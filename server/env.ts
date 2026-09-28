@@ -1,0 +1,95 @@
+/**
+ * 환경변수 읽기. 비밀값은 절대 로그·응답에 출력하지 않는다.
+ */
+function bool(v: string | undefined, def: boolean): boolean {
+  if (v === undefined || v === "") return def;
+  return ["1", "true", "yes", "on"].includes(v.toLowerCase());
+}
+
+export const env = {
+  get appEnv() {
+    return process.env.APP_ENV || (process.env.NODE_ENV === "production" ? "production" : "development");
+  },
+  get isProduction() {
+    return this.appEnv === "production";
+  },
+  get port() {
+    return Number(process.env.PORT || 5000);
+  },
+  get baseUrl() {
+    return process.env.APP_BASE_URL || `http://localhost:${this.port}`;
+  },
+  /** APP_DATABASE_URL 우선, 없으면 DATABASE_URL (README 참고) */
+  get databaseUrl() {
+    return process.env.APP_DATABASE_URL || process.env.DATABASE_URL || "";
+  },
+  get sessionSecret() {
+    return process.env.APP_SESSION_SECRET || "";
+  },
+  get adminUsername() {
+    return process.env.ADMIN_USERNAME || "";
+  },
+  get adminPasswordHash() {
+    return process.env.ADMIN_PASSWORD_HASH || "";
+  },
+  get demoMode() {
+    return bool(process.env.DEMO_MODE, false);
+  },
+  get dryRun() {
+    return bool(process.env.DRY_RUN, true);
+  },
+  get autoCollect() {
+    return bool(process.env.AUTO_COLLECT, false);
+  },
+  get autoGenerate() {
+    return bool(process.env.AUTO_GENERATE, false);
+  },
+  get autoPublish() {
+    return bool(process.env.AUTO_PUBLISH, false);
+  },
+  get naverClientId() {
+    return process.env.NAVER_CLIENT_ID || "";
+  },
+  get naverClientSecret() {
+    return process.env.NAVER_CLIENT_SECRET || "";
+  },
+  get anthropicKey() {
+    return process.env.ANTHROPIC_API_KEY || "";
+  },
+  get anthropicModel() {
+    return process.env.ANTHROPIC_MODEL || "";
+  },
+  get cloudinaryConfigured() {
+    return !!(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
+  },
+  get instagramApiVersion() {
+    return process.env.INSTAGRAM_API_VERSION || "";
+  },
+  get telegramBotToken() {
+    return process.env.TELEGRAM_BOT_TOKEN || "";
+  },
+  get telegramReviewChatId() {
+    return process.env.TELEGRAM_REVIEW_CHAT_ID || "";
+  },
+};
+
+/** 연결 상태 요약(값 대신 설정 여부만) */
+export function integrationStatus() {
+  return {
+    database: !!env.databaseUrl,
+    auth: !!(env.adminUsername && env.adminPasswordHash && env.sessionSecret),
+    naver: !!(env.naverClientId && env.naverClientSecret),
+    anthropic: !!(env.anthropicKey && env.anthropicModel),
+    cloudinary: env.cloudinaryConfigured,
+    telegramBot: !!env.telegramBotToken,
+    telegramReview: !!(env.telegramBotToken && env.telegramReviewChatId),
+    instagramApiVersion: !!env.instagramApiVersion,
+    flags: {
+      demoMode: env.demoMode,
+      dryRun: env.dryRun,
+      autoCollect: env.autoCollect,
+      autoGenerate: env.autoGenerate,
+      autoPublish: env.autoPublish,
+    },
+  };
+}
