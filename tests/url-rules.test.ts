@@ -113,3 +113,21 @@ describe("비밀값 참조 검증", () => {
     expect(r.invalid).toEqual(["chatId"]);
   });
 });
+
+import { cleanDatabaseUrl, describeDbError } from "../server/db";
+describe("DB 주소 붙여넣기 보정", () => {
+  it("psql 명령·따옴표·공백에서 주소만 꺼내고 SSL 파라미터 정리", () => {
+    const r = cleanDatabaseUrl(" psql 'postgresql://u:p@ep-a.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require' ");
+    expect(r.url).toBe("postgresql://u:p@ep-a.ap-southeast-1.aws.neon.tech/neondb");
+    expect(r.ssl).toBe(true);
+    expect(r.note).not.toBeNull();
+    expect(cleanDatabaseUrl("postgres://postgres@127.0.0.1:5433/x").ssl).toBe(false);
+    expect(() => cleanDatabaseUrl("neondb")).toThrow(/형식 오류/);
+  });
+  it("오류 설명에 비밀번호가 담긴 주소를 노출하지 않음", () => {
+    const d = describeDbError({ message: "Failed query", cause: { code: "28P01", message: "password authentication failed for user x at postgresql://u:secret@h/db" } });
+    expect(d).toContain("28P01");
+    expect(d).not.toContain("secret");
+    expect(d).toContain("비밀번호");
+  });
+});

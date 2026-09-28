@@ -1,6 +1,6 @@
 import { createApp } from "./app";
 import { env } from "./env";
-import { getDb } from "./db";
+import { describeDbError, getDb } from "./db";
 import { runMigrations } from "./migrate";
 import { seedIfNeeded } from "./seed";
 
@@ -11,7 +11,7 @@ async function main() {
       const r = await seedIfNeeded(getDb());
       if (r.createdChannels.length) console.log(`초기 채널 생성: ${r.createdChannels.join(", ")}`);
     } catch (e) {
-      console.error("DB 준비 실패:", (e as Error).message);
+      console.error("DB 준비 실패:", describeDbError(e));
       if (env.isProduction) process.exit(1);
     }
   } else {
