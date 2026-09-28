@@ -1,0 +1,233 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api";
+import { useChannel, useDirtyGuard } from "../state";
+import { Badge, Empty, ErrorBox, Loading } from "../ui";
+import type { Channel, ChannelBudget, Destination } from "@shared/schema";
+
+type Status = { integrations: Record<string, boolean | Record<string, boolean>>; globalStop: boolean; workerConnected: boolean };
+type DestView = Destination & { connection: { missing: string[]; invalid: string[]; ready: boolean } };
+
+const INTEG: Array<[string, string, string]> = [
+  ["database", "데이터베이스", "APP_DATABASE_URL"],
+  ["auth", "운영자 인증", "ADMIN_USERNAME, ADMIN_PASSWORD_HASH, APP_SESSION_SECRET"],
+  ["naver", "네이버 검색 API", "NAVER_CLIENT_ID, NAVER_CLIENT_SECRET"],
+  ["anthropic", "Claude API", "ANTHROPIC_API_KEY, ANTHROPIC_MODEL"],
+  ["cloudinary", "Cloudinary(이미지 공개 URL)", "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET"],
+  ["telegramBot", "텔레그램 봇", "TELEGRAM_BOT_TOKEN"],
+  ["telegramReview", "텔레그램 개인 검토 알림", "TELEGRAM_REVIEW_CHAT_ID"],
+  ["instagramApiVersion", "인스타그램 API 버전", "INSTAGRAM_API_VERSION"],
+];
+
+export function ChannelSettingsPage() {
+  const { current, selected } = useChannel();
+  const status = useQuery({ queryKey: ["status"], queryFn: () => api<Status>("/status") });
+  return (
+    <>
+      <div className="page-head">
+        <h1>채널 설정</h1>
+      </div>
+      {selected === "all" || !current ? <Empty>채널을 하나 선택하면 채널별 설정을 바꿀 수 있습니다.</Empty> : <ChannelForm key={current.id} ch={current} />}
+      {current && <Destinations cid={current.id} />}
+      <section className="panel stack">
+        <h2>연결 상태</h2>
+        <p className="small muted">비밀값은 화면에 표시하지 않습니다. 설정 여부만 보여줍니다. 값은 Render와 GitHub의 Secrets에 넣으세요.</p>
+        {status.isLoading ? (
+          <Loading lines={2} />
+        ) : status.error ? (
+          <ErrorBox error={status.error} />
+        ) : (
+          <table className="simple">
+            <tbody>
+              {INTEG.map(([k, label, vars]) => (
+                <tr key={k}>
+                  <td>{label}</td>
+                  <td>{status.data!.integrations[k] ? <Badge kind="ok">연결됨</Badge> : <Badge kind="warn">미연결</Badge>}</td>
+                  <td className="small muted">{vars}</td>
+                </tr>
+              ))}
+              <tr>
+                <td>워커(GitHub Actions)</td>
+                <td>{status.data!.workerConnected ? <Badge kind="ok">최근 실행 있음</Badge> : <Badge kind="warn">최근 6시간 실행 없음</Badge>}</td>
+                <td className="small muted">collect.yml / process.yml</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+        {status.data && <Flags flags={status.data.integrations.flags as Record<string, boolean>} />}
+        {status.data && <GlobalStop on={status.data.globalStop} />}
+      </section>
+    </>
+  );
+}
+
+function Flags({ flags }: { flags: Record<string, boolean> }) {
+  const L: Record<string, string> = { demoMode: "샘플 모드", dryRun: "모의 실행(DRY_RUN)", autoCollect: "예약 자동 수집", autoGenerate: "자동 초안 생성", autoPublish: "자동 게시" };
+  return (
+    <div className="row small">
+      {Object.entries(flags).map(([k, v]) => (
+        <Badge key={k} kind={v ? (k === "dryRun" ? "warn" : "ok") : ""}>
+          {L[k] ?? k}: {v ? "켜짐" : "꺼짐"}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function GlobalStop({ on }: { on: boolean }) {
+  const qc = useQueryClient();
+  const m = useMutation({ mutationFn: (stop: boolean) => api("/settings/global-stop", { method: "PUT", body: { stop } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["status"] }) });
+  return (
+    <div className="row">
+      <button className={`btn ${on ? "primary" : "danger"}`} onClick={() => m.mutate(!on)} disabled={m.isPending}>
+        {on ? "전역 정지 해제" : "전역 정지 (모든 수집·게시 중단)"}
+      </button>
+      {on && <Badge kind="err">현재 전역 정지 중</Badge>}
+      {m.error && <ErrorBox error={m.error} />}
+    </div>
+  );
+}
+
+function ChannelForm({ ch }: { ch: Channel }) {
+  const qc = useQueryClient();
+  const guard = useDirtyGuard();
+  const init = { name: ch.name, description: ch.description, audience: ch.audience, accentColor: ch.accentColor, active: ch.active, editorialGuide: ch.editorialGuide, budget: ch.budget };
+  const [f, setF] = useState(init);
+  const dirty = JSON.stringify(f) !== JSON.stringify(init);
+  const m = useMutation({
+    mutationFn: () => api<Channel>(`/channels/${ch.id}`, { method: "PATCH", body: { version: ch.version, ...f } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["channels"] }),
+  });
+  useEffect(() => {
+    guard.setDirty("channel-form", dirty, async () => {
+      try {
+        await m.mutateAsync();
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    return () => guard.setDirty("channel-form", false);
+  }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  const b = (k: keyof ChannelBudget, label: string, max: number) => (
+    <label className="field">
+      {label}
+      <input type="number" min={0} max={max} value={(f.budget[k] as number | null) ?? 0} onChange={(e) => setF({ ...f, budget: { ...f.budget, [k]: Number(e.target.value) } })} />
+    </label>
+  );
+  return (
+    <form className="panel stack" onSubmit={(e) => { e.preventDefault(); m.mutate(); }}>
+      <h2>{ch.name}</h2>
+      <div className="grid grid-2">
+        <label className="field">
+          표시 이름
+          <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={60} required />
+        </label>
+        <label className="field">
+          대상
+          <input value={f.audience} onChange={(e) => setF({ ...f, audience: e.target.value })} maxLength={60} required />
+        </label>
+      </div>
+      <label className="field">
+        설명
+        <textarea rows={2} value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
+      </label>
+      <div className="grid grid-2">
+        <label className="field">
+          강조색
+          <input value={f.accentColor} onChange={(e) => setF({ ...f, accentColor: e.target.value })} pattern="#[0-9A-Fa-f]{6}" />
+        </label>
+        <label className="check">
+          <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> 채널 사용
+        </label>
+      </div>
+      <label className="field">
+        편집 기준
+        <textarea rows={4} value={f.editorialGuide} onChange={(e) => setF({ ...f, editorialGuide: e.target.value })} />
+      </label>
+      <fieldset className="stack">
+        <legend>실행당 예산·한도</legend>
+        <div className="grid grid-3">
+          {b("naverCallsPerRun", "네이버 호출", 100)}
+          {b("resultsPerRun", "결과 수", 500)}
+          {b("fetchTargetsPerRun", "원문 확보 대상", 100)}
+          {b("fetchCallsPerRun", "원문 호출", 200)}
+          {b("llmCallsPerRun", "Claude 호출", 100)}
+          {b("dailyPublishLimit", "하루 게시 한도", 25)}
+        </div>
+        <p className="small muted">Claude 비용은 실제 토큰 사용량 × 아래 단가로 계산한 추정치입니다(단가는 직접 입력).</p>
+        <div className="grid grid-2">
+          <label className="field">
+            입력 단가 (USD / 100만 토큰)
+            <input type="number" step="0.01" min={0} value={f.budget.llmInputTokenPriceUsdPerM ?? ""} onChange={(e) => setF({ ...f, budget: { ...f.budget, llmInputTokenPriceUsdPerM: e.target.value === "" ? null : Number(e.target.value) } })} />
+          </label>
+          <label className="field">
+            출력 단가 (USD / 100만 토큰)
+            <input type="number" step="0.01" min={0} value={f.budget.llmOutputTokenPriceUsdPerM ?? ""} onChange={(e) => setF({ ...f, budget: { ...f.budget, llmOutputTokenPriceUsdPerM: e.target.value === "" ? null : Number(e.target.value) } })} />
+          </label>
+        </div>
+      </fieldset>
+      {m.error && <ErrorBox error={m.error} />}
+      <div className="savebar">
+        {m.isSuccess && !dirty && <span className="small muted" style={{ marginRight: "auto" }}>저장됨</span>}
+        <button type="button" className="btn" disabled={!dirty} onClick={() => setF(init)}>되돌리기</button>
+        <button className="btn primary" disabled={!dirty || m.isPending}>저장</button>
+      </div>
+    </form>
+  );
+}
+
+function Destinations({ cid }: { cid: number }) {
+  const qc = useQueryClient();
+  const q = useQuery({ queryKey: ["ch", cid, "destinations"], queryFn: () => api<{ items: DestView[]; defaults: Record<string, Record<string, string>> }>(`/channels/${cid}/destinations`) });
+  const [platform, setPlatform] = useState<"instagram" | "telegram_channel">("telegram_channel");
+  const [label, setLabel] = useState("");
+  const add = useMutation({
+    mutationFn: () => api(`/channels/${cid}/destinations`, { method: "POST", body: { platform, label } }),
+    onSuccess: () => { setLabel(""); qc.invalidateQueries({ queryKey: ["ch", cid, "destinations"] }); },
+  });
+  const toggle = useMutation({
+    mutationFn: (d: DestView) => api(`/channels/${cid}/destinations/${d.id}`, { method: "PATCH", body: { version: d.version, enabled: !d.enabled } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["ch", cid, "destinations"] }),
+  });
+  return (
+    <section className="panel stack">
+      <h2>게시 목적지</h2>
+      <p className="small muted">SNS 계정 연결과 권한 부여는 직접 해야 합니다. 여기에는 토큰 값이 아니라 환경변수 “이름”만 저장합니다.</p>
+      {q.isLoading ? <Loading lines={2} /> : q.error ? <ErrorBox error={q.error} /> : (
+        <>
+          {!q.data!.items.length && <p className="muted small">연결된 목적지가 없습니다.</p>}
+          <ul className="list">
+            {q.data!.items.map((d) => (
+              <li key={d.id} className="list-item">
+                <div className="row between">
+                  <span>
+                    <strong>{d.label}</strong> <Badge>{d.platform === "instagram" ? "인스타그램" : "텔레그램 채널"}</Badge>
+                  </span>
+                  <button className="btn sm" onClick={() => toggle.mutate(d)} disabled={toggle.isPending}>
+                    {d.enabled ? "사용 중지" : "사용"}
+                  </button>
+                </div>
+                <div className="row small">
+                  <Badge kind={d.enabled ? "ok" : ""}>{d.enabled ? "사용" : "사용 안 함"}</Badge>
+                  <Badge kind={d.connection.ready ? "ok" : "warn"}>{d.connection.ready ? "환경변수 설정됨" : `필요: ${d.connection.missing.join(", ") || d.connection.invalid.join(", ")}`}</Badge>
+                </div>
+                <span className="small muted">참조 환경변수: {Object.values(d.secretRefs).join(", ")}</span>
+              </li>
+            ))}
+          </ul>
+          <form className="row" onSubmit={(e) => { e.preventDefault(); add.mutate(); }}>
+            <select value={platform} onChange={(e) => setPlatform(e.target.value as typeof platform)} style={{ width: "auto" }} aria-label="플랫폼">
+              <option value="telegram_channel">텔레그램 채널</option>
+              <option value="instagram">인스타그램</option>
+            </select>
+            <input placeholder="이름 (예: 공개 텔레그램 채널)" value={label} onChange={(e) => setLabel(e.target.value)} style={{ flex: "1 1 200px", width: "auto" }} required aria-label="목적지 이름" />
+            <button className="btn" disabled={add.isPending}>목적지 추가</button>
+          </form>
+          <p className="small muted">추가 시 사용할 환경변수: {Object.values(q.data!.defaults[platform] ?? {}).join(", ")}</p>
+          {(add.error || toggle.error) && <ErrorBox error={add.error || toggle.error} />}
+        </>
+      )}
+    </section>
+  );
+}
