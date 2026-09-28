@@ -15,34 +15,16 @@ services:
         value: "22"
       - key: APP_ENV
         value: production
-      - key: APP_BASE_URL
-        sync: false
+      # 처음 만들 때 입력하는 값은 아래 3개뿐입니다(sync: false는 빈칸으로 둘 수 없음).
+      # 네이버·Claude·텔레그램 등 나머지 키는 배포 후 Render의 Environment 화면에서 추가하세요.
       - key: APP_DATABASE_URL
         sync: false
-      - key: APP_SESSION_SECRET
-        generateValue: true
       - key: ADMIN_USERNAME
         sync: false
       - key: ADMIN_PASSWORD_HASH
         sync: false
-      - key: NAVER_CLIENT_ID
-        sync: false
-      - key: NAVER_CLIENT_SECRET
-        sync: false
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: ANTHROPIC_MODEL
-        sync: false
-      - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
-        sync: false
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_REVIEW_CHAT_ID
-        sync: false
+      - key: APP_SESSION_SECRET
+        generateValue: true
       - key: DEMO_MODE
         value: "false"
       - key: DRY_RUN

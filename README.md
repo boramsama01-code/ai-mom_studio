@@ -75,12 +75,12 @@ npm run hash-password -- "12자 이상 비밀번호"
 
 1. https://render.com 가입 → **New → Blueprint** → 이 GitHub 저장소 선택
    (저장소에 있는 `render.yaml`을 읽어 설정을 자동으로 채웁니다. Region은 Singapore로 되어 있습니다.)
-2. 값을 물어보는 항목에 입력:
+2. 값을 물어보는 항목은 3개뿐입니다(빈칸으로 둘 수 없음):
    - `APP_DATABASE_URL`: 1단계의 Neon 주소
    - `ADMIN_USERNAME`: 원하는 운영자 아이디
    - `ADMIN_PASSWORD_HASH`: 2단계 결과
-   - `APP_BASE_URL`: 배포 후 받은 주소(예: `https://ai-mom-studio.onrender.com`). 처음엔 비워 두고 배포 후 채워도 됩니다.
-   - 나머지 API 키는 나중에 넣어도 됩니다(없으면 "미연결"로 표시).
+   - 네이버·Claude·텔레그램 등 나머지 키는 배포 후 서비스의 **Environment** 화면에서 추가합니다(없으면 "미연결"로 표시).
+   - 사이트 주소(`APP_BASE_URL`)는 Render가 자동으로 알려 주는 값을 쓰므로 넣지 않아도 됩니다. 나중에 개인 도메인을 쓰면 그때 넣으세요.
 3. 배포가 끝나면 주소로 접속 → 로그인.
    서버가 시작할 때 DB 구조(마이그레이션)와 초기 채널 3개·검색어를 자동으로 만듭니다. 이미 있으면 덮어쓰지 않습니다.
 

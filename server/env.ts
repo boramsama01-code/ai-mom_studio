@@ -17,7 +17,9 @@ export const env = {
     return Number(process.env.PORT || 5000);
   },
   get baseUrl() {
-    return process.env.APP_BASE_URL || `http://localhost:${this.port}`;
+    // APP_BASE_URL이 없으면 Render가 자동으로 넣는 주소를 사용
+    const render = process.env.RENDER_EXTERNAL_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : "");
+    return (process.env.APP_BASE_URL || render || `http://localhost:${this.port}`).replace(/\/$/, "");
   },
   /** APP_DATABASE_URL 우선, 없으면 DATABASE_URL (README 참고) */
   get databaseUrl() {
