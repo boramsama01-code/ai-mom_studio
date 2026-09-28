@@ -1,0 +1,172 @@
+import { Router } from "express";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { z } from "zod";
+import { getDb } from "../db";
+import { channels, destinations, officialSources } from "../../shared/schema";
+import { ah, conflict, HttpError, intParam, loadChannel, parse, zVersion } from "./util";
+import { actorOf } from "../auth";
+import { audit } from "../audit";
+import { allowedSecretName, defaultSecretRefs, resolveSecrets, SECRET_FIELDS } from "../services/secrets";
+
+export const channelRoutes = Router();
+
+channelRoutes.get(
+  "/channels",
+  ah(async (_req, res) => {
+    res.json(await getDb().select().from(channels).orderBy(asc(channels.id)));
+  }),
+);
+
+const budgetSchema = z.object({
+  naverCallsPerRun: z.number().int().min(0).max(100),
+  resultsPerRun: z.number().int().min(0).max(500),
+  fetchTargetsPerRun: z.number().int().min(0).max(100),
+  fetchCallsPerRun: z.number().int().min(0).max(200),
+  llmCallsPerRun: z.number().int().min(0).max(100),
+  dailyPublishLimit: z.number().int().min(0).max(25),
+  llmInputTokenPriceUsdPerM: z.number().min(0).max(1000).nullable().optional(),
+  llmOutputTokenPriceUsdPerM: z.number().min(0).max(1000).nullable().optional(),
+});
+
+const channelPatch = z.object({
+  version: zVersion,
+  name: z.string().trim().min(1).max(60).optional(),
+  description: z.string().max(500).optional(),
+  audience: z.string().trim().min(1).max(60).optional(),
+  accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  active: z.boolean().optional(),
+  editorialGuide: z.string().max(4000).optional(),
+  budget: budgetSchema.optional(),
+});
+
+channelRoutes.patch(
+  "/channels/:cid",
+  ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    const body = parse(channelPatch, req.body);
+    const { version, ...patch } = body;
+    const db = getDb();
+    const updated = await db
+      .update(channels)
+      .set({ ...patch, version: sql`${channels.version} + 1`, updatedAt: new Date() })
+      .where(and(eq(channels.id, ch.id), eq(channels.version, version)))
+      .returning();
+    if (!updated.length) conflict(ch);
+    await audit(db, { actor: actorOf(req), action: "update", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { fields: Object.keys(patch) } });
+    res.json(updated[0]);
+  }),
+);
+
+/* ───────────── 공식 출처 ───────────── */
+channelRoutes.get(
+  "/channels/:cid/official-sources",
+  ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    res.json(await getDb().select().from(officialSources).where(eq(officialSources.channelId, ch.id)).orderBy(asc(officialSources.schoolType), asc(officialSources.name)));
+  }),
+);
+
+const officialPatch = z.object({
+  version: zVersion,
+  aliases: z.array(z.string().trim().min(1).max(40)).max(10).optional(),
+  domain: z.string().trim().toLowerCase().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/).nullable().optional(),
+  boardUrl: z.string().url().startsWith("https://").nullable().optional(),
+  verified: z.boolean().optional(),
+  verificationNote: z.string().max(500).optional(),
+  enabled: z.boolean().optional(),
+});
+
+channelRoutes.patch(
+  "/channels/:cid/official-sources/:id",
+  ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    const id = intParam(req.params.id);
+    const body = parse(officialPatch, req.body);
+    const db = getDb();
+    const [cur] = await db.select().from(officialSources).where(and(eq(officialSources.id, id), eq(officialSources.channelId, ch.id)));
+    if (!cur) throw new HttpError(404, "공식 출처를 찾을 수 없습니다.");
+    if (body.boardUrl && body.domain !== undefined && body.domain && !new URL(body.boardUrl).hostname.endsWith(body.domain))
+      throw new HttpError(400, "게시판 URL이 확인한 도메인과 다릅니다.");
+    const { version, verified, ...rest } = body;
+    const updated = await db
+      .update(officialSources)
+      .set({
+        ...rest,
+        ...(verified === undefined ? {} : { verifiedAt: verified ? new Date() : null }),
+        version: sql`${officialSources.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(officialSources.id, id), eq(officialSources.version, version)))
+      .returning();
+    if (!updated.length) conflict(cur);
+    await audit(db, { actor: actorOf(req), action: "update", entity: "official_source", entityId: id, channelId: ch.id, detail: body });
+    res.json(updated[0]);
+  }),
+);
+
+/* ───────────── 게시 목적지 ───────────── */
+function destinationView(d: typeof destinations.$inferSelect, slug: string) {
+  const sec = resolveSecrets(d.platform, slug, d.secretRefs);
+  return { ...d, connection: { missing: sec.missing, invalid: sec.invalid, ready: !sec.missing.length && !sec.invalid.length } };
+}
+
+channelRoutes.get(
+  "/channels/:cid/destinations",
+  ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    const rows = await getDb().select().from(destinations).where(eq(destinations.channelId, ch.id)).orderBy(asc(destinations.id));
+    res.json({ items: rows.map((d) => destinationView(d, ch.slug)), defaults: { instagram: defaultSecretRefs("instagram", ch.slug), telegram_channel: defaultSecretRefs("telegram_channel", ch.slug) } });
+  }),
+);
+
+const destCreate = z.object({
+  platform: z.enum(["instagram", "telegram_channel"]),
+  label: z.string().trim().min(1).max(60),
+  secretRefs: z.record(z.string(), z.string().max(80)).optional(),
+});
+
+function checkRefs(platform: string, slug: string, refs: Record<string, string>) {
+  for (const [f, name] of Object.entries(refs)) {
+    if (!SECRET_FIELDS[platform]?.includes(f)) throw new HttpError(400, `알 수 없는 항목: ${f}`);
+    if (!allowedSecretName(platform, slug, f, name)) throw new HttpError(400, `허용되지 않은 환경변수 이름: ${name}`);
+  }
+}
+
+channelRoutes.post(
+  "/channels/:cid/destinations",
+  ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    const body = parse(destCreate, req.body);
+    const refs = body.secretRefs && Object.keys(body.secretRefs).length ? body.secretRefs : defaultSecretRefs(body.platform, ch.slug);
+    checkRefs(body.platform, ch.slug, refs);
+    const db = getDb();
+    const inserted = await db.insert(destinations).values({ channelId: ch.id, platform: body.platform, label: body.label, secretRefs: refs, enabled: false }).onConflictDoNothing().returning();
+    if (!inserted.length) throw new HttpError(409, "같은 이름의 목적지가 이미 있습니다.");
+    await audit(db, { actor: actorOf(req), action: "create", entity: "destination", entityId: inserted[0].id, channelId: ch.id, detail: { platform: body.platform, label: body.label } });
+    res.status(201).json(destinationView(inserted[0], ch.slug));
+  }),
+);
+
+const destPatch = z.object({ version: zVersion, label: z.string().trim().min(1).max(60).optional(), enabled: z.boolean().optional(), secretRefs: z.record(z.string(), z.string().max(80)).optional() });
+
+channelRoutes.patch(
+  "/channels/:cid/destinations/:id",
+  ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    const id = intParam(req.params.id);
+    const body = parse(destPatch, req.body);
+    const db = getDb();
+    const [cur] = await db.select().from(destinations).where(and(eq(destinations.id, id), eq(destinations.channelId, ch.id)));
+    if (!cur) throw new HttpError(404, "목적지를 찾을 수 없습니다.");
+    if (body.secretRefs) checkRefs(cur.platform, ch.slug, body.secretRefs);
+    const { version, ...patch } = body;
+    const updated = await db
+      .update(destinations)
+      .set({ ...patch, version: sql`${destinations.version} + 1`, updatedAt: new Date() })
+      .where(and(eq(destinations.id, id), eq(destinations.version, version)))
+      .returning();
+    if (!updated.length) conflict(cur);
+    await audit(db, { actor: actorOf(req), action: "update", entity: "destination", entityId: id, channelId: ch.id, detail: { fields: Object.keys(patch) } });
+    res.json(destinationView(updated[0], ch.slug));
+  }),
+);

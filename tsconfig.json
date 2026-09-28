@@ -13,9 +13,8 @@
     "isolatedModules": true,
     "noEmit": true,
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
-      "@shared/*": ["shared/*"]
+      "@shared/*": ["./shared/*"]
     }
   },
   "include": ["client/src", "server", "shared", "scripts", "tests", "vite.config.ts", "drizzle.config.ts", "vitest.config.ts"]
