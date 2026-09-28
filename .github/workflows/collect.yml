@@ -1,0 +1,50 @@
+# 수집 워커 — 한 번 실행 후 종료
+# 처음에는 수동 실행(Actions 탭 → Run workflow)만 켜져 있습니다.
+# 자동 실행을 원하면 아래 schedule 주석을 풀고, 저장소 Variables에 AUTO_COLLECT=true를 넣으세요.
+# 제안 시각: 매일 KST 07:13 / 19:13 (= UTC 22:13 / 10:13). GitHub 예약 실행은 정시를 보장하지 않습니다.
+name: collect
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "채널 slug (비우면 활성 검색어가 있는 모든 채널)"
+        required: false
+        default: ""
+  # schedule:
+  #   - cron: "13 10,22 * * *"
+permissions:
+  contents: read
+concurrency:
+  group: collect
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP_ENV: production
+      APP_DATABASE_URL: ${{ secrets.APP_DATABASE_URL }}
+      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+      NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+      NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_REVIEW_CHAT_ID: ${{ secrets.TELEGRAM_REVIEW_CHAT_ID }}
+      AUTO_COLLECT: ${{ vars.AUTO_COLLECT || 'false' }}
+      AUTO_GENERATE: ${{ vars.AUTO_GENERATE || 'false' }}
+      DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: 수집 1회
+        run: |
+          if [ -n "${{ github.event.inputs.channel }}" ]; then
+            npm run collect:once -- --channel "${{ github.event.inputs.channel }}"
+          else
+            npm run collect:once
+          fi

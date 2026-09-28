@@ -1,0 +1,58 @@
+# 작업 처리 워커 — 화면에서 등록한 수집 요청 처리 + 예약 시각이 지난 승인 건 전송
+# 처음에는 수동 실행만. 자동 실행은 아래 schedule 주석을 푸세요(정시 보장 없음).
+# 비용 주의: 비공개 저장소 무료 한도는 월 2,000분이고 작업마다 1분 단위로 올림됩니다.
+#   15분 간격(*/15)은 하루 96회 → 월 약 2,900분 이상으로 무료 한도를 넘습니다.
+#   무료 한도 안에서는 1시간 간격(월 약 720~1,100분)을 권장합니다.
+# 기본값 DRY_RUN=true, AUTO_PUBLISH=false → 실제로 게시하지 않습니다.
+name: process
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "7 * * * *"      # 매시 7분(권장)
+  #   # - cron: "*/15 * * * *" # 15분 간격(무료 한도 초과 가능)
+permissions:
+  contents: read
+concurrency:
+  group: process
+  cancel-in-progress: false  # 처리 중인 게시를 임의로 끊지 않음
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: production
+      APP_DATABASE_URL: ${{ secrets.APP_DATABASE_URL }}
+      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+      NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+      NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_REVIEW_CHAT_ID: ${{ secrets.TELEGRAM_REVIEW_CHAT_ID }}
+      INSTAGRAM_API_VERSION: ${{ vars.INSTAGRAM_API_VERSION }}
+      # 채널별 게시 목적지 (채널 설정 화면의 '참조 환경변수' 이름과 같아야 함)
+      IG_OPPORTUNITIES_ACCESS_TOKEN: ${{ secrets.IG_OPPORTUNITIES_ACCESS_TOKEN }}
+      IG_OPPORTUNITIES_USER_ID: ${{ secrets.IG_OPPORTUNITIES_USER_ID }}
+      TG_OPPORTUNITIES_CHAT_ID: ${{ secrets.TG_OPPORTUNITIES_CHAT_ID }}
+      IG_SCIENCE_DIALOGUE_ACCESS_TOKEN: ${{ secrets.IG_SCIENCE_DIALOGUE_ACCESS_TOKEN }}
+      IG_SCIENCE_DIALOGUE_USER_ID: ${{ secrets.IG_SCIENCE_DIALOGUE_USER_ID }}
+      TG_SCIENCE_DIALOGUE_CHAT_ID: ${{ secrets.TG_SCIENCE_DIALOGUE_CHAT_ID }}
+      IG_CURRENT_DIALOGUE_ACCESS_TOKEN: ${{ secrets.IG_CURRENT_DIALOGUE_ACCESS_TOKEN }}
+      IG_CURRENT_DIALOGUE_USER_ID: ${{ secrets.IG_CURRENT_DIALOGUE_USER_ID }}
+      TG_CURRENT_DIALOGUE_CHAT_ID: ${{ secrets.TG_CURRENT_DIALOGUE_CHAT_ID }}
+      DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+      AUTO_PUBLISH: ${{ vars.AUTO_PUBLISH || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: 대기 작업 처리
+        run: npm run jobs:once
+      - name: 예약 게시 처리
+        run: npm run publish:once
