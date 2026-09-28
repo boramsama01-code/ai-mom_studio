@@ -27,6 +27,9 @@ import { sendReviewMessage } from "../services/telegram";
 import { getSetting } from "../seed";
 import { env } from "../env";
 import { sha256 } from "../services/text";
+import { fetchBoardList, parseBoardDate, type BoardConfig } from "../services/boardAdapter";
+import { kstDateStartIso } from "../services/dates";
+import { categoryForSchoolType } from "../../shared/domain";
 import type { NoticePayload } from "../../shared/payloads";
 
 export type CollectOptions = {
@@ -34,6 +37,7 @@ export type CollectOptions = {
   now?: Date;
   naverFetch?: typeof fetch; // 테스트용 주입
   fetchSource?: typeof fetchAndExtract; // 테스트용 주입
+  fetchBoard?: typeof fetchBoardList; // 테스트용 주입
   heartbeat?: () => Promise<unknown>;
 };
 
@@ -63,6 +67,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   const officials = await db.select().from(officialSources).where(eq(officialSources.channelId, channelId));
   const unconnected = officials.filter((o) => o.enabled && !o.adapter).map((o) => o.name);
+  const boards = officials.filter((o) => o.enabled && o.adapter === "generic_board" && o.verifiedAt && o.domain && o.boardUrl);
 
   const snapshot = {
     channel: { id: channel.id, slug: channel.slug, budget },
@@ -127,8 +132,33 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     await opts.heartbeat?.();
   }
 
-  /* 4) 원문 확보 */
+  /* 3-2) 공식 게시판(설정형 어댑터) — 목록 조회도 원문 호출 예산에 포함 */
   let fetchCalls = 0;
+  counts.officialBoards = boards.length;
+  counts.officialNew = 0;
+  for (const o of boards) {
+    if (fetchCalls >= budget.fetchCallsPerRun) {
+      errors.push({ scope: `official:${o.id}`, message: `${o.name}: 원문 호출 한도 도달 — 게시판 건너뜀` });
+      continue;
+    }
+    fetchCalls++;
+    const r = await (opts.fetchBoard ?? fetchBoardList)(o.boardUrl!, o.domain!, o.adapterConfig as BoardConfig);
+    if (!r.ok) {
+      errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판 조회 실패: ${r.error}` });
+      continue;
+    }
+    if (!r.entries.length) errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판에서 목록을 찾지 못함(선택자 확인 필요)` });
+    for (const e of r.entries) {
+      const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e);
+      if (saved?.isNew) {
+        counts.officialNew++;
+        counts.newItems++;
+        newItemIds.push(saved.itemId);
+      }
+    }
+  }
+
+  /* 4) 원문 확보 */
   const fetchTargets = newItemIds.slice(0, budget.fetchTargetsPerRun);
   if (newItemIds.length > fetchTargets.length)
     errors.push({ scope: "fetch", message: `원문 확보 대상 한도(${budget.fetchTargetsPerRun}) 초과 — ${newItemIds.length - fetchTargets.length}건은 다음 실행/수동 처리` });
@@ -296,6 +326,36 @@ async function saveSearchItem(db: DB, channel: Channel, rule: SearchRule, runId:
     .from(contentItems)
     .where(and(eq(contentItems.channelId, channel.id), eq(contentItems.primarySourceId, doc.id)));
   return { itemId: existing.id, isNew: false, excluded: false };
+}
+
+async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, schoolType: string | null, runId: number, e: { url: string; title: string; dateText: string | null }) {
+  let normalized: string;
+  try {
+    normalized = normalizeUrl(e.url);
+  } catch {
+    return null;
+  }
+  const ymd = parseBoardDate(e.dateText);
+  await db
+    .insert(sourceDocuments)
+    .values({
+      normalizedUrl: normalized,
+      originalUrl: e.url,
+      kind: "official",
+      title: e.title,
+      meta: { officialSourceId: officialId, fetchUrl: e.url, boardDateText: e.dateText },
+      publishedRaw: e.dateText,
+      publishedAt: ymd && kstDateStartIso(ymd) ? new Date(kstDateStartIso(ymd)!) : null,
+      publishedPrecision: ymd ? "date" : "unknown",
+    })
+    .onConflictDoNothing();
+  const [doc] = await db.select().from(sourceDocuments).where(and(eq(sourceDocuments.normalizedUrl, normalized), eq(sourceDocuments.isSample, false)));
+  const inserted = await db
+    .insert(contentItems)
+    .values({ channelId: channel.id, kind: channel.contentType, origin: "collected", primarySourceId: doc.id, runId, title: e.title, category: schoolType ? categoryForSchoolType(schoolType) : null, scheduleStatus: "unknown" })
+    .onConflictDoNothing()
+    .returning({ id: contentItems.id });
+  return inserted.length ? { itemId: inserted[0].id, isNew: true } : { itemId: 0, isNew: false };
 }
 
 /** 한 항목 구조화 추출 — 운영자 편집값·기존 승인을 덮어쓰지 않는다 */

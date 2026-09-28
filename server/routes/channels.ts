@@ -6,6 +6,7 @@ import { channels, destinations, officialSources } from "../../shared/schema";
 import { ah, conflict, HttpError, intParam, loadChannel, parse, zVersion } from "./util";
 import { actorOf } from "../auth";
 import { audit } from "../audit";
+import { fetchBoardList } from "../services/boardAdapter";
 import { allowedSecretName, defaultSecretRefs, resolveSecrets, SECRET_FIELDS } from "../services/secrets";
 
 export const channelRoutes = Router();
@@ -74,6 +75,15 @@ const officialPatch = z.object({
   verified: z.boolean().optional(),
   verificationNote: z.string().max(500).optional(),
   enabled: z.boolean().optional(),
+  adapter: z.enum(["generic_board"]).nullable().optional(),
+  adapterConfig: z
+    .object({
+      linkSelector: z.string().trim().min(1).max(200),
+      titleSelector: z.string().trim().max(200).nullable().optional(),
+      dateSelector: z.string().trim().max(200).nullable().optional(),
+      maxItems: z.number().int().min(1).max(30).optional(),
+    })
+    .optional(),
 });
 
 channelRoutes.patch(
@@ -85,8 +95,12 @@ channelRoutes.patch(
     const db = getDb();
     const [cur] = await db.select().from(officialSources).where(and(eq(officialSources.id, id), eq(officialSources.channelId, ch.id)));
     if (!cur) throw new HttpError(404, "공식 출처를 찾을 수 없습니다.");
-    if (body.boardUrl && body.domain !== undefined && body.domain && !new URL(body.boardUrl).hostname.endsWith(body.domain))
+    const domain = body.domain !== undefined ? body.domain : cur.domain;
+    const boardUrl = body.boardUrl !== undefined ? body.boardUrl : cur.boardUrl;
+    if (boardUrl && domain && !new URL(boardUrl).hostname.toLowerCase().endsWith(domain))
       throw new HttpError(400, "게시판 URL이 확인한 도메인과 다릅니다.");
+    if (body.adapter === "generic_board" && !(body.adapterConfig ?? (cur.adapterConfig as { linkSelector?: string })).linkSelector)
+      throw new HttpError(400, "게시판 수집기에는 목록 링크 선택자가 필요합니다.");
     const { version, verified, ...rest } = body;
     const updated = await db
       .update(officialSources)
@@ -101,6 +115,22 @@ channelRoutes.patch(
     if (!updated.length) conflict(cur);
     await audit(db, { actor: actorOf(req), action: "update", entity: "official_source", entityId: id, channelId: ch.id, detail: body });
     res.json(updated[0]);
+  }),
+);
+
+/** 게시판 시험 읽기 — 저장하지 않고 목록만 보여줌 */
+channelRoutes.post(
+  "/channels/:cid/official-sources/:id/test-board",
+  ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    const [src] = await getDb().select().from(officialSources).where(and(eq(officialSources.id, intParam(req.params.id)), eq(officialSources.channelId, ch.id)));
+    if (!src) throw new HttpError(404, "공식 출처를 찾을 수 없습니다.");
+    if (!src.domain || !src.boardUrl) throw new HttpError(400, "도메인과 게시판 URL을 먼저 저장하세요.");
+    const cfg = src.adapterConfig as { linkSelector?: string };
+    if (!cfg.linkSelector) throw new HttpError(400, "목록 링크 선택자를 먼저 저장하세요.");
+    const r = await fetchBoardList(src.boardUrl, src.domain, src.adapterConfig as never);
+    if (!r.ok) throw new HttpError(502, r.error);
+    res.json({ entries: r.entries });
   }),
 );
 

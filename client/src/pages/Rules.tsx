@@ -511,17 +511,27 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
   const [aliases, setAliases] = useState(src.aliases.join("\n"));
   const [verified, setVerified] = useState(!!src.verifiedAt);
   const [note, setNote] = useState(src.verificationNote);
+  const cfg = src.adapterConfig as { linkSelector?: string; titleSelector?: string | null; dateSelector?: string | null };
+  const [useBoard, setUseBoard] = useState(src.adapter === "generic_board");
+  const [enabled, setEnabled] = useState(src.enabled);
+  const [linkSel, setLinkSel] = useState(cfg.linkSelector ?? "");
+  const [dateSel, setDateSel] = useState(cfg.dateSelector ?? "");
   const m = useMutation({
     mutationFn: () =>
-      api(`/channels/${cid}/official-sources/${src.id}`, {
+      api<OfficialSource>(`/channels/${cid}/official-sources/${src.id}`, {
         method: "PATCH",
-        body: { version: src.version, domain: domain.trim() || null, boardUrl: boardUrl.trim() || null, aliases: aliases.split("\n").map((s) => s.trim()).filter(Boolean), verified, verificationNote: note },
+        body: {
+          version: src.version, domain: domain.trim() || null, boardUrl: boardUrl.trim() || null, aliases: aliases.split("\n").map((s) => s.trim()).filter(Boolean), verified, verificationNote: note, enabled,
+          adapter: useBoard ? "generic_board" : null,
+          ...(useBoard ? { adapterConfig: { linkSelector: linkSel.trim(), dateSelector: dateSel.trim() || null, maxItems: 10 } } : {}),
+        },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ch", cid, "official"] });
       onClose();
     },
   });
+  const test = useMutation({ mutationFn: () => api<{ entries: Array<{ url: string; title: string; dateText: string | null }> }>(`/channels/${cid}/official-sources/${src.id}/test-board`, { method: "POST", body: {} }) });
   return (
     <Modal title={`공식 출처: ${src.name}`} onClose={onClose}>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); m.mutate(); }}>
@@ -541,6 +551,39 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
         <label className="check">
           <input type="checkbox" checked={verified} onChange={(e) => setVerified(e.target.checked)} /> 공식 자료로 학교 분류·도메인을 확인했음
         </label>
+        <fieldset className="stack">
+          <legend>공지 게시판 수집기(선택)</legend>
+          <label className="check">
+            <input type="checkbox" checked={useBoard} onChange={(e) => setUseBoard(e.target.checked)} /> 이 게시판을 설정형 수집기로 읽기
+          </label>
+          {useBoard && (
+            <>
+              <label className="field">
+                목록 링크 선택자 (CSS)
+                <span className="hint">게시판 목록에서 각 글 제목 링크를 고르는 선택자. 예: table.board_list td.subject a</span>
+                <input value={linkSel} onChange={(e) => setLinkSel(e.target.value)} />
+              </label>
+              <label className="field">
+                날짜 선택자 (같은 행 안, 선택)
+                <input value={dateSel} onChange={(e) => setDateSel(e.target.value)} />
+              </label>
+            </>
+          )}
+          <label className="check">
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> 수집에 사용 (도메인 확인 + 수집기 설정이 있을 때만 실제로 읽음)
+          </label>
+          {src.adapter === "generic_board" && (
+            <div className="stack">
+              <div>
+                <button type="button" className="btn sm" onClick={() => test.mutate()} disabled={test.isPending}>
+                  {test.isPending ? "읽는 중…" : "저장된 설정으로 게시판 시험 읽기"}
+                </button>
+              </div>
+              {test.error && <ErrorBox error={test.error} />}
+              {test.data && (test.data.entries.length ? <ul className="small">{test.data.entries.map((e) => <li key={e.url}>{e.dateText ?? ""} {e.title}</li>)}</ul> : <p className="small muted">목록을 찾지 못했습니다. 선택자를 확인하세요.</p>)}
+            </div>
+          )}
+        </fieldset>
         <label className="field">
           확인 메모 (출처·확인일)
           <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} />

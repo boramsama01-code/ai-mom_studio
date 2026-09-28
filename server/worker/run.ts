@@ -76,7 +76,8 @@ export async function collectOnce(opts: { channelSlug?: string; isSchedule?: boo
       .select({ n: sql<number>`count(*)::int` })
       .from(searchRules)
       .where(and(eq(searchRules.channelId, ch.id), eq(searchRules.enabled, true), isNull(searchRules.deletedAt)))) as Array<{ n: number }>;
-    if (!n) continue; // 활성 검색어 없는 채널은 호출하지 않음(채널 수만큼 자동 전수 수집 안 함)
+    const [{ b }] = (await db.execute(sql`select count(*)::int as b from official_sources where channel_id = ${ch.id} and enabled and adapter is not null and verified_at is not null`)).rows as Array<{ b: number }>;
+    if (!n && !b) continue; // 활성 검색어·연결된 공식 게시판이 없는 채널은 호출하지 않음(채널 수만큼 자동 전수 수집 안 함)
     try {
       const r = await runCollect(db, ch.id, { trigger: opts.isSchedule ? "schedule" : "cli" });
       results.push({ slug: ch.slug, status: r.status, counts: r.counts });
