@@ -10,6 +10,7 @@ import { ruleRoutes } from "./routes/rules";
 import { itemRoutes } from "./routes/items";
 import { opsRoutes } from "./routes/ops";
 import { secretRoutes } from "./routes/secrets";
+import { templateRoutes } from "./routes/templates";
 import { HttpError } from "./routes/util";
 
 export function createApp() {
@@ -50,7 +51,7 @@ export function createApp() {
       if (!authConfigured() && !demoAllowed()) return res.status(503).json({ error: "운영자 인증이 설정되지 않아 운영 API를 차단했습니다.", code: "auth_not_configured" });
       next();
     });
-    app.use("/api", requireOperator, channelRoutes, ruleRoutes, itemRoutes, opsRoutes, secretRoutes);
+    app.use("/api", requireOperator, channelRoutes, ruleRoutes, itemRoutes, opsRoutes, secretRoutes, templateRoutes);
   }
   app.use("/api", (_req, res) => res.status(404).json({ error: "없는 API입니다." }));
 

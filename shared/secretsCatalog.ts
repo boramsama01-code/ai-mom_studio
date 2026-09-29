@@ -52,6 +52,17 @@ export const SECRET_GROUPS: SecretGroup[] = [
     ],
   },
   {
+    id: "canva",
+    title: "Canva (선택)",
+    description: "Canva 브랜드 템플릿에 글자를 자동으로 채워 디자인을 만듭니다(Canva Pro 이상). Canva 개발자 페이지(Your apps)에서 앱을 만들고 'Outside Canva'에 권한과 리디렉트 주소를 넣은 뒤, 아래 두 값을 저장하고 'Canva 연결'을 누르세요.",
+    docs: "https://www.canva.com/developers/apps",
+    testable: false,
+    fields: [
+      { key: "CANVA_CLIENT_ID", label: "Client ID", secret: false },
+      { key: "CANVA_CLIENT_SECRET", label: "Client secret", secret: true },
+    ],
+  },
+  {
     id: "instagram",
     title: "인스타그램 API 버전",
     description: "Instagram API with Instagram Login 문서에서 확인한 버전(예: vNN.0). 계정별 토큰은 아래 '게시 목적지'에서 입력합니다.",

@@ -43,6 +43,10 @@ export const channels = pgTable("channels", {
   accentColor: text("accent_color").notNull(),
   active: boolean("active").notNull().default(true),
   editorialGuide: text("editorial_guide").notNull().default(""),
+  // 기본 카드 템플릿: "builtin:classic" | "custom:<id>" | "canva"
+  cardTemplate: text("card_template").notNull().default("builtin:classic"),
+  // Canva 자동 채우기용 브랜드 템플릿 ID(선택)
+  canvaBrandTemplateId: text("canva_brand_template_id"),
   // 채널별 예산·한도 (호출 수, LLM 호출 수, 일일 게시 수 등)
   budget: jsonb("budget").$type<ChannelBudget>().notNull(),
   version: integer("version").notNull().default(1),
@@ -198,6 +202,8 @@ export const contentItems = pgTable(
     nextActionAt: ts("next_action_at"),
     lastUsedAt: ts("last_used_at"),
     topicKey: text("topic_key"),
+    // Canva 자동 채우기로 만든 디자인(편집 링크는 Canva 기준 30일 유효)
+    canvaDesign: jsonb("canva_design").$type<{ designId: string; editUrl: string | null; viewUrl: string | null; revisionId: number; createdAt: string } | null>(),
     isSample: boolean("is_sample").notNull().default(false),
     version: integer("version").notNull().default(1),
     createdAt: createdAt(),
@@ -249,6 +255,8 @@ export const mediaAssets = pgTable(
     contentItemId: integer("content_item_id").notNull().references(() => contentItems.id),
     revisionId: integer("revision_id").notNull().references(() => contentRevisions.id),
     kind: text("kind").notNull().default("card"),
+    source: text("source").notNull().default("builtin"), // builtin | custom | canva
+    templateKey: text("template_key"),
     sha256: text("sha256").notNull(),
     mime: text("mime").notNull().default("image/jpeg"),
     width: integer("width").notNull(),
@@ -260,6 +268,20 @@ export const mediaAssets = pgTable(
   },
   (t) => [uniqueIndex("media_assets_revision_hash").on(t.revisionId, t.sha256)],
 );
+
+/* ───────────── 내 카드 템플릿(배경 이미지) ───────────── */
+export const cardTemplates = pgTable("card_templates", {
+  id: serial("id").primaryKey(),
+  channelId: integer("channel_id").references(() => channels.id), // null = 모든 채널
+  name: text("name").notNull(),
+  layout: text("layout").notNull().default("classic"), // 글자 배치 기준 레이아웃
+  textTone: text("text_tone").notNull().default("dark"), // dark | light
+  overlay: integer("overlay").notNull().default(0), // 0~80 (%) 가독성용 반투명 막
+  background: bytea("background").notNull(), // 1080×1350 JPEG로 정규화해 저장
+  createdBy: text("created_by").notNull(),
+  createdAt: createdAt(),
+  deletedAt: ts("deleted_at"),
+});
 
 /* ───────────── 최종 발행 승인 ───────────── */
 export const approvals = pgTable(
@@ -427,3 +449,4 @@ export type Destination = typeof destinations.$inferSelect;
 export type Delivery = typeof deliveries.$inferSelect;
 export type Approval = typeof approvals.$inferSelect;
 export type MediaAsset = typeof mediaAssets.$inferSelect;
+export type CardTemplate = typeof cardTemplates.$inferSelect;

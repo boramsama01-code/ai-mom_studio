@@ -32,6 +32,7 @@ import { uploadCard } from "../services/cloudinary";
 import { sendPhotoToChannel, telegramPostUrl } from "../services/telegram";
 import * as ig from "../services/instagram";
 import { audit } from "../audit";
+import { resolveStyle } from "../services/templates";
 
 export async function currentRevision(db: DB, itemId: number) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
@@ -54,7 +55,7 @@ export async function sourceOrgFor(db: DB, item: { primarySourceId: number | nul
 }
 
 /* ───────────── 카드 생성 ───────────── */
-export async function renderCardForItem(db: DB, itemId: number, now = new Date()) {
+export async function renderCardForItem(db: DB, itemId: number, now = new Date(), templateKey?: string | null) {
   const cr = await currentRevision(db, itemId);
   if (!cr) return { ok: false as const, code: "not_found", error: "항목 없음" };
   const { item, rev } = cr;
@@ -73,9 +74,16 @@ export async function renderCardForItem(db: DB, itemId: number, now = new Date()
     sourceOrg: await sourceOrgFor(db, item, payload),
     checkedDate: kstToday(now),
   });
+  const key = templateKey || ch.cardTemplate || "builtin:classic";
+  let style;
+  try {
+    style = await resolveStyle(db, key, ch.id);
+  } catch (e) {
+    return { ok: false as const, code: "template", error: (e as Error).message };
+  }
   let out;
   try {
-    out = await renderCardJpeg(model);
+    out = await renderCardJpeg(model, style);
   } catch (e) {
     if (e instanceof CardOverflowError) return { ok: false as const, code: "overflow", field: e.field, error: `편집 필요: ${e.message}` };
     if (e instanceof CardFontError) return { ok: false as const, code: "font", error: e.message };
@@ -84,10 +92,10 @@ export async function renderCardForItem(db: DB, itemId: number, now = new Date()
   const hash = sha256(out.jpeg);
   await db
     .insert(mediaAssets)
-    .values({ channelId: item.channelId, contentItemId: item.id, revisionId: rev.id, sha256: hash, width: out.width, height: out.height, bytes: out.jpeg })
+    .values({ channelId: item.channelId, contentItemId: item.id, revisionId: rev.id, sha256: hash, width: out.width, height: out.height, bytes: out.jpeg, source: key.startsWith("custom:") ? "custom" : "builtin", templateKey: key })
     .onConflictDoNothing();
   const [asset] = await db
-    .select({ id: mediaAssets.id, sha256: mediaAssets.sha256, revisionId: mediaAssets.revisionId, createdAt: mediaAssets.createdAt })
+    .select({ id: mediaAssets.id, sha256: mediaAssets.sha256, revisionId: mediaAssets.revisionId, createdAt: mediaAssets.createdAt, source: mediaAssets.source, templateKey: mediaAssets.templateKey })
     .from(mediaAssets)
     .where(and(eq(mediaAssets.revisionId, rev.id), eq(mediaAssets.sha256, hash)));
   return { ok: true as const, asset };

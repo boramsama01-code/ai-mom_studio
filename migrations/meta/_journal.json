@@ -15,6 +15,13 @@
       "when": 1790655016238,
       "tag": "0001_stored_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790660779186,
+      "tag": "0002_templates",
+      "breakpoints": true
     }
   ]
 }

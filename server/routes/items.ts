@@ -112,7 +112,7 @@ itemRoutes.get(
       .orderBy(desc(contentRevisions.revisionNo));
     const current = item.currentRevisionId ? (await db.select().from(contentRevisions).where(eq(contentRevisions.id, item.currentRevisionId)))[0] : null;
     const cards = await db
-      .select({ id: mediaAssets.id, revisionId: mediaAssets.revisionId, sha256: mediaAssets.sha256, createdAt: mediaAssets.createdAt, cloudinaryUrl: mediaAssets.cloudinaryUrl })
+      .select({ id: mediaAssets.id, revisionId: mediaAssets.revisionId, sha256: mediaAssets.sha256, createdAt: mediaAssets.createdAt, cloudinaryUrl: mediaAssets.cloudinaryUrl, source: mediaAssets.source, templateKey: mediaAssets.templateKey })
       .from(mediaAssets)
       .where(eq(mediaAssets.contentItemId, item.id))
       .orderBy(desc(mediaAssets.id))
@@ -326,8 +326,9 @@ itemRoutes.post(
   "/channels/:cid/items/:id/card",
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
-    const r = await renderCardForItem(getDb(), item.id);
-    if (!r.ok) return res.status(r.code === "font" || r.code === "render" ? 500 : 422).json({ error: r.error, code: r.code, field: (r as { field?: string }).field });
+    const body = parse(z.object({ templateKey: z.string().max(40).nullable().optional() }), req.body ?? {});
+    const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey);
+    if (!r.ok) return res.status(r.code === "font" || r.code === "render" ? 500 : r.code === "template" ? 400 : 422).json({ error: r.error, code: r.code, field: (r as { field?: string }).field });
     await audit(getDb(), { actor: actorOf(req), action: "render_card", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { assetId: r.asset.id, sha256: r.asset.sha256 } });
     res.json(r.asset);
   }),
