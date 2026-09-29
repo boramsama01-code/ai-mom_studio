@@ -1,6 +1,8 @@
-import { useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useSearch } from "wouter";
+import { useEffect, useRef, useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation, useSearch } from "wouter";
+import { useToast } from "../toast";
+import { useDirtyGuard } from "../state";
 import { api, qs } from "../api";
 import { useChannel } from "../state";
 import { Badge, Empty, ErrorBox, fmtDate, GuardedLink, Loading, Pager, StatusBadge } from "../ui";
@@ -132,7 +134,7 @@ export function InboxPage() {
         </Empty>
       ) : (
         <div className="stack" aria-busy={query.isFetching}>
-          <ItemList rows={query.data.items} showChannel={selected === "all"} />
+          {selected === "all" ? <ItemList rows={query.data.items} showChannel /> : <TriageList rows={query.data.items} cid={selected} />}
           <Pager page={page} pageSize={20} total={query.data.total} onPage={setPage} />
         </div>
       )}
@@ -143,29 +145,119 @@ export function InboxPage() {
 export function ItemList({ rows, showChannel }: { rows: ListRow[]; showChannel: boolean }) {
   return (
     <ul className="list">
-      {rows.map(({ item, source, channelName }) => (
-        <li key={item.id} className="list-item">
-          <GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">
-            {item.title}
-          </GuardedLink>
-          <div className="meta">
-            {showChannel && <span>{channelName}</span>}
-            <span>{CONTENT_KIND_LABEL[item.kind as ContentKind]}</span>
-            {item.category && <span>{item.category}</span>}
-            {source && <span>{SOURCE_KIND[source.kind] ?? source.kind} · 게시 {fmtDate(source.publishedAt, source.publishedPrecision)}</span>}
-            <span>수집 {fmtDate(item.createdAt as unknown as string)}</span>
-          </div>
-          <div className="row">
-            {item.isSample && <Badge kind="sample">샘플 · 실제 정보 아님</Badge>}
-            <StatusBadge type="review" value={item.reviewStatus} />
-            <StatusBadge type="evidence" value={item.evidenceStatus} />
-            {item.kind === "notice" && <StatusBadge type="schedule" value={item.scheduleStatus} />}
-            {item.relevance !== "uncertain" && <StatusBadge type="relevance" value={item.relevance} />}
-            {item.publishStatus !== "waiting" && <StatusBadge type="publish" value={item.publishStatus} />}
-            {item.excluded && <Badge kind="err">제외됨: {item.excludedReason}</Badge>}
-          </div>
+      {rows.map((r) => (
+        <li key={r.item.id} className="list-item">
+          <ItemBody row={r} showChannel={showChannel} />
         </li>
       ))}
     </ul>
+  );
+}
+
+function ItemBody({ row: { item, source, channelName }, showChannel }: { row: ListRow; showChannel: boolean }) {
+  return (
+    <>
+      <GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">
+        {item.title}
+      </GuardedLink>
+      {source?.snippet && <p className="small muted snippet">{source.snippet}</p>}
+      <div className="meta">
+        {showChannel && <span>{channelName}</span>}
+        <span>{CONTENT_KIND_LABEL[item.kind as ContentKind]}</span>
+        {item.category && <span>{item.category}</span>}
+        {source && <span>{SOURCE_KIND[source.kind] ?? source.kind} · 게시 {fmtDate(source.publishedAt, source.publishedPrecision)}</span>}
+        <span>수집 {fmtDate(item.createdAt as unknown as string)}</span>
+      </div>
+      <div className="row">
+        {item.isSample && <Badge kind="sample">샘플 · 실제 정보 아님</Badge>}
+        <StatusBadge type="review" value={item.reviewStatus} />
+        <StatusBadge type="evidence" value={item.evidenceStatus} />
+        {item.kind === "notice" && <StatusBadge type="schedule" value={item.scheduleStatus} />}
+        {item.relevance !== "uncertain" && <StatusBadge type="relevance" value={item.relevance} />}
+        {item.publishStatus !== "waiting" && <StatusBadge type="publish" value={item.publishStatus} />}
+        {item.excluded && <Badge kind="err">제외됨: {item.excludedReason}</Badge>}
+      </div>
+    </>
+  );
+}
+
+/** 수집함 분류 목록 — 여러 개 선택 후 한꺼번에 처리, 키보드로 빠르게 훑기 */
+function TriageList({ rows, cid }: { rows: ListRow[]; cid: number }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const guard = useDirtyGuard();
+  const [, navigate] = useLocation();
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [focus, setFocus] = useState(0);
+  const refs = useRef<Array<HTMLLIElement | null>>([]);
+  useEffect(() => setPicked(new Set()), [rows]);
+  const bulk = useMutation({
+    mutationFn: (a: { ids: number[]; action: string }) => api<{ updated: number }>(`/channels/${cid}/items/bulk`, { method: "POST", body: a }),
+    onSuccess: (r, a) => {
+      const label = { exclude: "제외", unexclude: "제외 해제", hold: "보류", pending: "검토 대기" }[a.action];
+      toast("ok", `${r.updated}건을 '${label}'(으)로 바꿨습니다.`);
+      setPicked(new Set());
+      qc.invalidateQueries({ queryKey: ["ch", cid] });
+    },
+    onError: (e) => toast("err", (e as Error).message),
+  });
+  const act = (action: string, ids = [...picked]) => ids.length && bulk.mutate({ ids, action });
+  const toggle = (id: number) => setPicked((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || e.metaKey || e.ctrlKey || e.altKey || document.querySelector(".modal-backdrop")) return;
+      const row = rows[focus];
+      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setFocus((f) => Math.min(f + 1, rows.length - 1)); }
+      else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); setFocus((f) => Math.max(f - 1, 0)); }
+      else if (e.key === "Enter" && row) guard.confirmLeave(() => navigate(`/items/${cid}/${row.item.id}`));
+      else if (e.key === "x" && row) toggle(row.item.id);
+      else if (e.key === "e" && row) act(row.item.excluded ? "unexclude" : "exclude", [row.item.id]);
+      else if (e.key === "h" && row) act("hold", [row.item.id]);
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  });
+  useEffect(() => refs.current[focus]?.scrollIntoView({ block: "nearest" }), [focus]);
+
+  const all = rows.length > 0 && rows.every((r) => picked.has(r.item.id));
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      {picked.size > 0 ? (
+        <div className="bulkbar" role="region" aria-label="선택한 항목 처리">
+          <strong>{picked.size}건 선택</strong>
+          <button className="btn sm" onClick={() => act("hold")}>보류</button>
+          <button className="btn sm" onClick={() => act("pending")}>검토 대기로</button>
+          <button className="btn sm" onClick={() => act("exclude")}>수집함에서 제외</button>
+          <button className="btn sm" onClick={() => setPicked(new Set())}>선택 해제</button>
+        </div>
+      ) : (
+        <div className="row between">
+          <label className="check" style={{ minHeight: 32 }}>
+            <input type="checkbox" className="row-check" checked={all} onChange={() => setPicked(all ? new Set() : new Set(rows.map((r) => r.item.id)))} /> 이 페이지 전체 선택
+          </label>
+          <span className="shortcut-hint hide-mobile">
+            <span><kbd>J</kbd>/<kbd>K</kbd> 이동</span><span><kbd>Enter</kbd> 열기</span><span><kbd>X</kbd> 선택</span><span><kbd>H</kbd> 보류</span><span><kbd>E</kbd> 제외</span>
+          </span>
+        </div>
+      )}
+      <ul className="list">
+        {rows.map((r, i) => (
+          <li key={r.item.id} ref={(el) => { refs.current[i] = el; }} className={`list-item ${i === focus ? "focused" : ""}`} onClick={() => setFocus(i)}>
+            <div className="item-head">
+              <input type="checkbox" className="row-check" aria-label={`${r.item.title} 선택`} checked={picked.has(r.item.id)} onChange={() => toggle(r.item.id)} style={{ marginTop: 3 }} />
+              <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
+                <ItemBody row={r} showChannel={false} />
+              </div>
+              <div className="quick hide-mobile">
+                <button className="btn sm ghost" title="보류 (H)" onClick={(e) => { e.stopPropagation(); act("hold", [r.item.id]); }}>보류</button>
+                <button className="btn sm ghost" title="제외 (E)" onClick={(e) => { e.stopPropagation(); act(r.item.excluded ? "unexclude" : "exclude", [r.item.id]); }}>{r.item.excluded ? "제외 해제" : "제외"}</button>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }

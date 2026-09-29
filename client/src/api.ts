@@ -29,3 +29,13 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
 
 export const qs = (o: Record<string, string | number | undefined | null>) =>
   new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)])).toString();
+
+/** 파일 그대로 올리기(이미지 업로드 등) */
+export async function apiUpload<T = unknown>(path: string, file: File): Promise<T> {
+  const headers: Record<string, string> = { "content-type": file.type || "application/octet-stream" };
+  if (csrf) headers["x-csrf-token"] = csrf;
+  const res = await fetch(`/api${path}`, { method: "POST", headers, body: file, credentials: "same-origin" });
+  const body = (res.headers.get("content-type") || "").includes("json") ? await res.json().catch(() => ({})) : {};
+  if (!res.ok) throw new ApiError(res.status, (body as { error?: string }).error || `업로드 실패 (HTTP ${res.status})`, body as Record<string, unknown>);
+  return body as T;
+}

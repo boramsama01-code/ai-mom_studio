@@ -416,3 +416,25 @@ itemRoutes.get(
   }),
 );
 
+
+/** 여러 항목 한꺼번에: 제외 / 보류 / 검토 대기로 (검토 완료는 항목별로 확인해야 하므로 제외) */
+itemRoutes.post(
+  "/channels/:cid/items/bulk",
+  ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    const body = parse(z.object({ ids: z.array(z.number().int().positive()).min(1).max(100), action: z.enum(["exclude", "unexclude", "hold", "pending"]) }), req.body);
+    const db = getDb();
+    const set =
+      body.action === "exclude" ? { excluded: true, excludedReason: "운영자 일괄 제외" } :
+      body.action === "unexclude" ? { excluded: false, excludedReason: null } :
+      body.action === "hold" ? { reviewStatus: "held" } :
+      { reviewStatus: "pending" };
+    const upd = await db
+      .update(contentItems)
+      .set({ ...set, version: sql`${contentItems.version} + 1`, updatedAt: new Date() })
+      .where(and(eq(contentItems.channelId, ch.id), inArray(contentItems.id, body.ids)))
+      .returning({ id: contentItems.id });
+    await audit(db, { actor: actorOf(req), action: `bulk:${body.action}`, entity: "content_item", channelId: ch.id, detail: { ids: upd.map((u) => u.id) } });
+    res.json({ updated: upd.length });
+  }),
+);

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useToast } from "../toast";
+import { TemplatePicker, useTemplates } from "./Design";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api";
 import { useChannel, useDirtyGuard } from "../state";
@@ -13,7 +15,7 @@ type Detail = {
   linked: Array<{ link: { role: string }; doc: SourceDocument }>;
   revisions: Array<Pick<ContentRevision, "id" | "revisionNo" | "author" | "model" | "promptVersion" | "note"> & { createdAt: string; usage: { inputTokens: number; outputTokens: number } | null }>;
   current: (ContentRevision & { payload: Record<string, any> }) | null;
-  cards: Array<{ id: number; revisionId: number; sha256: string; createdAt: string; cloudinaryUrl: string | null }>;
+  cards: Array<{ id: number; revisionId: number; sha256: string; createdAt: string; cloudinaryUrl: string | null; source?: string; templateKey?: string | null }>;
   approvals: Approval[];
   deliveries: Array<{ d: Delivery; dest: { label: string; platform: string } }>;
   similar: Array<{ id: number; title: string; reviewStatus: string }>;
@@ -56,6 +58,7 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
           </div>
         </div>
       </div>
+      <Progress d={d} onGo={(t, anchor) => { setTab(t); setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); }} />
       <div className="tabs only-mobile" role="tablist">
         {tabs.map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
@@ -102,7 +105,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
   const p = d.primary;
   const evidence: Array<{ field: string; source_id: number; quote: string }> = d.current?.payload?.evidence ?? [];
   return (
-    <div className="stack">
+    <div className="stack" id="source-panel">
       <section className="panel stack">
         <h2>원문</h2>
         {!p ? (
@@ -283,7 +286,7 @@ function EditPanel({ d, cid }: { d: Detail; cid: number }) {
   });
 
   return (
-    <section className="panel stack">
+    <section className="panel stack" id="edit-panel">
       <div className="row between">
         <h2 style={{ margin: 0 }}>편집</h2>
         <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
@@ -355,7 +358,7 @@ function ReviewPanel({ d, cid }: { d: Detail; cid: number }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
   });
   return (
-    <section className="panel stack">
+    <section className="panel stack" id="review-panel">
       <h2>검토</h2>
       <p className="small muted">검토 완료는 내용 확인 표시이며, 게시에는 별도의 최종 승인이 필요합니다.</p>
       <div className="row">
@@ -385,15 +388,46 @@ function toLocalInput(date: Date) {
 
 function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
   const qc = useQueryClient();
-  const currentCard = d.cards.find((c) => c.revisionId === d.current?.id) ?? null;
+  const toast = useToast();
+  const revCards = d.cards.filter((c) => c.revisionId === d.current?.id);
+  const [pickedCard, setPickedCard] = useState<number | null>(null);
+  const currentCard = revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
   const [caps, setCaps] = useState(d.defaultCaptions ?? { instagram: "", telegram: "" });
   const [when, setWhen] = useState(() => toLocalInput(new Date(Date.now() + 3600_000)));
+  const tpls = useTemplates(cid);
+  const [tpl, setTpl] = useState<string | null>(null);
+  const [showTpl, setShowTpl] = useState(false);
+  const canva = useQuery({ queryKey: ["canva-status"], queryFn: () => api<{ connected: boolean }>("/canva/status") });
+  const { channels } = useChannel();
+  const ch = channels.find((c) => c.id === cid);
   useEffect(() => {
     if (d.defaultCaptions) setCaps(d.defaultCaptions);
+    setPickedCard(null);
   }, [d.current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const render = useMutation({
-    mutationFn: () => api(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body: {} }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] }),
+    mutationFn: () => api<{ id: number }>(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body: { templateKey: tpl } }),
+    onSuccess: (a) => {
+      setPickedCard(a.id);
+      toast("ok", "카드를 만들었습니다.");
+      qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
+    },
+  });
+  const canvaMake = useMutation({
+    mutationFn: () => api<{ editUrl: string | null; usedFields: string[]; unusedTemplateFields: string[] }>(`/channels/${cid}/items/${d.item.id}/canva`, { method: "POST", body: {} }),
+    onSuccess: (r) => {
+      toast("ok", `Canva 디자인을 만들었습니다(채운 칸: ${r.usedFields.join(", ")}).`);
+      qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
+    },
+    onError: (e) => toast("err", (e as Error).message),
+  });
+  const canvaImport = useMutation({
+    mutationFn: () => api<{ assetId: number; aspectWarning: string | null }>(`/channels/${cid}/items/${d.item.id}/canva/import`, { method: "POST", body: {} }),
+    onSuccess: (r) => {
+      setPickedCard(r.assetId);
+      toast(r.aspectWarning ? "info" : "ok", r.aspectWarning ?? "Canva 디자인을 카드로 가져왔습니다.");
+      qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
+    },
+    onError: (e) => toast("err", (e as Error).message),
   });
   const approve = useMutation({
     mutationFn: () =>
@@ -401,7 +435,10 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
         method: "POST",
         body: { revisionId: d.current!.id, mediaAssetId: currentCard!.id, captions: caps, scheduledAt: `${when}:00+09:00` },
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
+    onSuccess: () => {
+      toast("ok", "최종 승인했습니다. 발행함에서 진행 상황을 볼 수 있습니다.");
+      qc.invalidateQueries({ queryKey: ["ch", cid] });
+    },
   });
   const cancel = useMutation({
     mutationFn: (aid: number) => api(`/channels/${cid}/approvals/${aid}/cancel`, { method: "POST", body: {} }),
@@ -413,16 +450,21 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
   });
   const active = d.approvals.find((a) => a.status === "active");
   const len = (s: string) => [...s].length;
+  const cd = d.item.canvaDesign;
+  const SRC: Record<string, string> = { builtin: "기본 템플릿", custom: "내 배경 템플릿", canva: "Canva" };
   return (
-    <section className="panel stack" style={{ marginTop: 16 }}>
-      <h2>카드·최종 승인</h2>
+    <section className="panel stack" style={{ marginTop: 16 }} id="card-panel">
+      <h2 style={{ margin: 0 }}>카드·최종 승인</h2>
       {!d.current ? (
         <p className="muted">초안이 있어야 카드를 만들 수 있습니다.</p>
       ) : (
         <>
           <div className="row">
-            <button className="btn" onClick={() => render.mutate()} disabled={render.isPending}>
-              {render.isPending ? "카드 만드는 중…" : currentCard ? "카드 다시 만들기" : "카드 만들기"}
+            <button className="btn primary" onClick={() => render.mutate()} disabled={render.isPending}>
+              {render.isPending ? "카드 만드는 중…" : revCards.length ? "새 카드 만들기" : "카드 만들기"}
+            </button>
+            <button className="btn" onClick={() => setShowTpl((v) => !v)} aria-expanded={showTpl}>
+              템플릿: {tpls.data?.items.find((t) => t.key === (tpl ?? tpls.data?.current))?.name ?? "기본"} ▾
             </button>
             {currentCard && (
               <a className="btn" href={`/api/channels/${cid}/media/${currentCard.id}?download=1`}>
@@ -430,14 +472,54 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
               </a>
             )}
           </div>
+          {showTpl && tpls.data && (
+            <TemplatePicker cid={cid} value={tpl ?? tpls.data.current} onChange={(k) => setTpl(k)} items={tpls.data.items} version={ch?.accentColor} />
+          )}
           {render.error && <ErrorBox error={render.error} />}
-          {currentCard ? (
-            <img className="card-preview" src={`/api/channels/${cid}/media/${currentCard.id}`} alt={`카드 미리보기: ${d.item.title}`} />
-          ) : (
-            <p className="small muted">현재 버전(r{d.current.revisionNo})으로 만든 카드가 없습니다.</p>
+
+          {canva.data?.connected && (
+            <div className="notice stack" style={{ gap: 8 }}>
+              <strong className="small">Canva로 다듬기</strong>
+              {!ch?.canvaBrandTemplateId ? (
+                <span className="small muted">
+                  <GuardedLink href="/design">카드 디자인</GuardedLink>에서 Canva 브랜드 템플릿을 먼저 고르세요.
+                </span>
+              ) : (
+                <div className="row">
+                  <button className="btn sm" onClick={() => canvaMake.mutate()} disabled={canvaMake.isPending}>
+                    {canvaMake.isPending ? "Canva에서 만드는 중…" : cd && cd.revisionId === d.current.id ? "Canva 디자인 다시 만들기" : "Canva로 디자인 만들기"}
+                  </button>
+                  {cd?.editUrl && cd.revisionId === d.current.id && (
+                    <>
+                      <a className="btn sm" href={cd.editUrl} target="_blank" rel="noopener noreferrer">
+                        Canva에서 열기 ↗
+                      </a>
+                      <button className="btn sm primary" onClick={() => canvaImport.mutate()} disabled={canvaImport.isPending}>
+                        {canvaImport.isPending ? "가져오는 중…" : "다듬은 디자인을 카드로 가져오기"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+              {cd && cd.revisionId !== d.current.id && <span className="small" style={{ color: "var(--warning)" }}>내용이 바뀌어 이전 Canva 디자인은 쓸 수 없습니다. 다시 만드세요.</span>}
+            </div>
           )}
 
-          <h3>캡션 (목적지별)</h3>
+          {revCards.length > 1 && (
+            <div className="row" role="group" aria-label="승인할 카드 고르기">
+              {revCards.map((c, i) => (
+                <button key={c.id} className="tpl" style={{ width: 96, padding: 4 }} aria-pressed={currentCard?.id === c.id} onClick={() => setPickedCard(c.id)}>
+                  <img src={`/api/channels/${cid}/media/${c.id}`} alt={`카드 후보 ${i + 1}`} />
+                  <span className="tpl-desc">{SRC[c.source ?? "builtin"] ?? c.source}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {!currentCard && <p className="small muted">현재 버전(r{d.current.revisionNo})으로 만든 카드가 없습니다.</p>}
+
+          <CopyFields cid={cid} itemId={d.item.id} revisionId={d.current.id} />
+
+          <h3 style={{ margin: "8px 0 0" }}>캡션 (목적지별)</h3>
           <label className="field">
             인스타그램 캡션
             <span className="hint">
@@ -445,6 +527,19 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
             </span>
             <textarea rows={8} value={caps.instagram} onChange={(e) => setCaps({ ...caps, instagram: e.target.value })} />
           </label>
+          {currentCard && (
+            <details>
+              <summary className="small">인스타그램에서 보이는 모습 미리보기</summary>
+              <div className="ig-preview">
+                <div className="ig-head">
+                  <span className="ig-avatar" style={{ background: ch?.accentColor }} aria-hidden />
+                  {ch?.name.replace(/\s+/g, "") ?? "ai-mom"}
+                </div>
+                <img src={`/api/channels/${cid}/media/${currentCard.id}`} alt="" />
+                <div className="ig-cap">{caps.instagram}</div>
+              </div>
+            </details>
+          )}
           <label className="field">
             텔레그램 캡션
             <span className="hint">{len(caps.telegram)} / 1024자 (사진 캡션 제한)</span>
@@ -559,5 +654,107 @@ function HistoryPanel({ d }: { d: Detail }) {
         <p className="muted">버전이 없습니다.</p>
       )}
     </section>
+  );
+}
+
+/* ───────────── 글자 복사(망고보드·Canva 직접 편집용) ───────────── */
+function CopyFields({ cid, itemId, revisionId }: { cid: number; itemId: number; revisionId: number }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const q = useQuery({ queryKey: ["ch", cid, "fields", itemId, revisionId], queryFn: () => api<{ fields: Array<{ key: string; label: string; value: string }> }>(`/channels/${cid}/items/${itemId}/fields`), enabled: open });
+  const copy = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("ok", `'${label}'을(를) 복사했습니다.`);
+    } catch {
+      toast("err", "복사하지 못했습니다. 글자를 직접 선택해 복사하세요.");
+    }
+  };
+  return (
+    <details onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="small">글자 복사 — 망고보드·Canva에서 직접 디자인할 때</summary>
+      {q.isLoading ? (
+        <Loading lines={2} />
+      ) : q.error ? (
+        <ErrorBox error={q.error} />
+      ) : q.data ? (
+        <div className="copy-list">
+          <div>
+            <button className="btn sm" onClick={() => copy(q.data!.fields.filter((f) => f.value).map((f) => `${f.label}: ${f.value}`).join("\n"), "전체")}>
+              전체 복사
+            </button>
+          </div>
+          {q.data.fields.map((f) => (
+            <div key={f.key} className="copy-row">
+              <span className="k">
+                {f.label}
+                <br />
+                <code>{f.key}</code>
+              </span>
+              <span className="v">{f.value || <span className="muted">(비어 있음)</span>}</span>
+              <button className="btn sm" onClick={() => copy(f.value, f.label)} disabled={!f.value}>
+                복사
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+/* ───────────── 작업 단계 + 다음 할 일 ───────────── */
+function Progress({ d, onGo }: { d: Detail; onGo: (tab: "source" | "edit" | "publish" | "history", anchor: string) => void }) {
+  const p = d.primary;
+  const curId = d.current?.id;
+  const hasCard = d.cards.some((c) => c.revisionId === curId);
+  const approved = d.approvals.some((a) => a.revisionId === curId && (a.status === "active" || a.status === "completed"));
+  const steps = [
+    { label: "수집", done: true },
+    { label: "원문 확보", done: !p || p.fetchStatus === "ok" },
+    { label: "초안", done: !!d.current },
+    { label: "검토 완료", done: d.item.reviewStatus === "reviewed" },
+    { label: "카드", done: hasCard },
+    { label: "최종 승인", done: approved },
+    { label: "게시", done: d.item.publishStatus === "succeeded" },
+  ];
+  const cur = steps.findIndex((s) => !s.done);
+  const next: { text: string; btn: string; tab: "source" | "edit" | "publish"; anchor: string } | null = d.item.excluded
+    ? null
+    : cur === 1
+      ? { text: "원문을 확보하지 못했습니다. 다시 시도하거나 공식 원문 주소를 연결하세요.", btn: "원문 확인", tab: "source", anchor: "source-panel" }
+      : cur === 2
+        ? { text: "아직 초안이 없습니다. 원문에서 자동으로 정리하거나 직접 작성하세요.", btn: "편집으로", tab: "edit", anchor: "edit-panel" }
+        : cur === 3
+          ? { text: "초안 내용을 원문과 대조한 뒤 ‘검토 완료’를 누르세요.", btn: "검토하기", tab: "publish", anchor: "review-panel" }
+          : cur === 4
+            ? { text: "검토가 끝났습니다. 템플릿을 골라 카드 이미지를 만드세요.", btn: "카드 만들기", tab: "publish", anchor: "card-panel" }
+            : cur === 5
+              ? { text: "카드와 캡션을 확인하고 예약 시각을 정해 최종 승인하세요.", btn: "승인하기", tab: "publish", anchor: "card-panel" }
+              : cur === 6
+                ? { text: "승인되었습니다. 예약 시각 이후 워커가 게시합니다(기본은 모의 실행).", btn: "전송 상태", tab: "publish", anchor: "card-panel" }
+                : null;
+  return (
+    <>
+      <ol className="stepper" aria-label="작업 단계">
+        {steps.map((s, i) => (
+          <li key={s.label} className={s.done ? "done" : i === cur ? "current" : ""}>
+            {s.label}
+            <span className="sr-only">{s.done ? " 완료" : i === cur ? " 진행 중" : " 대기"}</span>
+          </li>
+        ))}
+      </ol>
+      {next && (
+        <div className="next-action">
+          <span>
+            <strong>다음 할 일 · </strong>
+            {next.text}
+          </span>
+          <button className="btn primary sm" onClick={() => onGo(next.tab, next.anchor)}>
+            {next.btn}
+          </button>
+        </div>
+      )}
+    </>
   );
 }

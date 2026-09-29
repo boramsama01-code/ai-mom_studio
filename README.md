@@ -151,6 +151,25 @@ Claude 비용은 **채널 설정 → 입력/출력 단가**를 넣으면 실행 
 - 필요 값: `INSTAGRAM_API_VERSION`(공식 문서에서 확인), 목적지별 `IG_(채널)_ACCESS_TOKEN`, `IG_(채널)_USER_ID`, 그리고 이미지를 공개 주소로 올릴 **Cloudinary** 키 3개.
 - 공식 문서: https://developers.facebook.com/docs/instagram-platform/content-publishing/
 
+### 9-1단계. (선택) 카드 디자인 · Canva 자동 채우기
+
+왼쪽 메뉴 **카드 디자인**에서 세 가지 방식 중 고를 수 있습니다.
+
+1. **기본 템플릿 4종**(기본·컬러 헤더·매거진·미니멀): 채널 기본값을 정하면 카드 만들기에 그대로 쓰입니다. 콘텐츠마다 카드 만들 때 다른 템플릿을 고를 수도 있습니다.
+2. **내 배경 템플릿**: Canva·망고보드·포토샵에서 **글자 없이 배경만** 1080×1350(4:5)로 만들어 PNG/JPG로 내려받아 올립니다. 제목·일정 같은 글자는 이 앱이 자동으로 얹습니다. 글자색(어두운/흰)과 "가독성 막"(배경을 살짝 덮는 반투명 층) 정도를 정할 수 있습니다.
+3. **Canva 자동 채우기**(Canva Pro·Teams·Enterprise 계정 필요):
+   1. https://www.canva.com/developers/apps 에서 앱 만들기 → 종류는 **Outside Canva**(Connect API)
+   2. Scopes(권한): `design:content:read`, `design:content:write`, `design:meta:read`, `brandtemplate:meta:read`, `brandtemplate:content:read`
+   3. Redirect URL(돌아올 주소): `https://(내 Render 주소)/api/canva/callback`
+   4. 발급된 Client ID·Client secret을 **채널 설정 → 서비스 연결 → Canva**에 저장 → **카드 디자인** 화면에서 "Canva 연결"
+   5. Canva에서 **브랜드 템플릿**을 만들고, 글자 칸에 데이터 필드 이름을 붙입니다. 이름은 카드 디자인 화면 표의 영문 이름(`title`, `schedule`, `summary` 등)과 같아야 자동으로 채워집니다.
+   6. 채널의 Canva 브랜드 템플릿을 고른 뒤, 콘텐츠 상세 → 카드·승인 → **Canva로 만들기** → Canva에서 다듬기 → **Canva 결과 가져오기**
+   - Canva에서 만든 결과도 이 앱의 최종 승인(버전·카드·캡션 묶음)을 똑같이 거칩니다. 가져온 뒤 내용을 고치면 다시 가져와야 합니다.
+
+**API 없이 쓰는 방법**
+- **Canva 대량 제작(Bulk Create)**: 카드 디자인 화면에서 CSV를 내려받아 Canva 대량 제작에 올리면 행마다 디자인이 한 장씩 만들어집니다(Pro 이상, 데스크톱, 한 번에 최대 300행).
+- **망고보드**: 공개 API나 대량 제작 기능을 확인하지 못해 자동 입력은 없습니다. 콘텐츠 상세의 **글자 복사** 칸에서 항목별로 복사해 붙여 넣습니다.
+
 ### 10단계. 실제 게시 켜기 (충분히 확인한 뒤)
 
 1. 먼저 `DRY_RUN=true` 상태에서 승인 → process 실행 → 발행함에 **모의 실행(게시 안 함)**으로 나오는지 확인
@@ -160,6 +179,8 @@ Claude 비용은 **채널 설정 → 입력/출력 단가**를 넣으면 실행 
 ---
 
 ## 매일 쓰는 방법
+
+> 단축키: **Ctrl/⌘ + K** 어디서나 검색·이동(페이지, 콘텐츠 제목, 채널 전환). 수집함 목록에서 **J/K** 위아래, **Enter** 열기, **X** 선택, **H** 보류, **E** 제외. 여러 개를 체크해 한 번에 보류·제외할 수 있습니다.
 
 1. **오늘의 작업**: 검토 대기·근거 확인 필요·발행 준비 건수와 다음 검토 항목
 2. **수집함**: 제목을 눌러 상세 화면으로
@@ -214,4 +235,6 @@ TypeScript · React 19 + Vite · Express 5 · PostgreSQL + Drizzle ORM · Zod ·
 - Instagram 게시: https://developers.facebook.com/docs/instagram-platform/content-publishing/
 - Telegram Bot API: https://core.telegram.org/bots/api
 - GitHub Actions 이벤트: https://docs.github.com/actions/using-workflows/events-that-trigger-workflows
+- Canva Connect API(자동 채우기·인증·내보내기): https://www.canva.dev/docs/connect/
+- Canva 대량 제작: https://www.canva.com/help/bulk-create/
 - GitHub Actions 요금: https://docs.github.com/en/billing/concepts/product-billing/github-actions

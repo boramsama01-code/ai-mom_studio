@@ -1,6 +1,6 @@
 # BUILD_STATUS — 아이맘 스튜디오
 
-마지막 갱신: 2026-09-28 (KST)
+마지막 갱신: 2026-09-29 (KST)
 기준 명세: `ai_mom_all_in_one.md`(2026-09-28) — Replit 대신 **Render(웹) + Neon(DB) + GitHub Actions(워커)**로 구현
 
 표기: ✅ 완료·검증 / 🟡 구현했으나 실제 외부 서비스로는 미검증 / ⛔ 차단(이 개발 환경에서 불가) / ⬜ 미구현
@@ -47,16 +47,27 @@
 - 🟡 Render Blueprint(`render.yaml`, Singapore, free) — 실제 배포는 사용자 계정에서 진행 필요
 - ⬜ AUTO_GENERATE(과학·시사 초안 자동 생성 예약): 스위치만 있고 자동 생성 작업은 없음(화면 버튼으로 생성)
 
+## 6. 화면 v2 · 카드 템플릿 — ✅ / Canva 🟡
+- ✅ 사이드바 그룹(작업/설정)·건수 배지, Ctrl/⌘K 명령 팔레트(페이지·동작·채널·콘텐츠 검색), 알림 토스트
+- ✅ 오늘의 작업: "시작하기" 체크리스트(실제 연결 상태로 완료 판정), 숫자 카드 클릭 시 해당 필터로 이동
+- ✅ 수집함: 키보드 처리(J/K/Enter/X/H/E), 여러 건 선택 후 보류·제외·되돌리기(`POST /channels/:cid/items/bulk`)
+- ✅ 콘텐츠 상세: 진행 단계 표시(수집→원문→초안→검토→카드→승인) + "다음 할 일" 버튼, 인스타그램 미리보기, 항목별 글자 복사
+- ✅ 발행함: 주간 달력 / 목록 전환
+- ✅ 카드 템플릿: 기본 4종 + 사용자 배경 업로드(1080×1350로 자동 맞춤, 글자색·덮개 농도), 채널 기본값, 콘텐츠별 선택, 미리보기(예시 문구) — `migrations/0002_templates.sql`
+- ✅ Canva 대량 제작용 CSV(UTF-8 BOM) 내보내기, 망고보드용 글자 복사 칸
+- 🟡 Canva Connect API: OAuth(PKCE) 연결, 브랜드 템플릿 목록·데이터 필드, 자동 채우기(autofill) → 편집 링크, PNG 내보내기 → 카드로 가져오기(내용이 바뀌었으면 409). **실제 Canva 계정으로는 미검증**(가짜 응답 테스트만). Canva Pro 이상 필요
+- ⬜ 망고보드 자동 입력: 공개 API를 확인하지 못함
+
 ## 실행한 명령과 결과 (이 환경, 로컬 PostgreSQL 16)
 - `npm run typecheck` → 오류 0
-- `npm test` → 5개 파일, 53개 테스트 통과 (날짜·URL·SSRF·키워드·카드·캡션·게시판·대비·API/워커 통합)
+- `npm test` → 7개 파일, 69개 테스트 통과 (날짜·URL·SSRF·키워드·카드·캡션·게시판·대비·API/워커 통합·비밀값 저장·템플릿/CSV/일괄처리/Canva 가짜 응답)
 - `npm run build` → 화면 354KB(gzip 105KB), 서버 번들 생성, `node dist/server/index.js`로 /api/health·SPA 경로 확인
 - Playwright로 1440/390/320px 화면 확인: 콘솔 오류 0, 가로 넘침 0 (로컬 테스트 자료로 확인, 저장소에는 포함 안 함)
 - 색 대비: 본문·보조·강조·경고·오류 모두 WCAG AA 4.5:1 이상(테스트로 고정)
 - 사용량: 이 환경의 개발 작업 외에 외부 유료 API(네이버·Claude·Cloudinary 등) 호출 0회
 
 ## 필요한 변수 이름
-`APP_ENV, APP_BASE_URL, APP_DATABASE_URL, APP_SESSION_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD_HASH, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, ANTHROPIC_API_KEY, ANTHROPIC_MODEL, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_REVIEW_CHAT_ID, INSTAGRAM_API_VERSION, IG_<채널>_ACCESS_TOKEN, IG_<채널>_USER_ID, TG_<채널>_CHAT_ID, DEMO_MODE, DRY_RUN, AUTO_COLLECT, AUTO_GENERATE, AUTO_PUBLISH`
+`APP_ENV, APP_BASE_URL, APP_DATABASE_URL, APP_SESSION_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD_HASH, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, ANTHROPIC_API_KEY, ANTHROPIC_MODEL, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET, TELEGRAM_BOT_TOKEN, TELEGRAM_REVIEW_CHAT_ID, CANVA_CLIENT_ID, CANVA_CLIENT_SECRET, APP_SECRETS_KEY(선택), INSTAGRAM_API_VERSION, IG_<채널>_ACCESS_TOKEN, IG_<채널>_USER_ID, TG_<채널>_CHAT_ID, DEMO_MODE, DRY_RUN, AUTO_COLLECT, AUTO_GENERATE, AUTO_PUBLISH`
 
 ## 다음 작업 (우선순위)
 1. Neon·Render 배포 → 로그인·채널·키워드 저장이 새로고침/재시작 후 유지되는지 운영 환경에서 확인
@@ -64,7 +75,8 @@
 3. Claude 키·모델 → 공고 10건 추출값을 원문과 대조, 과학·시사 각 1건 수동 생성·검토
 4. 대표 학교 공식 게시판 1곳: 도메인 확인 → 선택자 입력 → 시험 읽기 → 2~3곳으로 확장
 5. 텔레그램 검토 알림 → 공개 채널 DRY_RUN → 지정한 1건 실게시 검증 → 인스타그램 동일
-6. 자동 실행(schedule) 켜기 — Actions 무료 한도(월 2,000분) 고려
+6. (Canva 사용 시) 개발자 앱 등록 → 연결 → 브랜드 템플릿 1개로 자동 채우기·가져오기 확인
+7. 자동 실행(schedule) 켜기 — Actions 무료 한도(월 2,000분) 고려
 
 ## 중단 후 이어서 할 때
 이 파일과 실제 코드·`git log`를 먼저 대조하고, 완료한 기능을 다시 만들지 말 것. 샘플 성공과 외부 API 실제 성공을 구분하고, 실게시·자동 스케줄은 꺼 둔 상태로 유지.
