@@ -38,8 +38,13 @@ export class LlmBudget {
 }
 
 let client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!client) client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2, timeout: 60_000 });
+let clientKey = "";
+export function getClient(): Anthropic {
+  // 화면에서 키를 바꾸면 새 키로 다시 만든다
+  if (!client || clientKey !== env.anthropicKey) {
+    client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2, timeout: 60_000 });
+    clientKey = env.anthropicKey;
+  }
   return client;
 }
 

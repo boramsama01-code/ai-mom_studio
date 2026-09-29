@@ -391,6 +391,21 @@ export const appSettings = pgTable("app_settings", {
   updatedAt: updatedAt(),
 });
 
+/* ───────────── 화면에서 입력한 연결 키(암호화 저장) ───────────── */
+export const storedSecrets = pgTable("stored_secrets", {
+  key: text("key").primaryKey(), // 환경변수와 같은 이름(예: NAVER_CLIENT_ID)
+  ciphertext: text("ciphertext").notNull(), // AES-256-GCM, base64
+  iv: text("iv").notNull(),
+  tag: text("tag").notNull(),
+  keyFingerprint: text("key_fingerprint").notNull(), // 어떤 암호키로 잠갔는지(값 아님)
+  valueLength: integer("value_length").notNull(),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: updatedAt(),
+  lastTestAt: ts("last_test_at"),
+  lastTestOk: boolean("last_test_ok"),
+  lastTestMessage: text("last_test_message"),
+});
+
 /* ───────────── 로그인 시도 제한 ───────────── */
 export const loginAttempts = pgTable("login_attempts", {
   id: bigserial("id", { mode: "number" }).primaryKey(),

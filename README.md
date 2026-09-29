@@ -95,33 +95,40 @@ npm run hash-password -- "12자 이상 비밀번호"
   - **시험 검색**: 버튼을 누를 때만 1회 호출, 최대 5건. 자동 저장하지 않고, 고른 것만 수집함에 저장합니다.
 - **공식 출처** 탭: 학교 38곳이 "도메인 미확인·수집기 미연결" 상태로 들어 있습니다. 학교 누리집에서 직접 확인한 도메인을 넣고 "확인했음"을 체크하면, 그 도메인의 원문은 "공식 원문 확인"으로 판정됩니다. 공지 게시판을 자동으로 읽으려면 게시판 URL과 CSS 선택자를 넣고 "게시판 시험 읽기"로 확인하세요.
 
-### 5단계. 네이버 검색 API 키
+### 5단계. 연결 키 입력 (화면에서)
 
-1. https://developers.naver.com → Application 등록 → 사용 API: **검색**
-2. Client ID/Secret을 Render의 `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`과 GitHub Secrets(7단계)에 넣습니다.
+로그인 후 **채널 설정 → 서비스 연결**에서 키를 붙여 넣고 **저장 → 연결 확인**을 누르면 됩니다.
 
-### 6단계. Claude API 키 (자동 추출·초안)
+- 입력한 키는 암호화(AES-256-GCM)되어 데이터베이스에 저장되고, 웹 화면과 GitHub Actions 워커가 함께 씁니다. 비밀값은 저장 후 화면에 다시 보이지 않습니다.
+- 암호를 푸는 열쇠는 Render의 `APP_SESSION_SECRET`입니다(데이터베이스에는 없음). 이 값을 바꾸면 저장된 키를 다시 입력해야 합니다.
+- Render의 Environment에 같은 이름의 값을 직접 넣어 두었다면 그 값이 우선하고, 화면 입력은 막힙니다.
 
-- `ANTHROPIC_API_KEY`: https://console.anthropic.com 에서 발급
-- `ANTHROPIC_MODEL`: 실제로 호출 가능한 모델 ID를 넣으세요(https://docs.claude.com 의 모델 목록 참고). 틀리면 실행 기록에 "모델을 찾을 수 없음"이 표시됩니다.
-- 비용은 API 사용량만큼 별도로 나옵니다. **채널 설정 → 입력/출력 단가**를 넣으면 실행 기록에 추정 비용이 표시됩니다(실제 청구와 다를 수 있음).
+| 항목 | 발급처 |
+|---|---|
+| 네이버 검색 API (Client ID/Secret) | https://developers.naver.com → Application 등록 → 사용 API: **검색** |
+| Claude API (API 키, 모델 ID) | https://console.anthropic.com · 모델 ID는 https://docs.claude.com 의 모델 목록. 사용량만큼 요금 발생 |
+| 텔레그램 (봇 토큰, 검토 알림 채팅 ID) | 텔레그램 @BotFather → `/newbot` |
+| Cloudinary (인스타그램 쓸 때) | https://console.cloudinary.com |
+| 채널별 게시 목적지 토큰·채널 ID | 채널 설정 → 게시 목적지에서 목적지를 추가하면 입력칸이 생김 |
+
+Claude 비용은 **채널 설정 → 입력/출력 단가**를 넣으면 실행 기록에 추정 비용이 표시됩니다(실제 청구와 다를 수 있음).
+
+### 6단계. (선택) 환경변수로 직접 넣기
+
+화면 대신 Render의 Environment / GitHub Secrets에 `NAVER_CLIENT_ID` 같은 이름으로 직접 넣어도 됩니다. 이 경우 그 값이 화면 입력보다 우선합니다.
 
 ### 7단계. GitHub Actions 워커 연결
 
 저장소 → **Settings → Secrets and variables → Actions**
 
-**Secrets** (비밀값):
+**Secrets** (필수 2개 — 연결 키는 화면에서 입력했다면 여기 넣을 필요 없음):
 
 | 이름 | 값 |
 |---|---|
 | `APP_DATABASE_URL` | Render와 **같은** Neon 주소 |
-| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | 5단계 |
-| `ANTHROPIC_API_KEY` | 6단계 |
-| `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | 9단계(인스타그램 쓸 때) |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_REVIEW_CHAT_ID` | 8단계 |
-| `TG_OPPORTUNITIES_CHAT_ID` 등 | 목적지별 값(채널 설정 화면에 이름이 나옵니다) |
+| `APP_SESSION_SECRET` | Render → Environment의 `APP_SESSION_SECRET` 값을 그대로 복사(화면에서 입력한 키를 풀 때 필요) |
 
-**Variables** (비밀 아님): `APP_BASE_URL`, `ANTHROPIC_MODEL`, `INSTAGRAM_API_VERSION`, 필요하면 `DRY_RUN`, `AUTO_PUBLISH`, `AUTO_COLLECT`.
+**Variables** (선택): `APP_BASE_URL`(Render 주소, 텔레그램 알림 속 링크용), 필요하면 `DRY_RUN`, `AUTO_PUBLISH`, `AUTO_COLLECT`.
 
 그다음 **Actions 탭 → collect → Run workflow**로 수동 실행해 보세요. 화면의 **실행 기록**에 결과가 나옵니다.
 

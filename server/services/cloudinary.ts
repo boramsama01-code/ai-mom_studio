@@ -11,22 +11,20 @@ export class CloudinaryNotConfigured extends Error {
   }
 }
 
-let configured = false;
-function ensure() {
+export function ensureCloudinary() {
   if (!env.cloudinaryConfigured) throw new CloudinaryNotConfigured();
-  if (!configured) {
-    cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET,
-      secure: true,
-    });
-    configured = true;
-  }
+  // 화면에서 키를 바꿀 수 있으므로 매번 현재 값으로 설정
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+  return cloudinary;
 }
 
 export async function uploadCard(jpeg: Buffer, publicId: string): Promise<{ publicId: string; url: string; bytes: number }> {
-  ensure();
+  ensureCloudinary();
   const res = await new Promise<{ public_id: string; secure_url: string; format: string; bytes: number }>((resolve, reject) => {
     const stream = cloudinary.uploader.upload_stream(
       { public_id: publicId, resource_type: "image", overwrite: false, unique_filename: false, format: "jpg" },

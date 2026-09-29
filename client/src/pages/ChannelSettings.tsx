@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useChannel, useDirtyGuard } from "../state";
 import { Badge, Empty, ErrorBox, Loading } from "../ui";
 import type { Channel, ChannelBudget, Destination } from "@shared/schema";
+import { ConnectionsSection, SecretInput, useSecrets } from "./Connections";
 
 type Status = { integrations: Record<string, boolean | Record<string, boolean>>; globalStop: boolean; workerConnected: boolean };
 type DestView = Destination & { connection: { missing: string[]; invalid: string[]; ready: boolean } };
@@ -27,11 +28,13 @@ export function ChannelSettingsPage() {
       <div className="page-head">
         <h1>채널 설정</h1>
       </div>
+      <ConnectionsSection />
+      <h2 style={{ marginTop: 24 }}>채널별 설정</h2>
       {selected === "all" || !current ? <Empty>채널을 하나 선택하면 채널별 설정을 바꿀 수 있습니다.</Empty> : <ChannelForm key={current.id} ch={current} />}
       {current && <Destinations cid={current.id} />}
       <section className="panel stack">
         <h2>연결 상태</h2>
-        <p className="small muted">비밀값은 화면에 표시하지 않습니다. 설정 여부만 보여줍니다. 값은 Render와 GitHub의 Secrets에 넣으세요.</p>
+        <p className="small muted">비밀값은 화면에 표시하지 않고 설정 여부만 보여줍니다. 값은 위 ‘서비스 연결’에서 입력하세요(Render에 직접 넣은 값이 있으면 그 값이 우선).</p>
         {status.isLoading ? (
           <Loading lines={2} />
         ) : status.error ? (
@@ -212,7 +215,7 @@ function Destinations({ cid }: { cid: number }) {
                   <Badge kind={d.enabled ? "ok" : ""}>{d.enabled ? "사용" : "사용 안 함"}</Badge>
                   <Badge kind={d.connection.ready ? "ok" : "warn"}>{d.connection.ready ? "환경변수 설정됨" : `필요: ${d.connection.missing.join(", ") || d.connection.invalid.join(", ")}`}</Badge>
                 </div>
-                <span className="small muted">참조 환경변수: {Object.values(d.secretRefs).join(", ")}</span>
+                <DestinationKeys d={d} />
               </li>
             ))}
           </ul>
@@ -229,5 +232,44 @@ function Destinations({ cid }: { cid: number }) {
         </>
       )}
     </section>
+  );
+}
+
+const REF_LABEL: Record<string, string> = { accessToken: "액세스 토큰", userId: "인스타그램 사용자 ID", chatId: "채널 ID (@채널아이디 또는 숫자)" };
+
+function DestinationKeys({ d }: { d: DestView }) {
+  const qc = useQueryClient();
+  const sec = useSecrets();
+  const [vals, setVals] = useState<Record<string, string>>({});
+  const changed = Object.entries(vals).filter(([, v]) => v.trim());
+  const save = useMutation({
+    mutationFn: async () => {
+      for (const [k, v] of changed) await api(`/secrets/${k}`, { method: "PUT", body: { value: v.trim() } });
+    },
+    onSuccess: () => {
+      setVals({});
+      qc.invalidateQueries({ queryKey: ["secrets"] });
+      qc.invalidateQueries({ queryKey: ["ch"] });
+    },
+  });
+  const tokenKey = d.secretRefs.accessToken;
+  const test = useMutation({ mutationFn: () => api<{ ok: boolean; message: string }>(`/secrets/test/instagram:${tokenKey}`, { method: "POST", body: {} }) });
+  if (sec.isLoading) return <Loading lines={1} />;
+  const st = (k: string) => sec.data?.statuses.find((s) => s.key === k);
+  return (
+    <form className="stack" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+      {Object.entries(d.secretRefs).map(([field, key]) => (
+        <SecretInput key={key} k={key} label={REF_LABEL[field] ?? field} status={st(key)} value={vals[key] ?? ""} onChange={(v) => setVals({ ...vals, [key]: v })} />
+      ))}
+      <div className="row">
+        <button className="btn sm primary" disabled={!changed.length || save.isPending}>저장</button>
+        {d.platform === "instagram" && tokenKey && (
+          <button type="button" className="btn sm" onClick={() => test.mutate()} disabled={test.isPending || changed.length > 0}>계정 연결 확인</button>
+        )}
+      </div>
+      {save.error && <ErrorBox error={save.error} />}
+      {test.data && <div className={`notice small ${test.data.ok ? "ok" : "err"}`}>{test.data.message}</div>}
+      {d.platform === "telegram_channel" && <p className="small muted" style={{ margin: 0 }}>봇을 이 채널의 관리자(메시지 게시 권한)로 추가해야 게시할 수 있습니다.</p>}
+    </form>
   );
 }

@@ -22,6 +22,10 @@ jobs:
     env:
       APP_ENV: production
       APP_DATABASE_URL: ${{ secrets.APP_DATABASE_URL }}
+      # 화면(채널 설정)에서 입력한 키를 풀기 위한 값 — Render의 APP_SESSION_SECRET과 같은 값
+      APP_SESSION_SECRET: ${{ secrets.APP_SESSION_SECRET }}
+      APP_SECRETS_KEY: ${{ secrets.APP_SECRETS_KEY }}
+      # 아래 키들은 선택: 화면에서 입력했다면 비워 둬도 됩니다(여기 값이 있으면 이 값이 우선)
       APP_BASE_URL: ${{ vars.APP_BASE_URL }}
       NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
       NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}

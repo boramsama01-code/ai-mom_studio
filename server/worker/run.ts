@@ -9,6 +9,7 @@ import { claimJob, completeJob, failJob, heartbeat, newWorkerId, recoverExpired 
 import { runCollect } from "./collect";
 import { publishDue } from "./publish";
 import { env } from "../env";
+import { loadStoredSecrets } from "../secretStore";
 
 async function startRun(db: DB, workerId: string, command: string) {
   const [r] = await db.insert(workerRuns).values({ workerId, command }).returning();
@@ -22,6 +23,7 @@ async function endRun(db: DB, id: number, status: string, processed: number, fai
 export async function jobsOnce(opts: { maxMs?: number; types?: string[] } = {}) {
   const db = getDb();
   await db.execute(sql`select 1`); // 연결 확인 — 실패 시 예외로 비정상 종료
+  await loadStoredSecrets(db);
   const workerId = newWorkerId();
   const runId = await startRun(db, workerId, "jobs:once");
   const recovered = await recoverExpired(db);
@@ -65,6 +67,7 @@ export async function jobsOnce(opts: { maxMs?: number; types?: string[] } = {}) 
 export async function collectOnce(opts: { channelSlug?: string; isSchedule?: boolean } = {}) {
   const db = getDb();
   await db.execute(sql`select 1`);
+  await loadStoredSecrets(db);
   if (opts.isSchedule && !env.autoCollect) return { skipped: "AUTO_COLLECT=false — 예약 실행에서는 수집하지 않음", results: [] };
   const workerId = newWorkerId();
   const runId = await startRun(db, workerId, "collect:once");
@@ -93,6 +96,7 @@ export async function collectOnce(opts: { channelSlug?: string; isSchedule?: boo
 export async function publishOnce() {
   const db = getDb();
   await db.execute(sql`select 1`);
+  await loadStoredSecrets(db);
   const workerId = newWorkerId();
   const runId = await startRun(db, workerId, "publish:once");
   const s = await publishDue(db, {});
