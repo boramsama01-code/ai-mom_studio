@@ -68,7 +68,7 @@ export const SECRET_GROUPS: SecretGroup[] = [
     description: "Instagram API with Instagram Login 문서에서 확인한 버전(예: vNN.0). 계정별 토큰은 아래 '게시 목적지'에서 입력합니다.",
     docs: "https://developers.facebook.com/docs/instagram-platform/content-publishing/",
     testable: false,
-    fields: [{ key: "INSTAGRAM_API_VERSION", label: "API 버전", secret: false, placeholder: "v00.0" }],
+    fields: [{ key: "INSTAGRAM_API_VERSION", label: "API 버전", secret: false, placeholder: "예: v25.0", hint: "Meta Graph API 버전 번호. 공식 버전 표(developers.facebook.com/docs/graph-api/changelog/versions)에서 만료일이 먼 버전을 넣습니다." }],
   },
 ];
 

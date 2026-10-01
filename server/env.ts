@@ -65,7 +65,11 @@ export const env = {
     return !!(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
   },
   get instagramApiVersion() {
-    return process.env.INSTAGRAM_API_VERSION || "";
+    // "26.0", "V26.0", " v26 " 처럼 넣어도 주소에 쓰는 형식(v26.0)으로 맞춘다
+    const raw = (process.env.INSTAGRAM_API_VERSION || "").trim();
+    if (!raw) return "";
+    const m = raw.match(/^v?(\d+)(?:\.(\d+))?$/i);
+    return m ? `v${m[1]}.${m[2] ?? "0"}` : raw;
   },
   get telegramBotToken() {
     return process.env.TELEGRAM_BOT_TOKEN || "";
