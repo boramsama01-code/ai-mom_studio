@@ -3,7 +3,7 @@
  * 게시나 메시지 발송처럼 밖에 흔적이 남는 요청은 최소화한다(텔레그램은 검토 알림 채팅에만 확인 메시지 1건).
  */
 import { env } from "../env";
-import { naverSearch, NaverError } from "./naver";
+import { naverSearch, NaverError, naverProviderInUse } from "./naver";
 import { getClient } from "./llm";
 import { ensureCloudinary, CloudinaryNotConfigured } from "./cloudinary";
 
@@ -11,11 +11,12 @@ export type TestResult = { ok: boolean; message: string };
 
 export async function testNaver(fetchImpl: typeof fetch = fetch): Promise<TestResult> {
   try {
-    const items = await naverSearch("과학고 입학설명회", "news", 1, { naver: 0, limit: 1 }, fetchImpl);
-    return { ok: true, message: `검색 성공(결과 ${items.length}건 수신)` };
+    const items = await naverSearch("과학고 입학설명회", "news", 1, { naver: 0, limit: 2 }, fetchImpl);
+    const how = naverProviderInUse() === "developers" ? "기존 개발자센터 키" : "NAVER API HUB 키";
+    return { ok: true, message: `검색 성공(${how}, 결과 ${items.length}건 수신)` };
   } catch (e) {
     const ne = e as NaverError;
-    return { ok: false, message: ne.kind === "auth" ? "인증 실패 — Client ID/Secret을 확인하세요(네이버 앱에 '검색' API가 추가돼 있어야 함)" : ne.message };
+    return { ok: false, message: ne.kind === "auth" ? "인증 실패 — Client ID/Secret을 확인하세요. 네이버 클라우드 NAVER API HUB에서 '검색' 상품을 이용 신청하고 Application을 등록해 받은 값이어야 합니다." : ne.message };
   }
 }
 

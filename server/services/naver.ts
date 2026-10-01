@@ -2,7 +2,11 @@
  * 네이버 검색 API (뉴스/블로그)
  * - query는 단순 텍스트. OR/AND 불리언 문법을 삽입하지 않는다.
  * - 429/일시적 5xx는 제한된 백오프, 인증·권한 오류는 재시도하지 않는다.
- * 문서: https://developers.naver.com/docs/serviceapi/search/news/news.md
+ * 2026-07-31부터 네이버 개발자센터 신규 등록이 중단되고 NAVER API HUB(네이버 클라우드)로 이관됨.
+ *  - API HUB: https://naverapihub.apigw.ntruss.com/search/v1/{news|blog}, 헤더 X-NCP-APIGW-API-KEY-ID / X-NCP-APIGW-API-KEY
+ *  - 기존 개발자센터 키: https://openapi.naver.com/v1/search/{news|blog}.json (2027-06-30까지)
+ * 같은 Client ID/Secret 칸을 쓰고, API HUB를 먼저 시도한 뒤 인증 거부 시 기존 방식을 시도한다.
+ * 문서: https://guide.ncloud-docs.com/docs/apihub-migration
  */
 import { env } from "../env";
 import { stripHtml } from "./text";
@@ -32,6 +36,26 @@ export class NaverError extends Error {
   }
 }
 
+export type NaverProvider = "apihub" | "developers";
+const PROVIDERS: Record<NaverProvider, { url: (e: NaverEndpoint) => string; headers: (id: string, secret: string) => Record<string, string> }> = {
+  apihub: {
+    url: (e) => `https://naverapihub.apigw.ntruss.com/search/v1/${e}`,
+    headers: (id, secret) => ({ "X-NCP-APIGW-API-KEY-ID": id, "X-NCP-APIGW-API-KEY": secret }),
+  },
+  developers: {
+    url: (e) => `https://openapi.naver.com/v1/search/${e}.json`,
+    headers: (id, secret) => ({ "X-Naver-Client-Id": id, "X-Naver-Client-Secret": secret }),
+  },
+};
+/** 마지막으로 인증에 성공한 방식(키가 바뀌면 다시 판단) */
+let known: { keyId: string; provider: NaverProvider } | null = null;
+export function naverProviderInUse(): NaverProvider | null {
+  return known && known.keyId === env.naverClientId ? known.provider : null;
+}
+export function __resetNaverProviderForTest() {
+  known = null;
+}
+
 export type CallCounter = { naver: number; limit: number };
 
 export function mapNaverItem(endpoint: NaverEndpoint, it: Record<string, string>): NaverItem {
@@ -56,7 +80,36 @@ export async function naverSearch(
   fetchImpl: typeof fetch = fetch,
 ): Promise<NaverItem[]> {
   if (!env.naverClientId || !env.naverClientSecret) throw new NaverError("네이버 API 키 미연결", "not_configured");
-  const url = new URL(`https://openapi.naver.com/v1/search/${endpoint}.json`);
+  const keyId = env.naverClientId;
+  const first = naverProviderInUse() ?? "apihub";
+  const order: NaverProvider[] = first === "apihub" ? ["apihub", "developers"] : ["developers", "apihub"];
+  let authErr: NaverError | null = null;
+  for (const provider of order) {
+    try {
+      const items = await searchWith(provider, query, endpoint, display, counter, fetchImpl);
+      known = { keyId, provider };
+      return items;
+    } catch (e) {
+      if (e instanceof NaverError && e.kind === "auth") {
+        authErr = e;
+        continue; // 다른 방식의 키일 수 있음
+      }
+      throw e;
+    }
+  }
+  throw authErr ?? new NaverError("알 수 없는 오류", "network");
+}
+
+async function searchWith(
+  provider: NaverProvider,
+  query: string,
+  endpoint: NaverEndpoint,
+  display: number,
+  counter: CallCounter,
+  fetchImpl: typeof fetch,
+): Promise<NaverItem[]> {
+  const p = PROVIDERS[provider];
+  const url = new URL(p.url(endpoint));
   url.searchParams.set("query", query);
   url.searchParams.set("display", String(Math.min(Math.max(display, 1), 100)));
   url.searchParams.set("start", "1");
@@ -70,10 +123,7 @@ export async function naverSearch(
     counter.naver++;
     let res: Response;
     try {
-      res = await fetchImpl(url, {
-        headers: { "X-Naver-Client-Id": env.naverClientId, "X-Naver-Client-Secret": env.naverClientSecret },
-        signal: AbortSignal.timeout(10_000),
-      });
+      res = await fetchImpl(url, { headers: p.headers(env.naverClientId, env.naverClientSecret), signal: AbortSignal.timeout(10_000) });
     } catch {
       lastErr = new NaverError("네트워크 오류", "network");
       continue;

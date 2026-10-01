@@ -9,8 +9,8 @@ export const SECRET_GROUPS: SecretGroup[] = [
   {
     id: "naver",
     title: "네이버 검색 API",
-    description: "뉴스·블로그 검색 수집에 사용합니다. developers.naver.com → Application 등록 → 사용 API '검색'.",
-    docs: "https://developers.naver.com/apps/#/register",
+    description: "뉴스·블로그 검색 수집에 사용합니다. 2026년 8월부터 새 키는 네이버 클라우드의 NAVER API HUB에서 받습니다(검색 이용 신청 → Application 등록 → Client ID/Secret). 예전 개발자센터 키도 2027년 6월까지는 그대로 됩니다.",
+    docs: "https://guide.ncloud-docs.com/docs/apihub-migration",
     testable: true,
     fields: [
       { key: "NAVER_CLIENT_ID", label: "Client ID", secret: false },

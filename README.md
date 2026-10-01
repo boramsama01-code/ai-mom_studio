@@ -105,11 +105,20 @@ npm run hash-password -- "12자 이상 비밀번호"
 
 | 항목 | 발급처 |
 |---|---|
-| 네이버 검색 API (Client ID/Secret) | https://developers.naver.com → Application 등록 → 사용 API: **검색** |
+| 네이버 검색 API (Client ID/Secret) | **NAVER API HUB**(네이버 클라우드) — 아래 "네이버 키 받기" 참고. 개발자센터(developers.naver.com)는 2026-07-31부터 새 등록이 안 됩니다 |
 | Claude API (API 키, 모델 ID) | https://console.anthropic.com · 모델 ID는 https://docs.claude.com 의 모델 목록. 사용량만큼 요금 발생 |
 | 텔레그램 (봇 토큰, 검토 알림 채팅 ID) | 텔레그램 @BotFather → `/newbot` |
 | Cloudinary (인스타그램 쓸 때) | https://console.cloudinary.com |
 | 채널별 게시 목적지 토큰·채널 ID | 채널 설정 → 게시 목적지에서 목적지를 추가하면 입력칸이 생김 |
+
+**네이버 키 받기 (NAVER API HUB)**
+1. https://www.ncloud.com 에 네이버 아이디로 로그인(처음이면 회원가입·약관 동의, 결제수단 등록을 요구할 수 있음. 검색 API는 현재 무료)
+2. 콘솔 → **Services → Application Services → NAVER API HUB**
+3. **Subscription**에서 검색 상품 **[서비스 이용 신청]**
+4. **Application** 메뉴에서 **[Application 등록]** → 이름(예: ai-mom) 입력, 검색 API 선택
+5. 등록된 Application의 **인증 정보**에서 Client ID와 Client Secret 확인 → 이 앱의 네이버 칸에 붙여 넣기
+- 계정 전체용 "API 인증키(Access Key)"가 아니라, Application에서 받은 값이어야 합니다.
+- 예전에 개발자센터에서 받은 키가 있다면 그것도 그대로 넣으면 됩니다(2027-06-30까지). 앱이 두 방식을 자동으로 구분합니다.
 
 Claude 비용은 **채널 설정 → 입력/출력 단가**를 넣으면 실행 기록에 추정 비용이 표시됩니다(실제 청구와 다를 수 있음).
 
@@ -230,7 +239,8 @@ TypeScript · React 19 + Vite · Express 5 · PostgreSQL + Drizzle ORM · Zod ·
 
 ### 참고 문서
 
-- 네이버 검색 API: https://developers.naver.com/docs/serviceapi/search/news/news.md
+- NAVER API HUB 이관 가이드: https://guide.ncloud-docs.com/docs/apihub-migration
+- 네이버 검색 API(기존 문서, 요청·응답 형식): https://developers.naver.com/docs/serviceapi/search/news/news.md
 - Claude 모델: https://docs.claude.com/en/docs/about-claude/models/overview
 - Instagram 게시: https://developers.facebook.com/docs/instagram-platform/content-publishing/
 - Telegram Bot API: https://core.telegram.org/bots/api
