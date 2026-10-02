@@ -15,6 +15,7 @@ export function setTestEnv() {
   process.env.APP_BASE_URL = "http://127.0.0.1";
   process.env.DRY_RUN = "true";
   process.env.AUTO_PUBLISH = "false";
+  process.env.INLINE_WORKER = "false";
   process.env.NAVER_CLIENT_ID = "test-id";
   process.env.NAVER_CLIENT_SECRET = "test-secret";
   delete process.env.ANTHROPIC_API_KEY;

@@ -43,6 +43,10 @@ export const env = {
   get autoCollect() {
     return bool(process.env.AUTO_COLLECT, false);
   },
+  /** "지금 수집"을 웹 서버에서 바로 처리(기본 켬). false면 GitHub Actions 워커가 처리 */
+  get inlineWorker() {
+    return bool(process.env.INLINE_WORKER, true);
+  },
   get autoGenerate() {
     return bool(process.env.AUTO_GENERATE, false);
   },

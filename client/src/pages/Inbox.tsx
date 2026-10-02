@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useToast } from "../toast";
+import { DiscoveryBadge } from "../discovery";
 import { useDirtyGuard } from "../state";
 import { api, qs } from "../api";
 import { useChannel } from "../state";
@@ -160,7 +161,7 @@ function ItemBody({ row: { item, source, channelName }, showChannel }: { row: Li
       <GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">
         {item.title}
       </GuardedLink>
-      {source?.snippet && <p className="small muted snippet">{source.snippet}</p>}
+      {item.discovery?.reason ? <p className="small snippet">AI 선정 이유: {item.discovery.reason}</p> : source?.snippet && <p className="small muted snippet">{source.snippet}</p>}
       <div className="meta">
         {showChannel && <span>{channelName}</span>}
         <span>{CONTENT_KIND_LABEL[item.kind as ContentKind]}</span>
@@ -170,6 +171,7 @@ function ItemBody({ row: { item, source, channelName }, showChannel }: { row: Li
       </div>
       <div className="row">
         {item.isSample && <Badge kind="sample">샘플 · 실제 정보 아님</Badge>}
+        <DiscoveryBadge info={item.discovery} />
         <StatusBadge type="review" value={item.reviewStatus} />
         <StatusBadge type="evidence" value={item.evidenceStatus} />
         {item.kind === "notice" && <StatusBadge type="schedule" value={item.scheduleStatus} />}

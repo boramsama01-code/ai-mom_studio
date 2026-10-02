@@ -217,3 +217,44 @@ export const SCIENCE_EVERGREEN_TOPICS = [
 ];
 
 export const CURRENT_EDITORIAL_TOPICS = ["학교의 스마트폰 사용 규칙", "공공도서관 예산 우선순위"];
+
+/* ───────────── 자동 화제 발굴(과학·시사 채널) ─────────────
+ * 사용자가 검색어를 넣지 않아도 아래 "탐색 주제"로 최신 뉴스를 넓게 훑고,
+ * 여러 언론사가 함께 다루는 기사 묶음을 화제로 본다. 주제는 채널 설정에서 바꿀 수 있다.
+ */
+export const DISCOVERY_DEFAULT_QUERIES: Record<"science_dialogue" | "current_dialogue", string[]> = {
+  science_dialogue: ["연구팀 발견", "우주 탐사", "인공지능 기술", "기후 환경 연구"],
+  current_dialogue: ["정부 발표", "국회 법안", "교육부", "국제 정상"],
+};
+
+export type DiscoverySettings = { enabled: boolean; queries: string[]; picksPerRun: number; autoDraft: boolean };
+
+export function discoveryDefaults(contentType: string): DiscoverySettings | null {
+  if (contentType !== "science_dialogue" && contentType !== "current_dialogue") return null;
+  return { enabled: true, queries: [...DISCOVERY_DEFAULT_QUERIES[contentType]], picksPerRun: 3, autoDraft: true };
+}
+
+/** 저장된 값이 없거나 일부만 있으면 기본값으로 채운다 */
+export function resolveDiscovery(contentType: string, stored: Partial<DiscoverySettings> | null | undefined): DiscoverySettings | null {
+  const d = discoveryDefaults(contentType);
+  if (!d) return null;
+  return {
+    enabled: stored?.enabled ?? d.enabled,
+    queries: stored?.queries?.length ? stored.queries : d.queries,
+    picksPerRun: stored?.picksPerRun ?? d.picksPerRun,
+    autoDraft: stored?.autoDraft ?? d.autoDraft,
+  };
+}
+
+/** 화제 발굴 결과(콘텐츠 항목에 저장) */
+export type DiscoveryInfo = {
+  score: number; // 같은 사건을 다룬 서로 다른 언론사 수
+  articleCount: number;
+  outlets: string[];
+  pickedBy: "claude" | "buzz";
+  reason: string | null; // 고른 이유(Claude)
+  angle: string | null; // 대화 질문 제안(Claude)
+  query: string; // 어떤 탐색 주제에서 나왔는지
+  headline: string; // 대표 기사 제목(초안 생성 후 제목이 바뀌어도 같은 사건 판별에 사용)
+  discoveredAt: string;
+};

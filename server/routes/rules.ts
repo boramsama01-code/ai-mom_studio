@@ -6,11 +6,11 @@ import { Router } from "express";
 import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
-import { searchRules, sourceDocuments, contentItems } from "../../shared/schema";
+import { channels, searchRules, sourceDocuments, contentItems } from "../../shared/schema";
 import { ah, conflict, HttpError, intParam, loadChannel, parse, zVersion } from "./util";
 import { actorOf } from "../auth";
 import { audit } from "../audit";
-import { buildSchoolRuleCandidates, cleanQuery, normalizeQuery, parseBulkQueries, ADMISSION_KEYWORDS } from "../../shared/domain";
+import { buildSchoolRuleCandidates, cleanQuery, normalizeQuery, parseBulkQueries, ADMISSION_KEYWORDS, resolveDiscovery } from "../../shared/domain";
 import { naverSearch, applyExcludeTerms, NaverError } from "../services/naver";
 import { normalizeUrl } from "../services/url";
 
@@ -27,13 +27,17 @@ ruleRoutes.get(
       .where(and(eq(searchRules.channelId, ch.id), deleted ? isNotNull(searchRules.deletedAt) : isNull(searchRules.deletedAt)))
       .orderBy(asc(searchRules.priority), asc(searchRules.id));
     const active = rows.filter((r) => r.enabled && !r.deletedAt);
+    const discovery = resolveDiscovery(ch.contentType, ch.budget.discovery);
+    const discoveryCalls = discovery?.enabled && discovery.picksPerRun > 0 ? discovery.queries.length : 0;
     res.json({
       items: rows,
+      discovery,
       estimate: {
-        // 규칙 1개(검색어+endpoint) = 네이버 호출 1회
+        // 규칙 1개(검색어+endpoint) = 네이버 호출 1회, 자동 발굴 탐색 주제 1개 = 1회
         activeRules: active.length,
-        callsPerRun: Math.min(active.length, ch.budget.naverCallsPerRun),
-        cappedByBudget: active.length > ch.budget.naverCallsPerRun,
+        discoveryCalls,
+        callsPerRun: Math.min(active.length + discoveryCalls, ch.budget.naverCallsPerRun),
+        cappedByBudget: active.length + discoveryCalls > ch.budget.naverCallsPerRun,
         budget: ch.budget.naverCallsPerRun,
       },
     });
@@ -317,5 +321,32 @@ ruleRoutes.post(
     }
     await audit(db, { actor: actorOf(req), action: "trial_save", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { created, dup } });
     res.status(201).json({ created, duplicates: dup });
+  }),
+);
+
+/* 자동 화제 발굴 설정(과학·시사 채널) — 예산 jsonb 안에 저장 */
+const discoveryBody = z.object({
+  enabled: z.boolean(),
+  queries: z.array(z.string().max(40)).max(8),
+  picksPerRun: z.number().int().min(0).max(10),
+  autoDraft: z.boolean(),
+});
+ruleRoutes.put(
+  "/channels/:cid/discovery",
+  ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    if (!resolveDiscovery(ch.contentType, null)) throw new HttpError(400, "자동 화제 발굴은 과학·시사 채널에서만 씁니다.");
+    const b = parse(discoveryBody, req.body);
+    const seen = new Set<string>();
+    const queries = b.queries.map(cleanQuery).filter((q) => q && !seen.has(normalizeQuery(q)) && seen.add(normalizeQuery(q)));
+    if (b.enabled && !queries.length) throw new HttpError(400, "탐색 주제를 1개 이상 넣으세요.");
+    const discovery = { ...b, queries };
+    const db = getDb();
+    await db
+      .update(channels)
+      .set({ budget: { ...ch.budget, discovery }, version: sql`${channels.version} + 1`, updatedAt: new Date() })
+      .where(eq(channels.id, ch.id));
+    await audit(db, { actor: actorOf(req), action: "update_discovery", entity: "channel", entityId: ch.id, channelId: ch.id, detail: discovery });
+    res.json({ discovery: resolveDiscovery(ch.contentType, discovery) });
   }),
 );

@@ -8,6 +8,7 @@
  * - 중복 방지는 UI가 아니라 UNIQUE 제약으로 보장한다.
  */
 import { sql } from "drizzle-orm";
+import type { DiscoveryInfo, DiscoverySettings } from "./domain";
 import {
   bigserial,
   boolean,
@@ -63,6 +64,8 @@ export type ChannelBudget = {
   dailyPublishLimit: number;
   llmInputTokenPriceUsdPerM?: number | null;
   llmOutputTokenPriceUsdPerM?: number | null;
+  // 과학·시사 채널 자동 화제 발굴 설정(없으면 기본값)
+  discovery?: Partial<DiscoverySettings>;
 };
 
 /* ───────────── 검색 규칙(키워드) ───────────── */
@@ -180,7 +183,7 @@ export const contentItems = pgTable(
     id: serial("id").primaryKey(),
     channelId: integer("channel_id").notNull().references(() => channels.id),
     kind: text("kind").notNull(), // notice | science_dialogue | current_dialogue
-    origin: text("origin").notNull().default("collected"), // collected | manual | evergreen
+    origin: text("origin").notNull().default("collected"), // collected | discovered | manual | evergreen
     primarySourceId: integer("primary_source_id").references(() => sourceDocuments.id),
     ruleId: integer("rule_id").references(() => searchRules.id),
     runId: integer("run_id").references(() => runs.id),
@@ -203,6 +206,8 @@ export const contentItems = pgTable(
     lastUsedAt: ts("last_used_at"),
     topicKey: text("topic_key"),
     // Canva 자동 채우기로 만든 디자인(편집 링크는 Canva 기준 30일 유효)
+    // 자동 화제 발굴로 들어온 항목의 화제도·선정 이유
+    discovery: jsonb("discovery").$type<DiscoveryInfo | null>(),
     canvaDesign: jsonb("canva_design").$type<{ designId: string; editUrl: string | null; viewUrl: string | null; revisionId: number; createdAt: string } | null>(),
     isSample: boolean("is_sample").notNull().default(false),
     version: integer("version").notNull().default(1),

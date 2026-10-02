@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../toast";
+import { DiscoveryNote } from "../discovery";
 import { TemplatePicker, useTemplates } from "./Design";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api";
@@ -58,6 +59,7 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
           </div>
         </div>
       </div>
+      <DiscoveryNote info={d.item.discovery} />
       <Progress d={d} onGo={(t, anchor) => { setTab(t); setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); }} />
       <div className="tabs only-mobile" role="tablist">
         {tabs.map(([k, l]) => (

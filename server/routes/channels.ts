@@ -27,6 +27,15 @@ const budgetSchema = z.object({
   dailyPublishLimit: z.number().int().min(0).max(25),
   llmInputTokenPriceUsdPerM: z.number().min(0).max(1000).nullable().optional(),
   llmOutputTokenPriceUsdPerM: z.number().min(0).max(1000).nullable().optional(),
+  discovery: z
+    .object({
+      enabled: z.boolean(),
+      queries: z.array(z.string().trim().min(1).max(40)).max(8),
+      picksPerRun: z.number().int().min(0).max(10),
+      autoDraft: z.boolean(),
+    })
+    .partial()
+    .optional(),
 });
 
 const channelPatch = z.object({

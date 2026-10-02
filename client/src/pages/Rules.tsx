@@ -3,10 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useChannel } from "../state";
 import { Badge, Empty, ErrorBox, fmtDate, Loading, Modal } from "../ui";
-import { ADMISSION_KEYWORDS, NOTICE_CATEGORIES, SCHOOL_TYPE_LABEL } from "@shared/domain";
+import { ADMISSION_KEYWORDS, NOTICE_CATEGORIES, SCHOOL_TYPE_LABEL, type DiscoverySettings } from "@shared/domain";
+import { DiscoveryPanel } from "../discovery";
 import type { OfficialSource, SearchRule } from "@shared/schema";
 
-type RulesResp = { items: SearchRule[]; estimate: { activeRules: number; callsPerRun: number; cappedByBudget: boolean; budget: number } };
+type RulesResp = { items: SearchRule[]; discovery: DiscoverySettings | null; estimate: { activeRules: number; discoveryCalls: number; callsPerRun: number; cappedByBudget: boolean; budget: number } };
 type TrialItem = { endpoint: "news" | "blog"; title: string; description: string; link: string; originallink?: string; bloggername?: string; published: { raw: string | null; iso: string | null; precision: "datetime" | "date" | "unknown" }; excludedReason: string | null };
 
 export function RulesPage() {
@@ -24,7 +25,11 @@ export function RulesPage() {
       <div className="page-head">
         <div>
           <h1>검색 설정</h1>
-          <p className="small muted">검색어(키워드)와 공식 출처를 따로 관리합니다. 수정·정지는 다음 실행부터 반영됩니다.</p>
+          <p className="small muted">
+            {current.contentType === "notice"
+              ? "검색어(키워드)와 공식 출처를 따로 관리합니다. 수정·정지는 다음 실행부터 반영됩니다."
+              : "이 채널은 자동 화제 발굴로 수집합니다. 검색어는 꼭 챙기고 싶은 주제가 있을 때만 추가하세요."}
+          </p>
         </div>
       </div>
       <div className="tabs" role="tablist">
@@ -41,7 +46,7 @@ export function RulesPage() {
           </button>
         ))}
       </div>
-      {tab === "rules" && <RulesTab cid={current.id} />}
+      {tab === "rules" && <RulesTab cid={current.id} kind={current.contentType} />}
       {tab === "bulk" && <BulkTab cid={current.id} isNotice={current.contentType === "notice"} />}
       {tab === "official" && <OfficialTab cid={current.id} />}
       {tab === "deleted" && <DeletedTab cid={current.id} />}
@@ -53,7 +58,7 @@ function useRules(cid: number, deleted = false) {
   return useQuery({ queryKey: ["ch", cid, "rules", deleted], queryFn: () => api<RulesResp>(`/channels/${cid}/rules${deleted ? "?deleted=1" : ""}`) });
 }
 
-function RulesTab({ cid }: { cid: number }) {
+function RulesTab({ cid, kind }: { cid: number; kind: string }) {
   const qc = useQueryClient();
   const rules = useRules(cid);
   const [editing, setEditing] = useState<SearchRule | "new" | null>(null);
@@ -68,13 +73,15 @@ function RulesTab({ cid }: { cid: number }) {
   });
   if (rules.isLoading) return <Loading />;
   if (rules.error) return <ErrorBox error={rules.error} retry={() => rules.refetch()} />;
-  const { items, estimate } = rules.data!;
+  const { items, estimate, discovery } = rules.data!;
   return (
     <div className="stack">
+      {discovery && (kind === "science_dialogue" || kind === "current_dialogue") && <DiscoveryPanel cid={cid} kind={kind} settings={discovery} />}
       <div className="panel row between">
         <div>
           <strong>한 번 실행할 때 예상 네이버 호출: {estimate.callsPerRun}회</strong>
           <div className="small muted">
+            {estimate.discoveryCalls > 0 && `자동 발굴 ${estimate.discoveryCalls}회 + `}
             활성 검색어 {estimate.activeRules}개 (뉴스·블로그는 각각 1회) · 실행당 한도 {estimate.budget}회
             {estimate.cappedByBudget && " — 한도를 넘는 검색어는 우선순위가 낮은 것부터 건너뜁니다"}
           </div>
@@ -85,7 +92,7 @@ function RulesTab({ cid }: { cid: number }) {
       </div>
       {(toggle.error || del.error) && <ErrorBox error={toggle.error || del.error} />}
       {!items.length ? (
-        <Empty>등록된 검색어가 없습니다.</Empty>
+        <Empty>{discovery ? "추가 검색어 없음 — 자동 화제 발굴만으로 수집합니다." : "등록된 검색어가 없습니다."}</Empty>
       ) : (
         <ul className="list">
           {items.map((r) => (

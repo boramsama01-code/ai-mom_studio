@@ -30,6 +30,8 @@ import { sha256 } from "../services/text";
 import { fetchBoardList, parseBoardDate, type BoardConfig } from "../services/boardAdapter";
 import { kstDateStartIso } from "../services/dates";
 import { categoryForSchoolType } from "../../shared/domain";
+import { runDiscovery, upsertNaverDoc } from "./discovery";
+import { generateDialogueDraft } from "./generate";
 import type { NoticePayload } from "../../shared/payloads";
 
 export type CollectOptions = {
@@ -92,9 +94,21 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const counter: CallCounter = { naver: 0, limit: budget.naverCallsPerRun };
   const newItemIds: number[] = [];
   let fatal = false;
+  const llmBudget = new LlmBudget(budget.llmCallsPerRun);
+
+  /* 1-2) 자동 화제 발굴(과학·시사 채널) — 사용자 검색어보다 먼저 */
+  const disc = await runDiscovery(db, channel, run.id, counter, llmBudget, now, opts.naverFetch);
+  if (disc) {
+    Object.assign(counts, disc.counts);
+    errors.push(...disc.errors);
+    counts.newItems += disc.itemIds.length;
+    newItemIds.push(...disc.itemIds);
+    if (disc.fatal) fatal = true;
+    await opts.heartbeat?.();
+  }
 
   /* 2~3) 검색 → 저장 */
-  for (const rule of selected) {
+  for (const rule of fatal ? [] : selected) {
     if (counts.results >= budget.resultsPerRun) {
       errors.push({ scope: `rule:${rule.id}`, message: "이번 실행 결과 한도 도달 — 남은 검색어 건너뜀" });
       break;
@@ -170,52 +184,31 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       break;
     }
     const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
-    const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId!));
-    const meta = doc.meta as { fetchUrl?: string };
+    const r = await fetchDoc(db, item.primarySourceId!, fetcher, now, () => (fetchCalls < budget.fetchCallsPerRun && !opts.fetchSource ? (fetchCalls++, true) : false));
     fetchCalls++;
-    const r = await fetcher(meta.fetchUrl || doc.originalUrl);
     if (!r.ok) {
       counts.fetchFailed++;
-      await db
-        .update(sourceDocuments)
-        .set({ fetchStatus: r.status, fetchError: r.error, attachments: r.attachments ?? doc.attachments, lastFetchedAt: now, updatedAt: now })
-        .where(eq(sourceDocuments.id, doc.id));
       await db.update(contentItems).set({ evidenceStatus: "fetch_failed", updatedAt: now }).where(eq(contentItems.id, itemId));
       continue;
     }
-    let text = r.text;
-    const attachments = [...r.attachments];
-    // 텍스트 PDF 첨부 1건까지 추가 확보(예산 내)
-    const pdf = attachments.find((a) => a.kind === "pdf" && a.status === "pending");
-    if (pdf && fetchCalls < budget.fetchCallsPerRun && !opts.fetchSource) {
-      fetchCalls++;
-      try {
-        const res = await safeFetch(pdf.url, { maxBytes: 8 * 1024 * 1024, accept: "application/pdf" });
-        const t = await extractPdf(res.body);
-        if (t.length >= 50) {
-          text += `\n\n[첨부 PDF: ${pdf.name}]\n${t}`;
-          pdf.status = "ok";
-        } else {
-          pdf.status = "manual_check";
-          pdf.reason = "텍스트 없는 PDF(스캔본 가능성)";
-        }
-      } catch (e) {
-        pdf.status = "failed";
-        pdf.reason = (e as Error).message;
-      }
-    }
-    const hash = sha256(text);
-    await db
-      .update(sourceDocuments)
-      .set({ fetchStatus: "ok", fetchError: null, fetchedText: text, contentHash: hash, attachments, lastFetchedAt: now, updatedAt: now, meta: { ...(doc.meta as object), finalUrl: r.finalUrl, pageTitle: r.title } })
-      .where(eq(sourceDocuments.id, doc.id));
     counts.fetchedOk++;
     fetchedOk.push(itemId);
     await opts.heartbeat?.();
   }
 
+  /* 4-2) 발굴한 화제의 보조 기사(다른 언론사) — 시사 초안의 독립 근거용 */
+  if (disc) {
+    for (const itemId of disc.itemIds) {
+      for (const docId of (disc.supporting.get(itemId) ?? []).slice(0, 2)) {
+        if (fetchCalls >= budget.fetchCallsPerRun) break;
+        fetchCalls++;
+        const r = await fetchDoc(db, docId, fetcher, now, () => false);
+        if (r.ok) counts.supportingFetched = (counts.supportingFetched ?? 0) + 1;
+      }
+    }
+  }
+
   /* 5) 구조화 추출 — 공고 채널 + Claude 설정 시 */
-  const llmBudget = new LlmBudget(budget.llmCallsPerRun);
   if (channel.contentType === "notice" && fetchedOk.length) {
     if (!env.anthropicKey || !env.anthropicModel) {
       errors.push({ scope: "llm", message: "Claude API 미연결 — 구조화 추출 건너뜀(수집함에서 수동 편집 가능)" });
@@ -236,8 +229,36 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     }
   }
 
+  /* 5-2) 발굴한 화제로 대화 초안 자동 생성(Claude 연결 + 채널 설정이 켜져 있을 때) — 생성돼도 검토 대기 */
+  if (disc?.settings.autoDraft && disc.itemIds.length) {
+    if (!env.anthropicKey || !env.anthropicModel) {
+      // 오류가 아니라 안내 — 화제는 저장됐고 초안만 건너뜀
+      counts.draftSkippedNoClaude = disc.itemIds.length;
+    } else {
+      counts.drafted = 0;
+      for (const itemId of disc.itemIds) {
+        if (llmBudget.used >= llmBudget.limit) {
+          errors.push({ scope: "llm", message: "Claude 호출 한도 도달 — 남은 화제는 초안 없이 저장" });
+          break;
+        }
+        const r = await generateDialogueDraft(db, itemId, now);
+        llmBudget.used++;
+        if (r.ok) {
+          counts.drafted++;
+          llmBudget.inputTokens += r.usage.inputTokens;
+          llmBudget.outputTokens += r.usage.outputTokens;
+        } else {
+          errors.push({ scope: `item:${itemId}`, message: `초안 생성 실패: ${r.error}` });
+          if (/인증|모델|미연결/.test(r.error)) break;
+        }
+        await opts.heartbeat?.();
+      }
+    }
+  }
+
   /* 6) 실행 결과 확정 */
-  const status = fatal || (counter.naver === 0 && selected.length > 0 && errors.length)
+  const discoveryRan = !!disc && disc.counts.discoveryQueries + disc.errors.length > 0;
+  const status = fatal || (counter.naver === 0 && (selected.length > 0 || discoveryRan) && errors.length)
     ? "failed"
     : errors.length
       ? "partial"
@@ -274,33 +295,8 @@ function ruleSnapshot(r: SearchRule) {
 }
 
 async function saveSearchItem(db: DB, channel: Channel, rule: SearchRule, runId: number, it: NaverItem) {
-  const identityUrl = it.endpoint === "news" && it.originallink ? it.originallink : it.link;
-  let normalized: string;
-  try {
-    normalized = normalizeUrl(identityUrl);
-  } catch {
-    return null;
-  }
-  const fetchUrl = it.endpoint === "news" && /n\.news\.naver\.com/.test(it.link) ? it.link : identityUrl;
-  const kind = it.endpoint === "news" ? "naver_news" : "naver_blog";
-  await db
-    .insert(sourceDocuments)
-    .values({
-      normalizedUrl: normalized,
-      originalUrl: identityUrl,
-      kind,
-      title: it.title,
-      snippet: it.description,
-      meta: { naverLink: it.link, originallink: it.originallink ?? null, bloggername: it.bloggername ?? null, bloggerlink: it.bloggerlink ?? null, fetchUrl, raw: it.raw },
-      publishedRaw: it.published.raw,
-      publishedAt: it.published.iso ? new Date(it.published.iso) : null,
-      publishedPrecision: it.published.precision,
-    })
-    .onConflictDoNothing();
-  const [doc] = await db
-    .select()
-    .from(sourceDocuments)
-    .where(and(eq(sourceDocuments.normalizedUrl, normalized), eq(sourceDocuments.isSample, false)));
+  const doc = await upsertNaverDoc(db, it);
+  if (!doc) return null;
   const reason = applyExcludeTerms(it, rule.excludeTerms, rule.excludeScope as "title" | "title_and_snippet");
   const inserted = await db
     .insert(contentItems)
@@ -433,4 +429,44 @@ async function buildReviewDigest(db: DB, channel: Channel, itemIds: number[]): P
   const list = rows.filter((r) => !r.excluded).slice(0, 15);
   const lines = list.map((r) => `• [${r.category ?? "미분류"}] ${r.title}\n  ${env.baseUrl}/items/${r.id}`);
   return [`📥 ${channel.name} — 새 수집 ${list.length}건 (검토 대기)`, "", ...lines, rows.length > 15 ? `…외 ${rows.length - 15}건` : "", "", `검토: ${env.baseUrl}/inbox`].join("\n");
+}
+
+/** 원문 1건 확보(+텍스트 PDF 첨부 1건). takeExtraCall()이 true일 때만 첨부를 추가로 받는다. */
+async function fetchDoc(db: DB, docId: number, fetcher: typeof fetchAndExtract, now: Date, takeExtraCall: () => boolean): Promise<{ ok: boolean }> {
+  const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, docId));
+  if (!doc) return { ok: false };
+  if (doc.fetchStatus === "ok" && doc.fetchedText) return { ok: true }; // 이미 확보(다른 실행·채널)
+  const meta = doc.meta as { fetchUrl?: string };
+  const r = await fetcher(meta.fetchUrl || doc.originalUrl);
+  if (!r.ok) {
+    await db
+      .update(sourceDocuments)
+      .set({ fetchStatus: r.status, fetchError: r.error, attachments: r.attachments ?? doc.attachments, lastFetchedAt: now, updatedAt: now })
+      .where(eq(sourceDocuments.id, doc.id));
+    return { ok: false };
+  }
+  let text = r.text;
+  const attachments = [...r.attachments];
+  const pdf = attachments.find((a) => a.kind === "pdf" && a.status === "pending");
+  if (pdf && takeExtraCall()) {
+    try {
+      const res = await safeFetch(pdf.url, { maxBytes: 8 * 1024 * 1024, accept: "application/pdf" });
+      const t = await extractPdf(res.body);
+      if (t.length >= 50) {
+        text += `\n\n[첨부 PDF: ${pdf.name}]\n${t}`;
+        pdf.status = "ok";
+      } else {
+        pdf.status = "manual_check";
+        pdf.reason = "텍스트 없는 PDF(스캔본 가능성)";
+      }
+    } catch (e) {
+      pdf.status = "failed";
+      pdf.reason = (e as Error).message;
+    }
+  }
+  await db
+    .update(sourceDocuments)
+    .set({ fetchStatus: "ok", fetchError: null, fetchedText: text, contentHash: sha256(text), attachments, lastFetchedAt: now, updatedAt: now, meta: { ...(doc.meta as object), finalUrl: r.finalUrl, pageTitle: r.title } })
+    .where(eq(sourceDocuments.id, doc.id));
+  return { ok: true };
 }
