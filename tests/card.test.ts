@@ -72,5 +72,7 @@ describe("우주펭귄상회 브랜드", () => {
     const model = buildCardModel({ kind: "notice", payload: { ...base, title: "입학설명회", category: "영재학교·과학고 입시", schedules: [], one_line_summary: "공식 공고를 확인하세요." }, channelName: "아이맘 · 하루 과학 대화", accent: "#0B766E", sourceOrg: null, checkedDate: "2026-10-18" });
     const { jpeg } = await renderCardJpeg(model, { layout });
     expect(jpeg.length).toBeGreaterThan(10_000);
+    const mascot = await sharp(jpeg).extract({ left: 84, top: layout === "minimal" ? 119 : 79, width: 46, height: 46 }).stats();
+    expect(mascot.channels[0].stdev).toBeGreaterThan(20);
   });
 });

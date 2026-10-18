@@ -105,9 +105,9 @@ function pathFor(font: opentype.Font, text: string, x: number, y: number, size: 
 /** Approved original mascot, used only when generating new cards. */
 let brandImage: string | null = null;
 function drawBrand(c: Ctx, label: string, y: number, color: string, maxWidth = c.w) {
-  brandImage ??= fs.readFileSync(path.resolve(process.cwd(), "assets/branding/space-penguin-icon.svg")).toString("base64");
+  brandImage ??= fs.readFileSync(path.resolve(process.cwd(), "assets/branding/space-penguin-company.png")).toString("base64");
   const iconSize = 46;
-  c.els.push(`<image x="${c.x}" y="${y - 35}" width="${iconSize}" height="${iconSize}" href="data:image/svg+xml;base64,${brandImage}"/>`);
+  c.els.push(`<svg x="${c.x}" y="${y - 35}" width="${iconSize}" height="${iconSize}" viewBox="420 55 640 650"><image width="1448" height="1086" href="data:image/png;base64,${brandImage}"/></svg>`);
   const textWidth = maxWidth - iconSize - 14;
   let size = 28;
   while (size > 18 && measure(c.fonts.semibold, label, size) > textWidth) size--;
