@@ -32,7 +32,7 @@ export function LoginPage({ me }: { me: Me }) {
     <main className="main" style={{ maxWidth: 440, margin: "10vh auto" }}>
       <div className="panel stack">
         <div>
-          <img className="login-brand-logo" src="/branding/space-penguin-company.svg" alt="우주펭귄상회 · space penguin company" />
+          <img className="login-brand-logo" src="/branding/space-penguin-company.svg?v=20261018-2" alt="우주펭귄상회 · space penguin company" />
           <h1 className="login-brand-title">우주펭귄상회 스튜디오</h1>
           <p className="muted">운영자 로그인</p>
         </div>

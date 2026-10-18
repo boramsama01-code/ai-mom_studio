@@ -138,7 +138,7 @@ function Shell() {
       <aside className={`sidebar ${open ? "open" : ""}`} aria-label="주 메뉴">
         <div className="row between">
           <div className="brand">
-            <img className="brand-penguin" src="/favicon.svg" alt="" width="40" height="40" />
+            <img className="brand-penguin" src="/favicon.svg?v=20261018-2" alt="" width="40" height="40" />
             <span>
               우주펭귄상회
               <small>스튜디오 · 운영 관리</small>
