@@ -90,7 +90,7 @@ export function wrapText(font: opentype.Font, text: string, size: number, maxWid
 
 export type CardModel = {
   accent: string;
-  brandLine: string; // "아이맘 스튜디오 · 도전·진학"
+  brandLine: string; // "우주펭귄상회 스튜디오 · 도전·진학"
   badge: string; // 카테고리
   title: string;
   blocks: Array<{ field: string; label?: string; text: string; maxLines: number; emphasis?: boolean }>;
@@ -100,6 +100,19 @@ export type CardModel = {
 function pathFor(font: opentype.Font, text: string, x: number, y: number, size: number, color: string): string {
   const p = font.getPath(text, x, y, size, { kerning: true });
   return `<path d="${p.toPathData(2)}" fill="${color}"/>`;
+}
+
+/** Approved original mascot, used only when generating new cards. */
+let brandImage: string | null = null;
+function drawBrand(c: Ctx, label: string, y: number, color: string, maxWidth = c.w) {
+  brandImage ??= fs.readFileSync(path.resolve(process.cwd(), "assets/branding/space-penguin-icon.svg")).toString("base64");
+  const iconSize = 46;
+  c.els.push(`<image x="${c.x}" y="${y - 35}" width="${iconSize}" height="${iconSize}" href="data:image/svg+xml;base64,${brandImage}"/>`);
+  const textWidth = maxWidth - iconSize - 14;
+  let size = 28;
+  while (size > 18 && measure(c.fonts.semibold, label, size) > textWidth) size--;
+  if (measure(c.fonts.semibold, label, size) > textWidth) throw new CardOverflowError("brandLine", "브랜드 표기가 영역을 넘음");
+  c.els.push(pathFor(c.fonts.semibold, label, c.x + iconSize + 14, y, size, color));
 }
 
 export type CardLayout = "classic" | "header" | "magazine" | "minimal";
@@ -202,7 +215,7 @@ export function layoutCard(model: CardModel, style: CardStyle = { layout: "class
     const headerH = PAD + 30 + 60 + (model.badge ? 60 : 0) + titleLines.length * 62 * 1.28 + 64;
     els.push(`<rect width="${CARD_W}" height="${headerH}" fill="${model.accent}"/>`);
     let y = PAD + 30;
-    els.push(pathFor(fonts.semibold, model.brandLine, PAD, y, 30, "#FFFFFF"));
+    drawBrand(c, model.brandLine, y, "#FFFFFF");
     y += 60;
     if (model.badge) {
       drawBadge(c, model.badge, PAD, y, "#FFFFFF", "#FFFFFF", 0.18);
@@ -216,7 +229,8 @@ export function layoutCard(model: CardModel, style: CardStyle = { layout: "class
     // 왼쪽 색 막대 + 큰 제목 + 강조 상자
     if (!hasBg) els.push(`<rect width="28" height="${CARD_H}" fill="${model.accent}"/>`);
     let y = PAD + 30;
-    els.push(pathFor(fonts.semibold, model.brandLine, PAD, y, 28, hasBg ? P.muted : model.accent));
+    const badgeWidth = model.badge ? measure(fonts.semibold, model.badge, 28) + 32 : 0;
+    drawBrand(c, model.brandLine, y, hasBg ? P.muted : model.accent, INNER_W - badgeWidth);
     if (model.badge) {
       const bw = measure(fonts.semibold, model.badge, 28);
       els.push(pathFor(fonts.semibold, model.badge, CARD_W - PAD - bw, y, 28, P.muted));
@@ -228,7 +242,7 @@ export function layoutCard(model: CardModel, style: CardStyle = { layout: "class
     drawFooter(c, model.footer, footerTop, P.border, P.borderOpacity);
   } else if (layout === "minimal") {
     let y = PAD + 70;
-    els.push(pathFor(fonts.regular, model.brandLine, PAD, y, 26, P.muted));
+    drawBrand(c, model.brandLine, y, P.muted);
     if (model.badge) {
       y += 50;
       els.push(pathFor(fonts.semibold, model.badge, PAD, y, 28, hasBg ? P.text : model.accent));
@@ -244,7 +258,7 @@ export function layoutCard(model: CardModel, style: CardStyle = { layout: "class
     // classic (배경 이미지 템플릿에서 header를 고르면 classic 배치를 사용)
     if (!hasBg) els.push(`<rect width="${CARD_W}" height="16" fill="${model.accent}"/>`);
     let y = PAD + 30;
-    els.push(pathFor(fonts.semibold, model.brandLine, PAD, y, 30, hasBg ? P.text : model.accent));
+    drawBrand(c, model.brandLine, y, hasBg ? P.text : model.accent);
     y += 60;
     if (model.badge) {
       drawBadge(c, model.badge, PAD, y, hasBg ? P.text : model.accent, hasBg ? P.text : model.accent, hasBg ? 0.16 : 0.12);
@@ -279,3 +293,4 @@ export async function renderCardJpeg(model: CardModel, style: CardStyle = { layo
   if (meta.width !== CARD_W || meta.height !== CARD_H || meta.channels !== 3) throw new Error("카드 결과 검증 실패(크기/채널)");
   return { jpeg, width: CARD_W, height: CARD_H };
 }
+

@@ -138,12 +138,10 @@ function Shell() {
       <aside className={`sidebar ${open ? "open" : ""}`} aria-label="주 메뉴">
         <div className="row between">
           <div className="brand">
-            <span className="brand-mark" aria-hidden>
-              a
-            </span>
+            <img className="brand-penguin" src="/favicon.svg" alt="" width="40" height="40" />
             <span>
-              아이맘 스튜디오
-              <small>ai-mom · 운영 관리</small>
+              우주펭귄상회
+              <small>스튜디오 · 운영 관리</small>
             </span>
           </div>
           <button className="btn ghost icon only-mobile" aria-label="메뉴 닫기" onClick={() => setOpen(false)}>
@@ -240,3 +238,4 @@ createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </StrictMode>,
 );
+

@@ -15,7 +15,7 @@ export function buildCardModel(args: {
   checkedDate: string; // YYYY-MM-DD (KST)
 }): CardModel {
   const { kind, payload: p } = args;
-  const brandLine = `아이맘 스튜디오 · ${args.channelName.replace(/^아이맘\s*·\s*/, "")}`;
+  const brandLine = `우주펭귄상회 스튜디오 · ${args.channelName.replace(/^아이맘\s*·\s*/, "")}`;
   const footer = `출처: ${args.sourceOrg || "원문 확인 필요"} · 확인 ${args.checkedDate} · 자세한 내용은 캡션 참고`;
   if (kind === "science_dialogue") {
     return {
@@ -116,3 +116,4 @@ export function validateCaptions(c: { instagram: string; telegram: string }): st
   if (!c.instagram.trim() && !c.telegram.trim()) errs.push("캡션이 비어 있습니다.");
   return errs;
 }
+

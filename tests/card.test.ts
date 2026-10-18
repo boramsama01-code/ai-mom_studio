@@ -59,3 +59,18 @@ describe("캡션", () => {
     expect(validateCaptions({ instagram: Array.from({ length: 31 }, (_, i) => `#t${i}`).join(" "), telegram: "x" }).length).toBe(1);
   });
 });
+
+
+describe("우주펭귄상회 브랜드", () => {
+  it("새 카드의 브랜드만 변경하고 기존 채널명과 입력은 보존", () => {
+    const args = { kind: "notice", payload: base, channelName: "아이맘 · 도전·진학", accent: "#0B766E", sourceOrg: null, checkedDate: "2026-10-18" };
+    const before = JSON.stringify(args);
+    expect(buildCardModel(args).brandLine).toBe("우주펭귄상회 스튜디오 · 도전·진학");
+    expect(JSON.stringify(args)).toBe(before);
+  });
+  it.each(["classic", "header", "magazine", "minimal"] as const)("%s: 긴 브랜드와 분류도 영역 안에서 생성", async (layout) => {
+    const model = buildCardModel({ kind: "notice", payload: { ...base, title: "입학설명회", category: "영재학교·과학고 입시", schedules: [], one_line_summary: "공식 공고를 확인하세요." }, channelName: "아이맘 · 하루 과학 대화", accent: "#0B766E", sourceOrg: null, checkedDate: "2026-10-18" });
+    const { jpeg } = await renderCardJpeg(model, { layout });
+    expect(jpeg.length).toBeGreaterThan(10_000);
+  });
+});

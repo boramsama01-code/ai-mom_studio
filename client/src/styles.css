@@ -317,3 +317,9 @@ fieldset legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
 .hot-list li { padding: 10px 0; border-top: 1px solid var(--border); }
 .hot-list li:first-child { border-top: 0; padding-top: 0; }
 .linklike { background: none; border: 0; padding: 0; min-height: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
+
+
+.brand-penguin { flex: none; object-fit: contain; border-radius: 10px; background: #fff; }
+.login-brand-logo { display: block; width: min(100%, 290px); height: auto; margin: 0 auto 18px; }
+.login-brand-title { font-size: clamp(18px, 4.6vw, 24px); line-height: 1.4; text-align: center; word-break: keep-all; }
+.login-brand-title + p { text-align: center; }
