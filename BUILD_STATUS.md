@@ -5,7 +5,18 @@
 
 표기: ✅ 완료·검증 / 🟡 구현했으나 실제 외부 서비스로는 미검증 / ⛔ 차단(이 개발 환경에서 불가) / ⬜ 미구현
 
-## 최신 상태 · 채널 관리와 설정 UX (2026-10-22)
+## 최신 상태 · 채널 순서와 AI 선택 (2026-10-22)
+- PR #7 병합. 운영 커밋 `03be30a9006cedf3c0ec99d9c90ff2de933d7573`, Render `dep-dbcsf4u1egvs73f347tg` 17:22 KST live.
+- 내 채널 → 순서 변경 → 드래그 또는 위/아래 버튼 → 순서 저장. 모든 채널 선택 목록과 제작 보드에 같은 순서 적용. 기존 순서는 배포 시 변경하지 않습니다.
+- 순서는 app_settings의 channel_display_order 배열에 별도 저장합니다. 전체 ID 검증, 이전 순서 대조, 트랜잭션 잠금, 감사 로그로 누락·중복·동시 덮어쓰기를 막고 새 채널은 마지막에 붙입니다.
+- AI_PROVIDER는 키가 아닌 auto/openai/anthropic 선택 항목. 선택란·실제 적용 AI·키 등록 여부·각 키 입력 위치를 명확히 표시합니다. 서버 환경변수가 있으면 우선권을 그대로 유지합니다.
+- 운영 확인 시 AI_PROVIDER는 화면 저장 openai, 실제 선택 GPT, GPT용 키 미등록 상태였습니다. 키·선택값·환경변수는 이번 작업에서 변경하지 않았습니다.
+- CI `39746894912`, job `119717496488`: 18개 파일 / 129개 테스트, 타입 검사·빌드 통과. 운영 새 JS `index-BYDtPvXY.js`와 신규 문구 확인. 채널 ID 순서와 카드 7개 데이터 해시가 배포 전후 동일.
+- 카드뉴스 참고 이미지 확인: Canva Studio Shodwe의 White Black and Orange Plain Professional Informational Tips 표지, Dribbble Supergut 음식 캐러셀, Behance Culturiety 매거진. Mobbin 유료 제한을 재시도하지 않았고, 샘플은 참고용이며 앱 템플릿으로 설치하지 않았습니다.
+- 참고 링크: https://www.canva.com/instagram-posts/templates/carousel/?continuation=550 · https://dribbble.com/shots/25538378-Instagram-Carousel-Design-for-Supergut · https://www.behance.net/gallery/233512919/Culturiety
+- 운영 검증 `.git/channel-order-before.json`, `.git/channel-order-after.json`. 브라우저 로그인 후 시각 검증은 미완료입니다.
+
+## 이전 기록 · 채널 관리와 설정 UX (2026-10-22)
 - PR #6 병합, 운영 커밋 `224909cab8a541d71fab93cb7d3e1fbe070abbc7`, Render `dep-dbcr7n61egvs73f1qjb0` 15:58 KST live.
 - 설정 첫 화면에 채널 목록·추가·수정 기능. 내 채널 / 서비스 연결 / 운영 설정으로 분리하고 비용·게시 계정 진단은 접어서 표시합니다.
 - Studio와 수집 화면은 같은 DB 채널명 사용. 기존 `highway`→`opportunities`, `news`→`current-dialogue` 식별자 연결 유지. 펭귄상회·Fryday를 기존 채널과 함께 관리하며, 기존 과학·시사 이름을 임의 변경하지 않았습니다.
