@@ -34,6 +34,10 @@ export const env = {
   get adminPasswordHash() {
     return process.env.ADMIN_PASSWORD_HASH || "";
   },
+  get privateLinkHash() {
+    const value = process.env.APP_PRIVATE_LINK_SHA256 || "";
+    return /^[a-f0-9]{64}$/.test(value) ? value : "";
+  },
   get demoMode() {
     return bool(process.env.DEMO_MODE, false);
   },

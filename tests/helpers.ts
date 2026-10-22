@@ -21,6 +21,7 @@ export function setTestEnv() {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
   delete process.env.AI_PROVIDER;
+  delete process.env.APP_PRIVATE_LINK_SHA256;
   delete process.env.OPENAI_MODEL;
   delete process.env.OPENAI_IMAGE_MODEL;
   delete process.env.TELEGRAM_REVIEW_CHAT_ID;
