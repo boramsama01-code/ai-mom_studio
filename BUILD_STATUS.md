@@ -8,13 +8,14 @@
 ## Render 통합 업데이트 (2026-10-22)
 
 - 대화 중단 복구 기록과 재개 순서: `RESUME.md`. 운영 배포 완료 여부는 해당 문서의 최신 검증 기록을 우선합니다.
+- 2026-10-22 11:32 KST 기존 Render 서비스 배포 live 완료. DB 헬스 200, 보호 API 비로그인 401, 새 JS/CSS·웹폰트 200, 캐릭터 4개와 예시 웹툰의 운영 원본 해시 일치, 저장된 연결 키 7개 로드 및 로그인 화면을 확인했습니다. 로그인 후 실제 유료 생성은 실행하지 않았습니다.
 
 - Studio Board를 첫 화면으로 통합. 펭귄상회·Highway·Fryday·시사 기획, 원고, 이미지, 버전 기록을 같은 로그인으로 관리합니다.
 - GPT 기본 글 생성·수정, 선택적 Claude 재작성·비교, 캐릭터 참조를 활용한 OpenAI 한 컷 생성. API 호출은 모의 응답으로 검증했으며 실제 유료 생성은 실행하지 않았습니다.
 - 원고·대사와 그림을 분리하고, 네 컷 PNG 다운로드를 제공합니다. Studio 결과를 기존 SNS 발행함으로 자동 전송하는 기능은 포함하지 않습니다.
 - 기존 Sites의 수정되지 않은 기본 기획 7개·메모와 참고 공고 7개를 이전합니다. 참고 공고는 샘플로 보존합니다. 별도 소유자 계정이나 키는 복사하지 않습니다.
 - 추가 마이그레이션만 적용하며 기존 PostgreSQL 데이터·암호화 키·로그인을 유지합니다. 생성 요청 UUID 중복 방지, 단계 변경 시 내용 보존, 동시 편집 보존, 전역 정지를 적용합니다.
-- 로컬 타입 검사·프로덕션 빌드와 단위 테스트 통과. PostgreSQL 전체 테스트는 PR CI로 확인합니다. 실제 Render 서비스와 저장된 API 키 상태는 배포 후 별도 확인이 필요합니다.
+- PR #4 병합 완료. PostgreSQL 16 GitHub CI에서 15개 파일·120개 테스트, 타입 검사, 프로덕션 빌드 모두 통과했고 병합 후 main CI도 성공했습니다. Render 배포와 운영 검증 결과는 `RESUME.md`를 우선합니다. 실제 유료 API 생성은 실행하지 않았습니다.
 - GitHub 참고: TanStack Query 50,455 stars(MIT, 10/22 push), Trigger.dev 16,592 stars(Apache-2.0, 10/21 push), pg-boss 4,075 stars(MIT, 10/21 push), 2026-10-22 조회. TanStack Query는 기존 의존성을 활용하며 나머지는 설계 참고입니다. 별도 자동화 서버·Redis·유료 서비스는 추가하지 않았습니다.
 - TanStack의 mutation 상태·오류 처리 패턴을 PNG 다운로드에 적용했습니다. 다운로드 오류는 편집기 안에서 표시하고, 작업 상태 조회가 일시 실패해도 편집기를 유지합니다. Trigger.dev의 idempotency 주의사항에 따라 요청 UUID 중복 방지와 유료 호출 재시도 금지를 분리합니다. 보드를 다시 열면 저장된 대기 작업을 확인하며, 이미 실행한 유료 호출은 만료되어도 자동 재실행하지 않습니다.
 - 참고 문서: https://tanstack.com/query/latest/docs/framework/react/guides/mutations · https://trigger.dev/docs/idempotency · https://github.com/timgit/pg-boss . 코드를 복사한 것이 아니라 기존 구현에 맞춰 패턴을 적용했습니다.
