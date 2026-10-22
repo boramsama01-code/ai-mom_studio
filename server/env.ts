@@ -59,11 +59,28 @@ export const env = {
   get naverClientSecret() {
     return process.env.NAVER_CLIENT_SECRET || "";
   },
+  get openaiKey() {
+    return process.env.OPENAI_API_KEY || "";
+  },
+  get openaiModel() {
+    return process.env.OPENAI_MODEL || "gpt-6.1-sol";
+  },
+  get openaiImageModel() {
+    return process.env.OPENAI_IMAGE_MODEL || "gpt-image-2.5-sunburst";
+  },
+  get aiProvider(): "openai" | "anthropic" {
+    if (process.env.AI_PROVIDER === "anthropic") return "anthropic";
+    if (process.env.AI_PROVIDER === "openai") return "openai";
+    return this.openaiKey || !this.anthropicKey ? "openai" : "anthropic";
+  },
+  get aiConfigured(): boolean {
+    return this.aiProvider === "openai" ? !!this.openaiKey : !!this.anthropicKey;
+  },
   get anthropicKey() {
     return process.env.ANTHROPIC_API_KEY || "";
   },
   get anthropicModel() {
-    return process.env.ANTHROPIC_MODEL || "";
+    return process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5";
   },
   get cloudinaryConfigured() {
     return !!(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET);
@@ -90,6 +107,9 @@ export function integrationStatus() {
     auth: !!(env.adminUsername && env.adminPasswordHash && env.sessionSecret),
     naver: !!(env.naverClientId && env.naverClientSecret),
     anthropic: !!(env.anthropicKey && env.anthropicModel),
+    openai: !!env.openaiKey,
+    aiProvider: env.aiProvider,
+    aiConfigured: env.aiConfigured,
     cloudinary: env.cloudinaryConfigured,
     telegramBot: !!env.telegramBotToken,
     telegramReview: !!(env.telegramBotToken && env.telegramReviewChatId),
@@ -103,3 +123,4 @@ export function integrationStatus() {
     },
   };
 }
+

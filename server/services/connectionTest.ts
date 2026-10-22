@@ -20,6 +20,21 @@ export async function testNaver(fetchImpl: typeof fetch = fetch): Promise<TestRe
   }
 }
 
+/** Model lookup checks credentials/access without generating billable content. */
+export async function testOpenai(fetchImpl: typeof fetch = fetch): Promise<TestResult> {
+  if (!env.openaiKey) return { ok: false, message: "OpenAI API 키가 없습니다." };
+  try {
+    for (const model of [env.openaiModel, env.openaiImageModel]) {
+      const response = await fetchImpl(`https://api.openai.com/v1/models/${encodeURIComponent(model)}`, {
+        headers: { authorization: `Bearer ${env.openaiKey}` }, signal: AbortSignal.timeout(15_000), redirect: "error",
+      });
+      await response.body?.cancel();
+      if (!response.ok) return { ok: false, message: response.status === 401 || response.status === 403 ? "OpenAI 키 인증 실패 또는 모델 접근 권한 부족" : response.status === 404 ? `모델을 찾을 수 없습니다: ${model}` : `OpenAI 확인 실패 (HTTP ${response.status})` };
+    }
+    return { ok: true, message: "API 키와 글·이미지 모델 접근을 확인했습니다. 생성·잔액 상태는 실제 생성 시 확인됩니다." };
+  } catch { return { ok: false, message: "OpenAI에 연결할 수 없습니다." }; }
+}
+
 export async function testAnthropic(): Promise<TestResult> {
   if (!env.anthropicKey) return { ok: false, message: "API 키가 없습니다." };
   if (!env.anthropicModel) return { ok: false, message: "모델 ID가 없습니다." };
@@ -91,3 +106,4 @@ export async function testInstagram(tokenKey: string, fetchImpl: typeof fetch = 
     return { ok: false, message: "인스타그램에 연결할 수 없습니다." };
   }
 }
+

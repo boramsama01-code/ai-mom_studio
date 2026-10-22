@@ -3,6 +3,7 @@ import { useToast } from "../toast";
 import { DiscoveryNote } from "../discovery";
 import { TemplatePicker, useTemplates } from "./Design";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { api, ApiError } from "../api";
 import { useChannel, useDirtyGuard } from "../state";
 import { Badge, ErrorBox, fmtDate, GuardedLink, Loading, StatusBadge } from "../ui";
@@ -29,6 +30,12 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
   const { selected } = useChannel();
   const q = useQuery({ queryKey: ["ch", cid, "item", id], queryFn: () => api<Detail>(`/channels/${cid}/items/${id}`) });
   const [tab, setTab] = useState<"source" | "edit" | "publish" | "history">("edit");
+  const [, navigate] = useLocation();
+  const guard = useDirtyGuard();
+  const transfer = useMutation({
+    mutationFn: () => api<{ id: number }>("/studio/cards", { method: "POST", body: { title: q.data!.item.title, channel: "highway", format: "카드뉴스", stage: "idea", sourceItemId: id } }),
+    onSuccess: (card) => navigate(`/studio/${card.id}`),
+  });
   if (selected !== "all" && selected !== cid)
     return (
       <div className="notice warn">
@@ -58,7 +65,9 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
             {d.item.excluded && <Badge kind="err">제외됨: {d.item.excludedReason}</Badge>}
           </div>
         </div>
+        {d.item.kind === "notice" && <button className="btn" disabled={transfer.isPending} onClick={() => guard.confirmLeave(() => transfer.mutate())}>{transfer.isPending ? "가져오는 중…" : "Highway 콘텐츠 만들기"}</button>}
       </div>
+      {transfer.error && <ErrorBox error={transfer.error} />}
       <DiscoveryNote info={d.item.discovery} />
       <Progress d={d} onGo={(t, anchor) => { setTab(t); setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); }} />
       <div className="tabs only-mobile" role="tablist">
@@ -292,7 +301,7 @@ function EditPanel({ d, cid }: { d: Detail; cid: number }) {
       <div className="row between">
         <h2 style={{ margin: 0 }}>편집</h2>
         <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
-          {gen.isPending ? "생성 중…" : d.item.kind === "notice" ? "원문에서 자동 추출" : "Claude로 초안 생성"}
+          {gen.isPending ? "생성 중…" : d.item.kind === "notice" ? "원문에서 자동 추출" : "AI로 초안 생성"}
         </button>
       </div>
       {d.current && (
@@ -643,7 +652,7 @@ function HistoryPanel({ d }: { d: Detail }) {
                   {d.item.currentRevisionId === r.id && " (현재)"}
                 </td>
                 <td>
-                  {r.author === "operator" ? "운영자" : r.author === "llm" ? `Claude ${r.model ?? ""}` : "시스템"}
+                  {r.author === "operator" ? "운영자" : r.author === "llm" ? `AI ${r.model ?? ""}` : "시스템"}
                   {r.usage && <div className="small muted">토큰 입력 {r.usage.inputTokens} · 출력 {r.usage.outputTokens}</div>}
                 </td>
                 <td>{fmtDate(r.createdAt)}</td>
@@ -760,3 +769,4 @@ function Progress({ d, onGo }: { d: Detail; onGo: (tab: "source" | "edit" | "pub
     </>
   );
 }
+

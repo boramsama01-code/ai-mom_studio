@@ -9,6 +9,7 @@
  */
 import { sql } from "drizzle-orm";
 import type { DiscoveryInfo, DiscoverySettings } from "./domain";
+import type { StudioContent } from "./studio";
 import {
   bigserial,
   boolean,
@@ -455,3 +456,30 @@ export type Delivery = typeof deliveries.$inferSelect;
 export type Approval = typeof approvals.$inferSelect;
 export type MediaAsset = typeof mediaAssets.$inferSelect;
 export type CardTemplate = typeof cardTemplates.$inferSelect;
+
+/* 통합 제작 보드 — 기존 입시 수집/승인/전송 테이블과 독립, 삭제 없는 추가 마이그레이션 */
+export const studioCards = pgTable("studio_cards", {
+  id: serial("id").primaryKey(),
+  content: jsonb("content").$type<StudioContent>().notNull(),
+  version: integer("version").notNull().default(1),
+  sourceItemId: integer("source_item_id").references(() => contentItems.id).unique(),
+  externalId: text("external_id").unique(),
+  importedMeta: jsonb("imported_meta").$type<Record<string, unknown>>(),
+  createdAt: createdAt(), updatedAt: updatedAt(),
+});
+export const studioRevisions = pgTable("studio_revisions", {
+  id: serial("id").primaryKey(), cardId: integer("card_id").notNull().references(() => studioCards.id),
+  version: integer("version").notNull(), snapshot: jsonb("snapshot").$type<StudioContent>().notNull(),
+  instruction: text("instruction").notNull().default(""), provider: text("provider"), model: text("model"),
+  applied: boolean("applied").notNull().default(true), createdAt: createdAt(),
+}, t => [index("studio_revisions_card").on(t.cardId, t.id)]);
+export const studioImages = pgTable("studio_images", {
+  id: serial("id").primaryKey(), cardId: integer("card_id").notNull().references(() => studioCards.id),
+  panelIndex: integer("panel_index").notNull(), bytes: bytea("bytes").notNull(),
+  mimeType: text("mime_type").notNull().default("image/png"), model: text("model").notNull(), createdAt: createdAt(),
+});
+export const studioRequests = pgTable("studio_requests", {
+  requestId: text("request_id").primaryKey(), cardId: integer("card_id").notNull().references(() => studioCards.id),
+  inputHash: text("input_hash").notNull(), jobId: integer("job_id").references(() => jobs.id), createdAt: createdAt(),
+});
+

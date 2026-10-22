@@ -9,3 +9,7 @@ coverage/
 .DS_Store
 tmp/
 .env.local.sh
+
+# Restored byte-for-byte from assets/studio-comic during development and build.
+/client/public/studio-assets/webtoon-01.png
+

@@ -10,7 +10,7 @@ export function DiscoveryBadge({ info }: { info: DiscoveryInfo | null | undefine
   if (!info) return null;
   return (
     <span className="badge hot" title={`언론사: ${info.outlets.join(", ")}`}>
-      화제 · 언론 {info.score}곳{info.pickedBy === "claude" ? " · AI 선정" : ""}
+      화제 · 언론 {info.score}곳{info.pickedBy !== "buzz" ? " · AI 선정" : ""}
     </span>
   );
 }
@@ -36,7 +36,7 @@ export function DiscoveryNote({ info }: { info: DiscoveryInfo | null | undefined
           <b>대화 질문 제안</b> {info.angle}
         </p>
       )}
-      {!info.reason && <p className="small muted" style={{ margin: "8px 0 0" }}>Claude가 연결되지 않아 화제도(다룬 언론사 수) 순으로 골랐습니다.</p>}
+      {!info.reason && <p className="small muted" style={{ margin: "8px 0 0" }}>AI가 연결되지 않아 화제도(다룬 언론사 수) 순으로 골랐습니다.</p>}
       <p className="small muted" style={{ margin: "6px 0 0" }}>다룬 언론사: {info.outlets.join(", ")}</p>
     </div>
   );
@@ -91,7 +91,7 @@ export function DiscoveryPanel({ cid, kind, settings }: { cid: number; kind: "sc
     setText(settings.queries.join("\n"));
   }, [settings]);
   const status = useQuery({ queryKey: ["status"], queryFn: () => api<{ integrations: Record<string, unknown> }>("/status") });
-  const claude = !!status.data?.integrations.anthropic;
+  const ai = !!status.data?.integrations.aiConfigured;
   const save = useMutation({
     mutationFn: () =>
       api(`/channels/${cid}/discovery`, {
@@ -112,7 +112,7 @@ export function DiscoveryPanel({ cid, kind, settings }: { cid: number; kind: "sc
           <h2 style={{ margin: 0 }}>자동 화제 발굴 {f.enabled ? <span className="badge ok">켜짐</span> : <span className="badge">꺼짐</span>}</h2>
           <p className="small muted" style={{ margin: "4px 0 0" }}>
             검색어를 넣지 않아도 됩니다. 수집할 때마다 아래 탐색 주제로 최신 뉴스를 주제당 100건씩 훑고, <b>여러 언론사가 함께 다루는 사건</b>을 화제로 찾습니다.
-            {claude ? " 그중 이 채널에 맞는 것을 Claude가 골라 이유·대화 질문을 붙이고 초안까지 만듭니다." : " Claude를 연결하면 채널에 맞는 화제를 골라 이유·초안까지 만들어 줍니다(지금은 화제도 순)."}
+            {ai ? " 그중 이 채널에 맞는 것을 AI가 골라 이유·대화 질문을 붙이고 초안까지 만듭니다." : " AI를 연결하면 채널에 맞는 화제를 골라 이유·초안까지 만들어 줍니다(지금은 화제도 순)."}
           </p>
         </div>
         <label className="check" style={{ flex: "none" }}>
@@ -136,7 +136,7 @@ export function DiscoveryPanel({ cid, kind, settings }: { cid: number; kind: "sc
             <input type="number" min={1} max={10} value={f.picksPerRun} onChange={(e) => setF({ ...f, picksPerRun: Number(e.target.value) })} />
           </label>
           <label className="check">
-            <input type="checkbox" checked={f.autoDraft} onChange={(e) => setF({ ...f, autoDraft: e.target.checked })} /> 고른 화제로 대화 초안 자동 생성(Claude 사용 · 1건 약 10~20원)
+            <input type="checkbox" checked={f.autoDraft} onChange={(e) => setF({ ...f, autoDraft: e.target.checked })} /> 고른 화제로 대화 초안 자동 생성(선택한 AI 사용)
           </label>
           <p className="small muted" style={{ margin: 0 }}>
             초안이 만들어져도 바로 게시되지 않습니다. 수집함에서 검토 → 카드 → 최종 승인을 거칩니다. 강력범죄·자살·마약 등 아이와 나누기 부적절한 주제는 자동으로 뺍니다.
@@ -151,3 +151,4 @@ export function DiscoveryPanel({ cid, kind, settings }: { cid: number; kind: "sc
     </section>
   );
 }
+

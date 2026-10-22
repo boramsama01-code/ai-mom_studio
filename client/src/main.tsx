@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Route, Switch, useLocation, Redirect } from "wouter";
 import "./styles.css";
+import "./studio.css";
 import { api } from "./api";
 import { ChannelProvider, DirtyGuardProvider, useChannel, useMe } from "./state";
 import { DirtyModal, ErrorBox, GuardedLink, Loading } from "./ui";
@@ -18,6 +19,7 @@ import { PublishPage } from "./pages/Publish";
 import { ChannelSettingsPage } from "./pages/ChannelSettings";
 import { RunsPage } from "./pages/Runs";
 import { DesignPage } from "./pages/Design";
+import { StudioPage } from "./pages/Studio";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 15_000 } },
@@ -25,9 +27,13 @@ const queryClient = new QueryClient({
 
 const NAV: Array<{ group: string; items: Array<{ href: string; label: string; icon: string; count?: "review" | "ready" }> }> = [
   {
-    group: "작업",
+    group: "스튜디오",
+    items: [{ href: "/", label: "Studio Board", icon: "▦" }],
+  },
+  {
+    group: "수집·발행",
     items: [
-      { href: "/", label: "오늘의 작업", icon: "◎" },
+      { href: "/today", label: "수집 현황", icon: "◎" },
       { href: "/inbox", label: "수집함", icon: "▤", count: "review" },
       { href: "/drafts", label: "콘텐츠 초안", icon: "✎", count: "ready" },
       { href: "/publish", label: "발행함", icon: "➤" },
@@ -38,7 +44,7 @@ const NAV: Array<{ group: string; items: Array<{ href: string; label: string; ic
     items: [
       { href: "/rules", label: "검색 설정", icon: "⌕" },
       { href: "/design", label: "카드 디자인", icon: "▣" },
-      { href: "/settings", label: "채널 설정·연결", icon: "⚙" },
+      { href: "/settings", label: "API·채널 설정", icon: "⚙" },
       { href: "/runs", label: "실행 기록", icon: "≡" },
     ],
   },
@@ -79,7 +85,8 @@ function Shell() {
     enabled: selected !== "all",
     refetchInterval: 120_000,
   });
-  const isActive = (href: string) => (href === "/" ? loc === "/" : loc.startsWith(href) || (href === "/inbox" && loc.startsWith("/items")));
+  const inStudio = loc === "/" || loc.startsWith("/studio");
+  const isActive = (href: string) => (href === "/" ? inStudio : loc.startsWith(href) || (href === "/inbox" && loc.startsWith("/items")));
   const logout = async () => {
     await api("/auth/logout", { method: "POST" });
     qc.clear();
@@ -116,7 +123,7 @@ function Shell() {
   }, [toast]);
 
   const counts = today.data?.counts;
-  const channelLabel = selected === "all" ? "전체 채널 (조회 전용)" : current?.name ?? "";
+  const channelLabel = inStudio ? "우주펭귄상회 · Studio" : selected === "all" ? "전체 채널 (조회 전용)" : current?.name ?? "";
   return (
     <div className="shell">
       <a href="#main" className="skip-link">
@@ -152,7 +159,7 @@ function Shell() {
           <span>검색·이동</span>
           <kbd>{isMac ? "⌘" : "Ctrl"} K</kbd>
         </button>
-        <ChannelSelect id="channel-select" />
+        {!inStudio && <ChannelSelect id="channel-select" />}
         <nav className="nav">
           {NAV.map((g) => (
             <div key={g.group} className="nav-group">
@@ -185,7 +192,9 @@ function Shell() {
       </aside>
       <main className="main" id="main" tabIndex={-1}>
         <Switch>
-          <Route path="/" component={TodayPage} />
+          <Route path="/"><StudioPage /></Route>
+          <Route path="/studio/:id">{(p) => <StudioPage cardId={Number(p.id)} />}</Route>
+          <Route path="/today" component={TodayPage} />
           <Route path="/inbox" component={InboxPage} />
           <Route path="/items/:cid/:id">{(p) => <ItemDetailPage cid={Number(p.cid)} id={Number(p.id)} />}</Route>
           <Route path="/drafts" component={DraftsPage} />
@@ -238,4 +247,5 @@ createRoot(document.getElementById("root")!).render(
     </QueryClientProvider>
   </StrictMode>,
 );
+
 

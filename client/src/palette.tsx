@@ -35,7 +35,7 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
 
   const cmds: Cmd[] = useMemo(() => {
     const pages: Cmd[] = [
-      ["/", "오늘의 작업"], ["/inbox", "수집함"], ["/drafts", "콘텐츠 초안"], ["/publish", "발행함"],
+      ["/", "Studio Board"], ["/today", "수집 현황"], ["/inbox", "수집함"], ["/drafts", "콘텐츠 초안"], ["/publish", "발행함"],
       ["/rules", "검색 설정"], ["/design", "카드 디자인"], ["/settings", "채널 설정·연결"], ["/runs", "실행 기록"],
     ].map(([href, label]) => ({ id: `p${href}`, label, group: "이동", run: () => go(href) }));
     const actions: Cmd[] = [
@@ -120,3 +120,4 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
     </div>
   );
 }
+

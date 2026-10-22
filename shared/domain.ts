@@ -5,7 +5,7 @@
 export const CHANNEL_SEEDS = [
   {
     slug: "opportunities",
-    name: "아이맘 · 도전·진학",
+    name: "Highway · 고입",
     description: "특목고·자사고·영재학교 입시와 STEM 캠프·대회·영재교육원 공고를 모아 확인합니다.",
     contentType: "notice",
     accentColor: "#0B766E",
@@ -251,10 +251,11 @@ export type DiscoveryInfo = {
   score: number; // 같은 사건을 다룬 서로 다른 언론사 수
   articleCount: number;
   outlets: string[];
-  pickedBy: "claude" | "buzz";
+  pickedBy: "claude" | "openai" | "buzz";
   reason: string | null; // 고른 이유(Claude)
   angle: string | null; // 대화 질문 제안(Claude)
   query: string; // 어떤 탐색 주제에서 나왔는지
   headline: string; // 대표 기사 제목(초안 생성 후 제목이 바뀌어도 같은 사건 판별에 사용)
   discoveredAt: string;
 };
+
