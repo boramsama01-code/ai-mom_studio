@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useChannel, useDirtyGuard } from "../state";
 import { Badge, Empty, ErrorBox, Loading } from "../ui";
 import type { Channel, ChannelBudget, Destination } from "@shared/schema";
+import { ChannelDirectory } from "./ChannelDirectory";
 import { ConnectionsSection, SecretInput, useSecrets } from "./Connections";
 
 type Status = { integrations: Record<string, boolean | Record<string, boolean>>; globalStop: boolean; workerConnected: boolean };
@@ -32,16 +33,12 @@ export function ChannelSettingsPage() {
   const leave = (action: () => void) => guard.confirmLeave(action);
   return <div className="settings-page">
     <header className="page-head"><div><span className="studio-eyebrow">WORKSPACE</span><h1>설정</h1><p className="muted">내 채널과 제작 환경을 한곳에서 관리하세요.</p></div>
-      {tab === "channels" && !creating && !current && <button className="btn primary" onClick={() => setCreating(true)}>＋ 새 채널</button>}</header>
+      {tab === "channels" && !creating && !current && <button className="btn primary" onClick={() => leave(() => setCreating(true))}>＋ 새 채널</button>}</header>
     <nav className="settings-tabs" aria-label="설정 메뉴">{[["channels", "내 채널"], ["connections", "서비스 연결"], ["operations", "운영 설정"]].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} onClick={() => leave(() => { setTab(key); setEditing(null); setCreating(false); })}>{label}</button>)}</nav>
     {tab === "channels" && <>
       {(creating || current) && <button className="btn ghost settings-back" onClick={() => leave(() => { setEditing(null); setCreating(false); })}>← 내 채널 목록</button>}
       {creating ? <NewChannel onCreated={ch => { setCreating(false); setEditing(ch.id); }} /> : current ? <><ChannelForm key={current.id} ch={current} /><details className="panel settings-details"><summary>게시 계정 연결</summary><Destinations cid={current.id} /></details></> : <>
-        <div className="settings-section-head"><h2>내 채널 <span className="muted">{channels.length}</span></h2><span className="small muted">이름·소개·사용 여부를 수정할 수 있습니다.</span></div>
-        <div className="channel-directory">{channels.map(ch => <button className="channel-card" key={ch.id} onClick={() => setEditing(ch.id)} aria-label={`${ch.name} 수정`}>
-          <span className="channel-avatar" style={{ backgroundColor: ch.accentColor }}>{ch.name.slice(0, 1)}</span>
-          <span className="channel-card-copy"><strong>{ch.name}</strong><span>{ch.description || "채널 소개를 추가하세요"}</span><small>{ch.active ? "사용 중" : "사용 중지"}</small></span><span className="channel-edit">수정 ↗</span>
-        </button>)}<button className="channel-card channel-create" onClick={() => setCreating(true)}><span className="channel-avatar">＋</span><strong>새 채널 추가</strong></button></div>
+        <ChannelDirectory channels={channels} onEdit={id => leave(() => setEditing(id))} onCreate={() => leave(() => setCreating(true))} />
       </>}
     </>}
     {tab === "connections" && <ConnectionsSection />}

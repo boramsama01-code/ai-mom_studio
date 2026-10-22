@@ -8,11 +8,11 @@ export type SecretGroup = { id: string; title: string; description: string; docs
 export const SECRET_GROUPS: SecretGroup[] = [
   {
     id: "ai",
-    title: "AI 기본 설정",
+    title: "글쓰기 AI 선택",
     description: "글은 선택한 AI로, 그림은 OpenAI로 만듭니다. 다른 AI 비교는 콘텐츠에서 직접 선택할 때만 실행됩니다.",
     testable: false,
     fields: [
-      { key: "AI_PROVIDER", label: "기본 글쓰기 AI", secret: false, hint: "자동은 GPT 키가 있으면 GPT, Claude 키만 있으면 Claude를 사용합니다.", options: [{ value: "auto", label: "자동 (GPT 우선)" }, { value: "openai", label: "GPT" }, { value: "anthropic", label: "Claude" }] },
+      { key: "AI_PROVIDER", label: "기본 글쓰기 AI", secret: false, hint: "API 키가 아닌 선택 항목입니다. 자동 선택은 GPT 키가 있으면 GPT, Claude 키만 있으면 Claude를 사용합니다.", options: [{ value: "auto", label: "자동 선택 · GPT 우선" }, { value: "openai", label: "GPT · OpenAI" }, { value: "anthropic", label: "Claude · Anthropic" }] },
     ],
   },
   {

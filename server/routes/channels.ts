@@ -3,21 +3,45 @@ import { Router } from "express";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
-import { channels, destinations, officialSources } from "../../shared/schema";
+import { appSettings, channels, destinations, officialSources } from "../../shared/schema";
 import { ah, conflict, HttpError, intParam, loadChannel, parse, zVersion } from "./util";
 import { actorOf } from "../auth";
 import { audit } from "../audit";
 import { fetchBoardList } from "../services/boardAdapter";
 import { allowedSecretName, defaultSecretRefs, resolveSecrets, SECRET_FIELDS } from "../services/secrets";
 
+import type { DB } from "../db";
+import { CHANNEL_ORDER_KEY, channelIdsSchema, orderedChannels } from "../services/channelOrder";
+
 export const channelRoutes = Router();
 
 channelRoutes.get(
   "/channels",
   ah(async (_req, res) => {
-    res.json(await getDb().select().from(channels).orderBy(asc(channels.id)));
+    res.json(await orderedChannels(getDb()));
   }),
 );
+
+channelRoutes.put("/channels/order", ah(async (req, res) => {
+  const body = parse(z.object({ ids: channelIdsSchema, previousIds: channelIdsSchema }).strict(), req.body);
+  const result = await getDb().transaction(async tx => {
+    await tx.execute(sql`select pg_advisory_xact_lock(7193203)`);
+    const current = await orderedChannels(tx as unknown as DB);
+    const currentIds = current.map(c => c.id);
+    if (JSON.stringify(currentIds) !== JSON.stringify(body.previousIds)) {
+      throw new HttpError(409, "다른 곳에서 채널 목록이 변경됐습니다. 목록을 새로 불러온 뒤 다시 정렬해 주세요.", { current });
+    }
+    if (new Set(body.ids).size !== body.ids.length || body.ids.length !== currentIds.length || body.ids.some(id => !currentIds.includes(id))) {
+      throw new HttpError(400, "모든 채널을 중복 없이 포함해야 합니다.");
+    }
+    await tx.insert(appSettings).values({ key: CHANNEL_ORDER_KEY, value: body.ids })
+      .onConflictDoUpdate({ target: appSettings.key, set: { value: body.ids, updatedAt: new Date() } });
+    await audit(tx, { actor: actorOf(req), action: "reorder", entity: "channel", detail: { ids: body.ids } });
+    const byId = new Map(current.map(ch => [ch.id, ch]));
+    return body.ids.map(id => byId.get(id)!);
+  });
+  res.json(result);
+}));
 
 const budgetSchema = z.object({
   naverCallsPerRun: z.number().int().min(0).max(100),
@@ -58,6 +82,7 @@ channelRoutes.post("/channels", ah(async (req, res) => {
     accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default("#51635A"),
   }).strict(), req.body);
   const created = await getDb().transaction(async tx => {
+    await tx.execute(sql`select pg_advisory_xact_lock(7193203)`);
     const [ch] = await tx.insert(channels).values({ ...body, slug: `channel-${randomUUID()}`, contentType: "manual",
       budget: { naverCallsPerRun: 0, resultsPerRun: 0, fetchTargetsPerRun: 0, fetchCallsPerRun: 0, llmCallsPerRun: 0, dailyPublishLimit: 0, discovery: { enabled: false, autoDraft: false } },
     }).returning();

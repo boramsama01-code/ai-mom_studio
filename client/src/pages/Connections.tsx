@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
+import { useDirtyGuard } from "../state";
 import { Badge, ErrorBox, fmtDate, Loading } from "../ui";
 import type { SecretField, SecretGroup } from "@shared/secretsCatalog";
 
@@ -64,6 +65,48 @@ export function SecretInput({ k, label, hint, placeholder, options, secret, stat
   );
 }
 
+type AiStatus = { integrations: { aiProvider: "openai" | "anthropic"; aiConfigured: boolean } };
+
+function AiProviderPanel({ data }: { data: Resp }) {
+  const qc = useQueryClient();
+  const guard = useDirtyGuard();
+  const status = data.statuses.find(s => s.key === "AI_PROVIDER");
+  const current = status?.value || "auto";
+  const envOwned = status?.source === "environment";
+  const [choice, setChoice] = useState<string | null>(null);
+  const selected = choice ?? current;
+  const changed = !envOwned && choice !== null && (choice !== current || status?.source === "unreadable");
+  const actual = useQuery({ queryKey: ["status"], queryFn: () => api<AiStatus>("/status") });
+  const save = useMutation({
+    mutationFn: () => api("/secrets/AI_PROVIDER", { method: "PUT", body: { value: selected } }),
+    onSuccess: async () => {
+      guard.setDirty("ai-provider", false);
+      await Promise.all([qc.invalidateQueries({ queryKey: ["secrets"] }), qc.invalidateQueries({ queryKey: ["status"] }), qc.invalidateQueries({ queryKey: ["studio"] })]);
+      setChoice(null);
+    },
+  });
+  useEffect(() => {
+    guard.setDirty("ai-provider", changed, async () => { try { await save.mutateAsync(); return true; } catch { return false; } });
+    return () => guard.setDirty("ai-provider", false);
+  }, [changed, selected]);
+  return <form className="panel stack" onSubmit={e => { e.preventDefault(); if (changed) save.mutate(); }}>
+    <div className="row between"><h3 style={{ margin: 0 }}>글쓰기 AI 선택</h3><Badge kind={status?.source === "unreadable" ? "warn" : ""}>{envOwned ? "서버에서 설정" : status?.source === "unreadable" ? "다시 선택 필요" : status?.source === "screen" ? "저장됨" : "기본값 사용"}</Badge></div>
+    <p className="small muted" style={{ margin: 0 }}>API 키를 입력하는 칸이 아닙니다. 글을 만들 때 기본으로 사용할 AI를 선택하세요.</p>
+    <label className="field" htmlFor="ai-provider-choice">기본 글쓰기 AI
+      <select id="ai-provider-choice" value={selected} disabled={envOwned || save.isPending} onChange={e => setChoice(e.target.value)} aria-describedby="ai-provider-help">
+        <option value="auto">자동 선택 · GPT 우선</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude · Anthropic</option>
+      </select>
+    </label>
+    <p id="ai-provider-help" className="small muted" style={{ margin: 0 }}>자동 선택은 GPT 키가 있으면 GPT, Claude 키만 있으면 Claude를 사용합니다. 그림 생성은 OpenAI 키를 사용합니다.</p>
+    {actual.data && <div className="row small" aria-live="polite"><span>현재 적용: <strong>{actual.data.integrations.aiProvider === "anthropic" ? "Claude" : "GPT"}</strong></span><Badge kind={actual.data.integrations.aiConfigured ? "ok" : "warn"}>{actual.data.integrations.aiConfigured ? "API 키 등록됨" : "API 키 등록 필요"}</Badge></div>}
+    {actual.error && <ErrorBox error={actual.error} retry={() => actual.refetch()} />}
+    <div className="row small"><a href="#connection-openai">GPT 키 입력으로 ↓</a><a href="#connection-anthropic">Claude 키 입력으로 ↓</a></div>
+    {envOwned ? <p className="small muted" style={{ margin: 0 }}>서버의 AI_PROVIDER 설정이 우선 적용되어 선택이 잠겨 있습니다. 화면에서 변경하려면 Render의 Environment에서 해당 항목을 제거한 뒤 재배포하세요.</p> : <div className="row"><button className="btn primary" disabled={!changed || save.isPending}>{save.isPending ? "저장 중…" : "선택 저장"}</button>{changed && <span className="small muted">저장하면 적용됩니다.</span>}</div>}
+    {save.error && <ErrorBox error={save.error} />}
+    {save.isSuccess && !changed && <div className="notice ok small" role="status">글쓰기 AI 선택을 저장했습니다.</div>}
+  </form>;
+}
+
 function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
   const qc = useQueryClient();
   const [vals, setVals] = useState<Record<string, string>>({});
@@ -85,7 +128,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
   const last = test.data ?? data.tests[g.id];
   const st = (k: string) => data.statuses.find((s) => s.key === k);
   return (
-    <form className="panel stack" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+    <form id={`connection-${g.id}`} className="panel stack" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
       <div className="row between">
         <h3 style={{ margin: 0 }}>{g.title}</h3>
         {g.docs && (
@@ -125,7 +168,7 @@ export function ConnectionsSection() {
   return (
     <section className="stack" style={{ marginBottom: 16 }}>
       <div>
-        <h2 style={{ marginBottom: 4 }}>API 설정</h2>
+        <h2 style={{ marginBottom: 4 }}>서비스 연결</h2>
         <p className="small muted" style={{ margin: 0 }}>
           모든 채널에서 공통으로 사용합니다. 키는 암호화해 저장하며 Render 환경변수가 있으면 우선 적용합니다.
         </p>
@@ -133,7 +176,7 @@ export function ConnectionsSection() {
       {q.isLoading ? <Loading lines={2} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : (
         <div className="grid grid-2">
           {q.data!.groups.map((g) => (
-            <GroupPanel key={g.id} g={g} data={q.data!} />
+            g.id === "ai" ? <AiProviderPanel key={g.id} data={q.data!} /> : <GroupPanel key={g.id} g={g} data={q.data!} />
           ))}
         </div>
       )}
