@@ -44,7 +44,7 @@ export async function validateStudioImages(db: DB, cardId: number, content: Stud
 }
 async function validateChannel(db: DB, key: string) {
   const [ch] = await db.select({ id: channels.id }).from(channels).where(eq(channels.slug, channelSlug(key)));
-  if (!ch) throw new HttpError(400, "채널을 먼저 추가해 주세요.");
+  if (!ch) throw new HttpError(400, key === "highway" ? "Highway 기본 채널을 먼저 추가해 주세요." : "채널을 먼저 추가해 주세요.");
 }
 export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number) {
   await validateChannel(db, content.channel);

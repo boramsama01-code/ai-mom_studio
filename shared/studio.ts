@@ -7,8 +7,8 @@ export const studioCharacters = ["pengpeng", "pempem", "penguin", "pengki"] as c
 export const studioChannelLabels = { penguin: "우주펭귄상회", highway: "Highway", fryday: "Fryday", news: "시사 채널 · 이름 미정" };
 export const studioStageLabels = { idea: "아이디어", writing: "원고", making: "제작", review: "검토", done: "완료" };
 export type StudioChannel = string;
-export const studioKey = (slug: string) => slug === "opportunities" ? "highway" : slug;
-export const channelSlug = (key: string) => key === "highway" ? "opportunities" : key;
+export const studioKey = (slug: string) => slug === "opportunities" ? "highway" : slug === "current-dialogue" ? "news" : slug;
+export const channelSlug = (key: string) => key === "highway" ? "opportunities" : key === "news" ? "current-dialogue" : key;
 export type StudioCharacter = typeof studioCharacters[number];
 export type StudioFormat = typeof studioFormats[number];
 export type StudioStage = typeof studioStages[number];
