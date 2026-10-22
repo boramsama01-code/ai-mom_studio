@@ -6,7 +6,7 @@ import { useChannel, useDirtyGuard } from "../state";
 import { ErrorBox, GuardedLink, Loading } from "../ui";
 import { useToast } from "../toast";
 
-import { studioKey } from "@shared/studio";
+import { studioKey } from "@shared/channelKeys";
 import type { StudioChannel as Channel, StudioStage as Stage, StudioCharacter as Character, StudioFormat as Format, StudioPanel as Panel, StudioContent as CardInput, StudioCard as Card, StudioRevision as Revision, StudioJob as Job, StudioBoard as Board, StudioCardDetail as Detail } from "@shared/studio";
 const stages: Array<{ id: Stage; label: string }> = [{ id: "idea", label: "아이디어" }, { id: "writing", label: "원고" }, { id: "making", label: "제작" }, { id: "review", label: "검토" }, { id: "done", label: "완료" }];
 const formats: Format[] = ["웹툰", "카드뉴스", "릴스", "브랜드", "기타"];
