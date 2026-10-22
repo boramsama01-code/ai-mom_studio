@@ -6,7 +6,9 @@ export const studioStages = ["idea", "writing", "making", "review", "done"] as c
 export const studioCharacters = ["pengpeng", "pempem", "penguin", "pengki"] as const;
 export const studioChannelLabels = { penguin: "우주펭귄상회", highway: "Highway", fryday: "Fryday", news: "시사 채널 · 이름 미정" };
 export const studioStageLabels = { idea: "아이디어", writing: "원고", making: "제작", review: "검토", done: "완료" };
-export type StudioChannel = typeof studioChannels[number];
+export type StudioChannel = string;
+export const studioKey = (slug: string) => slug === "opportunities" ? "highway" : slug;
+export const channelSlug = (key: string) => key === "highway" ? "opportunities" : key;
 export type StudioCharacter = typeof studioCharacters[number];
 export type StudioFormat = typeof studioFormats[number];
 export type StudioStage = typeof studioStages[number];
@@ -16,7 +18,7 @@ const date = z.string().refine(v => v === "" || (/^\d{4}-\d{2}-\d{2}$/.test(v) &
 export const studioPanelSchema = z.object({ scene: z.string().max(4000), dialogue: z.string().max(3000), imageId: z.number().int().positive().nullable().default(null) }).strict();
 export const studioContentSchema = z.object({
   title: z.string().trim().min(1).max(160),
-  channel: z.enum(studioChannels).default("penguin"),
+  channel: z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/).default("penguin"),
   format: z.enum(studioFormats).default("웹툰"),
   stage: z.enum(studioStages).default("idea"),
   dueDate: date.default(""), memo: z.string().max(12000).default(""),

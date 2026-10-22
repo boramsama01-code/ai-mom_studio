@@ -54,7 +54,7 @@ function ChannelSelect({ id }: { id: string }) {
   const { channels, selected, select } = useChannel();
   return (
     <label className="field channel-select">
-      <span className="small muted">현재 채널</span>
+      <span className="small muted">채널</span>
       <select id={id} value={String(selected)} onChange={(e) => select(e.target.value === "all" ? "all" : Number(e.target.value))}>
         {channels.map((c) => (
           <option key={c.id} value={c.id}>
@@ -62,7 +62,7 @@ function ChannelSelect({ id }: { id: string }) {
             {c.active ? "" : " (비활성)"}
           </option>
         ))}
-        <option value="all">전체 (조회 전용)</option>
+        <option value="all">모든 채널</option>
       </select>
     </label>
   );

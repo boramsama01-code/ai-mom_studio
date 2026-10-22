@@ -22,47 +22,54 @@ const INTEG: Array<[string, string, string]> = [
 ];
 
 export function ChannelSettingsPage() {
-  const { current, selected } = useChannel();
+  const { channels } = useChannel();
+  const guard = useDirtyGuard();
+  const [tab, setTab] = useState("channels");
+  const [editing, setEditing] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const current = channels.find(c => c.id === editing);
   const status = useQuery({ queryKey: ["status"], queryFn: () => api<Status>("/status") });
-  return (
-    <>
-      <div className="page-head">
-        <h1>채널 설정</h1>
-      </div>
-      <ConnectionsSection />
-      <h2 style={{ marginTop: 24 }}>채널별 설정</h2>
-      {selected === "all" || !current ? <Empty>채널을 하나 선택하면 채널별 설정을 바꿀 수 있습니다.</Empty> : <ChannelForm key={current.id} ch={current} />}
-      {current && <Destinations cid={current.id} />}
-      <section className="panel stack">
-        <h2>연결 상태</h2>
-        <p className="small muted">비밀값은 화면에 표시하지 않고 설정 여부만 보여줍니다. 값은 위 ‘서비스 연결’에서 입력하세요(Render에 직접 넣은 값이 있으면 그 값이 우선).</p>
-        {status.isLoading ? (
-          <Loading lines={2} />
-        ) : status.error ? (
-          <ErrorBox error={status.error} />
-        ) : (
-          <table className="simple">
-            <tbody>
-              {INTEG.map(([k, label, vars]) => (
-                <tr key={k}>
-                  <td>{label}</td>
-                  <td>{status.data!.integrations[k] ? <Badge kind="ok">연결됨</Badge> : <Badge kind="warn">미연결</Badge>}</td>
-                  <td className="small muted">{vars}</td>
-                </tr>
-              ))}
-              <tr>
-                <td>워커(GitHub Actions)</td>
-                <td>{status.data!.workerConnected ? <Badge kind="ok">최근 실행 있음</Badge> : <Badge kind="warn">최근 6시간 실행 없음</Badge>}</td>
-                <td className="small muted">collect.yml / process.yml</td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-        {status.data && <Flags flags={status.data.integrations.flags as Record<string, boolean>} />}
-        {status.data && <GlobalStop on={status.data.globalStop} />}
-      </section>
-    </>
-  );
+  const leave = (action: () => void) => guard.confirmLeave(action);
+  return <div className="settings-page">
+    <header className="page-head"><div><span className="studio-eyebrow">WORKSPACE</span><h1>설정</h1><p className="muted">내 채널과 제작 환경을 한곳에서 관리하세요.</p></div>
+      {tab === "channels" && !creating && !current && <button className="btn primary" onClick={() => setCreating(true)}>＋ 새 채널</button>}</header>
+    <nav className="settings-tabs" aria-label="설정 메뉴">{[["channels", "내 채널"], ["connections", "서비스 연결"], ["operations", "운영 설정"]].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} onClick={() => leave(() => { setTab(key); setEditing(null); setCreating(false); })}>{label}</button>)}</nav>
+    {tab === "channels" && <>
+      {(creating || current) && <button className="btn ghost settings-back" onClick={() => leave(() => { setEditing(null); setCreating(false); })}>← 내 채널 목록</button>}
+      {creating ? <NewChannel onCreated={ch => { setCreating(false); setEditing(ch.id); }} /> : current ? <><ChannelForm key={current.id} ch={current} /><details className="panel settings-details"><summary>게시 계정 연결</summary><Destinations cid={current.id} /></details></> : <>
+        <div className="settings-section-head"><h2>내 채널 <span className="muted">{channels.length}</span></h2><span className="small muted">이름·소개·사용 여부를 수정할 수 있습니다.</span></div>
+        <div className="channel-directory">{channels.map(ch => <button className="channel-card" key={ch.id} onClick={() => setEditing(ch.id)} aria-label={`${ch.name} 수정`}>
+          <span className="channel-avatar" style={{ backgroundColor: ch.accentColor }}>{ch.name.slice(0, 1)}</span>
+          <span className="channel-card-copy"><strong>{ch.name}</strong><span>{ch.description || "채널 소개를 추가하세요"}</span><small>{ch.active ? "사용 중" : "사용 중지"}</small></span><span className="channel-edit">수정 ↗</span>
+        </button>)}<button className="channel-card channel-create" onClick={() => setCreating(true)}><span className="channel-avatar">＋</span><strong>새 채널 추가</strong></button></div>
+      </>}
+    </>}
+    {tab === "connections" && <ConnectionsSection />}
+    {tab === "operations" && <section className="panel stack"><h2>운영 상태</h2>{status.isLoading ? <Loading lines={2} /> : status.error ? <ErrorBox error={status.error} /> : status.data && <>
+      <p className="small muted">{status.data.workerConnected ? "최근 자동 작업 실행 기록이 있습니다." : "최근 6시간 자동 작업 실행 기록이 없습니다."}</p>
+      <Flags flags={status.data.integrations.flags as Record<string, boolean>} /><GlobalStop on={status.data.globalStop} />
+      <details className="settings-details"><summary>연결 진단</summary><table className="simple"><tbody>{INTEG.map(([k, label]) => <tr key={k}><td>{label}</td><td><Badge kind={status.data!.integrations[k] ? "ok" : "warn"}>{status.data!.integrations[k] ? "설정됨" : "미설정"}</Badge></td></tr>)}</tbody></table></details>
+    </>}</section>}
+  </div>;
+}
+
+function NewChannel({ onCreated }: { onCreated: (ch: Channel) => void }) {
+  const qc = useQueryClient();
+  const guard = useDirtyGuard();
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [accentColor, setColor] = useState("#51635A");
+  const create = useMutation({ mutationFn: () => api<Channel>("/channels", { method: "POST", body: { name, description, accentColor } }), onSuccess: async ch => {
+    guard.setDirty("new-channel", false); await qc.invalidateQueries({ queryKey: ["channels"] }); onCreated(ch);
+  } });
+  useEffect(() => { guard.setDirty("new-channel", !!name || !!description); return () => guard.setDirty("new-channel", false); }, [name, description, guard]);
+  return <form className="panel stack channel-editor" onSubmit={e => { e.preventDefault(); create.mutate(); }}><h2>새 채널</h2>
+    <label className="field">채널명<input autoFocus required maxLength={60} value={name} onChange={e => setName(e.target.value)} placeholder="내 채널 이름" /></label>
+    <label className="field">한 줄 소개<textarea rows={2} maxLength={500} value={description} onChange={e => setDescription(e.target.value)} placeholder="어떤 이야기를 전하는 채널인가요?" /></label>
+    <label className="field">채널 색상<input type="color" value={accentColor} onChange={e => setColor(e.target.value)} /></label>
+    <p className="small muted">추가 후 바로 콘텐츠를 만들 수 있습니다. 자동 수집·게시 설정은 꺼져 있습니다.</p>
+    {create.error && <ErrorBox error={create.error} />}<div className="savebar"><button className="btn primary" disabled={!name.trim() || create.isPending}>{create.isPending ? "추가 중…" : "채널 추가"}</button></div>
+  </form>;
 }
 
 function Flags({ flags }: { flags: Record<string, boolean> }) {
@@ -112,7 +119,7 @@ function ChannelForm({ ch }: { ch: Channel }) {
       }
     });
     return () => guard.setDirty("channel-form", false);
-  }, [dirty]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dirty, f, ch.version]); // eslint-disable-line react-hooks/exhaustive-deps
   const b = (k: keyof ChannelBudget, label: string, max: number) => (
     <label className="field">
       {label}
@@ -120,11 +127,11 @@ function ChannelForm({ ch }: { ch: Channel }) {
     </label>
   );
   return (
-    <form className="panel stack" onSubmit={(e) => { e.preventDefault(); m.mutate(); }}>
-      <h2>{ch.name}</h2>
+    <form className="panel stack channel-editor" onSubmit={(e) => { e.preventDefault(); m.mutate(); }}>
+      <h2>{ch.name}</h2><fieldset className="channel-form-fields stack" disabled={m.isPending}>
       <div className="grid grid-2">
         <label className="field">
-          표시 이름
+          채널명
           <input value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={60} required />
         </label>
         <label className="field">
@@ -139,7 +146,7 @@ function ChannelForm({ ch }: { ch: Channel }) {
       <div className="grid grid-2">
         <label className="field">
           강조색
-          <input value={f.accentColor} onChange={(e) => setF({ ...f, accentColor: e.target.value })} pattern="#[0-9A-Fa-f]{6}" />
+          <input type="color" value={f.accentColor} onChange={(e) => setF({ ...f, accentColor: e.target.value })} pattern="#[0-9A-Fa-f]{6}" />
         </label>
         <label className="check">
           <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> 채널 사용
@@ -149,8 +156,8 @@ function ChannelForm({ ch }: { ch: Channel }) {
         편집 기준
         <textarea rows={4} value={f.editorialGuide} onChange={(e) => setF({ ...f, editorialGuide: e.target.value })} />
       </label>
-      <fieldset className="stack">
-        <legend>실행당 예산·한도</legend>
+      <details className="settings-details">
+        <summary>고급 설정 · 실행 한도와 비용</summary><div className="stack">
         <div className="grid grid-3">
           {b("naverCallsPerRun", "네이버 호출", 100)}
           {b("resultsPerRun", "결과 수", 500)}
@@ -170,14 +177,14 @@ function ChannelForm({ ch }: { ch: Channel }) {
             <input type="number" step="0.01" min={0} value={f.budget.llmOutputTokenPriceUsdPerM ?? ""} onChange={(e) => setF({ ...f, budget: { ...f.budget, llmOutputTokenPriceUsdPerM: e.target.value === "" ? null : Number(e.target.value) } })} />
           </label>
         </div>
-      </fieldset>
+      </div></details>
       {m.error && <ErrorBox error={m.error} />}
       <div className="savebar">
         {m.isSuccess && !dirty && <span className="small muted" style={{ marginRight: "auto" }}>저장됨</span>}
         <button type="button" className="btn" disabled={!dirty} onClick={() => setF(init)}>되돌리기</button>
         <button className="btn primary" disabled={!dirty || m.isPending}>저장</button>
       </div>
-    </form>
+    </fieldset></form>
   );
 }
 

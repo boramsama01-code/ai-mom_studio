@@ -9,19 +9,18 @@ import { useToast } from "../toast";
 import type { StudioChannel as Channel, StudioStage as Stage, StudioCharacter as Character, StudioFormat as Format, StudioPanel as Panel, StudioContent as CardInput, StudioCard as Card, StudioRevision as Revision, StudioJob as Job, StudioBoard as Board, StudioCardDetail as Detail } from "@shared/studio";
 const stages: Array<{ id: Stage; label: string }> = [{ id: "idea", label: "아이디어" }, { id: "writing", label: "원고" }, { id: "making", label: "제작" }, { id: "review", label: "검토" }, { id: "done", label: "완료" }];
 const formats: Format[] = ["웹툰", "카드뉴스", "릴스", "브랜드", "기타"];
-const channels: Array<{ id: Channel; name: string; role: string; image: Character }> = [
-  { id: "penguin", name: "펭귄상회", role: "웹툰 · 캐릭터 IP", image: "pengki" },
-  { id: "highway", name: "Highway", role: "특목고 · 고입", image: "pempem" },
-  { id: "fryday", name: "Fryday", role: "감자튀김 · 음식 탐구", image: "penguin" },
-  { id: "news", name: "시사 채널", role: "이름 미정", image: "pengpeng" },
-];
+function useStudioChannels() {
+  const { channels } = useChannel();
+  return channels.map(c => ({ id: c.slug === "opportunities" ? "highway" : c.slug, name: c.name, role: c.description,
+    image: (c.slug === "opportunities" ? "pempem" : c.slug === "news" ? "pengpeng" : c.slug === "penguin" ? "pengki" : "penguin") as Character }));
+}
 const characters: Array<{ id: Character; name: string; role: string; detail: string }> = [
   { id: "pengpeng", name: "펭펭", role: "아빠 · 지구 특파원", detail: "펼친 신문. 현장에서 보고 들은 지구의 이야기를 전합니다." },
   { id: "pempem", name: "펨펨", role: "엄마 · 전 우주기관 연구원", detail: "학사모, 연필, 분홍 볼터치. Highway의 안내자입니다." },
   { id: "penguin", name: "김펭귄", role: "첫째 · 식품공학 대학원생", detail: "흰 용기에 담긴 노란 감자튀김. 최고의 감자튀김을 고향에 전하려 합니다." },
   { id: "pengki", name: "김펭키", role: "둘째 · 탐사 과학자를 꿈꾸는 학생", detail: "작은 체구와 노란 가방. 가족에게 새로운 질문을 건넵니다." },
 ];
-const channelName = (id: Channel) => channels.find((c) => c.id === id)?.name ?? id;
+
 const imageUrl = (id: number) => `/api/studio/images/${id}`;
 const dateTime = (v: string) => new Date(v).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const activeJob = (j: Job) => ["queued", "running", "processing"].includes(j.status);
@@ -32,12 +31,14 @@ export function StudioPage({ cardId }: { cardId?: number }) {
   const guard = useDirtyGuard();
   if (cardId !== undefined) return Number.isSafeInteger(cardId) && cardId > 0 ? <StudioDetail key={cardId} id={cardId} /> : <div className="notice err">작업 주소를 확인해 주세요. <GuardedLink href="/">보드로</GuardedLink></div>;
   return <div className="studio">
-    <header className="page-head studio-heading"><div><span className="studio-eyebrow">우주펭귄상회</span><h1>{view === "board" ? "Studio Board" : "캐릭터 원본"}</h1></div><div className="row"><button className="btn" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본" : "제작 보드"}</button><GuardedLink className="btn ghost" href="/settings">API 설정</GuardedLink></div></header>
+    <header className="page-head studio-heading"><div><span className="studio-eyebrow">우주펭귄상회</span><h1>{view === "board" ? "Studio Board" : "캐릭터 원본"}</h1></div><div className="row"><button className="btn" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본" : "제작 보드"}</button><GuardedLink className="btn ghost" href="/settings">채널 관리</GuardedLink></div></header>
     {view === "board" ? <StudioBoard /> : <CharacterArchive />}
   </div>;
 }
 
 function StudioBoard() {
+  const channels = useStudioChannels();
+  const channelName = (id: string) => channels.find(c => c.id === id)?.name ?? id;
   const q = useQuery({ queryKey: ["studio", "cards"], queryFn: () => api<Board>("/studio/cards") });
   const [filter, setFilter] = useState<Channel | "all">("all");
   const [search, setSearch] = useState("");
@@ -56,7 +57,7 @@ function StudioBoard() {
   function newCard(stage: Stage = "idea") { setNewStage(stage); setCreating(true); }
   return <>
     <section className="studio-brands" aria-label="채널 필터">{channels.map((ch) => <button key={ch.id} className={`studio-brand ${ch.id}`} aria-pressed={filter === ch.id} onClick={() => setFilter(filter === ch.id ? "all" : ch.id)}><span><strong>{ch.name}</strong><small>{ch.role}</small><span className="studio-brand-count">{q.data ? cards.filter((c) => c.channel === ch.id && c.stage !== "done").length : "—"}개 진행 중</span></span><img src={`/studio-assets/${ch.image}.png`} alt="" /></button>)}</section>
-    <div className="studio-board-actions"><div className="row"><button className={`btn sm ${filter === "all" ? "primary" : ""}`} onClick={() => setFilter("all")}>전체</button><span className="small muted">{filter === "all" ? "모든 채널" : channelName(filter)} · {filtered.length}개</span></div><div className="row"><button className="btn sm" onClick={openHighway}>Highway 수집함 ↗</button><button className="btn primary" onClick={() => newCard()}>＋ 새 작업</button></div></div>
+    <div className="studio-board-actions"><div className="row"><button className={`btn sm ${filter === "all" ? "primary" : ""}`} onClick={() => setFilter("all")}>전체</button><span className="small muted">{filter === "all" ? "모든 채널" : channelName(filter)} · {filtered.length}개</span></div><div className="row"><button className="btn sm" onClick={openHighway}>수집함 ↗</button><button className="btn primary" onClick={() => newCard()}>＋ 새 작업</button></div></div>
     <label className="studio-search"><span className="sr-only">작업 검색</span><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="제목·원고·메모 검색" /></label>
     {q.isLoading ? <Loading lines={3} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : <div className="studio-board">{stages.map((stage) => <section key={stage.id} className={`studio-column stage-${stage.id}`} aria-label={stage.label} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const card = cards.find((c) => String(c.id) === e.dataTransfer.getData("text/studio-card")); if (card && card.stage !== stage.id && !move.isPending) move.mutate({ card, stage: stage.id }); }}><div className="studio-column-head"><h2>{stage.label}<span>{filtered.filter((c) => c.stage === stage.id).length}</span></h2><button className="studio-add" aria-label={`${stage.label} 작업 추가`} onClick={() => newCard(stage.id)}>＋</button></div><div className="studio-task-list">{filtered.filter((c) => c.stage === stage.id).map((c) => <article key={c.id} className="studio-task" draggable={!move.isPending} onDragStart={(e) => e.dataTransfer.setData("text/studio-card", String(c.id))}><span className={`studio-channel-tag ${c.channel}`}>{channelName(c.channel)}</span><GuardedLink href={`/studio/${c.id}`} className="studio-task-open">{c.panels?.find((p) => p.imageId)?.imageId ? <img className="studio-task-thumb" src={imageUrl(c.panels.find((p) => p.imageId)!.imageId!)} alt="콘텐츠 미리보기" loading="lazy" /> : c.imagePath ? <img className="studio-task-thumb" src={c.imagePath} alt="이전 웹툰 시안" loading="lazy" /> : null}<h3>{c.title}</h3><p>{c.memo || c.script || "원고와 제작 지시를 작성하세요."}</p></GuardedLink><div className="studio-task-meta"><span>{c.format}</span>{c.dueDate && <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", ".")}</time>}</div><select aria-label={`${c.title} 제작 단계`} value={c.stage} disabled={move.isPending} onChange={(e) => move.mutate({ card: c, stage: e.target.value as Stage })}>{stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></article>)}{!filtered.some((c) => c.stage === stage.id) && <button className="studio-empty-column" onClick={() => newCard(stage.id)}>{search ? "검색 결과 없음" : "＋ 작업 추가"}</button>}</div></section>)}</div>}
     <p className="small muted studio-board-foot">완성한 네컷은 PNG로 내려받고, 캡션은 복사해 검토 후 게시하세요.</p>
@@ -72,6 +73,8 @@ function Dialog({ title, children, onClose }: { title: string; children: ReactNo
 }
 
 function NewCard({ channel, stage, onClose }: { channel: Channel; stage: Stage; onClose: () => void }) {
+  const channels = useStudioChannels();
+  const channelName = (id: string) => channels.find(c => c.id === id)?.name ?? id;
   const [title, setTitle] = useState("");
   const [ch, setCh] = useState(channel);
   const [format, setFormat] = useState<Format>(channel === "penguin" ? "웹툰" : "카드뉴스");
@@ -117,6 +120,8 @@ function StudioDetail({ id }: { id: number }) {
 }
 
 function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown }) {
+  const channels = useStudioChannels();
+  const channelName = (id: string) => channels.find(c => c.id === id)?.name ?? id;
   const settings = useQuery({ queryKey: ["studio", "cards"], queryFn: () => api<Board>("/studio/cards") });
   const [base, setBase] = useState(data.card);
   const baseRef = useRef(data.card);
