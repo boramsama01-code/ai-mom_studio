@@ -4,7 +4,8 @@ import { Resvg } from "@resvg/resvg-js";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
-import { appSettings, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
+import { channels, appSettings, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
+import { channelSlug } from "../../shared/channelKeys";
 import { studioContentSchema, type StudioContent, type StudioCard, type StudioJob, type StudioRevision } from "../../shared/studio";
 import { conflict, HttpError, parse } from "../routes/util";
 import { enqueueJob } from "../worker/queue";
@@ -42,7 +43,12 @@ export async function validateStudioImages(db: DB, cardId: number, content: Stud
   const own = await db.select({ id: studioImages.id }).from(studioImages).where(and(eq(studioImages.cardId, cardId), inArray(studioImages.id, ids)));
   if (own.length !== ids.length) throw new HttpError(400, "이 콘텐츠에 속한 이미지만 사용할 수 있습니다.");
 }
+async function validateChannel(db: DB, key: string) {
+  const [ch] = await db.select({ id: channels.id }).from(channels).where(eq(channels.slug, channelSlug(key)));
+  if (!ch) throw new HttpError(400, key === "highway" ? "Highway 기본 채널을 먼저 추가해 주세요." : "채널을 먼저 추가해 주세요.");
+}
 export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number) {
+  await validateChannel(db, content.channel);
   if (content.panels.some(p => p.imageId)) throw new HttpError(400, "새 콘텐츠에는 기존 이미지 ID를 넣을 수 없습니다.");
   return db.transaction(async tx => {
     if (sourceItemId) {
@@ -71,6 +77,7 @@ export async function saveStudioCard(db: DB, cardId: number, version: number, pa
   return db.transaction(async tx => {
     const current = await loadStudioCard(tx as unknown as DB, cardId);
     const content = parse(studioContentSchema, { ...current.content, ...patch });
+    if (patch.channel && patch.channel !== current.content.channel) await validateChannel(tx as unknown as DB, content.channel);
     await validateStudioImages(tx as unknown as DB, cardId, content);
     const [row] = await tx.update(studioCards).set({ content, version: version + 1, updatedAt: new Date() }).where(and(eq(studioCards.id, cardId), eq(studioCards.version, version))).returning();
     if (!row) conflict(studioCardDto(current));
@@ -124,6 +131,7 @@ export const studioImportSchema = z.object({
 export async function importStudioBoard(db: DB, input: z.infer<typeof studioImportSchema>, actor: string) {
   // Validate every card before entering the transaction so a malformed backup imports nothing.
   const rows = input.cards.map(c => ({ source: c, content: parse(studioContentSchema, { title: c.title, channel: c.channel, format: c.format, stage: c.stage, dueDate: c.dueDate, memo: c.memo, imagePath: c.imagePath ?? "", characters: c.channel === "highway" ? ["pempem"] : c.channel === "news" ? ["pengpeng"] : ["penguin"] }) }));
+  for (const key of new Set(rows.map(r => r.content.channel))) await validateChannel(db, key);
   return db.transaction(async tx => {
     let imported = 0;
     for (const { source, content } of rows) {

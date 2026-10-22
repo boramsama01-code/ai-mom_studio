@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -48,6 +49,23 @@ const channelPatch = z.object({
   editorialGuide: z.string().max(4000).optional(),
   budget: budgetSchema.optional(),
 });
+
+channelRoutes.post("/channels", ah(async (req, res) => {
+  const body = parse(z.object({
+    name: z.string().trim().min(1).max(60),
+    description: z.string().trim().max(500).default(""),
+    audience: z.string().trim().min(1).max(60).default("일반 독자"),
+    accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default("#51635A"),
+  }).strict(), req.body);
+  const created = await getDb().transaction(async tx => {
+    const [ch] = await tx.insert(channels).values({ ...body, slug: `channel-${randomUUID()}`, contentType: "manual",
+      budget: { naverCallsPerRun: 0, resultsPerRun: 0, fetchTargetsPerRun: 0, fetchCallsPerRun: 0, llmCallsPerRun: 0, dailyPublishLimit: 0, discovery: { enabled: false, autoDraft: false } },
+    }).returning();
+    await audit(tx, { actor: actorOf(req), action: "create", entity: "channel", entityId: ch.id, channelId: ch.id });
+    return ch;
+  });
+  res.status(201).json(created);
+}));
 
 channelRoutes.patch(
   "/channels/:cid",
@@ -209,3 +227,4 @@ channelRoutes.patch(
     res.json(destinationView(updated[0], ch.slug));
   }),
 );
+

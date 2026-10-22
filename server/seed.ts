@@ -72,6 +72,12 @@ export async function seedIfNeeded(db: DB): Promise<{ createdChannels: string[] 
           .onConflictDoNothing();
       }
     }
+    for (const c of [
+      { slug: "penguin", name: "우주펭귄상회", description: "웹툰 · 캐릭터 IP", accentColor: "#51635A" },
+      { slug: "fryday", name: "Fryday", description: "감자튀김 · 음식 탐구", accentColor: "#BD742B" },
+    ]) await tx.insert(channels).values({ ...c, contentType: "manual", audience: "일반 독자",
+      budget: { naverCallsPerRun: 0, resultsPerRun: 0, fetchTargetsPerRun: 0, fetchCallsPerRun: 0, llmCallsPerRun: 0, dailyPublishLimit: 0, discovery: { enabled: false, autoDraft: false } },
+    }).onConflictDoNothing({ target: channels.slug });
     await tx
       .insert(appSettings)
       .values({ key: "global_stop", value: false })
@@ -84,3 +90,4 @@ export async function getSetting<T>(db: DB, key: string, def: T): Promise<T> {
   const r = await db.select().from(appSettings).where(eq(appSettings.key, key));
   return r.length ? (r[0].value as T) : def;
 }
+
