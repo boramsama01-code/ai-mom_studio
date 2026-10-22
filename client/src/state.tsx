@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, setCsrf } from "./api";
+import { enterFromPrivateLink } from "./privateLink";
 import type { Channel } from "@shared/schema";
 
 /* ───────────── 인증 ───────────── */
@@ -10,6 +11,7 @@ export function useMe() {
   return useQuery({
     queryKey: ["me"],
     queryFn: async () => {
+      await enterFromPrivateLink();
       const me = await api<Me>("/auth/me");
       setCsrf(me.csrf);
       return me;
@@ -138,3 +140,4 @@ export function useDirtyGuard() {
   if (!g) throw new Error("DirtyGuardProvider 필요");
   return g;
 }
+

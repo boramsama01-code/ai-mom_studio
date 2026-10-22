@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
+import { rateLimit } from "express-rate-limit";
 import type { Express, NextFunction, Request, Response } from "express";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { env } from "./env";
@@ -23,6 +24,7 @@ declare module "express-session" {
     user?: string;
     csrf?: string;
     demo?: boolean;
+    privateLinkHash?: string;
   }
 }
 
@@ -49,6 +51,15 @@ export function installSession(app: Express) {
       cookie: { httpOnly: true, sameSite: "lax", secure: env.isProduction, maxAge: 12 * 60 * 60 * 1000 },
     }),
   );
+  // Rotating/removing the link also revokes sessions created by that link.
+  app.use((req, _res, next) => {
+    if (req.session?.privateLinkHash && req.session.privateLinkHash !== env.privateLinkHash) {
+      delete req.session.user;
+      delete req.session.csrf;
+      delete req.session.privateLinkHash;
+    }
+    next();
+  });
   return true;
 }
 
@@ -85,6 +96,29 @@ function originOk(req: Request) {
 }
 
 export function installAuthRoutes(app: Express) {
+  app.use("/api/auth", (_req, res, next) => {
+    res.setHeader("Cache-Control", "no-store");
+    next();
+  });
+  app.post("/api/auth/private-link", rateLimit({
+    windowMs: 15 * 60_000, limit: 30, standardHeaders: "draft-7", legacyHeaders: false,
+    message: { error: "접속 시도가 많습니다. 잠시 후 전용 링크를 다시 열어 주세요." },
+  }), async (req, res) => {
+    if (!authConfigured() || !env.privateLinkHash) return res.status(404).json({ error: "사용할 수 없는 전용 링크입니다." });
+    if (!originOk(req)) return res.status(403).json({ error: "허용되지 않은 출처의 요청입니다." });
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return res.status(401).json({ error: "전용 링크가 올바르지 않거나 만료되었습니다." });
+    const hash = crypto.createHash("sha256").update(token).digest("hex");
+    if (!timingSafeEq(hash, env.privateLinkHash)) return res.status(401).json({ error: "전용 링크가 올바르지 않거나 만료되었습니다." });
+    await new Promise<void>((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
+    req.session.user = env.adminUsername;
+    req.session.csrf = crypto.randomBytes(24).toString("hex");
+    req.session.privateLinkHash = hash;
+    req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
+    await new Promise<void>((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
+    await audit(getDb(), { actor: env.adminUsername, action: "login_private_link", entity: "session" });
+    res.json({ user: req.session.user, csrf: req.session.csrf });
+  });
   app.get("/api/auth/me", (req, res) => {
     res.json({
       user: req.session?.user ?? null,
@@ -146,3 +180,4 @@ export function installAuthRoutes(app: Express) {
 export function actorOf(req: Request) {
   return req.session?.user ?? "unknown";
 }
+

@@ -273,3 +273,11 @@ TypeScript · React 19 + Vite · Express 5 · PostgreSQL + Drizzle ORM · Zod ·
 - Canva 대량 제작: https://www.canva.com/help/bulk-create/
 - GitHub Actions 요금: https://docs.github.com/en/billing/concepts/product-billing/github-actions
 
+
+### 개인 전용 접속 링크
+
+`/#access=...` 형태의 전용 링크로 아이디·비밀번호 입력 없이 운영 세션을 시작할 수 있습니다. 링크를 가진 사람은 운영자 권한을 가지므로 공유하지 마세요. 비밀값은 주소의 fragment로만 전달되고 화면 시작 시 주소창에서 제거됩니다. 브라우저 저장소에는 보관하지 않으며, 서버에는 원본 대신 `APP_PRIVATE_LINK_SHA256` 검증값만 설정합니다.
+
+토큰은 암호학적 난수 32바이트의 base64url 문자열입니다. 이 문자열의 SHA-256(소문자 64자리)을 기존 Render 서비스 환경변수에 추가합니다. 설정의 원본은 Render 서비스 환경변수이며 Blueprint에는 값을 넣지 않습니다. 원본 링크·토큰을 저장소나 로그에 남기지 마세요. 검증값 교체 또는 제거 후 재배포하면 이전 링크와 그 링크로 만든 세션이 모두 무효화됩니다. 기존 비밀번호 로그인은 복구 수단으로 유지됩니다.
+
+전용 링크 세션은 마지막 사용 후 30일간 유지되며, 기존 HttpOnly/Secure/SameSite 쿠키와 CSRF·Origin 검사를 그대로 적용합니다. 링크가 없거나 잘못되면 운영 데이터에 접근할 수 없습니다.
