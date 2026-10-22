@@ -8,7 +8,9 @@
     "node": "22.x"
   },
   "scripts": {
+    "predev": "node scripts/restore-studio-assets.mjs",
     "dev": "tsx watch --clear-screen=false server/index.ts",
+    "prebuild": "node scripts/restore-studio-assets.mjs",
     "build": "vite build && node scripts/build-server.mjs",
     "start": "NODE_ENV=production node dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -65,3 +67,4 @@
     "vitest": "^5.0.2"
   }
 }
+

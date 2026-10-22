@@ -1,6 +1,6 @@
 /**
  * 수집 실행 안의 "자동 화제 발굴" 단계 (과학·시사 채널)
- * 탐색 주제 검색 → 사건 묶기 → 화제도 순위 → (Claude 선정) → 고른 화제만 수집함에 저장
+ * 탐색 주제 검색 → 사건 묶기 → 화제도 순위 → (AI 선정) → 고른 화제만 수집함에 저장
  * 고른 화제의 대표 기사는 원문 확보 대상이 되고, 같은 사건을 다룬 다른 언론사 기사 몇 건은 보조 근거로 연결한다.
  */
 import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
@@ -70,7 +70,7 @@ export async function runDiscovery(
   /* 2) 사건 묶기 → 순위 */
   const clusters = clusterArticles(articles);
   counts.discoveryClusters = clusters.length;
-  const useClaude = !!(env.anthropicKey && env.anthropicModel);
+  const useAI = env.aiConfigured;
   const recent = await db
     .select({ discovery: contentItems.discovery, title: contentItems.title })
     .from(contentItems)
@@ -78,13 +78,13 @@ export async function runDiscovery(
     .orderBy(desc(contentItems.createdAt))
     .limit(60);
   const recentHeadlines = recent.map((r) => (r.discovery as DiscoveryInfo | null)?.headline ?? r.title);
-  const ranked = rankClusters(clusters, { strictTopic: !useClaude }).filter((c) => !isRecentlyCovered(c, recentHeadlines));
+  const ranked = rankClusters(clusters, { strictTopic: !useAI }).filter((c) => !isRecentlyCovered(c, recentHeadlines));
   counts.discoveryHot = ranked.filter((c) => c.score >= 2).length;
   if (!ranked.length) return result;
 
-  /* 3) 선정 — Claude(연결 시) 또는 화제도 순 */
+  /* 3) 선정 — AI(연결 시) 또는 화제도 순 */
   let chosen: Array<{ cluster: Cluster; pick: CuratePick | null }> = [];
-  if (useClaude) {
+  if (useAI) {
     const pool = ranked.slice(0, 15);
     const r = await curateIssues({
       kind: channel.contentType as "science_dialogue" | "current_dialogue",
@@ -105,7 +105,7 @@ export async function runDiscovery(
       const byId = new Map(pool.map((c) => [c.id, c]));
       chosen = r.data.picks.map((p) => ({ cluster: byId.get(p.candidate_id)!, pick: p }));
     } else {
-      errors.push({ scope: "discovery", message: `Claude 화제 선정 실패 — 화제도 순으로 대신 고름: ${r.error}` });
+      errors.push({ scope: "discovery", message: `AI 화제 선정 실패 — 화제도 순으로 대신 고름: ${r.error}` });
       chosen = rankClusters(ranked, { strictTopic: true }).slice(0, settings.picksPerRun).map((cluster) => ({ cluster, pick: null }));
     }
   } else {
@@ -161,7 +161,7 @@ async function saveCluster(db: DB, channel: Channel, runId: number, c: Cluster, 
     score: c.score,
     articleCount: c.articles.length,
     outlets: c.outlets.slice(0, 12),
-    pickedBy: pick ? "claude" : "buzz",
+    pickedBy: pick ? (env.aiProvider === "openai" ? "openai" : "claude") : "buzz",
     reason: pick?.reason ?? null,
     angle: pick?.angle ?? null,
     query: c.query,
@@ -201,3 +201,4 @@ async function saveCluster(db: DB, channel: Channel, runId: number, c: Cluster, 
   }
   return { itemId, supportingDocIds };
 }
+

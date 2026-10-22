@@ -1,5 +1,5 @@
 /**
- * Claude 기반 구조화 추출·초안 생성.
+ * GPT / Claude 구조화 추출·초안 생성.
  * - LLM은 "진위 판별기"가 아니라, 확보한 근거에서 사실을 추출·분류·초안하는 도구.
  * - 원문 속 지시문은 실행하지 않는다(데이터로만 취급).
  * - 확인 불가 값은 null. 근거 구절은 실제 원문에 있는지 서버가 다시 검사한다.
@@ -43,7 +43,7 @@ let clientKey = "";
 export function getClient(): Anthropic {
   // 화면에서 키를 바꾸면 새 키로 다시 만든다
   if (!client || clientKey !== env.anthropicKey) {
-    client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 2, timeout: 60_000 });
+    client = new Anthropic({ apiKey: env.anthropicKey, maxRetries: 0, timeout: 60_000 });
     clientKey = env.anthropicKey;
   }
   return client;
@@ -89,7 +89,77 @@ export function verifyEvidence<T extends { evidence: Array<{ source_id: number; 
   return { data: { ...data, evidence: kept }, dropped: data.evidence.length - kept.length };
 }
 
-async function callTool<T>(opts: {
+export type AiProvider = "openai" | "anthropic";
+
+export class AiServiceError extends Error {
+  constructor(message: string, public kind: "not_configured" | "api" | "parse" = "api") {
+    super(message);
+    this.name = "AiServiceError";
+  }
+}
+
+/** Provider errors never include upstream bodies, headers or credentials. */
+export function aiErrorMessage(provider: AiProvider, status?: number): string {
+  const name = provider === "openai" ? "OpenAI" : "Claude";
+  return status === 401 || status === 403 ? `${name} API 인증 실패 또는 권한 부족(설정의 키 확인)` :
+    status === 404 ? `${name} 모델을 찾을 수 없습니다. 설정의 모델 ID를 확인하세요.` :
+    status === 429 ? `${name} 호출 한도 초과 또는 API 크레딧 부족` :
+    status === 400 ? `${name} 요청을 처리할 수 없습니다. 모델과 입력 내용을 확인하세요.` :
+    `${name} API 연결 오류${status ? ` (HTTP ${status})` : ""}. 자동으로 재호출하지 않았습니다.`;
+}
+
+/** Fixed API origin, bounded response, no network retries (a timed-out call may be billable). */
+export async function openaiRequest(
+  endpoint: "/responses" | "/images/generations" | "/images/edits",
+  body: Record<string, unknown>,
+  opts: { timeoutMs?: number; maxBytes?: number } = {},
+): Promise<Record<string, any>> {
+  if (!env.openaiKey) throw new AiServiceError("설정에서 OpenAI API 키를 먼저 입력하세요.", "not_configured");
+  const maxBytes = opts.maxBytes ?? 2_000_000;
+  try {
+    const response = await fetch(`https://api.openai.com/v1${endpoint}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${env.openaiKey}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 90_000),
+      redirect: "error",
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new AiServiceError(aiErrorMessage("openai", response.status));
+    }
+    if (Number(response.headers.get("content-length") || 0) > maxBytes) {
+      await response.body?.cancel();
+      throw new AiServiceError("AI 응답이 저장 한도를 초과했습니다.", "parse");
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new AiServiceError("AI 응답이 비어 있습니다.", "parse");
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > maxBytes) {
+        await reader.cancel();
+        throw new AiServiceError("AI 응답이 저장 한도를 초과했습니다.", "parse");
+      }
+      chunks.push(value);
+    }
+    try {
+      const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid response");
+      return parsed as Record<string, any>;
+    } catch {
+      throw new AiServiceError("AI 응답 형식을 읽을 수 없습니다.", "parse");
+    }
+  } catch (e) {
+    if (e instanceof AiServiceError) throw e;
+    throw new AiServiceError(aiErrorMessage("openai"));
+  }
+}
+
+export async function callTool<T>(opts: {
   system: string;
   user: string;
   toolName: string;
@@ -98,58 +168,79 @@ async function callTool<T>(opts: {
   zod: ZodType<T>;
   budget: LlmBudget;
   maxTokens?: number;
+  provider?: AiProvider;
+  maxAttempts?: number;
 }): Promise<LlmResult<T>> {
-  if (!env.anthropicKey || !env.anthropicModel)
-    return { ok: false, kind: "not_configured", error: "Claude API 미연결(ANTHROPIC_API_KEY, ANTHROPIC_MODEL 필요)" };
+  const provider = opts.provider ?? env.aiProvider;
+  const model = provider === "openai" ? env.openaiModel : env.anthropicModel;
+  if (!(provider === "openai" ? env.openaiKey : env.anthropicKey))
+    return { ok: false, kind: "not_configured", error: `${provider === "openai" ? "GPT" : "Claude"} API 미연결: 설정에서 API 키를 입력하세요.` };
   const usage = { inputTokens: 0, outputTokens: 0 };
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: opts.user }];
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let validationFeedback = "";
+  const attempts = Math.min(2, Math.max(1, opts.maxAttempts ?? 2));
+  for (let attempt = 0; attempt < attempts; attempt++) {
     if (!opts.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달", usage };
-    let resp: Anthropic.Message;
+    let payload: unknown;
+    let responseModel = model;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let claudeResponse: Anthropic.Message | undefined;
     try {
-      resp = await getClient().messages.create({
-        model: env.anthropicModel,
-        max_tokens: opts.maxTokens ?? 4000,
-        system: opts.system,
-        tools: [{ name: opts.toolName, description: opts.toolDescription, input_schema: opts.inputSchema as Anthropic.Tool.InputSchema }],
-        tool_choice: { type: "tool", name: opts.toolName },
-        messages,
-      });
+      if (provider === "openai") {
+        const resp = await openaiRequest("/responses", {
+          model,
+          store: false,
+          instructions: opts.system,
+          input: opts.user + validationFeedback,
+          max_output_tokens: opts.maxTokens ?? 4000,
+          tools: [{ type: "function", name: opts.toolName, description: opts.toolDescription, parameters: opts.inputSchema, strict: false }],
+          tool_choice: { type: "function", name: opts.toolName },
+          parallel_tool_calls: false,
+        });
+        responseModel = typeof resp.model === "string" ? resp.model : model;
+        inputTokens = Number(resp.usage?.input_tokens) || 0;
+        outputTokens = Number(resp.usage?.output_tokens) || 0;
+        const block = Array.isArray(resp.output) ? resp.output.find((b: any) => b.type === "function_call" && b.name === opts.toolName) : null;
+        if (resp.status !== "incomplete" && block && typeof block.arguments === "string") {
+          try { payload = JSON.parse(block.arguments); } catch { /* schema error below */ }
+        }
+      } else {
+        claudeResponse = await getClient().messages.create({
+          model,
+          max_tokens: opts.maxTokens ?? 4000,
+          system: opts.system,
+          tools: [{ name: opts.toolName, description: opts.toolDescription, input_schema: opts.inputSchema as Anthropic.Tool.InputSchema }],
+          tool_choice: { type: "tool", name: opts.toolName },
+          messages,
+        });
+        responseModel = claudeResponse.model;
+        inputTokens = claudeResponse.usage.input_tokens;
+        outputTokens = claudeResponse.usage.output_tokens;
+        const block = claudeResponse.content.find((b) => b.type === "tool_use" && b.name === opts.toolName);
+        if (claudeResponse.stop_reason !== "max_tokens" && block?.type === "tool_use") payload = block.input;
+      }
     } catch (e) {
-      const status = (e as { status?: number }).status;
-      const msg =
-        status === 401 ? "Claude API 인증 실패(키 확인)" :
-        status === 404 ? `모델을 찾을 수 없음(ANTHROPIC_MODEL=${env.anthropicModel} 확인)` :
-        status === 429 ? "Claude API 호출 한도 초과" :
-        `Claude API 오류${status ? ` (HTTP ${status})` : ""}`;
-      return { ok: false, kind: "api", error: msg, usage };
+      return { ok: false, kind: e instanceof AiServiceError ? e.kind : "api", error: e instanceof AiServiceError ? e.message : aiErrorMessage(provider, (e as { status?: number }).status), usage };
     }
-    usage.inputTokens += resp.usage.input_tokens;
-    usage.outputTokens += resp.usage.output_tokens;
-    opts.budget.inputTokens += resp.usage.input_tokens;
-    opts.budget.outputTokens += resp.usage.output_tokens;
-    const block = resp.content.find((b) => b.type === "tool_use");
-    const parsed = block && block.type === "tool_use" ? opts.zod.safeParse(block.input) : null;
-    if (parsed?.success) return { ok: true, data: parsed.data, model: resp.model, usage, droppedEvidence: 0 };
-    if (attempt === 0 && block && block.type === "tool_use") {
-      // 한 번만 수정 재시도
-      messages.push({ role: "assistant", content: resp.content });
-      messages.push({
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: block.id,
-            is_error: true,
-            content: `스키마 검증 실패: ${parsed?.error.issues.slice(0, 8).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. 같은 도구로 형식을 고쳐 다시 제출하라.`,
-          },
-        ],
-      });
-      continue;
+    usage.inputTokens += inputTokens;
+    usage.outputTokens += outputTokens;
+    opts.budget.inputTokens += inputTokens;
+    opts.budget.outputTokens += outputTokens;
+    const parsed = opts.zod.safeParse(payload);
+    if (parsed.success) return { ok: true, data: parsed.data, model: responseModel, usage, droppedEvidence: 0 };
+    if (attempt + 1 < attempts) {
+      validationFeedback = `\n이전 응답은 형식 검증에 실패했습니다: ${parsed.error.issues.slice(0, 8).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. 요청한 도구 형식으로 다시 작성하세요.`;
+      if (claudeResponse) {
+        const block = claudeResponse.content.find((b) => b.type === "tool_use");
+        if (block?.type === "tool_use") {
+          messages.push({ role: "assistant", content: claudeResponse.content });
+          messages.push({ role: "user", content: [{ type: "tool_result", tool_use_id: block.id, is_error: true, content: validationFeedback }] });
+        } else messages.push({ role: "user", content: validationFeedback });
+      }
     }
-    return { ok: false, kind: "parse", error: "모델 출력 형식 오류(수정 재시도 후에도 실패)", usage };
   }
-  return { ok: false, kind: "parse", error: "모델 출력 형식 오류", usage };
+  return { ok: false, kind: "parse", error: "AI 출력 형식 오류. 기존 콘텐츠는 유지됩니다.", usage };
 }
 
 /* ───────────── JSON Schema (도구 입력) ───────────── */
@@ -368,3 +459,4 @@ submit_picks 도구를 호출하라.`;
   const picks = r.data.picks.filter((p) => valid.has(p.candidate_id) && !seen.has(p.candidate_id) && seen.add(p.candidate_id)).slice(0, args.picks);
   return { ...r, data: { picks } };
 }
+

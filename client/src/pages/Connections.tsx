@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { Badge, ErrorBox, fmtDate, Loading } from "../ui";
-import type { SecretGroup } from "@shared/secretsCatalog";
+import type { SecretField, SecretGroup } from "@shared/secretsCatalog";
 
 type Status = { key: string; source: "environment" | "screen" | "none" | "unreadable"; updatedAt: string | null; valueLength: number | null; secret: boolean; value: string | null };
 type Resp = { groups: SecretGroup[]; statuses: Status[]; tests: Record<string, { ok: boolean; message: string; at: string }> };
@@ -19,9 +19,9 @@ export function SourceBadge({ s }: { s: Status | undefined }) {
 }
 
 /** 하나의 키 입력칸 — 비밀값은 저장 후 다시 보여주지 않음 */
-export function SecretInput({ k, label, hint, placeholder, status, value, onChange }: { k: string; label: string; hint?: string; placeholder?: string; status: Status | undefined; value: string; onChange: (v: string) => void }) {
+export function SecretInput({ k, label, hint, placeholder, options, secret, status, value, onChange }: { k: string; label: string; hint?: string; placeholder?: string; options?: SecretField["options"]; secret?: boolean; status: Status | undefined; value: string; onChange: (v: string) => void }) {
   const qc = useQueryClient();
-  const del = useMutation({ mutationFn: () => api(`/secrets/${k}`, { method: "DELETE" }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["secrets"] }); qc.invalidateQueries({ queryKey: ["status"] }); } });
+  const del = useMutation({ mutationFn: () => api(`/secrets/${k}`, { method: "DELETE" }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["secrets"] }); qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] }); } });
   const envOwned = status?.source === "environment";
   const has = status && status.source !== "none";
   return (
@@ -37,16 +37,20 @@ export function SecretInput({ k, label, hint, placeholder, status, value, onChan
         <p className="small muted" style={{ margin: 0 }}>Render(또는 GitHub)에 직접 넣은 값이 우선 적용됩니다. 화면에서 관리하려면 Render의 Environment에서 이 항목을 지우세요.</p>
       ) : (
         <div className="row">
-          <input
+          {options ? (
+            <select id={`sec-${k}`} value={value || status?.value || "auto"} onChange={(e) => onChange(e.target.value)} style={{ flex: "1 1 220px" }}>
+              {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          ) : <input
             id={`sec-${k}`}
-            type={status?.secret ? "password" : "text"}
+            type={(secret ?? status?.secret) ? "password" : "text"}
             autoComplete="off"
             spellCheck={false}
             style={{ flex: "1 1 220px", width: "auto" }}
             placeholder={has && status?.secret ? "저장됨 — 바꾸려면 새 값을 붙여 넣으세요" : placeholder ?? (status?.value ? "" : "값을 붙여 넣으세요")}
             value={value}
             onChange={(e) => onChange(e.target.value)}
-          />
+          />}
           {has && status?.source !== "environment" && (
             <button type="button" className="btn sm danger" onClick={() => confirm(`${label} 값을 지울까요?`) && del.mutate()} disabled={del.isPending}>
               지우기
@@ -71,7 +75,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
     onSuccess: () => {
       setVals({});
       qc.invalidateQueries({ queryKey: ["secrets"] });
-      qc.invalidateQueries({ queryKey: ["status"] });
+      qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] });
     },
   });
   const test = useMutation({
@@ -92,7 +96,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
       </div>
       <p className="small muted" style={{ margin: 0 }}>{g.description}</p>
       {g.fields.map((f) => (
-        <SecretInput key={f.key} k={f.key} label={f.label} hint={f.hint} placeholder={f.placeholder} status={st(f.key)} value={vals[f.key] ?? ""} onChange={(v) => setVals({ ...vals, [f.key]: v })} />
+        <SecretInput key={f.key} k={f.key} label={f.label} hint={f.hint} placeholder={f.placeholder} options={f.options} secret={f.secret} status={st(f.key)} value={vals[f.key] ?? ""} onChange={(v) => setVals({ ...vals, [f.key]: v })} />
       ))}
       <div className="row">
         <button className="btn primary" disabled={!changed.length || save.isPending}>
@@ -105,7 +109,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
         )}
       </div>
       {save.error && <ErrorBox error={save.error} />}
-      {save.isSuccess && <div className="notice ok small">저장했습니다. 값은 암호화되어 보관되며 바로 적용됩니다.</div>}
+      {save.isSuccess && <div className="notice ok small">저장했습니다.</div>}
       {last && (
         <div className={`notice small ${last.ok ? "ok" : "err"}`} role="status">
           {last.ok ? "연결 확인 성공" : "연결 확인 실패"}: {last.message}
@@ -121,9 +125,9 @@ export function ConnectionsSection() {
   return (
     <section className="stack" style={{ marginBottom: 16 }}>
       <div>
-        <h2 style={{ marginBottom: 4 }}>서비스 연결 (모든 채널 공통)</h2>
+        <h2 style={{ marginBottom: 4 }}>API 설정</h2>
         <p className="small muted" style={{ margin: 0 }}>
-          여기에 입력한 키는 암호화되어 데이터베이스에 저장되고, 웹 화면과 GitHub Actions 워커가 함께 사용합니다. 비밀값은 저장 후 다시 보이지 않습니다.
+          모든 채널에서 공통으로 사용합니다. 키는 암호화해 저장하며 Render 환경변수가 있으면 우선 적용합니다.
         </p>
       </div>
       {q.isLoading ? <Loading lines={2} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : (
@@ -136,3 +140,4 @@ export function ConnectionsSection() {
     </section>
   );
 }
+

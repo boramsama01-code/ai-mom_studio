@@ -16,7 +16,8 @@ services:
       - key: APP_ENV
         value: production
       # 처음 만들 때 입력하는 값은 아래 3개뿐입니다(sync: false는 빈칸으로 둘 수 없음).
-      # 네이버·Claude·텔레그램 등 나머지 키는 배포 후 Render의 Environment 화면에서 추가하세요.
+      # GPT·Claude·네이버 등 API 키는 배포 후 앱의 API 설정에서 입력할 수 있습니다.
+      # 기존 DB·APP_SESSION_SECRET·APP_SECRETS_KEY는 재배포 시 유지하세요.
       - key: APP_DATABASE_URL
         sync: false
       - key: ADMIN_USERNAME
@@ -35,3 +36,4 @@ services:
         value: "false"
       - key: AUTO_PUBLISH
         value: "false"
+

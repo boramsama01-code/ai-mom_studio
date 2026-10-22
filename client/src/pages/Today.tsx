@@ -28,7 +28,7 @@ function SetupChecklist({ status, cid, discovery }: { status: Status; cid: numbe
     discovery
       ? { done: discovery.enabled, title: "자동 화제 발굴 확인", desc: "검색어 없이 뉴스를 훑어 화제를 찾습니다. 탐색 주제를 바꿀 수 있습니다.", href: "/rules" }
       : { done: (rules.data?.estimate.activeRules ?? 0) > 0, title: "검색어 확인", desc: "켜 둔 검색어로만 수집합니다.", href: "/rules" },
-    { done: !!i.anthropic, title: "Claude API 키 입력", desc: "원문에서 일정·대상을 자동 정리합니다(선택이지만 권장).", href: "/settings" },
+    { done: !!i.aiConfigured, title: "GPT 또는 Claude API 키 입력", desc: "원문에서 일정·대상을 자동 정리합니다(선택이지만 권장).", href: "/settings" },
     { done: status.workerConnected, title: "자동 수집 예약 연결(선택)", desc: "'지금 수집'은 바로 됩니다. 매일 정해진 시각에 자동으로 수집·게시하려면 GitHub Actions 연결이 필요합니다(README 7단계).", href: "/runs" },
     { done: !!i.telegramReview, title: "텔레그램 검토 알림(선택)", desc: "새 자료가 모이면 휴대폰으로 알려줍니다.", href: "/settings" },
     { done: (dests.data?.items ?? []).some((d) => d.enabled && d.connection.ready), title: "게시 목적지 연결(선택)", desc: "텔레그램 채널·인스타그램 계정.", href: "/settings" },
@@ -198,7 +198,7 @@ export function TodayPage() {
                     <div className="small muted">
                       화제 발굴: 기사 {today.data.lastRun.counts.discoveryArticles}건 훑음 · 화제 후보 {today.data.lastRun.counts.discoveryHot ?? 0}개 · 선정 {today.data.lastRun.counts.discoveryPicked ?? 0}건
                       {today.data.lastRun.counts.drafted !== undefined && ` · 초안 ${today.data.lastRun.counts.drafted}건`}
-                      {!!today.data.lastRun.counts.draftSkippedNoClaude && " · 초안은 Claude 연결 후 자동 생성"}
+                      {!!today.data.lastRun.counts.draftSkippedNoClaude && " · 초안은 AI 연결 후 자동 생성"}
                     </div>
                   )}
                   {today.data.lastRun.errors.length > 0 && (
@@ -237,3 +237,4 @@ function Stat({ label, value, href, hint }: { label: string; value: number; href
     </GuardedLink>
   );
 }
+

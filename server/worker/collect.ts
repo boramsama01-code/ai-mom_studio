@@ -208,10 +208,10 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     }
   }
 
-  /* 5) 구조화 추출 — 공고 채널 + Claude 설정 시 */
+  /* 5) 구조화 추출 — 공고 채널 + AI 설정 시 */
   if (channel.contentType === "notice" && fetchedOk.length) {
-    if (!env.anthropicKey || !env.anthropicModel) {
-      errors.push({ scope: "llm", message: "Claude API 미연결 — 구조화 추출 건너뜀(수집함에서 수동 편집 가능)" });
+    if (!env.aiConfigured) {
+      errors.push({ scope: "llm", message: "AI API 미연결 — 구조화 추출 건너뜀(수집함에서 수동 편집 가능)" });
     } else {
       for (const itemId of fetchedOk) {
         const r = await extractForItem(db, itemId, llmBudget, now, officials);
@@ -229,16 +229,16 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     }
   }
 
-  /* 5-2) 발굴한 화제로 대화 초안 자동 생성(Claude 연결 + 채널 설정이 켜져 있을 때) — 생성돼도 검토 대기 */
+  /* 5-2) 발굴한 화제로 대화 초안 자동 생성(AI 연결 + 채널 설정이 켜져 있을 때) — 생성돼도 검토 대기 */
   if (disc?.settings.autoDraft && disc.itemIds.length) {
-    if (!env.anthropicKey || !env.anthropicModel) {
+    if (!env.aiConfigured) {
       // 오류가 아니라 안내 — 화제는 저장됐고 초안만 건너뜀
       counts.draftSkippedNoClaude = disc.itemIds.length;
     } else {
       counts.drafted = 0;
       for (const itemId of disc.itemIds) {
         if (llmBudget.used >= llmBudget.limit) {
-          errors.push({ scope: "llm", message: "Claude 호출 한도 도달 — 남은 화제는 초안 없이 저장" });
+          errors.push({ scope: "llm", message: "AI 호출 한도 도달 — 남은 화제는 초안 없이 저장" });
           break;
         }
         const r = await generateDialogueDraft(db, itemId, now);
@@ -470,3 +470,4 @@ async function fetchDoc(db: DB, docId: number, fetcher: typeof fetchAndExtract, 
     .where(eq(sourceDocuments.id, doc.id));
   return { ok: true };
 }
+

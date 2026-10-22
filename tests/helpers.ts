@@ -19,6 +19,10 @@ export function setTestEnv() {
   process.env.NAVER_CLIENT_ID = "test-id";
   process.env.NAVER_CLIENT_SECRET = "test-secret";
   delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  delete process.env.AI_PROVIDER;
+  delete process.env.OPENAI_MODEL;
+  delete process.env.OPENAI_IMAGE_MODEL;
   delete process.env.TELEGRAM_REVIEW_CHAT_ID;
 }
 
@@ -42,3 +46,4 @@ export async function login(app: import("express").Express) {
 export function naverResponse(items: Array<Record<string, string>>) {
   return new Response(JSON.stringify({ total: items.length, start: 1, display: items.length, items }), { status: 200, headers: { "content-type": "application/json" } });
 }
+

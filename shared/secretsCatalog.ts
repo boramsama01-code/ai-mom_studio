@@ -2,10 +2,31 @@
  * 화면에서 입력할 수 있는 연결 키 목록 (클라이언트/서버 공용)
  * secret=true 인 값은 저장 후 다시 보여주지 않는다.
  */
-export type SecretField = { key: string; label: string; secret: boolean; hint?: string; placeholder?: string };
+export type SecretField = { key: string; label: string; secret: boolean; hint?: string; placeholder?: string; options?: { value: string; label: string }[] };
 export type SecretGroup = { id: string; title: string; description: string; docs?: string; fields: SecretField[]; testable: boolean };
 
 export const SECRET_GROUPS: SecretGroup[] = [
+  {
+    id: "ai",
+    title: "AI 기본 설정",
+    description: "글은 선택한 AI로, 그림은 OpenAI로 만듭니다. 다른 AI 비교는 콘텐츠에서 직접 선택할 때만 실행됩니다.",
+    testable: false,
+    fields: [
+      { key: "AI_PROVIDER", label: "기본 글쓰기 AI", secret: false, hint: "자동은 GPT 키가 있으면 GPT, Claude 키만 있으면 Claude를 사용합니다.", options: [{ value: "auto", label: "자동 (GPT 우선)" }, { value: "openai", label: "GPT" }, { value: "anthropic", label: "Claude" }] },
+    ],
+  },
+  {
+    id: "openai",
+    title: "GPT · 이미지 생성",
+    description: "ChatGPT 구독과 별도인 API 키입니다. 생성할 때 API 사용료가 발생합니다. 모델을 비워 두면 아래 기본 모델을 사용합니다.",
+    docs: "https://platform.openai.com/api-keys",
+    testable: true,
+    fields: [
+      { key: "OPENAI_API_KEY", label: "API 키", secret: true, placeholder: "sk-..." },
+      { key: "OPENAI_MODEL", label: "글 모델", secret: false, placeholder: "gpt-6.1-sol", hint: "기본값: gpt-6.1-sol" },
+      { key: "OPENAI_IMAGE_MODEL", label: "이미지 모델", secret: false, placeholder: "gpt-image-2.5-sunburst", hint: "기본값: gpt-image-2.5-sunburst" },
+    ],
+  },
   {
     id: "naver",
     title: "네이버 검색 API",
@@ -19,13 +40,13 @@ export const SECRET_GROUPS: SecretGroup[] = [
   },
   {
     id: "anthropic",
-    title: "Claude API",
-    description: "공고 구조화 추출과 과학·시사 초안에 사용합니다. 사용량만큼 요금이 나옵니다.",
+    title: "Claude (선택)",
+    description: "다른 글 초안을 비교하거나 기본 글쓰기 AI로 선택할 때 사용합니다. 별도 API 사용료가 발생합니다.",
     docs: "https://console.anthropic.com/settings/keys",
     testable: true,
     fields: [
       { key: "ANTHROPIC_API_KEY", label: "API 키", secret: true, placeholder: "sk-ant-..." },
-      { key: "ANTHROPIC_MODEL", label: "모델 ID", secret: false, hint: "Claude 문서의 모델 목록에 있는 ID를 그대로 입력" },
+      { key: "ANTHROPIC_MODEL", label: "모델 ID", secret: false, placeholder: "claude-sonnet-5-5", hint: "기본값: claude-sonnet-5-5" },
     ],
   },
   {
@@ -88,3 +109,4 @@ export function isSecretKey(key: string): boolean {
   for (const g of SECRET_GROUPS) for (const f of g.fields) if (f.key === key) return f.secret;
   return destinationKeyIsSecret(key);
 }
+

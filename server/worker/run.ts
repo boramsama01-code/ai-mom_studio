@@ -12,6 +12,7 @@ import { env } from "../env";
 import { loadStoredSecrets } from "../secretStore";
 import { getSetting } from "../seed";
 import { channelDiscovery } from "./discovery";
+import { processStudioJob } from "./studio";
 
 async function startRun(db: DB, workerId: string, command: string) {
   const [r] = await db.insert(workerRuns).values({ workerId, command }).returning();
@@ -51,12 +52,14 @@ export async function jobsOnce(opts: { maxMs?: number; types?: string[] } = {}) 
   let processed = 0, failed = 0;
   const notes: string[] = recovered ? [`lease 만료 복구 ${recovered}건`] : [];
   while (Date.now() < deadline) {
-    const job = await claimJob(db, workerId, opts.types ?? ["collect", "publish"]);
+    const job = await claimJob(db, workerId, opts.types ?? ["collect", "publish", "studio_generate"]);
     if (!job) break;
     processed++;
     try {
       if (job.type === "collect") {
         if (!(await processCollectJob(db, job, workerId))) failed++;
+      } else if (job.type === "studio_generate") {
+        if (!(await processStudioJob(db, job, workerId))) failed++;
       } else if (job.type === "publish") {
         const s = await publishDue(db, {});
         await completeJob(db, job.id, workerId, s as unknown as Record<string, unknown>);
@@ -116,3 +119,4 @@ export async function publishOnce() {
   await endRun(db, runId, s.failed || s.unknown ? "partial" : "ok", s.processed, s.failed, [...s.notes, JSON.stringify(s)].join("\n"));
   return s;
 }
+

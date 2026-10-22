@@ -13,6 +13,7 @@ const INTEG: Array<[string, string, string]> = [
   ["database", "데이터베이스", "APP_DATABASE_URL"],
   ["auth", "운영자 인증", "ADMIN_USERNAME, ADMIN_PASSWORD_HASH, APP_SESSION_SECRET"],
   ["naver", "네이버 검색 API", "NAVER_CLIENT_ID, NAVER_CLIENT_SECRET"],
+  ["openai", "GPT · 이미지 생성", "OPENAI_API_KEY"],
   ["anthropic", "Claude API", "ANTHROPIC_API_KEY, ANTHROPIC_MODEL"],
   ["cloudinary", "Cloudinary(이미지 공개 URL)", "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET"],
   ["telegramBot", "텔레그램 봇", "TELEGRAM_BOT_TOKEN"],
@@ -155,10 +156,10 @@ function ChannelForm({ ch }: { ch: Channel }) {
           {b("resultsPerRun", "결과 수", 500)}
           {b("fetchTargetsPerRun", "원문 확보 대상", 100)}
           {b("fetchCallsPerRun", "원문 호출", 200)}
-          {b("llmCallsPerRun", "Claude 호출", 100)}
+          {b("llmCallsPerRun", "AI 호출", 100)}
           {b("dailyPublishLimit", "하루 게시 한도", 25)}
         </div>
-        <p className="small muted">Claude 비용은 실제 토큰 사용량 × 아래 단가로 계산한 추정치입니다(단가는 직접 입력).</p>
+        <p className="small muted">AI 비용은 실제 토큰 사용량 × 아래 단가로 계산한 추정치입니다(단가는 직접 입력).</p>
         <div className="grid grid-2">
           <label className="field">
             입력 단가 (USD / 100만 토큰)
@@ -273,3 +274,4 @@ function DestinationKeys({ d }: { d: DestView }) {
     </form>
   );
 }
+

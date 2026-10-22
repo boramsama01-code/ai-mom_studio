@@ -10,7 +10,7 @@ import { actorOf } from "../auth";
 import { audit } from "../audit";
 import { SECRET_GROUPS, isAllowedSecretKey, isSecretKey } from "../../shared/secretsCatalog";
 import { deleteSecret, saveSecret, secretStatuses, SecretKeyMissing } from "../secretStore";
-import { testAnthropic, testCloudinary, testInstagram, testNaver, testTelegram, type TestResult } from "../services/connectionTest";
+import { testOpenai, testAnthropic, testCloudinary, testInstagram, testNaver, testTelegram, type TestResult } from "../services/connectionTest";
 
 export const secretRoutes = Router();
 
@@ -52,6 +52,8 @@ secretRoutes.put(
     const key = String(req.params.key);
     if (!isAllowedSecretKey(key, await slugs())) throw new HttpError(400, "입력할 수 없는 항목입니다.");
     const { value } = parse(putSchema, req.body);
+    if (key === "AI_PROVIDER" && !["auto", "openai", "anthropic"].includes(value)) throw new HttpError(400, "AI는 auto, openai, anthropic 중에서 선택하세요.");
+    if (["OPENAI_MODEL", "OPENAI_IMAGE_MODEL", "ANTHROPIC_MODEL"].includes(key) && !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,119}$/.test(value)) throw new HttpError(400, "모델 ID 형식이 올바르지 않습니다.");
     if (/[\r\n]/.test(value)) throw new HttpError(400, "값에 줄바꿈이 들어 있습니다. 한 줄로 붙여 넣으세요.");
     try {
       await saveSecret(getDb(), key, value, actorOf(req));
@@ -87,6 +89,7 @@ secretRoutes.post(
     const service = String(req.params.service);
     let r: TestResult;
     if (service === "naver") r = await testNaver();
+    else if (service === "openai") r = await testOpenai();
     else if (service === "anthropic") r = await testAnthropic();
     else if (service === "telegram") r = await testTelegram();
     else if (service === "cloudinary") r = await testCloudinary();
@@ -104,4 +107,5 @@ secretRoutes.post(
     res.json(r);
   }),
 );
+
 
