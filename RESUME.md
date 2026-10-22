@@ -2,7 +2,18 @@
 
 갱신: 2026-10-22 (KST). 긴 대화 전체 대신 이 문서와 GitHub·Render의 현재 상태부터 대조합니다.
 
-## 최신 상태
+## 최신 상태 · 개인 전용 링크
+- 사용자 요청에 따라 아이디·비밀번호 입력 없이 전용 링크로 접속하는 기능을 배포했습니다. 일반 주소만으로 운영 데이터가 공개되지는 않습니다.
+- PR #5: https://github.com/boramsama01-code/ai-mom_studio/pull/5
+- 운영 코드 커밋: `4c2bbaf99ec386939e1cd4eeef61c0b5ce3abbd6`, Render 배포 `dep-dbcnl8jm8hqs73ah6rug` (2026-10-22 11:56 KST live).
+- CI `39713040636`, job `119608608914`: PostgreSQL 16에서 17개 파일·125개 테스트, 타입 검사, 빌드 통과.
+- 실제 운영 확인: 전용 링크 교환 200 → 운영자 세션·Studio 카드 7개 조회 200. 잘못된 링크 401, 비로그인 조회 401, 로그아웃 후 조회 401. 업무 데이터 변경·유료 생성은 하지 않았습니다.
+- 운영 쿠키의 Secure·HttpOnly·SameSite=Lax와 30일 유지 확인. 원본 토큰은 URL fragment에서 읽고 요청 전에 주소창에서 지우며 브라우저 저장소에는 남기지 않습니다.
+- 기존 Render 환경변수를 보존하고 `APP_PRIVATE_LINK_SHA256` 하나만 추가했습니다. 원본 토큰과 전용 링크를 GitHub 코드·문서·로그에 넣지 않습니다. 링크는 사용자에게만 전달합니다.
+- 검증값 교체·제거 후 재배포하면 이전 링크와 해당 링크로 만든 세션이 무효화됩니다. 기존 비밀번호 로그인은 복구용으로 유지합니다.
+- 서버에서 기존 연결 키 7개 로드 및 정상 기동 확인. 실행 기록은 `.git/private-link-task.json`, 운영 검증 결과는 `.git/private-link-verification.json`에 있습니다.
+
+## Studio 통합 기록
 - 사용자가 준비한 코드·캐릭터·웹툰 예시 원본의 비공개 저장소 업로드 및 DB 테스트 통과 후 기존 Render 배포를 명시적으로 승인했습니다. 과거 자동 승인 거부는 이후 해소됐습니다.
 - PR #4 병합 완료: https://github.com/boramsama01-code/ai-mom_studio/pull/4
 - 검증한 PR 커밋: `a5b98e484e8655ccdb499e016f85a35c3e6f599d`.
