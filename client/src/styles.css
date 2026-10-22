@@ -355,3 +355,14 @@ fieldset legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
 @media(max-width:700px) { .channel-directory { grid-template-columns:1fr; } .channel-card { min-height:112px; padding:20px; } .channel-editor { padding:20px; } .settings-tabs { gap:22px; } }
 
 .channel-form-fields { border:0; padding:0; margin:0; min-width:0; }
+
+.channel-sort-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:10px; }
+.channel-sort-row { display:flex; align-items:center; gap:16px; border:1px solid var(--border); background:var(--surface); border-radius:12px; padding:16px 20px; }
+.channel-sort-row.dragging { opacity:.4; }
+.channel-sort-row strong { overflow-wrap:anywhere; min-width:0; }
+.sort-grip { cursor:grab; color:var(--muted); font-size:22px; }
+.sort-number { color:var(--muted); font-size:12px; width:16px; text-align:center; }
+.channel-sort-controls { margin-left:auto; display:flex; gap:8px; flex-shrink:0; }
+.channel-sort-controls button { min-width:40px; min-height:40px; }
+.settings-section-head p { margin:8px 0 0; }
+@media(max-width:600px) { .channel-sort-row { gap:10px; padding:14px 12px; } .channel-sort-row .channel-avatar { width:34px; height:34px; font-size:17px; border-radius:9px; } .sort-number { display:none; } }

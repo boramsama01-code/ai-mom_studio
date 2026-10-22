@@ -34,4 +34,33 @@ describe("shared channel directory", () => {
     expect((await agent.post("/api/studio/cards").set(H).send({ title: "잘못된 채널", channel: "missing-channel" })).status).toBe(400);
     for (const key of ["penguin", "highway", "fryday", "news"]) expect((await agent.post("/api/studio/cards").set(H).send({ title: key, channel: key })).status).toBe(201);
   });
+  it("persists order for all clients without rewriting channels, and appends new channels", async () => {
+    const { agent, csrf } = await login(app); const H = { "x-csrf-token": csrf };
+    const before = (await agent.get("/api/channels")).body;
+    const previousIds = before.map((c: { id: number }) => c.id);
+    const ids = [...previousIds].reverse();
+    expect((await request(app).put("/api/channels/order").send({ ids, previousIds })).status).toBe(401);
+    expect((await agent.put("/api/channels/order").send({ ids, previousIds })).status).toBe(403);
+    const saved = await agent.put("/api/channels/order").set(H).send({ ids, previousIds });
+    expect(saved.status).toBe(200);
+    expect(saved.body).toEqual([...before].reverse());
+    await seedIfNeeded(getDb());
+    const other = await login(app);
+    expect((await other.agent.get("/api/channels")).body.map((c: { id: number }) => c.id)).toEqual(ids);
+    const added = await agent.post("/api/channels").set(H).send({ name: "마지막 채널" });
+    expect(added.status).toBe(201);
+    expect((await agent.get("/api/channels")).body.map((c: { id: number }) => c.id)).toEqual([...ids, added.body.id]);
+  });
+  it("rejects incomplete, duplicate and stale orders without losing a saved order", async () => {
+    const { agent, csrf } = await login(app); const H = { "x-csrf-token": csrf };
+    const before = (await agent.get("/api/channels")).body.map((c: { id: number }) => c.id);
+    for (const ids of [before.slice(1), [...before.slice(0, -1), before[0]], [...before.slice(0, -1), 999999]]) {
+      expect((await agent.put("/api/channels/order").set(H).send({ ids, previousIds: before })).status).toBe(400);
+    }
+    const ids = [...before].reverse();
+    expect((await agent.put("/api/channels/order").set(H).send({ ids, previousIds: before })).status).toBe(200);
+    expect((await agent.put("/api/channels/order").set(H).send({ ids: before, previousIds: before })).status).toBe(409);
+    expect((await agent.get("/api/channels")).body.map((c: { id: number }) => c.id)).toEqual(ids);
+  });
+
 });
