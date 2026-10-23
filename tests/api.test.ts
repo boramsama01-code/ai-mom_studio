@@ -263,6 +263,28 @@ describe("카드·승인·게시", () => {
     if (Date.now() > Date.parse("2026-08-28T15:00:00Z")) expect(r.status).toBe(400);
   });
 
+  it("채널을 보관하면 예약된 게시를 전송 직전에 취소", async () => {
+    const { agent, csrf } = await login(app); const H = { "x-csrf-token": csrf };
+    const db = getDb();
+    const dest = await agent.post("/api/channels/1/destinations").set(H).send({ platform: "telegram_channel", label: "보관 중단 테스트" });
+    await agent.patch(`/api/channels/1/destinations/${dest.body.id}`).set(H).send({ version: dest.body.version, enabled: true });
+    const { id, d } = await prepareApproved(agent, csrf, [{ kind: "apply", label: "접수", start: { date: "2099-10-20" }, end: { date: "2099-10-24" }, raw: null }] as never);
+    const approved = await agent.post(`/api/channels/1/items/${id}/approve`).set(H).send({ revisionId: d.current.id, mediaAssetId: d.cards[0].id, captions: d.defaultCaptions, scheduledAt: "2026-01-01T00:00:00+09:00" });
+    expect(approved.status).toBe(201);
+    await db.update(schema.channels).set({ active: false }).where(eq(schema.channels.id, 1));
+    const fetchSpy = vi.fn(); vi.stubGlobal("fetch", fetchSpy);
+    try {
+      await publishDue(db, { now: new Date() });
+      const rows = await db.select().from(schema.deliveries).where(eq(schema.deliveries.approvalId, approved.body.approval.id));
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.every(row => row.status === "cancelled" && row.lastError?.includes("보관된 채널"))).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      await db.update(schema.channels).set({ active: true }).where(eq(schema.channels.id, 1));
+      await db.update(schema.destinations).set({ enabled: false }).where(eq(schema.destinations.id, dest.body.id));
+    }
+  });
+
   it("DRY_RUN: 모든 사전 검사 후 전송 안 함, succeeded로 저장하지 않음 / 수정하면 승인 무효", async () => {
     const { agent, csrf } = await login(app);
     const H = { "x-csrf-token": csrf };
@@ -373,3 +395,4 @@ describe("재시작 후 영속성", () => {
     expect(r.body.items.some((x: { query: string }) => x.query === "서울과학고 모집요강")).toBe(true);
   });
 });
+

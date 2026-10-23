@@ -151,7 +151,7 @@ export async function autofillFromBrandTemplate(
     data[name] = { type: "text", text: v };
     used.push(name);
   }
-  if (!used.length) throw new CanvaError(`템플릿의 글자 필드 이름이 아이맘 필드와 하나도 맞지 않습니다. 템플릿 필드: ${Object.keys(dataset).join(", ") || "(없음)"}`);
+  if (!used.length) throw new CanvaError(`템플릿의 글자 필드 이름이 콘텐츠 항목과 하나도 맞지 않습니다. 템플릿 필드: ${Object.keys(dataset).join(", ") || "(없음)"}`);
   let job = await api<AutofillJob>(db, "/autofills", { method: "POST", body: { type: "create_from_brand_template", brand_template_id: a.brandTemplateId, title: a.title.slice(0, 255), data } }, fetchImpl);
   const deadline = Date.now() + 45_000;
   while (job.job.status === "in_progress" && Date.now() < deadline) {
@@ -184,3 +184,4 @@ export async function exportDesignPng(db: DB, designId: string, a: { pollMs?: nu
   if (job.job.status !== "success" || !job.job.urls?.length) throw new CanvaError(`Canva 내보내기 실패: ${job.job.error?.message ?? job.job.status}`);
   return job.job.urls[0];
 }
+

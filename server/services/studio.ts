@@ -1,6 +1,4 @@
 import crypto from "node:crypto";
-import sharp, { type OverlayOptions } from "sharp";
-import { Resvg } from "@resvg/resvg-js";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
@@ -10,10 +8,10 @@ import { studioContentSchema, type StudioContent, type StudioCard, type StudioJo
 import { conflict, HttpError, parse } from "../routes/util";
 import { enqueueJob } from "../worker/queue";
 import { audit } from "../audit";
-import { loadFonts, wrapText } from "./card";
+import { renderStudioOutput } from "./studioExport";
 import { getSetting } from "../seed";
 
-export const studioCardDto = (row: typeof studioCards.$inferSelect): StudioCard => ({ ...row.content, id: row.id, version: row.version, sourceItemId: row.sourceItemId, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() });
+export const studioCardDto = (row: typeof studioCards.$inferSelect): StudioCard => ({ ...studioContentSchema.parse(row.content), id: row.id, version: row.version, sourceItemId: row.sourceItemId, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() });
 export const studioRevisionDto = (r: typeof studioRevisions.$inferSelect): StudioRevision => ({ ...r, createdAt: r.createdAt.toISOString() });
 export const studioJobDto = (j: typeof jobs.$inferSelect): StudioJob => ({ id: j.id, status: j.status, lastError: j.lastError, result: j.result, createdAt: j.createdAt.toISOString(), finishedAt: j.finishedAt?.toISOString() ?? null });
 
@@ -43,12 +41,13 @@ export async function validateStudioImages(db: DB, cardId: number, content: Stud
   const own = await db.select({ id: studioImages.id }).from(studioImages).where(and(eq(studioImages.cardId, cardId), inArray(studioImages.id, ids)));
   if (own.length !== ids.length) throw new HttpError(400, "이 콘텐츠에 속한 이미지만 사용할 수 있습니다.");
 }
-async function validateChannel(db: DB, key: string) {
-  const [ch] = await db.select({ id: channels.id }).from(channels).where(eq(channels.slug, channelSlug(key)));
+export async function validateStudioChannel(db: DB, key: string) {
+  const [ch] = await db.select({ id: channels.id, active: channels.active }).from(channels).where(eq(channels.slug, channelSlug(key)));
   if (!ch) throw new HttpError(400, key === "highway" ? "Highway 기본 채널을 먼저 추가해 주세요." : "채널을 먼저 추가해 주세요.");
+  if (!ch.active) throw new HttpError(409, "보관된 채널입니다. 채널을 복원한 뒤 새 작업을 시작하세요.");
 }
 export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number) {
-  await validateChannel(db, content.channel);
+  await validateStudioChannel(db, content.channel);
   if (content.panels.some(p => p.imageId)) throw new HttpError(400, "새 콘텐츠에는 기존 이미지 ID를 넣을 수 없습니다.");
   return db.transaction(async tx => {
     if (sourceItemId) {
@@ -59,7 +58,7 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
       // Copy explicit source material as editable context; never infer a new channel mapping.
       if (!content.memo) {
         const [document] = source.primarySourceId ? await tx.select().from(sourceDocuments).where(eq(sourceDocuments.id, source.primarySourceId)) : [];
-        content = { ...content, memo: JSON.stringify({ sourceTitle: source.title, sourceUrl: document?.originalUrl ?? null, facts: source.edited ?? source.extracted ?? {} }, null, 2).slice(0, 12000) };
+        content = { ...content, sourceLabel: content.sourceLabel || (document?.originalUrl ? new URL(document.originalUrl).hostname : ""), memo: JSON.stringify({ sourceTitle: source.title, sourceUrl: document?.originalUrl ?? null, facts: source.edited ?? source.extracted ?? {} }, null, 2).slice(0, 12000) };
       }
     }
     const [card] = await tx.insert(studioCards).values({ content, sourceItemId: sourceItemId ?? null }).onConflictDoNothing().returning();
@@ -77,7 +76,7 @@ export async function saveStudioCard(db: DB, cardId: number, version: number, pa
   return db.transaction(async tx => {
     const current = await loadStudioCard(tx as unknown as DB, cardId);
     const content = parse(studioContentSchema, { ...current.content, ...patch });
-    if (patch.channel && patch.channel !== current.content.channel) await validateChannel(tx as unknown as DB, content.channel);
+    if (patch.channel && patch.channel !== current.content.channel) await validateStudioChannel(tx as unknown as DB, content.channel);
     await validateStudioImages(tx as unknown as DB, cardId, content);
     const [row] = await tx.update(studioCards).set({ content, version: version + 1, updatedAt: new Date() }).where(and(eq(studioCards.id, cardId), eq(studioCards.version, version))).returning();
     if (!row) conflict(studioCardDto(current));
@@ -99,6 +98,7 @@ export async function queueStudioGeneration(db: DB, cardId: number, input: { ver
   const inputHash = crypto.createHash("sha256").update(JSON.stringify({ cardId, ...input })).digest("hex");
   return db.transaction(async tx => {
     const card = await loadStudioCard(tx as unknown as DB, cardId);
+    await validateStudioChannel(tx as unknown as DB, card.content.channel);
     const reserved = await tx.insert(studioRequests).values({ requestId: input.requestId, cardId, inputHash }).onConflictDoNothing().returning();
     if (!reserved.length) {
       const [existing] = await tx.select().from(studioRequests).where(eq(studioRequests.requestId, input.requestId));
@@ -131,7 +131,7 @@ export const studioImportSchema = z.object({
 export async function importStudioBoard(db: DB, input: z.infer<typeof studioImportSchema>, actor: string) {
   // Validate every card before entering the transaction so a malformed backup imports nothing.
   const rows = input.cards.map(c => ({ source: c, content: parse(studioContentSchema, { title: c.title, channel: c.channel, format: c.format, stage: c.stage, dueDate: c.dueDate, memo: c.memo, imagePath: c.imagePath ?? "", characters: c.channel === "highway" ? ["pempem"] : c.channel === "news" ? ["pengpeng"] : ["penguin"] }) }));
-  for (const key of new Set(rows.map(r => r.content.channel))) await validateChannel(db, key);
+  for (const key of new Set(rows.map(r => r.content.channel))) await validateStudioChannel(db, key);
   return db.transaction(async tx => {
     let imported = 0;
     for (const { source, content } of rows) {
@@ -158,28 +158,7 @@ export async function importStudioBoard(db: DB, input: z.infer<typeof studioImpo
 
 /** Same saved images plus editable dialogue, rendered locally without another paid AI call. */
 export async function exportStudioComic(db: DB, cardId: number) {
-  const card = await loadStudioCard(db, cardId);
-  if (card.content.panels.some(p => !p.imageId)) throw new HttpError(400, "네 컷의 그림을 모두 만든 뒤 다운로드하세요.");
-  const fonts = loadFonts();
-  const titleLines = wrapText(fonts.bold, card.content.title, 30, 1024);
-  if (titleLines.length > 2) throw new HttpError(400, "다운로드용 제목이 너무 깁니다. 두 줄 이내로 줄여 주세요.");
-  const elements: string[] = [];
-  titleLines.forEach((line, i) => elements.push(`<path d="${fonts.bold.getPath(line, 28, 42 + i * 36, 30).toPathData(2)}" fill="#142b36"/>`));
-  const overlays: OverlayOptions[] = [];
-  for (const [index, panel] of card.content.panels.entries()) {
-    const [image] = await db.select().from(studioImages).where(and(eq(studioImages.id, panel.imageId!), eq(studioImages.cardId, cardId)));
-    if (!image) throw new HttpError(400, `${index + 1}컷의 그림을 찾을 수 없습니다.`);
-    const x = index % 2 === 0 ? 28 : 552;
-    const y = index < 2 ? 106 : 720;
-    const lines = wrapText(fonts.regular, panel.dialogue, 24, 484);
-    if (lines.length > 3) throw new HttpError(400, `${index + 1}컷 대사가 너무 깁니다. 다운로드용 대사를 세 줄 이내로 줄여 주세요.`);
-    const png = await sharp(image.bytes, { limitInputPixels: 40_000_000 }).resize(500, 500, { fit: "contain", background: "white" }).png().toBuffer();
-    overlays.push({ input: png, left: x, top: y });
-    elements.push(`<rect x="${x}" y="${y}" width="500" height="500" rx="10" fill="none" stroke="#d8e0e3" stroke-width="2"/>`);
-    lines.forEach((line, i) => elements.push(`<path d="${fonts.regular.getPath(line, x + 8, y + 532 + i * 30, 24).toPathData(2)}" fill="#142b36"/>`));
-  }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350">${elements.join("")}</svg>`;
-  overlays.push({ input: new Resvg(svg, { font: { loadSystemFonts: false } }).render().asPng(), left: 0, top: 0 });
-  const bytes = await sharp({ create: { width: 1080, height: 1350, channels: 3, background: "white" } }).composite(overlays).png().toBuffer();
-  return { bytes, version: card.version };
+  const output = await renderStudioOutput(db, cardId);
+  if (output.content.format !== "웹툰") throw new HttpError(400, "웹툰 형식을 선택한 뒤 PNG로 내려받으세요.");
+  return { bytes: await output.page(0), version: output.version };
 }

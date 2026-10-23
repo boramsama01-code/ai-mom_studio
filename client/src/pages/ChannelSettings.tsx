@@ -6,6 +6,7 @@ import { Badge, Empty, ErrorBox, Loading } from "../ui";
 import type { Channel, ChannelBudget, Destination } from "@shared/schema";
 import { ChannelDirectory } from "./ChannelDirectory";
 import { ConnectionsSection, SecretInput, useSecrets } from "./Connections";
+import { StudioImport } from "./Studio";
 
 type Status = { integrations: Record<string, boolean | Record<string, boolean>>; globalStop: boolean; workerConnected: boolean };
 type DestView = Destination & { connection: { missing: string[]; invalid: string[]; ready: boolean } };
@@ -23,9 +24,9 @@ const INTEG: Array<[string, string, string]> = [
 ];
 
 export function ChannelSettingsPage() {
-  const { channels } = useChannel();
+  const { allChannels: channels } = useChannel();
   const guard = useDirtyGuard();
-  const [tab, setTab] = useState("channels");
+  const [tab, setTab] = useState(() => new URLSearchParams(location.search).get("tab") === "connections" ? "connections" : "channels");
   const [editing, setEditing] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const current = channels.find(c => c.id === editing);
@@ -37,16 +38,16 @@ export function ChannelSettingsPage() {
     <nav className="settings-tabs" aria-label="설정 메뉴">{[["channels", "내 채널"], ["connections", "서비스 연결"], ["operations", "운영 설정"]].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} onClick={() => leave(() => { setTab(key); setEditing(null); setCreating(false); })}>{label}</button>)}</nav>
     {tab === "channels" && <>
       {(creating || current) && <button className="btn ghost settings-back" onClick={() => leave(() => { setEditing(null); setCreating(false); })}>← 내 채널 목록</button>}
-      {creating ? <NewChannel onCreated={ch => { setCreating(false); setEditing(ch.id); }} /> : current ? <><ChannelForm key={current.id} ch={current} /><details className="panel settings-details"><summary>게시 계정 연결</summary><Destinations cid={current.id} /></details></> : <>
+      {creating ? <NewChannel onCreated={ch => { setCreating(false); setEditing(ch.id); }} /> : current ? <><ChannelForm key={current.id} ch={current} onArchived={() => setEditing(null)} /><details className="panel settings-details"><summary>수집 콘텐츠의 게시 계정</summary><p className="small muted">수집함 → 콘텐츠 초안 → 발행함에서 사용합니다. Studio 제작물은 편집 화면에서 내려받아 직접 게시하세요.</p><Destinations cid={current.id} /></details></> : <>
         <ChannelDirectory channels={channels} onEdit={id => leave(() => setEditing(id))} onCreate={() => leave(() => setCreating(true))} />
       </>}
     </>}
     {tab === "connections" && <ConnectionsSection />}
-    {tab === "operations" && <section className="panel stack"><h2>운영 상태</h2>{status.isLoading ? <Loading lines={2} /> : status.error ? <ErrorBox error={status.error} /> : status.data && <>
+    {tab === "operations" && <><section className="panel stack"><h2>운영 상태</h2>{status.isLoading ? <Loading lines={2} /> : status.error ? <ErrorBox error={status.error} /> : status.data && <>
       <p className="small muted">{status.data.workerConnected ? "최근 자동 작업 실행 기록이 있습니다." : "최근 6시간 자동 작업 실행 기록이 없습니다."}</p>
       <Flags flags={status.data.integrations.flags as Record<string, boolean>} /><GlobalStop on={status.data.globalStop} />
       <details className="settings-details"><summary>연결 진단</summary><table className="simple"><tbody>{INTEG.map(([k, label]) => <tr key={k}><td>{label}</td><td><Badge kind={status.data!.integrations[k] ? "ok" : "warn"}>{status.data!.integrations[k] ? "설정됨" : "미설정"}</Badge></td></tr>)}</tbody></table></details>
-    </>}</section>}
+    </>}</section><StudioImport /></>}
   </div>;
 }
 
@@ -96,16 +97,22 @@ function GlobalStop({ on }: { on: boolean }) {
   );
 }
 
-function ChannelForm({ ch }: { ch: Channel }) {
+function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
   const init = { name: ch.name, description: ch.description, audience: ch.audience, accentColor: ch.accentColor, active: ch.active, editorialGuide: ch.editorialGuide, budget: ch.budget };
   const [f, setF] = useState(init);
+  const [confirmArchive, setConfirmArchive] = useState(false);
   const dirty = JSON.stringify(f) !== JSON.stringify(init);
   const m = useMutation({
     mutationFn: () => api<Channel>(`/channels/${ch.id}`, { method: "PATCH", body: { version: ch.version, ...f } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["channels"] }),
   });
+  const archive = useMutation({ mutationFn: () => api(`/channels/${ch.id}`, { method: "PATCH", body: { version: ch.version, active: false } }), onSuccess: async () => {
+    guard.setDirty("channel-form", false);
+    await Promise.all([qc.invalidateQueries({ queryKey: ["channels"] }), qc.invalidateQueries({ queryKey: ["studio"] })]);
+    onArchived();
+  } });
   useEffect(() => {
     guard.setDirty("channel-form", dirty, async () => {
       try {
@@ -125,7 +132,7 @@ function ChannelForm({ ch }: { ch: Channel }) {
   );
   return (
     <form className="panel stack channel-editor" onSubmit={(e) => { e.preventDefault(); m.mutate(); }}>
-      <h2>{ch.name}</h2><fieldset className="channel-form-fields stack" disabled={m.isPending}>
+      <h2>{ch.name}</h2><fieldset className="channel-form-fields stack" disabled={m.isPending || archive.isPending}>
       <div className="grid grid-2">
         <label className="field">
           채널명
@@ -145,9 +152,7 @@ function ChannelForm({ ch }: { ch: Channel }) {
           강조색
           <input type="color" value={f.accentColor} onChange={(e) => setF({ ...f, accentColor: e.target.value })} pattern="#[0-9A-Fa-f]{6}" />
         </label>
-        <label className="check">
-          <input type="checkbox" checked={f.active} onChange={(e) => setF({ ...f, active: e.target.checked })} /> 채널 사용
-        </label>
+        <p className="small muted">{ch.active ? "사용 중인 채널" : "보관된 채널 · 기존 콘텐츠는 보존됩니다"}</p>
       </div>
       <label className="field">
         편집 기준
@@ -181,7 +186,13 @@ function ChannelForm({ ch }: { ch: Channel }) {
         <button type="button" className="btn" disabled={!dirty} onClick={() => setF(init)}>되돌리기</button>
         <button className="btn primary" disabled={!dirty || m.isPending}>저장</button>
       </div>
-    </fieldset></form>
+    </fieldset>
+    {ch.active && <details className="settings-details channel-archive"><summary>채널 보관</summary><p className="small muted">채널 목록과 새 작업에서 숨기고 자동 수집·게시를 중지합니다. 기존 콘텐츠는 그대로 남으며 언제든 복원할 수 있습니다. 이미 실행 중인 요청은 완료될 수 있습니다.</p>
+      {dirty && <p className="small muted">변경사항을 저장하거나 되돌린 뒤 보관하세요.</p>}
+      {confirmArchive ? <div className="row"><span>‘{ch.name}’ 채널을 보관할까요?</span><button type="button" className="btn" onClick={() => setConfirmArchive(false)} disabled={archive.isPending}>취소</button><button type="button" className="btn danger" disabled={dirty || m.isPending || archive.isPending} onClick={() => archive.mutate()}>{archive.isPending ? "보관 중…" : "보관하기"}</button></div> : <button type="button" className="btn" disabled={dirty || m.isPending} onClick={() => setConfirmArchive(true)}>이 채널 보관하기</button>}
+      {archive.error && <ErrorBox error={archive.error} />}
+    </details>}
+    </form>
   );
 }
 

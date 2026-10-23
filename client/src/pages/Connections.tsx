@@ -13,8 +13,8 @@ export function useSecrets() {
 }
 
 export function SourceBadge({ s }: { s: Status | undefined }) {
-  if (!s || s.source === "none") return <Badge kind="warn">미입력</Badge>;
-  if (s.source === "environment") return <Badge kind="ok">Render 환경변수 사용 중</Badge>;
+  if (!s || s.source === "none") return <Badge>아직 입력 안 함</Badge>;
+  if (s.source === "environment") return <Badge>서버에서 관리</Badge>;
   if (s.source === "unreadable") return <Badge kind="err">다시 입력 필요</Badge>;
   return <Badge kind="ok">입력됨{s.updatedAt ? ` · ${fmtDate(s.updatedAt)}` : ""}</Badge>;
 }
@@ -29,13 +29,13 @@ export function SecretInput({ k, label, hint, placeholder, options, secret, stat
     <div className="stack" style={{ gap: 6 }}>
       <div className="row between">
         <label htmlFor={`sec-${k}`} style={{ fontWeight: 600, fontSize: 14 }}>
-          {label} <span className="small muted" style={{ fontWeight: 400 }}>{k}</span>
+          {label}
         </label>
         <SourceBadge s={status} />
       </div>
       {hint && <span className="small muted">{hint}</span>}
       {envOwned ? (
-        <p className="small muted" style={{ margin: 0 }}>Render(또는 GitHub)에 직접 넣은 값이 우선 적용됩니다. 화면에서 관리하려면 Render의 Environment에서 이 항목을 지우세요.</p>
+        <details className="small muted"><summary>서버에서 관리하는 값입니다</summary>Render의 Environment에 등록된 {k} 설정이 우선합니다. 화면에서 관리하려면 서버의 해당 설정을 제거해야 합니다.</details>
       ) : (
         <div className="row">
           {options ? (
@@ -65,7 +65,13 @@ export function SecretInput({ k, label, hint, placeholder, options, secret, stat
   );
 }
 
-type AiStatus = { integrations: { aiProvider: "openai" | "anthropic"; aiConfigured: boolean } };
+type AiStatus = { integrations: { aiProvider: "openai" | "anthropic"; aiConfigured: boolean; openai: boolean } };
+
+function focusKey(key: string, group: string) {
+  const target = document.getElementById(`sec-${key}`) ?? document.getElementById(`connection-${group}`);
+  target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  target?.focus({ preventScroll: true });
+}
 
 function AiProviderPanel({ data }: { data: Resp }) {
   const qc = useQueryClient();
@@ -91,16 +97,16 @@ function AiProviderPanel({ data }: { data: Resp }) {
   }, [changed, selected]);
   return <form className="panel stack" onSubmit={e => { e.preventDefault(); if (changed) save.mutate(); }}>
     <div className="row between"><h3 style={{ margin: 0 }}>글쓰기 AI 선택</h3><Badge kind={status?.source === "unreadable" ? "warn" : ""}>{envOwned ? "서버에서 설정" : status?.source === "unreadable" ? "다시 선택 필요" : status?.source === "screen" ? "저장됨" : "기본값 사용"}</Badge></div>
-    <p className="small muted" style={{ margin: 0 }}>API 키를 입력하는 칸이 아닙니다. 글을 만들 때 기본으로 사용할 AI를 선택하세요.</p>
+    <p className="small muted" style={{ margin: 0 }}>글을 만들 때 사용할 AI를 선택하고 아래에서 키를 등록하세요.</p>
     <label className="field" htmlFor="ai-provider-choice">기본 글쓰기 AI
       <select id="ai-provider-choice" value={selected} disabled={envOwned || save.isPending} onChange={e => setChoice(e.target.value)} aria-describedby="ai-provider-help">
         <option value="auto">자동 선택 · GPT 우선</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude · Anthropic</option>
       </select>
     </label>
     <p id="ai-provider-help" className="small muted" style={{ margin: 0 }}>자동 선택은 GPT 키가 있으면 GPT, Claude 키만 있으면 Claude를 사용합니다. 그림 생성은 OpenAI 키를 사용합니다.</p>
-    {actual.data && <div className="row small" aria-live="polite"><span>현재 적용: <strong>{actual.data.integrations.aiProvider === "anthropic" ? "Claude" : "GPT"}</strong></span><Badge kind={actual.data.integrations.aiConfigured ? "ok" : "warn"}>{actual.data.integrations.aiConfigured ? "API 키 등록됨" : "API 키 등록 필요"}</Badge></div>}
+    {actual.data && <div className="ai-readiness" aria-live="polite"><div><strong>글쓰기 · {actual.data.integrations.aiProvider === "anthropic" ? "Claude" : "GPT"}</strong><Badge kind={actual.data.integrations.aiConfigured ? "ok" : ""}>{actual.data.integrations.aiConfigured ? "키 등록됨" : "키 등록 필요"}</Badge></div><div><strong>그림 · OpenAI</strong><Badge kind={actual.data.integrations.openai ? "ok" : ""}>{actual.data.integrations.openai ? "키 등록됨" : "키 등록 필요"}</Badge></div><small className="muted">키 등록 상태입니다. 실제 연결은 각 서비스에서 확인하세요.</small></div>}
     {actual.error && <ErrorBox error={actual.error} retry={() => actual.refetch()} />}
-    <div className="row small"><a href="#connection-openai">GPT 키 입력으로 ↓</a><a href="#connection-anthropic">Claude 키 입력으로 ↓</a></div>
+    <div className="row"><button type="button" className="btn sm" onClick={() => focusKey("OPENAI_API_KEY", "openai")}>GPT·그림 키 입력</button><button type="button" className="btn sm" onClick={() => focusKey("ANTHROPIC_API_KEY", "anthropic")}>Claude 키 입력</button></div>
     {envOwned ? <p className="small muted" style={{ margin: 0 }}>서버의 AI_PROVIDER 설정이 우선 적용되어 선택이 잠겨 있습니다. 화면에서 변경하려면 Render의 Environment에서 해당 항목을 제거한 뒤 재배포하세요.</p> : <div className="row"><button className="btn primary" disabled={!changed || save.isPending}>{save.isPending ? "저장 중…" : "선택 저장"}</button>{changed && <span className="small muted">저장하면 적용됩니다.</span>}</div>}
     {save.error && <ErrorBox error={save.error} />}
     {save.isSuccess && !changed && <div className="notice ok small" role="status">글쓰기 AI 선택을 저장했습니다.</div>}
@@ -109,6 +115,7 @@ function AiProviderPanel({ data }: { data: Resp }) {
 
 function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
   const qc = useQueryClient();
+  const guard = useDirtyGuard();
   const [vals, setVals] = useState<Record<string, string>>({});
   const changed = Object.entries(vals).filter(([, v]) => v.trim());
   const save = useMutation({
@@ -127,8 +134,14 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
   });
   const last = test.data ?? data.tests[g.id];
   const st = (k: string) => data.statuses.find((s) => s.key === k);
+  useEffect(() => {
+    guard.setDirty(`connection-${g.id}`, changed.length > 0, async () => { try { await save.mutateAsync(); return true; } catch { return false; } });
+    return () => guard.setDirty(`connection-${g.id}`, false);
+  }, [vals, g.id]);
+  const sendsMessage = g.id === "telegram" && !!st("TELEGRAM_REVIEW_CHAT_ID")?.value;
+  const paidTest = g.id === "anthropic";
   return (
-    <form id={`connection-${g.id}`} className="panel stack" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+    <form id={`connection-${g.id}`} tabIndex={-1} className="panel stack" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
       <div className="row between">
         <h3 style={{ margin: 0 }}>{g.title}</h3>
         {g.docs && (
@@ -147,10 +160,13 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
         </button>
         {g.testable && (
           <button type="button" className="btn" onClick={() => test.mutate()} disabled={test.isPending || changed.length > 0} title={changed.length ? "먼저 저장하세요" : undefined}>
-            {test.isPending ? "확인 중…" : "연결 확인"}
+            {test.isPending ? "확인 중…" : sendsMessage ? "확인 메시지 보내기" : paidTest ? "테스트 호출 (유료)" : "연결 확인"}
           </button>
         )}
       </div>
+      {sendsMessage && <p className="small muted">검토 알림 채팅방에 메시지 1건을 보냅니다.</p>}
+      {paidTest && <p className="small muted">짧은 글 생성 요청 1회를 보내며 API 사용료가 발생합니다.</p>}
+      <details className="settings-details small"><summary>고급 · 환경변수 이름</summary><dl>{g.fields.map(f => <div key={f.key}><dt>{f.label}</dt><dd><code>{f.key}</code></dd></div>)}</dl></details>
       {save.error && <ErrorBox error={save.error} />}
       {save.isSuccess && <div className="notice ok small">저장했습니다.</div>}
       {last && (
@@ -170,7 +186,7 @@ export function ConnectionsSection() {
       <div>
         <h2 style={{ marginBottom: 4 }}>서비스 연결</h2>
         <p className="small muted" style={{ margin: 0 }}>
-          모든 채널에서 공통으로 사용합니다. 키는 암호화해 저장하며 Render 환경변수가 있으면 우선 적용합니다.
+          모든 채널에서 함께 사용합니다. 키는 암호화해 저장합니다.
         </p>
       </div>
       {q.isLoading ? <Loading lines={2} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : (

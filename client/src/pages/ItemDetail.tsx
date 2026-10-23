@@ -9,6 +9,7 @@ import { useChannel, useDirtyGuard } from "../state";
 import { Badge, ErrorBox, fmtDate, GuardedLink, Loading, StatusBadge } from "../ui";
 import { cleanPayload, FIELD_LABEL, PayloadEditor } from "./editors";
 import { CONTENT_KIND_LABEL, PUBLISH_LABEL, type ContentKind } from "@shared/domain";
+import { studioKey } from "@shared/channelKeys";
 import type { Approval, ContentItem, ContentRevision, Delivery, SourceDocument } from "@shared/schema";
 
 type Detail = {
@@ -27,13 +28,17 @@ type Detail = {
 const SRC_KIND: Record<string, string> = { naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", official: "공식 게시물", manual: "직접 추가 자료" };
 
 export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
-  const { selected } = useChannel();
+  const { selected, allChannels } = useChannel();
+  const sourceChannel = allChannels.find(ch => ch.id === cid);
   const q = useQuery({ queryKey: ["ch", cid, "item", id], queryFn: () => api<Detail>(`/channels/${cid}/items/${id}`) });
   const [tab, setTab] = useState<"source" | "edit" | "publish" | "history">("edit");
   const [, navigate] = useLocation();
   const guard = useDirtyGuard();
   const transfer = useMutation({
-    mutationFn: () => api<{ id: number }>("/studio/cards", { method: "POST", body: { title: q.data!.item.title, channel: "highway", format: "카드뉴스", stage: "idea", sourceItemId: id } }),
+    mutationFn: () => {
+      if (!sourceChannel?.active) throw new Error("사용 중인 채널을 확인해 주세요.");
+      return api<{ id: number }>("/studio/cards", { method: "POST", body: { title: q.data!.item.title, channel: studioKey(sourceChannel.slug), format: "카드뉴스", stage: "idea", sourceItemId: id } });
+    },
     onSuccess: (card) => navigate(`/studio/${card.id}`),
   });
   if (selected !== "all" && selected !== cid)
@@ -65,7 +70,7 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
             {d.item.excluded && <Badge kind="err">제외됨: {d.item.excludedReason}</Badge>}
           </div>
         </div>
-        {d.item.kind === "notice" && <button className="btn" disabled={transfer.isPending} onClick={() => guard.confirmLeave(() => transfer.mutate())}>{transfer.isPending ? "가져오는 중…" : "Highway 콘텐츠 만들기"}</button>}
+        <button className="btn" disabled={transfer.isPending || !sourceChannel?.active} onClick={() => guard.confirmLeave(() => transfer.mutate())}>{transfer.isPending ? "가져오는 중…" : "제작 보드로 가져오기"}</button>
       </div>
       {transfer.error && <ErrorBox error={transfer.error} />}
       <DiscoveryNote info={d.item.discovery} />
@@ -544,7 +549,7 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
               <div className="ig-preview">
                 <div className="ig-head">
                   <span className="ig-avatar" style={{ background: ch?.accentColor }} aria-hidden />
-                  {ch?.name.replace(/\s+/g, "") ?? "ai-mom"}
+                  {ch?.name.replace(/\s+/g, "") ?? "우주펭귄상회"}
                 </div>
                 <img src={`/api/channels/${cid}/media/${currentCard.id}`} alt="" />
                 <div className="ig-cap">{caps.instagram}</div>

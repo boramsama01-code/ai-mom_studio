@@ -23,6 +23,7 @@ export function useMe() {
 /* ───────────── 채널 선택 ───────────── */
 type ChannelCtx = {
   channels: Channel[];
+  allChannels: Channel[];
   selected: "all" | number;
   current: Channel | null; // '전체'면 null
   select: (v: "all" | number) => void;
@@ -41,7 +42,8 @@ function readStored(): "all" | number | null {
 }
 
 export function ChannelProvider({ children }: { children: ReactNode }) {
-  const { data: channels = [] } = useQuery({ queryKey: ["channels"], queryFn: () => api<Channel[]>("/channels") });
+  const { data: allChannels = [] } = useQuery({ queryKey: ["channels"], queryFn: () => api<Channel[]>("/channels") });
+  const channels = useMemo(() => allChannels.filter(c => c.active), [allChannels]);
   const [stored, setSelected] = useState<"all" | number | null>(readStored);
   const guard = useDirtyGuard();
   const qc = useQueryClient();
@@ -68,7 +70,7 @@ export function ChannelProvider({ children }: { children: ReactNode }) {
     document.documentElement.style.setProperty("--accent", current?.accentColor ?? "#172334");
     document.documentElement.style.setProperty("--accent-weak", hexA(current?.accentColor ?? "#172334", 0.1));
   }, [current]);
-  const value = useMemo(() => ({ channels, selected, current, select }), [channels, selected, current, select]);
+  const value = useMemo(() => ({ channels, allChannels, selected, current, select }), [channels, allChannels, selected, current, select]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

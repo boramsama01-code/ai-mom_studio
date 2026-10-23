@@ -63,4 +63,26 @@ describe("shared channel directory", () => {
     expect((await agent.get("/api/channels")).body.map((c: { id: number }) => c.id)).toEqual(ids);
   });
 
+  it("archives and restores without deleting cards or changing stored order", async () => {
+    const { agent, csrf } = await login(app); const H = { "x-csrf-token": csrf };
+    const created = await agent.post("/api/channels").set(H).send({ name: "보관 테스트" });
+    const ch = created.body;
+    const card = await agent.post("/api/studio/cards").set(H).send({ title: "계속 보존", channel: ch.slug, script: "직접 쓴 원고" });
+    const before = (await agent.get("/api/channels")).body.map((c: { id: number }) => c.id);
+    const archived = await agent.patch(`/api/channels/${ch.id}`).set(H).send({ version: ch.version, active: false });
+    expect(archived.status).toBe(200);
+    await seedIfNeeded(getDb());
+    const listed = (await agent.get("/api/channels")).body;
+    expect(listed.map((c: { id: number }) => c.id)).toEqual(before);
+    expect(listed.find((c: { id: number }) => c.id === ch.id).active).toBe(false);
+    expect((await agent.get(`/api/studio/cards/${card.body.id}`)).body.card.script).toBe("직접 쓴 원고");
+    expect((await agent.post("/api/studio/cards").set(H).send({ title: "차단", channel: ch.slug })).status).toBe(409);
+    const { runCollect } = await import("../server/worker/collect");
+    await expect(runCollect(getDb(), ch.id, { trigger: "cli" })).rejects.toThrow("보관된 채널");
+    expect((await agent.put("/api/channels/order").set(H).send({ ids: [...before].reverse(), previousIds: before })).status).toBe(200);
+    const restored = await agent.patch(`/api/channels/${ch.id}`).set(H).send({ version: archived.body.version, active: true });
+    expect(restored.status).toBe(200);
+    expect((await agent.post("/api/studio/cards").set(H).send({ title: "복원 후 새 작업", channel: ch.slug })).status).toBe(201);
+    expect((await agent.get(`/api/studio/cards/${card.body.id}`)).body.card.channel).toBe(ch.slug);
+  });
 });

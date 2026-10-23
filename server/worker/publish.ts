@@ -236,6 +236,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
     return "skipped" as const;
   };
   // 게시 직전 재검사
+  if (!ch?.active) return block("보관된 채널 — 게시 중단");
   if (ap.status !== "active") return block("승인이 더 이상 유효하지 않음");
   if (item.currentRevisionId !== ap.revisionId) return block("승인 이후 콘텐츠가 수정됨 — 재승인 필요");
   if (!asset || sha256(asset.bytes) !== ap.cardSha256) return block("카드 파일이 승인본과 다름");
@@ -342,3 +343,4 @@ export async function retryDelivery(db: DB, deliveryId: number, actor: string, c
   await audit(db, { actor, action: "retry_delivery", entity: "delivery", entityId: d.id, channelId: d.channelId, detail: { from: d.status, confirmNotPosted } });
   return { ok: true as const };
 }
+
