@@ -6,6 +6,7 @@ import { Badge, Empty, ErrorBox, Loading } from "../ui";
 import type { Channel, ChannelBudget, Destination } from "@shared/schema";
 import { ChannelDirectory } from "./ChannelDirectory";
 import { ConnectionsSection, SecretInput, useSecrets } from "./Connections";
+import { StudioImport } from "./Studio";
 
 type Status = { integrations: Record<string, boolean | Record<string, boolean>>; globalStop: boolean; workerConnected: boolean };
 type DestView = Destination & { connection: { missing: string[]; invalid: string[]; ready: boolean } };
@@ -42,11 +43,11 @@ export function ChannelSettingsPage() {
       </>}
     </>}
     {tab === "connections" && <ConnectionsSection />}
-    {tab === "operations" && <section className="panel stack"><h2>운영 상태</h2>{status.isLoading ? <Loading lines={2} /> : status.error ? <ErrorBox error={status.error} /> : status.data && <>
+    {tab === "operations" && <><section className="panel stack"><h2>운영 상태</h2>{status.isLoading ? <Loading lines={2} /> : status.error ? <ErrorBox error={status.error} /> : status.data && <>
       <p className="small muted">{status.data.workerConnected ? "최근 자동 작업 실행 기록이 있습니다." : "최근 6시간 자동 작업 실행 기록이 없습니다."}</p>
       <Flags flags={status.data.integrations.flags as Record<string, boolean>} /><GlobalStop on={status.data.globalStop} />
       <details className="settings-details"><summary>연결 진단</summary><table className="simple"><tbody>{INTEG.map(([k, label]) => <tr key={k}><td>{label}</td><td><Badge kind={status.data!.integrations[k] ? "ok" : "warn"}>{status.data!.integrations[k] ? "설정됨" : "미설정"}</Badge></td></tr>)}</tbody></table></details>
-    </>}</section>}
+    </>}</section><StudioImport /></>}
   </div>;
 }
 

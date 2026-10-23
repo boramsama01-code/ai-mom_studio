@@ -69,7 +69,7 @@ function StudioBoard() {
     <label className="studio-search"><span className="sr-only">작업 검색</span><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="제목·원고·메모 검색" /></label>
     {q.isLoading ? <Loading lines={3} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : <div className="studio-board">{stages.map((stage) => <section key={stage.id} className={`studio-column stage-${stage.id}`} aria-label={stage.label} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const card = cards.find((c) => String(c.id) === e.dataTransfer.getData("text/studio-card")); if (!archived && card && card.stage !== stage.id && !move.isPending) move.mutate({ card, stage: stage.id }); }}><div className="studio-column-head"><h2>{stage.label}<span>{filtered.filter((c) => c.stage === stage.id).length}</span></h2><button className="studio-add" disabled={archived || !visibleChannels.length} aria-label={`${stage.label} 작업 추가`} onClick={() => newCard(stage.id)}>＋</button></div>{stage.id === "done" && <p className="studio-column-hint">파일 저장 후 직접 게시</p>}<div className="studio-task-list">{filtered.filter((c) => c.stage === stage.id).map((c) => <article key={c.id} className="studio-task" draggable={!move.isPending && !archived} onDragStart={(e) => e.dataTransfer.setData("text/studio-card", String(c.id))}><span className={`studio-channel-tag ${c.channel}`}>{channelName(c.channel)}</span><GuardedLink href={`/studio/${c.id}`} className="studio-task-open">{c.panels?.find((p) => p.imageId)?.imageId ? <img className="studio-task-thumb" src={imageUrl(c.panels.find((p) => p.imageId)!.imageId!)} alt="콘텐츠 미리보기" loading="lazy" /> : c.imagePath ? <img className="studio-task-thumb" src={c.imagePath} alt="이전 웹툰 시안" loading="lazy" /> : null}<h3>{c.title}</h3><p>{c.memo || c.script || "원고와 제작 지시를 작성하세요."}</p></GuardedLink><div className="studio-task-meta"><span>{c.format}</span>{c.dueDate && <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", ".")}</time>}</div><select aria-label={`${c.title} 제작 단계`} value={c.stage} disabled={move.isPending} onChange={(e) => move.mutate({ card: c, stage: e.target.value as Stage })}>{stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select>{stage.id === "done" && <StudioQuickExport card={c} />}</article>)}{!filtered.some((c) => c.stage === stage.id) && <button className="studio-empty-column" disabled={archived || !visibleChannels.length || !!search} onClick={() => newCard(stage.id)}>{search ? "검색 결과 없음" : archived ? "작업 없음" : "＋ 작업 추가"}</button>}</div></section>)}</div>}
     <p className="small muted studio-board-foot">‘완료’는 제작 완료입니다. 이미지 저장 → 캡션 복사 → SNS 앱에서 직접 게시하세요.</p>
-    {q.data && <StudioNotes data={q.data} />}<StudioImport />
+    {q.data && <StudioNotes data={q.data} />}
     {creating && <NewCard channel={filter === "all" || !visibleKeys.has(filter) ? visibleChannels[0]?.id : filter} stage={newStage} onClose={() => setCreating(false)} />}
   </>;
 }
@@ -106,7 +106,7 @@ function StudioNotes({ data }: { data: Board }) {
   return <details className="panel studio-notes"><summary>운영 메모</summary><div className="stack"><textarea disabled={save.isPending} aria-label="운영 메모" rows={5} value={notes} maxLength={20000} onChange={(e) => setNotes(e.target.value)} /><div className="row"><button className="btn sm" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? "저장 중…" : "메모 저장"}</button>{save.isSuccess && !dirty && <span className="small muted">저장됨</span>}</div>{save.error && <ErrorBox error={save.error} />}</div></details>;
 }
 
-function StudioImport() {
+export function StudioImport() {
   const [file, setFile] = useState<File | null>(null);
   const qc = useQueryClient();
   const migrate = useMutation({ mutationFn: async () => {
@@ -170,7 +170,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const busy = save.isPending || generate.isPending || restore.isPending;
   const archivedChannel = !channels.find(c => c.id === form.channel)?.active;
   const compared = data.revisions.find((r) => r.id === compareId);
-  return <div className="studio studio-detail">
+  return <div className="studio studio-detail" style={{ "--channel-accent": channels.find(c => c.id === form.channel)?.accent ?? "#285f6a" } as CSSProperties}>
     <GuardedLink href="/" className="studio-back">← Studio Board</GuardedLink>
     <header className="page-head"><div><span className={`studio-channel-tag ${form.channel}`}>{channelName(form.channel)}</span><h1>{base.title}</h1><span className="small muted">버전 {base.version} · {dateTime(base.updatedAt)}{dirty ? " · 저장 전 변경사항" : " · 저장됨"}</span></div><button className="btn primary" onClick={() => save.mutate()} disabled={!dirty || busy || !form.title.trim()}>{save.isPending ? "저장 중…" : "저장"}</button></header>
     {newer && dirty && <div className="notice warn row between"><span>서버에 새 버전이 있습니다. 현재 입력은 유지했습니다.</span><button className="btn sm" onClick={() => guard.confirmLeave(() => accept(data.card))}>새 버전 불러오기</button></div>}
