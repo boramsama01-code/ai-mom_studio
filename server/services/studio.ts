@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { DB } from "../db";
 import { channels, appSettings, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
 import { channelSlug } from "../../shared/channelKeys";
-import { studioContentSchema, type StudioContent, type StudioCard, type StudioJob, type StudioRevision } from "../../shared/studio";
+import { studioContentSchema, type StudioGeneration, type StudioContent, type StudioCard, type StudioJob, type StudioRevision } from "../../shared/studio";
 import { conflict, HttpError, parse } from "../routes/util";
 import { enqueueJob } from "../worker/queue";
 import { audit } from "../audit";
@@ -93,7 +93,7 @@ export async function studioDetail(db: DB, cardId: number) {
   ]);
   return { card: studioCardDto(card), revisions: revisions.map(studioRevisionDto), jobs: cardJobs.map(studioJobDto) };
 }
-export async function queueStudioGeneration(db: DB, cardId: number, input: { version: number; kind: "text" | "image"; provider: "openai" | "anthropic"; instruction: string; panelIndex?: number; requestId: string }, actor: string) {
+export async function queueStudioGeneration(db: DB, cardId: number, input: StudioGeneration, actor: string) {
   if (await getSetting(db, "global_stop", false)) throw new HttpError(409, "전역 정지 상태입니다. 정지를 해제한 뒤 생성하세요.");
   const inputHash = crypto.createHash("sha256").update(JSON.stringify({ cardId, ...input })).digest("hex");
   return db.transaction(async tx => {
@@ -108,6 +108,9 @@ export async function queueStudioGeneration(db: DB, cardId: number, input: { ver
       return { job: studioJobDto(job), duplicate: true };
     }
     if (card.version !== input.version) conflict(studioCardDto(card));
+    if (input.kind === "image" && !input.instruction && !card.content.panels[input.panelIndex!].scene.trim() && !card.content.panels[input.panelIndex!].dialogue.trim()) {
+      throw new HttpError(400, "이 컷의 장면이나 대사를 먼저 작성해 주세요. 빈칸 초안 채우기도 사용할 수 있습니다.");
+    }
     const queued = await enqueueJob(tx as unknown as DB, {
       type: "studio_generate", maxAttempts: 1, dedupeKey: `studio:${cardId}`, requestedBy: actor,
       payload: { cardId, ...input, snapshot: card.content },

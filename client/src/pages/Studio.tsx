@@ -8,6 +8,8 @@ import { useToast } from "../toast";
 
 import { studioKey } from "@shared/channelKeys";
 import { studioOutputFormats, studioOutputDescription } from "@shared/studio";
+import { studioCaptionDraft } from "@shared/studioWorkflow";
+import type { StudioGeneration } from "@shared/studio";
 import { StudioExport, StudioQuickExport } from "./StudioExport";
 import type { StudioChannel as Channel, StudioStage as Stage, StudioCharacter as Character, StudioFormat as Format, StudioPanel as Panel, StudioContent as CardInput, StudioCard as Card, StudioRevision as Revision, StudioJob as Job, StudioBoard as Board, StudioCardDetail as Detail } from "@shared/studio";
 const stages: Array<{ id: Stage; label: string }> = [{ id: "idea", label: "아이디어" }, { id: "writing", label: "원고" }, { id: "making", label: "제작" }, { id: "review", label: "검토" }, { id: "done", label: "완료" }];
@@ -127,6 +129,8 @@ function StudioDetail({ id }: { id: number }) {
   return <>{q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}<StudioEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} /></>;
 }
 
+type GenerationAction = Pick<StudioGeneration, "kind"> & Partial<Pick<StudioGeneration, "textTarget" | "panelIndex" | "instruction">>;
+
 function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown }) {
   const channels = useStudioChannels(true);
   const channelName = (id: string) => channels.find(c => c.id === id)?.name ?? id;
@@ -135,54 +139,161 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const baseRef = useRef(data.card);
   const [form, setForm] = useState(() => inputOf(data.card));
   const [instruction, setInstruction] = useState("");
+  const [panelInstructions, setPanelInstructions] = useState(["", "", "", ""]);
   const [provider, setProvider] = useState<"openai" | "anthropic">("openai");
-  const [kind, setKind] = useState<"text" | "image">("text");
-  const [panelIndex, setPanelIndex] = useState(0);
   const [tab, setTab] = useState<"content" | "history">("content");
   const [compareId, setCompareId] = useState<number | null>(null);
-  const [localError, setLocalError] = useState("");
+  const [awaitingJob, setAwaitingJob] = useState<number | null>(null);
   const guard = useDirtyGuard();
   const qc = useQueryClient();
   const toast = useToast();
   const request = useRef<{ signature: string; id: string } | null>(null);
+  const submitting = useRef(false);
   const providerInitialized = useRef(false);
   useEffect(() => { if (settings.data && !providerInitialized.current) { setProvider(settings.data.ai.defaultProvider); providerInitialized.current = true; } }, [settings.data]);
+  useEffect(() => { if (awaitingJob && data.jobs.some(j => j.id === awaitingJob)) setAwaitingJob(null); }, [data.jobs, awaitingJob]);
   const dirty = JSON.stringify(form) !== JSON.stringify(inputOf(base));
   const newer = data.card.version !== base.version;
-  const working = data.jobs.some(activeJob);
-  const configured = kind === "image" ? settings.data?.ai.image : settings.data?.ai.text[provider];
+  const working = awaitingJob !== null || data.jobs.some(activeJob);
   const invalidate = () => qc.invalidateQueries({ queryKey: ["studio"] });
   const accept = (c: Card) => { baseRef.current = c; setBase(c); setForm(inputOf(c)); };
-  useEffect(() => { if (!dirty && data.card.version !== base.version) accept(data.card); }, [data.card.version]);
-  const save = useMutation({ mutationFn: () => api<Card | { card: Card }>(`/studio/cards/${base.id}`, { method: "PATCH", body: { ...form, version: base.version } }), onSuccess: (d) => { accept("card" in d ? d.card : d); invalidate(); } });
+  useEffect(() => { if (!dirty && data.card.version !== base.version) accept(data.card); }, [data.card.version, dirty]);
+  const save = useMutation({
+    mutationFn: () => api<Card | { card: Card }>(`/studio/cards/${base.id}`, { method: "PATCH", body: { ...form, version: base.version } }),
+    onSuccess: (d) => { accept("card" in d ? d.card : d); invalidate(); },
+  });
   const saveCurrent = useCallback(async (): Promise<Card> => { if (!dirty) return base; const d = await save.mutateAsync(); return "card" in d ? d.card : d; }, [dirty, base, form]);
   useEffect(() => { guard.setDirty("studio-card", dirty, async () => { try { await saveCurrent(); return true; } catch { return false; } }); return () => guard.setDirty("studio-card", false); }, [dirty, saveCurrent]);
-  const generate = useMutation({ retry: false, mutationFn: async () => {
-    setLocalError("");
-    const current = await saveCurrent();
-    const signature = JSON.stringify({ version: current.version, kind, provider, instruction, panelIndex });
-    if (!request.current || request.current.signature !== signature) request.current = { signature, id: crypto.randomUUID() };
-    return api<{ job: Job; duplicate: boolean }>(`/studio/cards/${base.id}/generate`, { method: "POST", body: { version: current.version, kind, provider: kind === "image" ? "openai" : provider, instruction, ...(kind === "image" ? { panelIndex } : {}), requestId: request.current.id } });
-  }, onSuccess: () => { request.current = null; invalidate(); toast("ok", "생성 요청을 등록했습니다. 결과는 이 작업에 저장됩니다."); } });
-  const restore = useMutation({ mutationFn: (revisionId: number) => api<Card | { card: Card }>(`/studio/cards/${baseRef.current.id}/restore`, { method: "POST", body: { version: baseRef.current.version, revisionId } }), onSuccess: (d) => { accept("card" in d ? d.card : d); invalidate(); setTab("content"); toast("ok", "선택한 버전을 새 버전으로 복원했습니다."); } });
-  function change<K extends keyof CardInput>(key: K, value: CardInput[K]) { setForm((f) => ({ ...f, [key]: value })); }
+  const generate = useMutation({
+    retry: false,
+    mutationFn: async (action: GenerationAction) => {
+      const current = await saveCurrent();
+      const input = { version: current.version, kind: action.kind, provider: action.kind === "image" ? "openai" : provider,
+        instruction: action.instruction ?? "", textTarget: action.textTarget ?? "rewrite",
+        ...(action.kind === "image" ? { panelIndex: action.panelIndex } : {}) };
+      const signature = JSON.stringify(input);
+      if (!request.current || request.current.signature !== signature) request.current = { signature, id: crypto.randomUUID() };
+      return api<{ job: Job; duplicate: boolean }>(`/studio/cards/${base.id}/generate`, {
+        method: "POST", body: { ...input, requestId: request.current.id },
+      });
+    },
+    onSuccess: ({ job }) => {
+      request.current = null; setAwaitingJob(job.id); invalidate();
+      toast("ok", "작성 내용을 저장하고 생성을 시작했습니다.");
+    },
+    onSettled: () => { submitting.current = false; },
+  });
+  const testConnection = useMutation({
+    retry: false, mutationFn: () => api<{ ok: boolean; message: string }>("/secrets/test/openai", { method: "POST", body: {} }),
+  });
+  const restore = useMutation({
+    mutationFn: (revisionId: number) => api<Card | { card: Card }>(`/studio/cards/${baseRef.current.id}/restore`, { method: "POST", body: { version: baseRef.current.version, revisionId } }),
+    onSuccess: (d) => { accept("card" in d ? d.card : d); invalidate(); setTab("content"); toast("ok", "선택한 버전을 새 버전으로 복원했습니다."); },
+  });
+  function change<K extends keyof CardInput>(key: K, value: CardInput[K]) { setForm(f => ({ ...f, [key]: value })); }
   function changePanel(i: number, key: "scene" | "dialogue", value: string) { change("panels", form.panels.map((p, n) => n === i ? { ...p, [key]: value } : p)); }
   const busy = save.isPending || generate.isPending || restore.isPending;
   const archivedChannel = !channels.find(c => c.id === form.channel)?.active;
-  const compared = data.revisions.find((r) => r.id === compareId);
+  const canGenerate = !busy && !working && !newer && !archivedChannel && !!form.title.trim();
+  const canWrite = canGenerate && settings.data?.ai.text[provider] === true;
+  const canDraw = canGenerate && settings.data?.ai.image === true;
+  const hasBlanks = !form.script.trim() || !form.caption.trim() || form.panels.some(p => !p.scene.trim() || !p.dialogue.trim());
+  const captionProposal = !form.caption.trim() ? studioCaptionDraft(form) : "";
+  const compared = data.revisions.find(r => r.id === compareId);
+  const latestJob = data.jobs[0];
+  function run(action: GenerationAction) {
+    if (submitting.current || !canGenerate) return;
+    submitting.current = true;
+    generate.mutate(action);
+  }
+  const copyCaption = async () => { try { await navigator.clipboard.writeText(form.caption); toast("ok", "캡션을 복사했습니다."); } catch { toast("err", "캡션을 직접 선택해 복사해 주세요."); } };
   return <div className="studio studio-detail" style={{ "--channel-accent": channels.find(c => c.id === form.channel)?.accent ?? "#285f6a" } as CSSProperties}>
     <GuardedLink href="/" className="studio-back">← Studio Board</GuardedLink>
-    <header className="page-head"><div><span className={`studio-channel-tag ${form.channel}`}>{channelName(form.channel)}</span><h1>{base.title}</h1><span className="small muted">버전 {base.version} · {dateTime(base.updatedAt)}{dirty ? " · 저장 전 변경사항" : " · 저장됨"}</span></div><button className="btn primary" onClick={() => save.mutate()} disabled={!dirty || busy || !form.title.trim()}>{save.isPending ? "저장 중…" : "저장"}</button></header>
+    <header className="page-head">
+      <div><span className="studio-channel-tag">{channelName(form.channel)}</span><h1>{base.title}</h1><span className="small muted">버전 {base.version} · {dirty ? "저장 전 변경사항" : "저장됨"}</span></div>
+      <button className="btn primary" onClick={() => save.mutate()} disabled={!dirty || busy || !form.title.trim()}>{save.isPending ? "저장 중…" : "저장"}</button>
+    </header>
     {newer && dirty && <div className="notice warn row between"><span>서버에 새 버전이 있습니다. 현재 입력은 유지했습니다.</span><button className="btn sm" onClick={() => guard.confirmLeave(() => accept(data.card))}>새 버전 불러오기</button></div>}
     {(save.error || restore.error) && <ErrorBox error={save.error || restore.error} />}
-    <div className="tabs" role="tablist" aria-label="콘텐츠 편집"><button role="tab" aria-selected={tab === "content"} onClick={() => setTab("content")}>원고·구성</button><button role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>버전 기록 <span className="small">{data.revisions.length}</span></button></div>
-    {tab === "content" ? <div className="studio-editor-layout"><div className="stack"><section className="panel stack"><label className="field">제목<input id="studio-title" disabled={busy} value={form.title} maxLength={160} onChange={(e) => change("title", e.target.value)} /></label><div className="studio-form-grid"><label className="field">채널<select disabled={busy} value={form.channel} onChange={(e) => change("channel", e.target.value as Channel)}>{channels.filter(c => c.active || c.id === form.channel).map((c) => <option key={c.id} value={c.id}>{c.name}{c.active ? "" : " (보관됨)"}</option>)}</select></label><label className="field">형식<select id="studio-format" disabled={busy} value={form.format} onChange={(e) => change("format", e.target.value as Format)}>{!formats.includes(form.format) && <option value={form.format}>{form.format} · 기획용</option>}{formats.map((f) => <option key={f}>{f}</option>)}</select></label><label className="field">단계<select disabled={busy} value={form.stage} onChange={(e) => change("stage", e.target.value as Stage)}>{stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></label><label className="field">예정일<input type="date" disabled={busy} value={form.dueDate} onChange={(e) => change("dueDate", e.target.value)} /></label></div><label className="field">기획·참고 자료<textarea disabled={busy} value={form.memo} rows={4} maxLength={12000} onChange={(e) => change("memo", e.target.value)} placeholder="만들고 싶은 이야기, 유지할 설정, 확인한 원문 내용을 적어 주세요." /></label><label className="field">원고<textarea disabled={busy} value={form.script} rows={8} maxLength={24000} onChange={(e) => change("script", e.target.value)} placeholder="직접 쓰거나 오른쪽에서 AI에 제작을 지시하세요." /></label></section>
-      <section className="panel stack"><div className="row between"><h2>{form.format === "카드뉴스" ? "본문 4장" : "네컷 구성"}</h2><span className="small muted">글만으로도 내보낼 수 있습니다.</span></div>{form.imagePath && <details className="studio-original"><summary>이전 웹툰 시안 보기</summary><img src={form.imagePath} alt="이전 네컷 웹툰 시안" /></details>}<div className="studio-panels">{form.panels.map((p, i) => <article className={`studio-comic-panel ${kind === "image" && panelIndex === i ? "selected" : ""}`} key={i}><div className="row between"><h3>{i + 1}{form.format === "카드뉴스" ? "번째 본문" : "컷"}</h3><button className="btn sm ghost" onClick={() => { setKind("image"); setPanelIndex(i); document.getElementById("studio-instruction")?.focus(); }}>{p.imageId ? "다시 그리기" : "그림 만들기"}</button></div><div className="studio-panel-picture">{p.imageId ? <a href={imageUrl(p.imageId)} target="_blank" rel="noopener noreferrer"><img src={imageUrl(p.imageId)} alt={`${i + 1}컷 그림`} /></a> : <div className="studio-picture-empty">{i + 1}<span>장면을 적고 그림을 만들어 주세요.</span></div>}</div>{p.imageId && <button className="btn sm ghost" disabled={busy} onClick={() => change("panels", form.panels.map((panel, n) => n === i ? { ...panel, imageId: null } : panel))}>그림 빼고 글로 구성</button>}<label className="field small">장면<textarea disabled={busy} aria-label={`${i + 1}컷 장면`} rows={3} value={p.scene} maxLength={4000} onChange={(e) => changePanel(i, "scene", e.target.value)} placeholder="등장인물, 표정, 배경, 소품" /></label><label className="field small">{form.format === "카드뉴스" ? "본문" : "대사"}<textarea id={`studio-panels.${i}.dialogue`} disabled={busy} aria-label={`${i + 1}컷 대사`} rows={2} value={p.dialogue} maxLength={3000} onChange={(e) => changePanel(i, "dialogue", e.target.value)} placeholder={form.format === "카드뉴스" ? "이미지에 표시할 핵심 이야기" : "그림 아래에 표시할 대사"} /></label></article>)}</div></section>
+    <div className="tabs" role="tablist" aria-label="콘텐츠 편집">
+      <button role="tab" aria-selected={tab === "content"} onClick={() => setTab("content")}>원고·구성</button>
+      <button role="tab" aria-selected={tab === "history"} onClick={() => setTab("history")}>버전 기록 {data.revisions.length}</button>
+    </div>
+    {(working || generate.error || latestJob?.status === "failed" || latestJob?.result?.applied === false) && <section className="panel stack studio-work-status" aria-label="생성 상태">
+      {working && <p role="status">AI가 작업 중입니다. 완료되면 여기에 반영됩니다. 화면을 닫아도 요청은 보관됩니다.</p>}
+      {generate.error && <ErrorBox error={generate.error} />}
+      {!working && latestJob?.status === "failed" && <div role="alert" className="notice err"><strong>생성을 완료하지 못했습니다.</strong><p>{latestJob.lastError}</p></div>}
+      {!working && latestJob?.result?.applied === false && <p className="notice warn">생성 중 수정한 내용은 유지했습니다. <button className="btn sm" onClick={() => { setTab("history"); setCompareId(Number(latestJob.result?.revisionId)); }}>새 결과를 버전 기록에서 확인</button></p>}
+      <div className="row"><button className="btn sm" onClick={() => refresh()}>상태 새로고침</button><GuardedLink href="/settings?tab=connections" className="btn sm ghost">API 설정</GuardedLink><button className="btn sm ghost" disabled={working || testConnection.isPending} onClick={() => testConnection.mutate()}>{testConnection.isPending ? "확인 중…" : "OpenAI 연결 확인 · 생성 비용 없음"}</button></div>
+      {testConnection.data && <p role="status" className={testConnection.data.ok ? "notice ok" : "notice warn"}>{testConnection.data.message}</p>}
+      {testConnection.error && <ErrorBox error={testConnection.error} />}
+    </section>}
+    {tab === "content" ? <div className="studio-editor-layout studio-guided-editor">
+      <section className="panel stack" id="studio-story">
+        <div className="studio-section-heading"><div><span className="studio-step">01 · 이야기</span><h2>아이디어를 컷 구성으로</h2></div>
+          <button className="btn primary" disabled={!canWrite || !hasBlanks} onClick={() => run({ kind: "text", textTarget: "fill" })}>빈칸 초안 채우기</button></div>
+        <p className="small muted">제목이나 기획을 쓰면 원고·컷 구성·캡션을 함께 작성합니다. 이미 쓴 글과 그림은 유지합니다. AI 사용료가 발생합니다.</p>
+        <label className="field">제목<input id="studio-title" disabled={busy} value={form.title} maxLength={160} onChange={e => change("title", e.target.value)} /></label>
+        <label className="field">기획·참고 자료<textarea disabled={busy} value={form.memo} rows={3} maxLength={12000} onChange={e => change("memo", e.target.value)} placeholder="이야기의 핵심이나 확인한 자료를 적어 주세요. 이미 컷을 썼다면 비워 두어도 됩니다." /></label>
+        <div className="studio-form-grid">
+          <label className="field">작성 AI<select value={provider} disabled={busy || working} onChange={e => { providerInitialized.current = true; setProvider(e.target.value as typeof provider); }}><option value="openai">GPT</option><option value="anthropic">Claude</option></select></label>
+          <label className="field">형식<select id="studio-format" disabled={busy} value={form.format} onChange={e => change("format", e.target.value as Format)}>{!formats.includes(form.format) && <option value={form.format}>{form.format} · 기획용</option>}{formats.map(f => <option key={f}>{f}</option>)}</select></label>
+        </div>
+        {settings.data?.ai.text[provider] === false && <p className="notice warn small">작성 AI의 키가 없습니다. 직접 편집은 계속할 수 있습니다. <GuardedLink href="/settings?tab=connections">API 설정 →</GuardedLink></p>}
+        {archivedChannel && <p className="notice warn small">보관된 채널입니다. 새 AI 생성은 <GuardedLink href="/settings">채널 복원</GuardedLink> 후 사용할 수 있습니다.</p>}
+        <details className="studio-more"><summary>전체 원고·작업 정보</summary><div className="stack">
+          <label className="field">전체 원고<textarea disabled={busy} value={form.script} rows={6} maxLength={24000} onChange={e => change("script", e.target.value)} placeholder="전체 원고가 없어도 아래 장면·대사에서 바로 그림을 만들 수 있습니다." /></label>
+          <div className="studio-form-grid">
+            <label className="field">채널<select disabled={busy} value={form.channel} onChange={e => change("channel", e.target.value)}>{channels.filter(c => c.active || c.id === form.channel).map(c => <option key={c.id} value={c.id}>{c.name}{c.active ? "" : " (보관됨)"}</option>)}</select></label>
+            <label className="field">단계<select disabled={busy} value={form.stage} onChange={e => change("stage", e.target.value as Stage)}>{stages.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</select></label>
+            <label className="field">예정일<input type="date" disabled={busy} value={form.dueDate} onChange={e => change("dueDate", e.target.value)} /></label>
+          </div>
+        </div></details>
+      </section>
+      <section className="panel stack" id="studio-composition">
+        <div className="studio-section-heading"><div><span className="studio-step">02 · 그림 제작</span><h2>{form.format === "카드뉴스" ? "본문 4장" : "네컷 구성"}</h2></div><span className="small muted">{form.panels.filter(p => p.imageId).length} / 4 그림</span></div>
+        <p className="small muted">장면·대사를 그대로 사용합니다. 별도 지시 없이 ‘이 컷 그리기’를 누르세요. 한 번에 한 컷 · 이미지 API 사용료 발생.</p>
+        <fieldset className="studio-cast"><legend>등장인물 · 그림 기준</legend><div className="studio-character-picks">{characters.map(c => <label key={c.id} className={form.characters.includes(c.id) ? "selected" : ""}><input type="checkbox" disabled={busy} checked={form.characters.includes(c.id)} onChange={e => change("characters", e.target.checked ? [...form.characters, c.id] : form.characters.filter(id => id !== c.id))} /><img src={getCharacterImage(c.id)} alt="" /><span>{c.name}</span></label>)}</div></fieldset>
+        {settings.data?.ai.image === false && <p className="notice warn small">그림 제작에는 OpenAI 키가 필요합니다. <GuardedLink href="/settings?tab=connections">API 설정 →</GuardedLink></p>}
+        {form.imagePath && <details className="studio-original"><summary>이전 웹툰 시안 보기</summary><img src={form.imagePath} alt="이전 네컷 웹툰 시안" /></details>}
+        <div className="studio-panels">{form.panels.map((p, i) => <article className="studio-comic-panel" key={i}>
+          <div className="row between"><h3>{i + 1}{form.format === "카드뉴스" ? "번째 본문" : "컷"}</h3><span className="small muted">{p.imageId ? "그림 있음" : "구성 중"}</span></div>
+          <label className="field small">장면<textarea disabled={busy} aria-label={panelLabel(i, "장면")} rows={3} value={p.scene} maxLength={4000} onChange={e => changePanel(i, "scene", e.target.value)} placeholder="등장인물, 표정, 배경, 소품" /></label>
+          <label className="field small">{form.format === "카드뉴스" ? "본문" : "대사"}<textarea id={panelField(i)} disabled={busy} aria-label={panelLabel(i, "대사")} rows={2} value={p.dialogue} maxLength={3000} onChange={e => changePanel(i, "dialogue", e.target.value)} placeholder="그림 아래에 표시할 글" /></label>
+          <div className="studio-panel-picture">{p.imageId ? <a href={imageUrl(p.imageId)} target="_blank" rel="noopener noreferrer"><img src={imageUrl(p.imageId)} alt={panelLabel(i, "그림")} /></a> : <div className="studio-picture-empty">{i + 1}<span>위에 쓴 내용이 그림으로 이어집니다.</span></div>}</div>
+          <button className="btn primary" aria-label={panelLabel(i, p.imageId ? "다시 그리기" : "그리기")} disabled={!canDraw || (!p.scene.trim() && !p.dialogue.trim() && !panelInstructions[i].trim())} onClick={() => run({ kind: "image", panelIndex: i, instruction: panelInstructions[i] })}>{generate.isPending && generate.variables?.kind === "image" && generate.variables.panelIndex === i ? "요청 중…" : p.imageId ? "이 컷 다시 그리기" : "이 컷 그리기"}</button>
+          <details className="studio-more"><summary>그림 추가 요청 · 선택</summary><div className="stack">
+            <label className="field small">추가 요청<textarea aria-label={panelLabel(i, "그림 추가 요청")} disabled={busy} rows={2} maxLength={6000} value={panelInstructions[i]} onChange={e => setPanelInstructions(current => current.map((v, n) => n === i ? e.target.value : v))} placeholder="예: 배경은 유지하고 표정만 놀라게. 비워 두어도 됩니다." /></label>
+            {p.imageId && <><p className="small muted">다시 그려도 이전 그림은 버전 기록에 남습니다.</p><button className="btn sm ghost" disabled={busy} onClick={() => change("panels", form.panels.map((panel, n) => n === i ? { ...panel, imageId: null } : panel))}>그림 빼고 글로 구성</button></>}
+          </div></details>
+        </article>)}</div>
+      </section>
+      <section className="panel stack" id="studio-caption">
+        <div className="studio-section-heading"><div><span className="studio-step">03 · 게시 글</span><h2>캡션</h2></div><button className="btn" disabled={!canWrite || (!form.caption.trim() && !studioCaptionDraft(form) && !form.memo.trim())} onClick={() => run({ kind: "text", textTarget: "caption" })}>{form.caption.trim() ? "캡션만 AI로 다듬기" : "캡션만 AI로 작성"}</button></div>
+        {captionProposal && <div className="studio-caption-proposal"><span className="small muted">작성한 글에서 만든 기본 초안 · AI 사용 없음</span><p>{captionProposal}</p><button className="btn sm" disabled={busy} onClick={() => change("caption", captionProposal)}>이 초안 사용</button></div>}
+        <label className="field">게시용 캡션<textarea disabled={busy} rows={5} value={form.caption} maxLength={8000} onChange={e => change("caption", e.target.value)} placeholder="대사나 원고를 쓰면 기본 초안이 자동으로 제안됩니다." /></label>
+        <div className="row between"><button className="btn sm" onClick={copyCaption} disabled={!form.caption.trim()}>캡션 복사</button><span className="small muted">AI 다듬기는 캡션만 변경 · API 사용료 발생</span></div>
+      </section>
       <StudioExport form={form} base={base} dirty={dirty} busy={busy} change={change} save={saveCurrent} />
-      <section className="panel stack"><label className="field">게시용 캡션<textarea disabled={busy} rows={5} value={form.caption} maxLength={8000} onChange={(e) => change("caption", e.target.value)} /></label><div className="row"><button className="btn sm" onClick={async () => { try { await navigator.clipboard.writeText(form.caption); toast("ok", "캡션을 복사했습니다."); } catch { toast("err", "복사하지 못했습니다. 캡션을 직접 선택해 복사해 주세요."); } }} disabled={!form.caption}>캡션 복사</button></div></section>
-    </div><aside className="studio-command"><section className="panel stack"><h2>AI 제작·수정</h2><div className="studio-segment" aria-label="생성할 콘텐츠"><button disabled={busy} aria-pressed={kind === "text"} onClick={() => setKind("text")}>원고</button><button disabled={busy} aria-pressed={kind === "image"} onClick={() => setKind("image")}>컷 그림</button></div>{kind === "text" ? <label className="field">작성 AI<select value={provider} disabled={busy} onChange={(e) => { providerInitialized.current = true; setProvider(e.target.value as typeof provider); }}><option value="openai">GPT</option><option value="anthropic">Claude</option></select></label> : <label className="field">수정할 컷<select disabled={busy} value={panelIndex} onChange={(e) => setPanelIndex(Number(e.target.value))}>{form.panels.map((_, i) => <option value={i} key={i}>{i + 1}컷</option>)}</select><span className="hint">OpenAI 이미지 모델 · 선택한 컷만 생성</span></label>}<fieldset><legend>등장인물·그림 기준</legend><div className="studio-character-picks">{characters.map((c) => <label key={c.id} className={form.characters.includes(c.id) ? "selected" : ""}><input type="checkbox" disabled={busy} checked={form.characters.includes(c.id)} onChange={(e) => change("characters", e.target.checked ? [...form.characters, c.id] : form.characters.filter((id) => id !== c.id))} /><img src={`/studio-assets/${c.id}.png`} alt="" /><span>{c.name}</span></label>)}</div></fieldset><label className="field" htmlFor="studio-instruction">제작·수정 지시<textarea disabled={busy} id="studio-instruction" rows={6} maxLength={6000} value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder={kind === "text" ? "예: 네컷의 마지막 반전을 더 재밌게. 펨펨의 대사는 짧게 바꿔줘." : "예: 빈 감자튀김 용기는 하나만. 캐릭터의 외형과 배경은 유지해줘."} /></label><button className="btn primary" disabled={busy || working || archivedChannel || configured !== true || !instruction.trim() || !form.title.trim()} onClick={() => generate.mutate()}>{busy ? "요청 중…" : working ? "생성 진행 중…" : kind === "text" ? "원고 생성·수정" : `${panelIndex + 1}컷 ${form.panels[panelIndex]?.imageId ? "다시 그리기" : "생성"}`}</button>{configured === false && <div className="notice warn small">{kind === "image" || provider === "openai" ? "OpenAI" : "Claude"} 연결이 필요합니다. <GuardedLink href="/settings?tab=connections">API 설정 →</GuardedLink></div>}{archivedChannel && <p className="notice warn small">보관된 채널입니다. <GuardedLink href="/settings">채널 복원 →</GuardedLink></p>}<p className="small muted">수정 내용을 저장한 뒤 생성합니다. API 사용료가 발생하며, 이전 결과는 버전 기록에 남습니다.</p>{generate.error && <><ErrorBox error={generate.error} /><GuardedLink href="/settings?tab=connections" className="small">API 설정 확인 →</GuardedLink></>}{localError && <div role="alert" className="notice err">{localError}</div>}{working && <div className="notice" role="status">AI가 작업 중입니다. 화면을 닫아도 요청은 보관됩니다.</div>}{data.jobs.slice(0, 3).map((j) => <div key={j.id} className={`studio-job ${j.status === "failed" ? "failed" : ""}`}><span>{({ queued: "대기 중", running: "생성 중", processing: "생성 중", succeeded: "생성 완료", failed: "생성 실패", cancelled: "취소됨" } as Record<string, string>)[j.status] ?? j.status}</span>{j.lastError && <p>{j.lastError}</p>}</div>)}<button className="btn sm ghost" onClick={() => refresh()}>결과 새로고침</button></section><p className="small muted">다른 AI로 다시 만들면 버전 기록에서 결과를 비교할 수 있습니다.</p></aside></div> : <section className="panel stack"><div className="row between"><h2>버전 기록</h2><span className="small muted">복원해도 이전 기록은 유지됩니다.</span></div>{!data.revisions.length ? <p className="muted">저장한 버전이 없습니다.</p> : <div className="studio-history-layout"><div className="studio-revision-list">{data.revisions.map((r) => <button key={r.id} className={compareId === r.id ? "selected" : ""} onClick={() => setCompareId(r.id)}><strong>버전 {r.version}{!r.applied ? " · 미적용 결과" : ""}</strong><span>{r.provider === "openai" ? "GPT" : r.provider === "anthropic" ? "Claude" : "직접 편집"} · {dateTime(r.createdAt)}</span><small>{r.instruction || "작업 저장"}</small></button>)}</div><div>{compared ? <><div className="row between"><h3>버전 {compared.version} 비교</h3><button className="btn sm" disabled={busy || working} onClick={() => guard.confirmLeave(() => restore.mutate(compared.id))}>이 버전으로 복원</button></div><div className="studio-compare"><Snapshot title="현재 작업" card={form} /><Snapshot title={`버전 ${compared.version}`} card={compared.snapshot} /></div></> : <div className="studio-history-empty">왼쪽에서 비교할 버전을 선택하세요.</div>}</div></div>}{restore.error && <ErrorBox error={restore.error} />}</section>}
+      <details className="panel studio-more"><summary>전체 원고를 AI로 수정하기</summary><div className="stack">
+        <p className="small muted">제목·원고·컷 구성·캡션을 함께 변경합니다. 장면이 바뀐 컷의 그림은 분리되며, 이전 내용은 버전 기록에 남습니다.</p>
+        <label className="field">바꿀 내용<textarea disabled={busy} rows={3} maxLength={6000} value={instruction} onChange={e => setInstruction(e.target.value)} placeholder="예: 마지막 반전은 유지하고 전체 흐름을 더 짧게 바꿔줘." /></label>
+        <button className="btn" disabled={!canWrite || !instruction.trim()} onClick={() => run({ kind: "text", textTarget: "rewrite", instruction })}>전체 원고 수정 · API 사용료 발생</button>
+      </div></details>
+    </div> : <section className="panel stack">
+      <div className="row between"><h2>버전 기록</h2><span className="small muted">복원해도 이전 기록은 유지됩니다.</span></div>
+      {!data.revisions.length ? <p className="muted">저장한 버전이 없습니다.</p> : <div className="studio-history-layout">
+        <div className="studio-revision-list">{data.revisions.map(r => <button key={r.id} className={compareId === r.id ? "selected" : ""} onClick={() => setCompareId(r.id)}><strong>버전 {r.version}{!r.applied ? " · 미적용 결과" : ""}</strong><span>{r.provider === "openai" ? "GPT" : r.provider === "anthropic" ? "Claude" : "직접 편집"} · {dateTime(r.createdAt)}</span><small>{r.instruction || "작업 저장"}</small></button>)}</div>
+        <div>{compared ? <><div className="row between"><h3>버전 {compared.version} 비교</h3><button className="btn sm" disabled={busy || working} onClick={() => guard.confirmLeave(() => restore.mutate(compared.id))}>이 버전으로 복원</button></div><div className="studio-compare"><Snapshot title="현재 작업" card={form} /><Snapshot title={revisionLabel(compared.version)} card={compared.snapshot} /></div></> : <div className="studio-history-empty">왼쪽에서 비교할 버전을 선택하세요.</div>}</div>
+      </div>}
+    </section>}
   </div>;
 }
+
+const getCharacterImage = (id: Character) => "/studio-assets/" + id + ".png";
+const panelLabel = (i: number, label: string) => (i + 1) + "컷 " + label;
+const panelField = (i: number) => "studio-panels." + i + ".dialogue";
+const revisionLabel = (version: number) => "버전 " + version;
 
 function Snapshot({ title, card }: { title: string; card: CardInput }) {
   return <article className="studio-snapshot"><h4>{title}</h4><strong>{card.title}</strong><p>{card.script || card.memo || "원고 없음"}</p>{card.panels?.map((p, i) => <div className="studio-snapshot-panel" key={i}><b>{i + 1}컷</b>{p.imageId && <img src={imageUrl(p.imageId)} alt={`${title} ${i + 1}컷`} />}<p>{p.scene}</p><blockquote>{p.dialogue}</blockquote></div>)}<h4>캡션</h4><p>{card.caption || "캡션 없음"}</p></article>;

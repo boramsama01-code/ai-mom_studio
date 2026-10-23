@@ -15,6 +15,7 @@ import {
   type NoticePayload,
 } from "../../shared/payloads";
 import { NOTICE_CATEGORIES } from "../../shared/domain";
+import { openaiFailureMessage } from "./openaiError";
 
 export const PROMPT_VERSION = {
   curate: "curate-v1",
@@ -125,8 +126,7 @@ export async function openaiRequest(
       redirect: "error",
     });
     if (!response.ok) {
-      await response.body?.cancel();
-      throw new AiServiceError(aiErrorMessage("openai", response.status));
+      throw new AiServiceError(await openaiFailureMessage(response));
     }
     if (Number(response.headers.get("content-length") || 0) > maxBytes) {
       await response.body?.cancel();

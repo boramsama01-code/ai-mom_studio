@@ -6,6 +6,7 @@ import { env } from "../env";
 import { naverSearch, NaverError, naverProviderInUse } from "./naver";
 import { getClient } from "./llm";
 import { ensureCloudinary, CloudinaryNotConfigured } from "./cloudinary";
+import { openaiFailureMessage } from "./openaiError";
 
 export type TestResult = { ok: boolean; message: string };
 
@@ -28,10 +29,10 @@ export async function testOpenai(fetchImpl: typeof fetch = fetch): Promise<TestR
       const response = await fetchImpl(`https://api.openai.com/v1/models/${encodeURIComponent(model)}`, {
         headers: { authorization: `Bearer ${env.openaiKey}` }, signal: AbortSignal.timeout(15_000), redirect: "error",
       });
+      if (!response.ok) return { ok: false, message: await openaiFailureMessage(response) };
       await response.body?.cancel();
-      if (!response.ok) return { ok: false, message: response.status === 401 || response.status === 403 ? "OpenAI 키 인증 실패 또는 모델 접근 권한 부족" : response.status === 404 ? `모델을 찾을 수 없습니다: ${model}` : `OpenAI 확인 실패 (HTTP ${response.status})` };
     }
-    return { ok: true, message: "API 키와 글·이미지 모델 접근을 확인했습니다. 생성·잔액 상태는 실제 생성 시 확인됩니다." };
+    return { ok: true, message: "글·이미지 모델 조회에 성공했습니다. 생성 권한·잔액까지 검증한 것은 아닙니다. 생성에는 Model Capabilities 요청 권한도 필요합니다." };
   } catch { return { ok: false, message: "OpenAI에 연결할 수 없습니다." }; }
 }
 

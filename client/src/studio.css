@@ -179,6 +179,39 @@
 .studio-preview-pages { display:flex; justify-content:center; flex-wrap:wrap; gap:6px; }
 .studio-preview-pages button[aria-pressed="true"] { background:#25394b; color:white; }
 .studio input:focus-visible,.studio textarea:focus-visible,.studio button:focus-visible { outline:2px solid #285f6a; outline-offset:3px; }
+.studio-editor-layout.studio-guided-editor { display:flex; flex-direction:column; gap:24px; max-width:980px; margin:0 auto; }
+.studio-guided-editor > * { width:100%; min-width:0; box-sizing:border-box; }
+.studio-section-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.studio-step { display:block; color:#56797c; font-size:11px; font-weight:700; letter-spacing:.05em; margin-bottom:7px; }
+.studio-guided-editor .panel { padding:24px; }
+.studio-guided-editor .panel h2 { font-size:19px; }
+.studio-guided-editor .small { line-height:1.7; }
+.studio-guided-editor .studio-panels { grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+.studio-guided-editor .studio-comic-panel { padding:16px; gap:14px; border-radius:12px; background:#fff; }
+.studio-guided-editor .studio-comic-panel .btn { min-height:44px; font-size:13px; }
+.studio-guided-editor .studio-comic-panel .field { font-size:12px; }
+.studio-guided-editor .studio-panel-picture { aspect-ratio:4/3; }
+.studio-cast { border:0; padding:0; margin:0; max-width:480px; }
+.studio-cast legend { font-size:12px; margin-bottom:8px; }
+.studio-cast .studio-character-picks { gap:10px; }
+.studio-cast .studio-character-picks label { border-color:#e3e9ec; padding:10px; }
+.studio-cast .studio-character-picks label.selected { border-color:#7ea5a4; }
+.studio-cast .studio-character-picks img { height:64px; }
+.studio-more summary { font-size:12px; color:#536d76; cursor:pointer; padding:6px 0; }
+.studio-more[open] > .stack { margin-top:14px; }
+.studio-caption-proposal { background:#f1f6f4; border:1px solid #d7e5df; border-radius:10px; padding:16px; }
+.studio-caption-proposal p { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.8; font-size:13px; max-height:240px; overflow:auto; }
+.studio-work-status { max-width:980px; margin:0 auto 24px; }
+.studio-work-status p { margin:0; }
+@media (max-width:700px) {
+ .studio-guided-editor .panel { padding:17px; }
+ .studio-guided-editor .studio-panels { grid-template-columns:minmax(0,1fr); }
+ .studio-section-heading { gap:12px; }
+ .studio-section-heading > .btn { width:100%; }
+ .studio-guided-editor .studio-comic-panel { padding:13px; }
+ .studio-cast .studio-character-picks { gap:4px; }
+ .studio-cast .studio-character-picks label { padding:10px 2px; }
+}
 @media (max-width:480px) {
  .studio-export-designs { gap:6px; }
  .studio-design-option { padding:8px; font-size:11px; }
