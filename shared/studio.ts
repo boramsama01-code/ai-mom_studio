@@ -51,12 +51,15 @@ export const studioPatchSchema = z.object({
 export const studioGenerationSchema = z.object({
   version: z.number().int().positive(), kind: z.enum(["text", "image"]),
   provider: z.enum(["openai", "anthropic"]).default("openai"),
-  instruction: z.string().trim().min(1).max(8000), panelIndex: z.number().int().min(0).max(3).optional(),
+  instruction: z.string().trim().max(8000).default(""), panelIndex: z.number().int().min(0).max(3).optional(),
+  textTarget: z.enum(["rewrite", "fill", "caption"]).default("rewrite"),
   requestId: z.string().uuid(),
 }).strict().superRefine((v, ctx) => {
   if (v.kind === "image" && v.panelIndex === undefined) ctx.addIssue({ code: "custom", path: ["panelIndex"], message: "다시 그릴 컷을 선택하세요." });
   if (v.kind === "image" && v.provider !== "openai") ctx.addIssue({ code: "custom", path: ["provider"], message: "그림 생성은 OpenAI를 사용합니다." });
+  if (v.kind === "text" && v.textTarget === "rewrite" && !v.instruction) ctx.addIssue({ code: "custom", path: ["instruction"], message: "전체 원고를 바꿀 내용을 입력하세요." });
 });
+export type StudioGeneration = z.infer<typeof studioGenerationSchema>;
 export type StudioPanel = z.infer<typeof studioPanelSchema>;
 export type StudioContent = z.infer<typeof studioContentSchema>;
 export type StudioCardInput = StudioContent;

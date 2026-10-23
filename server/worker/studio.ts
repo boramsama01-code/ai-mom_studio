@@ -7,7 +7,8 @@ import { z } from "zod";
 import type { DB } from "../db";
 import { jobs, studioCards, studioImages, studioRevisions, type Job } from "../../shared/schema";
 import { studioContentSchema, studioGenerationSchema, type StudioContent } from "../../shared/studio";
-import { generateStudioImage, generateStudioText } from "../services/studioAi";
+import { generateStudioCaption, generateStudioImage, generateStudioText } from "../services/studioAi";
+import { applyStudioText, studioImageContext, studioInstruction } from "../../shared/studioWorkflow";
 import { loadStudioCard, validateStudioChannel } from "../services/studio";
 import { claimJob, completeJob, failJob, heartbeat, recoverExpired } from "./queue";
 import { loadStoredSecrets } from "../secretStore";
@@ -32,6 +33,7 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
   let timer: ReturnType<typeof setInterval> | undefined;
   try {
     const payload = payloadSchema.parse(job.payload);
+    const instruction = studioInstruction(payload);
     if (await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태로 생성을 실행하지 않았습니다.");
     const card = await loadStudioCard(db, payload.cardId);
     await validateStudioChannel(db, card.content.channel);
@@ -43,14 +45,20 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
     let model: string;
     let image: { bytes: Buffer; mimeType: string; model: string } | null = null;
     if (payload.kind === "text") {
-      const generated = await generateStudioText({
-        provider: payload.provider, directive: payload.instruction,
+      const options = {
+        provider: payload.provider, directive: instruction,
         content: { title: content.title, channel: content.channel, format: content.format, brief: content.memo, script: content.script, caption: content.caption, panels: content.panels.map(p => ({ scene: p.scene, dialogue: p.dialogue })) },
         referenceText: characterGuide,
-      });
-      model = generated.model;
-      provider = generated.provider;
-      content = studioContentSchema.parse({ ...content, title: generated.title, script: generated.script, caption: generated.caption, stage: "review", panels: generated.panels.map((p, i) => ({ ...p, imageId: content.panels[i]?.scene === p.scene ? content.panels[i].imageId : null })) });
+      };
+      if (payload.textTarget === "caption") {
+        const generated = await generateStudioCaption(options);
+        model = generated.model; provider = generated.provider;
+        content = studioContentSchema.parse({ ...content, caption: generated.caption });
+      } else {
+        const generated = await generateStudioText(options);
+        model = generated.model; provider = generated.provider;
+        content = applyStudioText(content, generated, payload.textTarget);
+      }
     } else {
       const panelIndex = payload.panelIndex!;
       const panel = content.panels[panelIndex];
@@ -61,7 +69,7 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
       }
       if (await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태로 생성을 실행하지 않았습니다.");
       image = await generateStudioImage({
-        prompt: `${characterGuide}\n제목: ${content.title}\n전체 구성: ${content.panels.map((p, i) => `${i + 1}컷: ${p.scene}`).join("\n")}\n이번에는 ${panelIndex + 1}번째 한 컷만 그린다. 장면: ${panel.scene}\n수정 지시: ${payload.instruction}\n첨부 캐릭터 기준 이미지와 기존 컷의 외형을 유지한다. 패널 하나만, 말풍선·글자·자막 없이 그린다. 대사는 별도로 편집한다.`,
+        prompt: `${characterGuide}\n${studioImageContext(content, panelIndex)}\n수정 지시: ${instruction}\n첨부 캐릭터 기준 이미지와 기존 컷의 외형을 유지한다. 패널 하나만, 말풍선·글자·자막 없이 그린다. 대사는 별도로 편집한다.`,
         referenceImages: refs,
       });
       if (image.bytes.length > 20 * 1024 * 1024) throw new Error("생성 이미지가 저장 한도를 초과했습니다.");
@@ -80,8 +88,8 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
       // A user may keep editing while generation runs. Preserve their newer edits and retain the generated candidate in history.
       const updated = await tx.update(studioCards).set({ content, version: payload.version + 1, updatedAt: new Date() }).where(and(eq(studioCards.id, card.id), eq(studioCards.version, payload.version))).returning();
       const applied = updated.length > 0;
-      const [revision] = await tx.insert(studioRevisions).values({ cardId: card.id, version: payload.version + 1, snapshot: content, instruction: payload.instruction, provider, model, applied }).returning({ id: studioRevisions.id });
-      return { cardId: card.id, revisionId: revision.id, applied, kind: payload.kind, panelIndex: payload.panelIndex ?? null, message: applied ? "생성 결과를 저장했습니다." : "생성 중 직접 수정한 내용은 유지했습니다. 기록에서 생성 결과를 확인하고 적용하세요." };
+      const [revision] = await tx.insert(studioRevisions).values({ cardId: card.id, version: payload.version + 1, snapshot: content, instruction, provider, model, applied }).returning({ id: studioRevisions.id });
+      return { cardId: card.id, revisionId: revision.id, applied, kind: payload.kind, textTarget: payload.textTarget, panelIndex: payload.panelIndex ?? null, message: applied ? "생성 결과를 저장했습니다." : "생성 중 직접 수정한 내용은 유지했습니다. 기록에서 생성 결과를 확인하고 적용하세요." };
     });
     await completeJob(db, job.id, workerId, result);
     return true;

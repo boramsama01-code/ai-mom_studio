@@ -4,7 +4,8 @@ const { claudeCreate } = vi.hoisted(() => ({ claudeCreate: vi.fn() }));
 vi.mock("@anthropic-ai/sdk", () => ({ default: class { messages = { create: claudeCreate }; } }));
 import { env } from "../server/env";
 import { callTool, LlmBudget, verifyEvidence } from "../server/services/llm";
-import { generateStudioImage, generateStudioText, studioAiStatus } from "../server/services/studioAi";
+import { generateStudioCaption, generateStudioImage, generateStudioText, studioAiStatus } from "../server/services/studioAi";
+import { openaiFailureMessage } from "../server/services/openaiError";
 import { testOpenai } from "../server/services/connectionTest";
 
 const draft = { title: "새 이야기", script: "본문", caption: "캡션", panels: Array.from({ length: 4 }, () => ({ scene: "우주복 펭귄", dialogue: "안녕" })) };
@@ -22,6 +23,17 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("AI provider routing", () => {
+  it("requests only a caption with one paid call and no full-draft rewrite", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ caption: "캡션만 개선" }, "save_studio_caption"));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await generateStudioCaption(input);
+    expect(result.caption).toBe("캡션만 개선");
+    expect(result).not.toHaveProperty("panels");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.tools[0].parameters.required).toEqual(["caption"]);
+    expect(sent.tool_choice).toEqual({ type: "function", name: "save_studio_caption" });
+  });
   it("uses GPT by default, stores no provider conversation, and returns usage", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response(draft));
     vi.stubGlobal("fetch", fetchMock);
@@ -106,4 +118,34 @@ it("checks OpenAI model access without billable generation", async () => {
   const result = await testOpenai(fetchMock);
   expect(result.ok).toBe(true); expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith("https://api.openai.com/v1/models/"))).toBe(true);
+});
+
+describe("safe and actionable OpenAI failures", () => {
+  it.each([
+    [401, "invalid_api_key", "unit-openai-key must never leak", "API 키가 유효하지"],
+    [401, null, "unit-openai-key", "원인을 확정할 수 없습니다"],
+    [403, null, "unit-openai-key", "접근이 거부"],
+    [403, null, "Your organization must be verified to use this model. unit-openai-key", "조직 인증이 필요"],
+    [429, "insufficient_quota", "unit-openai-key", "API 크레딧"],
+    [404, "model_not_found", "unit-openai-key", "모델을 찾을 수 없거나"],
+  ])("classifies %s/%s without exposing provider bodies", async (status, code, message, expected) => {
+    const result = await openaiFailureMessage(new Response(JSON.stringify({ error: { code, message } }), { status }));
+    expect(result).toContain(expected);
+    expect(result).toContain(`HTTP ${status}`);
+    expect(result).not.toContain("unit-openai-key");
+  });
+  it("bounds large/malformed provider error bodies", async () => {
+    const result = await openaiFailureMessage(new Response("unit-openai-key".repeat(5000), { status: 403 }));
+    expect(result).toContain("접근이 거부");
+    expect(result).not.toContain("unit-openai-key");
+    expect(await openaiFailureMessage(new Response("not-json", { status: 401 }))).toContain("HTTP 401");
+  });
+  it("uses the same safe diagnosis for free connection checks and stops on first rejection", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: "invalid_api_key", message: "secret" } }), { status: 401 }));
+    const result = await testOpenai(fetchMock);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("API 키가 유효하지");
+    expect(result.message).not.toContain("secret");
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });

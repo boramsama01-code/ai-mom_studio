@@ -4,10 +4,12 @@ import request from "supertest";
 import { login, resetDb, setTestEnv } from "./helpers";
 setTestEnv();
 const mockText = vi.fn();
+const mockCaption = vi.fn();
 const mockImage = vi.fn();
 vi.mock("../server/services/studioAi", () => ({
   studioAiStatus: () => ({ defaultProvider: "openai", text: { openai: true, anthropic: true }, image: true }),
   generateStudioText: (...a: unknown[]) => mockText(...a), generateStudioImage: (...a: unknown[]) => mockImage(...a),
+  generateStudioCaption: (...a: unknown[]) => mockCaption(...a),
 }));
 const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
@@ -19,7 +21,7 @@ const { eq } = await import("drizzle-orm");
 let app: ReturnType<typeof createApp>;
 beforeAll(async () => { await resetDb(); app = createApp(); });
 afterAll(async () => { await closeDb(); });
-beforeEach(() => { mockText.mockReset(); mockImage.mockReset(); });
+beforeEach(() => { mockText.mockReset(); mockImage.mockReset(); mockCaption.mockReset(); });
 const generated = () => ({ title: "생성 제목", script: "생성 원고", caption: "생성 캡션", panels: Array.from({ length: 4 }, (_, i) => ({ scene: `장면 ${i + 1}`, dialogue: `대사 ${i + 1}` })), provider: "openai", model: "mock-model" });
 
 async function setup() {
@@ -30,6 +32,54 @@ async function setup() {
   return { ...auth, headers, card: created.body };
 }
 describe("통합 제작 보드", () => {
+  it("캡션만 요청하면 원고·대사·그림·단계를 유지하고 캡션만 저장", async () => {
+    const { agent, headers, card } = await setup();
+    const panels = card.panels.map((p: object, i: number) => ({ ...p, scene: `내 장면 ${i}`, dialogue: `내 대사 ${i}` }));
+    const saved = await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: 1, script: "완성한 원고", panels, stage: "done" });
+    mockCaption.mockResolvedValue({ caption: "새 캡션만", provider: "openai", model: "mock-model" });
+    const request = { version: 2, kind: "text", textTarget: "caption", requestId: crypto.randomUUID() };
+    const queued = await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send(request);
+    expect(queued.status).toBe(202);
+    const job = await claimJob(getDb(), "caption-only", ["studio_generate"]);
+    expect(await processStudioJob(getDb(), job!, "caption-only")).toBe(true);
+    const detail = (await agent.get(`/api/studio/cards/${card.id}`)).body;
+    expect(detail.card).toMatchObject({ title: card.title, script: "완성한 원고", panels: saved.body.panels, stage: "done", caption: "새 캡션만" });
+    expect(mockCaption).toHaveBeenCalledOnce();
+    expect(mockText).not.toHaveBeenCalled();
+    expect(mockImage).not.toHaveBeenCalled();
+    expect((await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send(request)).body.duplicate).toBe(true);
+  });
+  it("별도 AI 지시 없이 빈칸을 채워도 사용자가 쓴 대사를 덮어쓰지 않음", async () => {
+    const { agent, headers, card } = await setup();
+    await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: 1, panels: card.panels.map((p: object) => ({ ...p, dialogue: "직접 쓴 대사" })) });
+    mockText.mockResolvedValue(generated());
+    expect((await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send({ version: 2, kind: "text", textTarget: "fill", requestId: crypto.randomUUID() })).status).toBe(202);
+    const job = await claimJob(getDb(), "fill-draft", ["studio_generate"]);
+    expect(await processStudioJob(getDb(), job!, "fill-draft")).toBe(true);
+    const detail = (await agent.get(`/api/studio/cards/${card.id}`)).body;
+    expect(detail.card.title).toBe(card.title);
+    expect(detail.card.caption).toBe("생성 캡션");
+    expect(detail.card.panels.every((p: { dialogue: string }) => p.dialogue === "직접 쓴 대사")).toBe(true);
+    expect(mockText).toHaveBeenCalledOnce();
+  });
+  it("빈 컷의 무지시 생성은 차단하고 작성한 대사는 이미지 지시로 바로 전달", async () => {
+    const { agent, headers, card } = await setup();
+    expect((await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send({ version: 1, kind: "image", panelIndex: 0, requestId: crypto.randomUUID() })).status).toBe(400);
+    await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: 1, characters: [], panels: card.panels.map((p: object) => ({ ...p, scene: "창가", dialogue: "왜 나만?" })) });
+    const sharp = (await import("sharp")).default;
+    const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
+    mockImage.mockResolvedValue({ bytes: png, mimeType: "image/png", model: "mock-image" });
+    const body = { version: 2, kind: "image", panelIndex: 0, requestId: crypto.randomUUID() };
+    expect((await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send(body)).status).toBe(202);
+    const job = await claimJob(getDb(), "direct-image", ["studio_generate"]);
+    expect(await processStudioJob(getDb(), job!, "direct-image")).toBe(true);
+    expect(mockImage).toHaveBeenCalledOnce();
+    expect(mockImage.mock.calls[0][0].prompt).toContain("왜 나만?");
+    expect((await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send(body)).body.duplicate).toBe(true);
+    expect(mockImage).toHaveBeenCalledOnce();
+    const detail = (await agent.get(`/api/studio/cards/${card.id}`)).body;
+    expect(detail.card.panels[0]).toMatchObject({ scene: "창가", dialogue: "왜 나만?" });
+  });
   it("로그인·CSRF 없이 제작 데이터 조회·변경 불가", async () => {
     expect((await request(app).get("/api/studio/cards")).status).toBe(401);
     const { agent } = await login(app);
