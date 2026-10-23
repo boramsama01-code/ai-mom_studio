@@ -4,11 +4,12 @@ import { z } from "zod";
 import { getDb } from "../db";
 import { actorOf } from "../auth";
 import { jobs, studioCards, studioImages, studioRevisions } from "../../shared/schema";
-import { studioCreateSchema, studioGenerationSchema, studioPatchSchema } from "../../shared/studio";
+import { studioContentSchema, studioCreateSchema, studioGenerationSchema, studioPatchSchema } from "../../shared/studio";
 import { ah, HttpError, intParam, parse } from "./util";
-import { createStudioCard, exportStudioComic, importStudioBoard, loadStudioNotes, queueStudioGeneration, saveStudioCard, saveStudioNotes, studioCardDto, studioDetail, studioImportSchema, studioJobDto } from "../services/studio";
+import { createStudioCard, importStudioBoard, loadStudioNotes, queueStudioGeneration, saveStudioCard, saveStudioNotes, studioCardDto, studioDetail, studioImportSchema, studioJobDto } from "../services/studio";
 import { studioAiStatus } from "../services/studioAi";
 import { kickInlineStudio } from "../worker/studio";
+import { checkStudioExport, exportStudioZip, renderStudioOutput } from "../services/studioExport";
 
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -21,6 +22,9 @@ studioRoutes.post("/studio/cards", ah(async (req, res) => {
   const { sourceItemId, ...content } = parse(studioCreateSchema, req.body);
   res.status(201).json(await createStudioCard(getDb(), content, actorOf(req), sourceItemId));
 }));
+studioRoutes.post("/studio/export-check", ah(async (req, res) => {
+  res.json(checkStudioExport(parse(studioContentSchema, req.body)));
+}));
 studioRoutes.get("/studio/cards/:id", ah(async (req, res) => {
   const db = getDb();
   const detail = await studioDetail(db, intParam(req.params.id));
@@ -30,8 +34,17 @@ studioRoutes.get("/studio/cards/:id", ah(async (req, res) => {
 }));
 studioRoutes.get("/studio/cards/:id/export.png", ah(async (req, res) => {
   const id = intParam(req.params.id);
-  const exported = await exportStudioComic(getDb(), id);
-  res.type("image/png").set("Content-Disposition", `attachment; filename="studio-${id}-v${exported.version}.png"`).send(exported.bytes);
+  const version = req.query.version === undefined ? undefined : parse(z.coerce.number().int().positive(), req.query.version);
+  const exported = await renderStudioOutput(getDb(), id, version);
+  if (exported.content.format === "카드뉴스" && req.query.page === undefined) throw new HttpError(400, "카드뉴스는 ZIP으로 내려받거나 미리보기 페이지를 선택하세요.");
+  const page = req.query.page === undefined ? 0 : parse(z.coerce.number().int().min(0).max(5), req.query.page);
+  res.type("image/png").set("Content-Disposition", `${req.query.preview === "1" ? "inline" : "attachment"}; filename="studio-${id}-v${exported.version}.png"`).send(await exported.page(page));
+}));
+studioRoutes.get("/studio/cards/:id/export.zip", ah(async (req, res) => {
+  const id = intParam(req.params.id);
+  const version = req.query.version === undefined ? undefined : parse(z.coerce.number().int().positive(), req.query.version);
+  const output = await exportStudioZip(getDb(), id, version);
+  res.type("application/zip").set("Content-Disposition", `attachment; filename="studio-${id}-v${output.version}.zip"`).send(output.bytes);
 }));
 studioRoutes.patch("/studio/cards/:id", ah(async (req, res) => {
   const { version, ...patch } = parse(studioPatchSchema, req.body);

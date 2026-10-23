@@ -2,6 +2,9 @@ import { z } from "zod";
 
 export const studioChannels = ["penguin", "highway", "fryday", "news"] as const;
 export const studioFormats = ["웹툰", "카드뉴스", "릴스", "브랜드", "기타"] as const;
+export const studioExportDesigns = ["editorial", "spotlight", "minimal"] as const;
+export const studioOutputFormats = ["웹툰", "카드뉴스"] as const;
+export const studioOutputDescription = (format: string) => format === "웹툰" ? "네컷 이미지 1장 · 1080 × 1350 PNG" : format === "카드뉴스" ? "표지 + 본문 4장 + 마무리 · 1080 × 1350 PNG 6장 (ZIP)" : "기획용 형식 · 이미지·영상 내보내기 미지원";
 export const studioStages = ["idea", "writing", "making", "review", "done"] as const;
 export const studioCharacters = ["pengpeng", "pempem", "penguin", "pengki"] as const;
 export const studioChannelLabels = { penguin: "우주펭귄상회", highway: "Highway", fryday: "Fryday", news: "시사 채널 · 이름 미정" };
@@ -21,6 +24,8 @@ export const studioContentSchema = z.object({
   stage: z.enum(studioStages).default("idea"),
   dueDate: date.default(""), memo: z.string().max(12000).default(""),
   script: z.string().max(24000).default(""), caption: z.string().max(8000).default(""),
+  exportDesign: z.enum(studioExportDesigns).default("editorial"),
+  sourceLabel: z.string().trim().max(180).default(""),
   panels: z.array(studioPanelSchema).length(4).default(() => Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null }))),
   characters: z.array(z.enum(studioCharacters)).max(4).default(["penguin"]),
   imagePath: z.union([z.literal(""), z.literal("/studio-assets/webtoon-01.png")]).default(""),
@@ -36,6 +41,8 @@ export const studioPatchSchema = z.object({
   memo: studioContentSchema.shape.memo.unwrap().optional(),
   script: studioContentSchema.shape.script.unwrap().optional(),
   caption: studioContentSchema.shape.caption.unwrap().optional(),
+  exportDesign: studioContentSchema.shape.exportDesign.unwrap().optional(),
+  sourceLabel: studioContentSchema.shape.sourceLabel.unwrap().optional(),
   panels: studioContentSchema.shape.panels.unwrap().optional(),
   characters: studioContentSchema.shape.characters.unwrap().optional(),
   imagePath: studioContentSchema.shape.imagePath.unwrap().optional(),
@@ -59,4 +66,5 @@ export type StudioJob = { id: number; status: string; lastError: string | null; 
 export type StudioAiStatus = { defaultProvider: StudioProvider; text: { openai: boolean; anthropic: boolean }; image: boolean };
 export type StudioBoard = { cards: StudioCard[]; notes: string; notesVersion: number; ai: StudioAiStatus };
 export type StudioCardDetail = { card: StudioCard; revisions: StudioRevision[]; jobs: StudioJob[] };
+export type StudioExportCheck = { errors: Array<{ field: string; message: string }>; warnings: string[]; pageCount: number };
 export function emptyStudioCard(): StudioContent { return studioContentSchema.parse({ title: "새 콘텐츠" }); }

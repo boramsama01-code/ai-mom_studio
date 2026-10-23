@@ -27,11 +27,11 @@ const queryClient = new QueryClient({
 
 const NAV: Array<{ group: string; items: Array<{ href: string; label: string; icon: string; count?: "review" | "ready" }> }> = [
   {
-    group: "스튜디오",
-    items: [{ href: "/", label: "Studio Board", icon: "▦" }],
+    group: "제작 · 내려받아 직접 게시",
+    items: [{ href: "/", label: "제작 보드", icon: "▦" }],
   },
   {
-    group: "수집·발행",
+    group: "수집 콘텐츠 · 승인 후 발행",
     items: [
       { href: "/today", label: "수집 현황", icon: "◎" },
       { href: "/inbox", label: "수집함", icon: "▤", count: "review" },
@@ -43,8 +43,8 @@ const NAV: Array<{ group: string; items: Array<{ href: string; label: string; ic
     group: "설정",
     items: [
       { href: "/rules", label: "검색 설정", icon: "⌕" },
-      { href: "/design", label: "카드 디자인", icon: "▣" },
-      { href: "/settings", label: "API·채널 설정", icon: "⚙" },
+      { href: "/design", label: "수집 카드 디자인", icon: "▣" },
+      { href: "/settings", label: "채널·서비스 설정", icon: "⚙" },
       { href: "/runs", label: "실행 기록", icon: "≡" },
     ],
   },

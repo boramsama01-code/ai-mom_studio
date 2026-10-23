@@ -67,7 +67,7 @@ export async function testTelegram(fetchImpl: typeof fetch = fetch): Promise<Tes
     const s = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id: env.telegramReviewChatId, text: "✅ 아이맘 스튜디오 연결 확인 메시지입니다." }),
+      body: JSON.stringify({ chat_id: env.telegramReviewChatId, text: "✅ 우주펭귄상회 스튜디오 연결 확인 메시지입니다." }),
       signal: AbortSignal.timeout(10_000),
     });
     const sj = (await s.json()) as { ok?: boolean; description?: string };

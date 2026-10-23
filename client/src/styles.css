@@ -349,9 +349,13 @@ fieldset legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
 .settings-details summary { padding:12px 0; font-weight:600; cursor:pointer; }
 .settings-details[open]>summary { margin-bottom:16px; }
 .channel-editor input[type=color] { width:72px; height:42px; padding:4px; }
-.studio .studio-brands { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+.studio .studio-brands { grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr)); }
 .studio .studio-brand { min-height:110px; }
 .studio-brand small { display:none; }
+.ai-readiness { display:grid; gap:10px; padding:14px; background:#f5f8f8; border:1px solid #e1e8e9; border-radius:10px; }
+.ai-readiness > div { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:13px; }
+.channel-sort-controls .btn { min-width:44px; min-height:44px; }
+.channel-archive { border-top:1px solid var(--border); padding-top:16px; }
 @media(max-width:700px) { .channel-directory { grid-template-columns:1fr; } .channel-card { min-height:112px; padding:20px; } .channel-editor { padding:20px; } .settings-tabs { gap:22px; } }
 
 .channel-form-fields { border:0; padding:0; margin:0; min-width:0; }

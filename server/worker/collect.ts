@@ -54,6 +54,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const now = opts.now ?? new Date();
   const [channel] = await db.select().from(channels).where(eq(channels.id, channelId));
   if (!channel) throw new Error("채널 없음");
+  if (!channel.active) throw new Error("보관된 채널 — 수집하지 않음");
   if (await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태 — 수집하지 않음");
 
   const rules = await db

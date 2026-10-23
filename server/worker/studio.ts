@@ -8,7 +8,7 @@ import type { DB } from "../db";
 import { jobs, studioCards, studioImages, studioRevisions, type Job } from "../../shared/schema";
 import { studioContentSchema, studioGenerationSchema, type StudioContent } from "../../shared/studio";
 import { generateStudioImage, generateStudioText } from "../services/studioAi";
-import { loadStudioCard } from "../services/studio";
+import { loadStudioCard, validateStudioChannel } from "../services/studio";
 import { claimJob, completeJob, failJob, heartbeat, recoverExpired } from "./queue";
 import { loadStoredSecrets } from "../secretStore";
 import { env } from "../env";
@@ -34,6 +34,7 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
     const payload = payloadSchema.parse(job.payload);
     if (await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태로 생성을 실행하지 않았습니다.");
     const card = await loadStudioCard(db, payload.cardId);
+    await validateStudioChannel(db, card.content.channel);
     if (card.version !== payload.version) throw new Error("생성 전 콘텐츠가 수정되었습니다. 최신 내용에서 다시 요청하세요.");
     timer = setInterval(() => { void heartbeat(db, job.id, workerId).catch(() => undefined); }, 30_000);
     timer.unref();
@@ -86,7 +87,7 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
     return true;
   } catch (e) {
     // Provider adapters use fixed safe messages. Never return upstream response bodies or credentials.
-    const ownMessage = /^(전역 정지 상태로|생성 전 콘텐츠가|캐릭터 기준 이미지가|생성 이미지가|생성 이미지 형식이|생성 작업의 실행 권한이)/.test((e as Error).message ?? "");
+    const ownMessage = /^(보관된 채널입니다|전역 정지 상태로|생성 전 콘텐츠가|캐릭터 기준 이미지가|생성 이미지가|생성 이미지 형식이|생성 작업의 실행 권한이)/.test((e as Error).message ?? "");
     const message = e instanceof z.ZodError ? "생성 결과의 형식이 올바르지 않아 적용하지 않았습니다." : e instanceof AiServiceError || ownMessage ? (e as Error).message : "생성 처리 또는 결과 저장에 실패했습니다. 연결과 작업 상태를 확인하세요.";
     await failJob(db, job, workerId, `${message} 자동 재시도하지 않았습니다.`, false);
     return false;

@@ -298,7 +298,7 @@ templateRoutes.post(
     const { item, rev, fields } = await itemFields(ch, intParam(req.params.id));
     let r;
     try {
-      r = await autofillFromBrandTemplate(getDb(), { brandTemplateId: templateId, title: `[아이맘] ${item.title}`, fields: Object.fromEntries(fields.map((f) => [f.key, f.value])) });
+      r = await autofillFromBrandTemplate(getDb(), { brandTemplateId: templateId, title: `[우주펭귄상회] ${item.title}`, fields: Object.fromEntries(fields.map((f) => [f.key, f.value])) });
     } catch (e) {
       canvaHttp(e);
     }
@@ -344,3 +344,4 @@ templateRoutes.post(
     res.json({ assetId: asset.id, aspectWarning: Math.abs(ratio - CARD_W / CARD_H) > 0.02 ? "Canva 디자인 비율이 4:5가 아니어서 여백을 넣어 맞췄습니다. 1080×1350 크기로 디자인하면 여백이 생기지 않습니다." : null });
   }),
 );
+

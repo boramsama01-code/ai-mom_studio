@@ -12,14 +12,14 @@ export const CHANNEL_SEEDS = [
   },
   {
     slug: "science-dialogue",
-    name: "아이맘 · 하루 과학 대화",
+    name: "과학 대화",
     description: "중학생과 부모가 5~10분 과학 질문을 근거로 이야기합니다.",
     contentType: "science_dialogue",
     accentColor: "#6550A6",
   },
   {
     slug: "current-dialogue",
-    name: "아이맘 · 하루 시사 대화",
+    name: "시사 채널 · 이름 미정",
     description: "사실·관점·가치를 구분하며 시사 주제를 이야기합니다.",
     contentType: "current_dialogue",
     accentColor: "#285FAD",

@@ -36,17 +36,17 @@ export function DesignPage() {
   if (selected === "all" || !current)
     return (
       <>
-        <h1>카드 디자인</h1>
-        <Empty>카드 디자인은 채널별로 정합니다. 채널을 하나 선택하세요.</Empty>
+        <h1>수집 카드 디자인</h1>
+        <Empty>수집함에서 만드는 카드의 디자인입니다. 채널을 하나 선택하세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>
       </>
     );
   return (
     <>
       <div className="page-head">
         <div>
-          <h1>카드 디자인</h1>
+          <h1>수집 카드 디자인</h1>
           <p className="small muted" style={{ margin: 0 }}>
-            카드 이미지 모양을 고르고, 직접 만든 배경을 올리거나 Canva 템플릿에 글자를 자동으로 채울 수 있습니다.
+            수집함 → 콘텐츠 초안 → 발행함의 카드에 적용됩니다. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.
           </p>
         </div>
       </div>
@@ -289,7 +289,7 @@ function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: 
           </form>
           {tplId && dataset.data && (
             <div className="stack">
-              <span className="small">템플릿의 글자 칸과 아이맘 필드 대응</span>
+              <span className="small">템플릿의 글자 칸과 콘텐츠 항목 연결</span>
               <div className="row">
                 {Object.entries(dataset.data.dataset).map(([k, v]) => (
                   <Badge key={k} kind={v.type === "text" && ours.has(k) ? "ok" : "warn"}>
@@ -339,3 +339,4 @@ function BulkSection({ cid, kind }: { cid: number; kind: string }) {
     </section>
   );
 }
+
