@@ -349,7 +349,7 @@ fieldset legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
 .settings-details summary { padding:12px 0; font-weight:600; cursor:pointer; }
 .settings-details[open]>summary { margin-bottom:16px; }
 .channel-editor input[type=color] { width:72px; height:42px; padding:4px; }
-.studio .studio-brands { grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr)); }
+.studio .studio-brands { grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr)); }
 .studio .studio-brand { min-height:110px; }
 .studio-brand small { display:none; }
 .ai-readiness { display:grid; gap:10px; padding:14px; background:#f5f8f8; border:1px solid #e1e8e9; border-radius:10px; }
