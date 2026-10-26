@@ -29,6 +29,12 @@ export async function openaiFailureMessage(response: Response): Promise<string> 
     return prefix + "이 모델은 OpenAI 조직 인증이 필요합니다. OpenAI Platform의 조직 인증과 모델 사용 권한을 확인하세요.";
   }
   if (code === "insufficient_quota") return prefix + "OpenAI API 크레딧 또는 프로젝트 사용 한도를 확인하세요. ChatGPT 구독과 API 결제는 별도입니다.";
+  if (code === "credit_balance_exhausted") return prefix + "OpenAI API 선불 크레딧이 소진되었습니다. OpenAI Platform의 Billing에서 잔액을 확인하세요. ChatGPT 구독과 API 결제는 별도입니다.";
+  if (code === "organization_spend_limit_exceeded") return prefix + "OpenAI 조직의 월간 지출 한도에 도달했습니다. 조직의 Limits 설정을 확인하세요. 한도 초기화 또는 조정 전에는 재시도로 해결되지 않습니다.";
+  if (code === "project_spend_limit_exceeded") return prefix + "이 API 키가 속한 프로젝트의 월간 지출 한도에 도달했습니다. 해당 프로젝트의 Limits 설정을 확인하세요. 한도 초기화 또는 조정 전에는 재시도로 해결되지 않습니다.";
+  if (code === "organization_usage_limit_exceeded") return prefix + "OpenAI에서 정한 조직의 월간 사용 한도에 도달했습니다. Limits에서 한도를 확인하고 필요하면 OpenAI에 증액을 요청하세요.";
+  if (code === "usage_limit_exceeded") return prefix + "OpenAI API 사용 또는 결제 한도에 도달했습니다. Billing과 Limits를 확인하세요. 반복 요청만으로 해결되지 않습니다.";
+  if (code === "rate_limit_exceeded" || code === "slow_down") return prefix + "일시적인 요청 속도 한도에 도달했습니다. 잠시 기다린 뒤 다시 요청하세요. 이 오류만으로 크레딧 부족을 의미하지는 않습니다.";
   if (status === 401) return prefix + "인증이 거부되었습니다. API 키의 유효성·프로젝트와 필요한 엔드포인트 권한을 확인하세요. 현재 정보만으로 원인을 확정할 수 없습니다.";
   if (status === 403) return prefix + "접근이 거부되었습니다. 프로젝트·API 키의 모델 및 요청 권한과 조직·지역 제한을 확인하세요. 키를 다시 입력하는 것만으로 해결되지 않을 수 있습니다.";
   if (status === 404) return prefix + "모델을 찾을 수 없거나 접근할 수 없습니다. 설정의 모델 ID와 프로젝트의 모델 접근 권한을 확인하세요.";

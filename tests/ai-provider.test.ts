@@ -127,6 +127,13 @@ describe("safe and actionable OpenAI failures", () => {
     [403, null, "unit-openai-key", "접근이 거부"],
     [403, null, "Your organization must be verified to use this model. unit-openai-key", "조직 인증이 필요"],
     [429, "insufficient_quota", "unit-openai-key", "API 크레딧"],
+    [429, "credit_balance_exhausted", "unit-openai-key", "선불 크레딧이 소진"],
+    [429, "organization_spend_limit_exceeded", "unit-openai-key", "조직의 월간 지출 한도"],
+    [429, "project_spend_limit_exceeded", "unit-openai-key", "프로젝트의 월간 지출 한도"],
+    [429, "organization_usage_limit_exceeded", "unit-openai-key", "조직의 월간 사용 한도"],
+    [429, "usage_limit_exceeded", "unit-openai-key", "사용 또는 결제 한도"],
+    [429, "rate_limit_exceeded", "unit-openai-key", "일시적인 요청 속도"],
+    [429, "slow_down", "unit-openai-key", "일시적인 요청 속도"],
     [404, "model_not_found", "unit-openai-key", "모델을 찾을 수 없거나"],
   ])("classifies %s/%s without exposing provider bodies", async (status, code, message, expected) => {
     const result = await openaiFailureMessage(new Response(JSON.stringify({ error: { code, message } }), { status }));
