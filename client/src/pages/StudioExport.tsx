@@ -36,10 +36,11 @@ const designs = [
   { id: "minimal", name: "미니멀", detail: "여백과 본문 중심" },
 ] as const;
 
-export function StudioExport({ form, base, dirty, busy, change, save }: {
+export function StudioExport({ form, base, dirty, busy, change, save, onFieldFocus }: {
   form: StudioContent; base: StudioCard; dirty: boolean; busy: boolean;
   change: <K extends keyof StudioContent>(key: K, value: StudioContent[K]) => void;
   save: () => Promise<StudioCard>;
+  onFieldFocus?: (field: string) => void;
 }) {
   const [checkedInput, setCheckedInput] = useState(form);
   const [preview, setPreview] = useState<{ version: number; format: string } | null>(null);
@@ -56,9 +57,9 @@ export function StudioExport({ form, base, dirty, busy, change, save }: {
     return saved;
   }, onSuccess: saved => { setPreview({ version: saved.version, format: saved.format }); setPage(0); setPreviewError(false); }, onError: error => toast("err", error.message) });
   const stalePreview = dirty || preview?.version !== base.version || preview?.format !== form.format;
-  const focusField = (field: string) => document.getElementById(`studio-${field}`)?.focus();
+  const focusField = (field: string) => { onFieldFocus?.(field); window.requestAnimationFrame(() => document.getElementById(`studio-${field}`)?.focus()); };
   return <section className="panel stack studio-export" aria-labelledby="studio-export-heading">
-    <div><span className="studio-eyebrow">내보내기</span><h2 id="studio-export-heading">디자인하고, 저장해서 게시하기</h2><p className="small muted">{studioOutputDescription(form.format)}</p></div>
+    <div><h2 id="studio-export-heading">최종 이미지</h2><p className="small muted">{studioOutputDescription(form.format)}</p></div>
     <div className="studio-export-designs" role="group" aria-label="출력 디자인">
       {designs.map(design => <button key={design.id} type="button" className={`studio-design-option design-${design.id}`} aria-pressed={form.exportDesign === design.id} disabled={busy || prepare.isPending} onClick={() => change("exportDesign", design.id)}><span className="studio-design-swatch" aria-hidden="true"><i /><i /><i /></span><strong>{design.name}</strong><small>{design.detail}</small></button>)}
     </div>
@@ -77,6 +78,6 @@ export function StudioExport({ form, base, dirty, busy, change, save }: {
         {previewError ? <p className="notice err" role="alert">미리보기를 불러오지 못했습니다. 최신 버전인지 확인하고 다시 눌러 주세요.</p> : <img key={`${preview.version}-${page}`} src={`/api/studio/cards/${base.id}/export.png?version=${preview.version}&page=${page}&preview=1`} alt={`${base.title} ${page + 1}페이지 출력 미리보기`} onError={() => setPreviewError(true)} />}
       </>}
     </div>}
-    <p className="small studio-handoff">① 이미지 저장 → ② 아래 캡션 복사 → ③ SNS 앱에서 직접 게시<br />‘완료’는 제작 단계입니다. 이 보드에서는 SNS로 자동 전송하지 않습니다.</p>
+    <p className="small studio-handoff">이미지를 내려받고 위 캡션을 복사해 SNS에 직접 게시하세요. ‘완료’는 제작 완료를 뜻합니다.</p>
   </section>;
 }
