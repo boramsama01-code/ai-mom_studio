@@ -2,7 +2,7 @@
  * 수집함 · 콘텐츠 초안 · 카드 · 승인
  */
 import { Router } from "express";
-import { and, asc, desc, eq, ilike, inArray, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
 import {
@@ -15,6 +15,7 @@ import {
   destinations,
   mediaAssets,
   officialSources,
+  runs,
   sourceDocuments,
 } from "../../shared/schema";
 import { ah, conflict, HttpError, intParam, loadChannel, parse, zVersion } from "./util";
@@ -31,6 +32,7 @@ import { generateDialogueDraft } from "../worker/generate";
 import { approveItem, cancelApproval, renderCardForItem, retryDelivery, sourceOrgFor } from "../worker/publish";
 import { buildCaptions } from "../services/cardModel";
 import { matchOfficialSource } from "../worker/evidence";
+import { collectionDateSchema, collectionDayRange } from "../../shared/collection";
 
 export const itemRoutes = Router();
 
@@ -41,6 +43,7 @@ const listQuery = z.object({
   schedule: z.string().max(40).optional(),
   evidence: z.string().max(40).optional(),
   category: z.string().max(40).optional(),
+  collectedOn: collectionDateSchema.optional(),
   view: z.enum(["inbox", "drafts", "excluded", "all"]).optional(),
   sample: z.enum(["0", "1"]).optional(),
   page: z.coerce.number().int().min(1).max(1000).optional(),
@@ -64,6 +67,10 @@ itemRoutes.get(
     if (q.schedule) conds.push(inArray(contentItems.scheduleStatus, q.schedule.split(",")));
     if (q.evidence) conds.push(inArray(contentItems.evidenceStatus, q.evidence.split(",")));
     if (q.category) conds.push(eq(contentItems.category, q.category));
+    if (q.collectedOn) {
+      const { start, end } = collectionDayRange(q.collectedOn);
+      conds.push(gte(contentItems.createdAt, start), lt(contentItems.createdAt, end), inArray(contentItems.origin, ["collected", "discovered"]));
+    }
     const where = and(...conds);
     const db = getDb();
     const pageSize = q.pageSize ?? 20, page = q.page ?? 1;
@@ -74,10 +81,12 @@ itemRoutes.get(
         source: { id: sourceDocuments.id, kind: sourceDocuments.kind, url: sourceDocuments.originalUrl, publishedAt: sourceDocuments.publishedAt, publishedPrecision: sourceDocuments.publishedPrecision, fetchStatus: sourceDocuments.fetchStatus, snippet: sourceDocuments.snippet },
         channelSlug: channels.slug,
         channelName: channels.name,
+        matchedQuery: sql<string | null>`coalesce((select r->>'query' from jsonb_array_elements(coalesce(${runs.snapshot}->'rules', '[]'::jsonb)) r where r->>'id' = ${contentItems.ruleId}::text limit 1), ${contentItems.discovery}->>'query')`,
       })
       .from(contentItems)
       .innerJoin(channels, eq(channels.id, contentItems.channelId))
       .leftJoin(sourceDocuments, eq(sourceDocuments.id, contentItems.primarySourceId))
+      .leftJoin(runs, eq(runs.id, contentItems.runId))
       .where(where)
       .orderBy(desc(contentItems.createdAt), desc(contentItems.id))
       .limit(pageSize)
@@ -438,3 +447,4 @@ itemRoutes.post(
     res.json({ updated: upd.length });
   }),
 );
+

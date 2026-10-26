@@ -37,7 +37,7 @@ export async function checkWorkerConnection() {
 /** 수집 작업 1건 처리 — 성공 여부 반환(GitHub 워커와 웹 서버 즉시 실행이 함께 씀) */
 export async function processCollectJob(db: DB, job: Job, workerId: string): Promise<boolean> {
   if (!job.channelId) throw new Error("채널 없는 수집 작업");
-  const r = await runCollect(db, job.channelId, { trigger: "worker", heartbeat: () => heartbeat(db, job.id, workerId) });
+  const r = await runCollect(db, job.channelId, { trigger: "worker", collectionOnly: job.payload.collectionOnly === true, heartbeat: () => heartbeat(db, job.id, workerId) });
   if (r.status === "failed") {
     // 키 미연결·인증 오류 등은 재시도해도 같으므로 재시도하지 않음
     await failJob(db, job, workerId, `수집 실행 #${r.runId} 실패: ${r.errors[0]?.message ?? "원인 미상"}`, false);

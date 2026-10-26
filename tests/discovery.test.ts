@@ -184,18 +184,18 @@ describe("수집 실행 안의 자동 발굴", () => {
     }
   });
 
-  it("자동 AI·알림을 끄면 키가 있어도 검색 자료만 저장한다", async () => {
+  it.each([false, true])("수집 전용=%s에서 AI·알림 호출 없이 자료만 저장한다", async (collectionOnly) => {
     const { getPool } = await import("../server/db");
     await getPool().query(`delete from content_sources where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_revisions where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_items where channel_id = ${SCIENCE};`);
     vi.stubEnv("ANTHROPIC_API_KEY", "configured-test-key");
-    vi.stubEnv("AUTO_GENERATE", "false");
-    vi.stubEnv("COLLECT_REVIEW_NOTIFICATIONS", "false");
+    vi.stubEnv("AUTO_GENERATE", String(collectionOnly));
+    vi.stubEnv("COLLECT_REVIEW_NOTIFICATIONS", String(collectionOnly));
     vi.stubEnv("TELEGRAM_REVIEW_CHAT_ID", "configured-test-destination");
     fakeCurate.mockClear(); fakeScience.mockClear(); fakeReview.mockClear();
     try {
-      const r = await runCollect(getDb(), SCIENCE, { trigger: "schedule", now: NOW, naverFetch, fetchSource: okFetch });
+      const r = await runCollect(getDb(), SCIENCE, { trigger: "schedule", now: NOW, naverFetch, fetchSource: okFetch, collectionOnly });
       expect(r.counts.discoveryPicked).toBe(2);
       expect(r.counts.draftSkippedAutoGenerateOff).toBe(2);
       expect(fakeCurate).not.toHaveBeenCalled();

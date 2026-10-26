@@ -35,7 +35,7 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
 
   const cmds: Cmd[] = useMemo(() => {
     const pages: Cmd[] = [
-      ["/", "내 콘텐츠"], ["/today", "수집 현황"], ["/inbox", "수집함"], ["/drafts", "콘텐츠 초안"], ["/publish", "발행함"],
+      ["/", "내 콘텐츠"], ["/today", "아침 수집 브리핑"], ["/inbox", "수집함"], ["/drafts", "콘텐츠 초안"], ["/publish", "발행함"],
       ["/rules", "검색 설정"], ["/design", "카드 디자인"], ["/connections", "API 키 관리 · OpenAI / Claude / Canva"], ["/settings", "채널 설정"], ["/runs", "실행 기록"],
     ].map(([href, label]) => ({ id: `p${href}`, label, group: "이동", run: () => go(href) }));
     const actions: Cmd[] = [

@@ -83,7 +83,7 @@ function RulesTab({ cid, kind }: { cid: number; kind: string }) {
           <div className="small muted">
             {estimate.discoveryCalls > 0 && `자동 발굴 ${estimate.discoveryCalls}회 + `}
             활성 검색어 {estimate.activeRules}개 (뉴스·블로그는 각각 1회) · 실행당 한도 {estimate.budget}회
-            {estimate.cappedByBudget && " — 한도를 넘는 검색어는 우선순위가 낮은 것부터 건너뜁니다"}
+            {estimate.cappedByBudget && " — 이번에 처리하지 못한 검색어는 다음 실행에서 먼저 처리합니다"}
           </div>
         </div>
         <button className="btn primary" onClick={() => setEditing("new")}>
@@ -608,3 +608,4 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
     </Modal>
   );
 }
+

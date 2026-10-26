@@ -393,3 +393,27 @@ fieldset legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
 .channel-sort-controls button { min-width:40px; min-height:40px; }
 .settings-section-head p { margin:8px 0 0; }
 @media(max-width:600px) { .channel-sort-row { gap:10px; padding:14px 12px; } .channel-sort-row .channel-avatar { width:34px; height:34px; font-size:17px; border-radius:9px; } .sort-number { display:none; } }
+
+/* 날짜별 수집 결과와 실행 상태 */
+.collection-summary { margin-bottom: 20px; }
+.collection-metrics { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 16px; padding: 18px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.collection-metrics > div { display: flex; flex-direction: column; gap: 9px; }
+.collection-metrics span { color: var(--muted); font-size: 12px; }
+.collection-metrics strong { font-size: 30px; line-height: 1.2; }
+.collection-metrics small { font-size: 13px; margin-left: 5px; font-weight: 400; }
+.collection-metrics .collection-next { font-size: 18px; }
+.collection-channels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.collection-channel { border: 1px solid var(--border); padding: 18px; border-radius: 12px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.collection-channel h3, .collection-channel p { margin: 0; }
+.collection-channel h3 { font-size: 15px; }
+.collection-channel details { overflow-wrap: anywhere; }
+.collection-preset { border-top: 1px solid var(--border); padding-top: 12px; }
+.collection-preset p { margin: 10px 0; }
+.collection-date-filter { margin: 16px 0; flex-wrap: wrap; }
+.collection-date-filter input { max-width: 170px; }
+@media (max-width: 700px) {
+  .collection-channels { grid-template-columns: 1fr; }
+  .collection-metrics { grid-template-columns: 1fr 1fr; }
+  .collection-metrics > div:last-child { grid-column: 1 / -1; }
+  .collection-summary > .row { align-items: flex-start; gap: 12px; }
+}
