@@ -150,6 +150,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
         )}
       </div>
       {g.id === "openai" && <p className="connection-help">아래 API 키 칸에 붙여 넣고 <strong>키 저장 → 연결 확인</strong> 순서로 누르세요.</p>}
+      {g.id === "naver" && <p className="connection-help">NAVER API HUB → Application → 인증 정보에서 발급된 두 값을 입력한 뒤 <strong>키 저장 → 연결 확인</strong>을 누르세요. 검색 API의 뉴스·블로그 이용 권한도 필요합니다.</p>}
       {last && <div className={`notice small ${last.ok ? "ok" : "err"}`} role="status"><strong>{last.ok ? "최근 연결 확인 성공" : "연결 확인 실패"}</strong><p style={{ margin: "6px 0" }}>{last.message}</p><span className="muted">{fmtDate(last.at)}</span></div>}
       {g.fields.filter(f => !f.key.endsWith("_MODEL")).map(input)}
       {!!modelFields.length && <details className="settings-details"><summary>모델 설정 · 선택 사항</summary><div className="stack" style={{ marginTop: 12 }}>{modelFields.map(input)}</div></details>}

@@ -36,6 +36,8 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
   const totals = d.channels.reduce((a, c) => ({ newItems: a.newItems + c.newItems, pending: a.pending + c.pending }), { newItems: 0, pending: 0 });
   const busy = d.channels.some(c => c.jobs.some(j => j.status === "running" && !j.stale));
   const queued = d.channels.some(c => c.jobs.length);
+  const searchAuthFailed = d.channels.some(c => c.lastRun?.status === "failed" && c.lastRun.errors.some(e =>
+    (e.scope === "discovery" || e.scope.startsWith("rule:")) && /인증\/권한 오류 \(HTTP (401|403)\)/.test(e.message)));
   const showItems = (id: number) => { select(id); navigate(`/inbox?collectedOn=${day}`); };
   return <section className="panel stack collection-summary" aria-label="날짜별 수집 현황">
     <div className="row between">
@@ -56,6 +58,7 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
       <span className="muted">05:13 · 07:13 · 19:13 예약 / GitHub 실행 지연 가능</span>
     </div>
     {!d.naverReady && <div className="notice warn">네이버 검색 연결이 필요합니다. <GuardedLink href="/connections?service=naver">연결 확인</GuardedLink></div>}
+    {searchAuthFailed && <div className="notice err" role="alert"><strong>최근 수집이 네이버 인증 단계에서 멈췄습니다.</strong><p style={{ margin: "6px 0" }}>저장된 Client ID·Client Secret 또는 검색 API 권한을 확인해 주세요. 신규 0건은 검색할 자료가 없다는 뜻이 아닙니다.</p><GuardedLink href="/connections?service=naver">네이버 키 확인·수정 →</GuardedLink><span className="small"> 키 저장 → 연결 확인 → 지금 수집 순서로 재개할 수 있습니다.</span></div>}
     {d.globalStop && <div className="notice warn">전역 정지 중이므로 수집이 실행되지 않습니다.</div>}
     <p className="small muted" style={{ margin: 0 }}>{d.lastScheduledAt ? `최근 실제 예약 수집: ${fmtDate(d.lastScheduledAt)}` : "실제 예약 수집 기록이 아직 없습니다. 연결 검사 성공과 자료 수집 완료는 별개입니다."}</p>
     {detailed ? <div className="collection-channels">{d.channels.map(c => <article key={c.id} className="collection-channel">
