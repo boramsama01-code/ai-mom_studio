@@ -36,7 +36,7 @@ export function StudioPage({ cardId }: { cardId?: number }) {
   const guard = useDirtyGuard();
   if (cardId !== undefined) return Number.isSafeInteger(cardId) && cardId > 0 ? <StudioDetail key={cardId} id={cardId} /> : <div className="notice err">작업 주소를 확인해 주세요. <GuardedLink href="/">보드로</GuardedLink></div>;
   return <div className="studio">
-    <header className="page-head studio-heading"><div><span className="studio-eyebrow">우주펭귄상회</span><h1>{view === "board" ? "Studio Board" : "캐릭터 원본"}</h1></div><div className="row"><button className="btn" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본" : "제작 보드"}</button><GuardedLink className="btn ghost" href="/settings">채널 관리</GuardedLink></div></header>
+    <header className="page-head studio-heading"><div><span className="studio-eyebrow">우주펭귄상회</span><h1>{view === "board" ? "Studio Board" : "캐릭터 원본"}</h1></div><div className="row"><GuardedLink className="btn" href="/connections">API 키 관리</GuardedLink><button className="btn" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본" : "제작 보드"}</button><GuardedLink className="btn ghost" href="/settings">채널 관리</GuardedLink></div></header>
     {view === "board" ? <StudioBoard /> : <CharacterArchive />}
   </div>;
 }
@@ -224,7 +224,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
       {generate.error && <ErrorBox error={generate.error} />}
       {!working && latestJob?.status === "failed" && <div role="alert" className="notice err"><strong>생성을 완료하지 못했습니다.</strong><p>{latestJob.lastError}</p></div>}
       {!working && latestJob?.result?.applied === false && <p className="notice warn">생성 중 수정한 내용은 유지했습니다. <button className="btn sm" onClick={() => { setTab("history"); setCompareId(Number(latestJob.result?.revisionId)); }}>새 결과를 버전 기록에서 확인</button></p>}
-      <div className="row"><button className="btn sm" onClick={() => refresh()}>상태 새로고침</button><GuardedLink href="/settings?tab=connections" className="btn sm ghost">API 설정</GuardedLink><button className="btn sm ghost" disabled={working || testConnection.isPending} onClick={() => testConnection.mutate()}>{testConnection.isPending ? "확인 중…" : "OpenAI 연결 확인 · 생성 비용 없음"}</button></div>
+      <div className="row"><button className="btn sm" onClick={() => refresh()}>상태 새로고침</button><GuardedLink href="/connections?service=openai" className="btn sm ghost">OpenAI 키 입력·수정</GuardedLink><button className="btn sm ghost" disabled={working || testConnection.isPending} onClick={() => testConnection.mutate()}>{testConnection.isPending ? "확인 중…" : "OpenAI 연결 확인 · 생성 비용 없음"}</button></div>
       {testConnection.data && <p role="status" className={testConnection.data.ok ? "notice ok" : "notice warn"}>{testConnection.data.message}</p>}
       {testConnection.error && <ErrorBox error={testConnection.error} />}
     </section>}
@@ -239,7 +239,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
           <label className="field">작성 AI<select value={provider} disabled={busy || working} onChange={e => { providerInitialized.current = true; setProvider(e.target.value as typeof provider); }}><option value="openai">GPT</option><option value="anthropic">Claude</option></select></label>
           <label className="field">형식<select id="studio-format" disabled={busy} value={form.format} onChange={e => change("format", e.target.value as Format)}>{!formats.includes(form.format) && <option value={form.format}>{form.format} · 기획용</option>}{formats.map(f => <option key={f}>{f}</option>)}</select></label>
         </div>
-        {settings.data?.ai.text[provider] === false && <p className="notice warn small">작성 AI의 키가 없습니다. 직접 편집은 계속할 수 있습니다. <GuardedLink href="/settings?tab=connections">API 설정 →</GuardedLink></p>}
+        {settings.data?.ai.text[provider] === false && <p className="notice warn small">작성 AI의 키가 없습니다. 직접 편집은 계속할 수 있습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
         {archivedChannel && <p className="notice warn small">보관된 채널입니다. 새 AI 생성은 <GuardedLink href="/settings">채널 복원</GuardedLink> 후 사용할 수 있습니다.</p>}
         <details className="studio-more"><summary>전체 원고·작업 정보</summary><div className="stack">
           <label className="field">전체 원고<textarea disabled={busy} value={form.script} rows={6} maxLength={24000} onChange={e => change("script", e.target.value)} placeholder="전체 원고가 없어도 아래 장면·대사에서 바로 그림을 만들 수 있습니다." /></label>
@@ -254,7 +254,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         <div className="studio-section-heading"><div><span className="studio-step">02 · 그림 제작</span><h2>{form.format === "카드뉴스" ? "본문 4장" : "네컷 구성"}</h2></div><span className="small muted">{form.panels.filter(p => p.imageId).length} / 4 그림</span></div>
         <p className="small muted">장면·대사를 그대로 사용합니다. 별도 지시 없이 ‘이 컷 그리기’를 누르세요. 한 번에 한 컷 · 이미지 API 사용료 발생.</p>
         <fieldset className="studio-cast"><legend>등장인물 · 그림 기준</legend><div className="studio-character-picks">{characters.map(c => <label key={c.id} className={form.characters.includes(c.id) ? "selected" : ""}><input type="checkbox" disabled={busy} checked={form.characters.includes(c.id)} onChange={e => change("characters", e.target.checked ? [...form.characters, c.id] : form.characters.filter(id => id !== c.id))} /><img src={getCharacterImage(c.id)} alt="" /><span>{c.name}</span></label>)}</div></fieldset>
-        {settings.data?.ai.image === false && <p className="notice warn small">그림 제작에는 OpenAI 키가 필요합니다. <GuardedLink href="/settings?tab=connections">API 설정 →</GuardedLink></p>}
+        {settings.data?.ai.image === false && <p className="notice warn small">그림 제작에는 OpenAI 키가 필요합니다. <GuardedLink href="/connections?service=openai">OpenAI 키 입력 →</GuardedLink></p>}
         {form.imagePath && <details className="studio-original"><summary>이전 웹툰 시안 보기</summary><img src={form.imagePath} alt="이전 네컷 웹툰 시안" /></details>}
         <div className="studio-panels">{form.panels.map((p, i) => <article className="studio-comic-panel" key={i}>
           <div className="row between"><h3>{i + 1}{form.format === "카드뉴스" ? "번째 본문" : "컷"}</h3><span className="small muted">{p.imageId ? "그림 있음" : "구성 중"}</span></div>

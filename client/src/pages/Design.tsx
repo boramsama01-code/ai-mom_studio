@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiUpload } from "../api";
 import { useChannel } from "../state";
 import { useToast } from "../toast";
-import { Badge, Empty, ErrorBox, Loading } from "../ui";
+import { Badge, Empty, ErrorBox, GuardedLink, Loading } from "../ui";
 import { CARD_FIELD_KEYS } from "@shared/cardFields";
 
 export type Tpl = { key: string; name: string; description: string; kind: "builtin" | "custom"; id?: number; layout?: string; textTone?: string; overlay?: number; allChannels?: boolean };
@@ -248,7 +248,7 @@ function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: 
           <li>
             리디렉트 주소(Redirect URL)에 <code>{s.redirectUri}</code> 를 넣습니다.
           </li>
-          <li>Client ID와 Client secret을 <b>채널 설정 → 서비스 연결 → Canva</b>에 저장한 뒤 이 화면으로 돌아옵니다.</li>
+          <li>Client ID와 Client secret을 <GuardedLink href="/connections?service=canva">API 키 관리 → Canva</GuardedLink>에 저장한 뒤 이 화면으로 돌아옵니다.</li>
         </ol>
       ) : !s.connected ? (
         <div className="stack">

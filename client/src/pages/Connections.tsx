@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation, useSearch } from "wouter";
 import { api } from "../api";
 import { useDirtyGuard } from "../state";
-import { Badge, ErrorBox, fmtDate, Loading } from "../ui";
+import { Badge, ErrorBox, fmtDate, GuardedLink, Loading } from "../ui";
 import type { SecretField, SecretGroup } from "@shared/secretsCatalog";
 
 type Status = { key: string; source: "environment" | "screen" | "none" | "unreadable"; updatedAt: string | null; valueLength: number | null; secret: boolean; value: string | null };
@@ -67,12 +68,6 @@ export function SecretInput({ k, label, hint, placeholder, options, secret, stat
 
 type AiStatus = { integrations: { aiProvider: "openai" | "anthropic"; aiConfigured: boolean; openai: boolean } };
 
-function focusKey(key: string, group: string) {
-  const target = document.getElementById(`sec-${key}`) ?? document.getElementById(`connection-${group}`);
-  target?.scrollIntoView({ behavior: "smooth", block: "center" });
-  target?.focus({ preventScroll: true });
-}
-
 function AiProviderPanel({ data }: { data: Resp }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
@@ -106,7 +101,7 @@ function AiProviderPanel({ data }: { data: Resp }) {
     <p id="ai-provider-help" className="small muted" style={{ margin: 0 }}>자동 선택은 GPT 키가 있으면 GPT, Claude 키만 있으면 Claude를 사용합니다. 그림 생성은 OpenAI 키를 사용합니다.</p>
     {actual.data && <div className="ai-readiness" aria-live="polite"><div><strong>글쓰기 · {actual.data.integrations.aiProvider === "anthropic" ? "Claude" : "GPT"}</strong><Badge kind={actual.data.integrations.aiConfigured ? "ok" : ""}>{actual.data.integrations.aiConfigured ? "키 등록됨" : "키 등록 필요"}</Badge></div><div><strong>그림 · OpenAI</strong><Badge kind={actual.data.integrations.openai ? "ok" : ""}>{actual.data.integrations.openai ? "키 등록됨" : "키 등록 필요"}</Badge></div><small className="muted">키 등록 상태입니다. 실제 연결은 각 서비스에서 확인하세요.</small></div>}
     {actual.error && <ErrorBox error={actual.error} retry={() => actual.refetch()} />}
-    <div className="row"><button type="button" className="btn sm" onClick={() => focusKey("OPENAI_API_KEY", "openai")}>GPT·그림 키 입력</button><button type="button" className="btn sm" onClick={() => focusKey("ANTHROPIC_API_KEY", "anthropic")}>Claude 키 입력</button></div>
+    <div className="row"><GuardedLink className="btn sm" href="/connections?service=openai">OpenAI 키 입력</GuardedLink><GuardedLink className="btn sm" href="/connections?service=anthropic">Claude 키 입력</GuardedLink></div>
     {envOwned ? <p className="small muted" style={{ margin: 0 }}>서버의 AI_PROVIDER 설정이 우선 적용되어 선택이 잠겨 있습니다. 화면에서 변경하려면 Render의 Environment에서 해당 항목을 제거한 뒤 재배포하세요.</p> : <div className="row"><button className="btn primary" disabled={!changed || save.isPending}>{save.isPending ? "저장 중…" : "선택 저장"}</button>{changed && <span className="small muted">저장하면 적용됩니다.</span>}</div>}
     {save.error && <ErrorBox error={save.error} />}
     {save.isSuccess && !changed && <div className="notice ok small" role="status">글쓰기 AI 선택을 저장했습니다.</div>}
@@ -124,6 +119,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
     },
     onSuccess: () => {
       setVals({});
+      guard.setDirty(`connection-${g.id}`, false);
       qc.invalidateQueries({ queryKey: ["secrets"] });
       qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] });
     },
@@ -132,7 +128,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
     mutationFn: () => api<{ ok: boolean; message: string }>(`/secrets/test/${g.id}`, { method: "POST", body: {} }),
     onSettled: () => qc.invalidateQueries({ queryKey: ["secrets"] }),
   });
-  const last = test.data ?? data.tests[g.id];
+  const last = currentTest(g, data);
   const st = (k: string) => data.statuses.find((s) => s.key === k);
   useEffect(() => {
     guard.setDirty(`connection-${g.id}`, changed.length > 0, async () => { try { await save.mutateAsync(); return true; } catch { return false; } });
@@ -140,63 +136,98 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
   }, [vals, g.id]);
   const sendsMessage = g.id === "telegram" && !!st("TELEGRAM_REVIEW_CHAT_ID")?.value;
   const paidTest = g.id === "anthropic";
+  const info = SERVICE_INFO[g.id];
+  const input = (f: SecretField) => <SecretInput key={f.key} k={f.key} label={f.key === "OPENAI_API_KEY" ? "API 키 · Secret key" : f.label} hint={f.key === "OPENAI_API_KEY" ? "발급 시 표시된 Secret key 전체를 붙여 넣으세요. Tracking ID나 가려진 값(•••)은 사용할 수 없습니다." : f.hint} placeholder={f.placeholder} options={f.options} secret={f.secret} status={st(f.key)} value={vals[f.key] ?? ""} onChange={(v) => { save.reset(); setVals(prev => ({ ...prev, [f.key]: v })); }} />;
+  const modelFields = g.fields.filter(f => f.key.endsWith("_MODEL"));
   return (
     <form id={`connection-${g.id}`} tabIndex={-1} className="panel stack" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
       <div className="row between">
-        <h3 style={{ margin: 0 }}>{g.title}</h3>
+        <h2 style={{ margin: 0 }}>{info?.title ?? g.title} 키 설정</h2>
         {g.docs && (
           <a href={g.docs} target="_blank" rel="noopener noreferrer" className="small">
             키 발급 페이지 ↗
           </a>
         )}
       </div>
-      <p className="small muted" style={{ margin: 0 }}>{g.description}</p>
-      {g.fields.map((f) => (
-        <SecretInput key={f.key} k={f.key} label={f.label} hint={f.hint} placeholder={f.placeholder} options={f.options} secret={f.secret} status={st(f.key)} value={vals[f.key] ?? ""} onChange={(v) => setVals({ ...vals, [f.key]: v })} />
-      ))}
+      {g.id === "openai" && <p className="connection-help">아래 API 키 칸에 붙여 넣고 <strong>키 저장 → 연결 확인</strong> 순서로 누르세요.</p>}
+      {last && <div className={`notice small ${last.ok ? "ok" : "err"}`} role="status"><strong>{last.ok ? "최근 연결 확인 성공" : "연결 확인 실패"}</strong><p style={{ margin: "6px 0" }}>{last.message}</p><span className="muted">{fmtDate(last.at)}</span></div>}
+      {g.fields.filter(f => !f.key.endsWith("_MODEL")).map(input)}
+      {!!modelFields.length && <details className="settings-details"><summary>모델 설정 · 선택 사항</summary><div className="stack" style={{ marginTop: 12 }}>{modelFields.map(input)}</div></details>}
       <div className="row">
         <button className="btn primary" disabled={!changed.length || save.isPending}>
-          {save.isPending ? "저장 중…" : "저장"}
+          {save.isPending ? "저장 중…" : "키 저장"}
         </button>
         {g.testable && (
-          <button type="button" className="btn" onClick={() => test.mutate()} disabled={test.isPending || changed.length > 0} title={changed.length ? "먼저 저장하세요" : undefined}>
-            {test.isPending ? "확인 중…" : sendsMessage ? "확인 메시지 보내기" : paidTest ? "테스트 호출 (유료)" : "연결 확인"}
+          <button type="button" className="btn" onClick={() => test.mutate()} disabled={test.isPending || save.isPending || changed.length > 0} title={changed.length ? "먼저 키를 저장하세요" : undefined}>
+            {test.isPending ? "확인 중…" : sendsMessage ? "확인 메시지 보내기" : paidTest ? "테스트 호출 (유료)" : g.id === "openai" ? "연결 확인 · 생성 비용 없음" : "연결 확인"}
           </button>
         )}
       </div>
+      {g.id === "canva" && <GuardedLink className="btn" href="/design">Canva 계정 연결·디자인 관리 →</GuardedLink>}
+      {g.id === "instagram" && <GuardedLink href="/settings">채널별 게시 계정·토큰 관리 →</GuardedLink>}
       {sendsMessage && <p className="small muted">검토 알림 채팅방에 메시지 1건을 보냅니다.</p>}
       {paidTest && <p className="small muted">짧은 글 생성 요청 1회를 보내며 API 사용료가 발생합니다.</p>}
-      <details className="settings-details small"><summary>고급 · 환경변수 이름</summary><dl>{g.fields.map(f => <div key={f.key}><dt>{f.label}</dt><dd><code>{f.key}</code></dd></div>)}</dl></details>
+      <details className="settings-details small"><summary>발급·사용 안내</summary><p>{g.description}</p><dl>{g.fields.map(f => <div key={f.key}><dt>{f.label}</dt><dd><code>{f.key}</code></dd></div>)}</dl></details>
       {save.error && <ErrorBox error={save.error} />}
-      {save.isSuccess && <div className="notice ok small">저장했습니다.</div>}
-      {last && (
-        <div className={`notice small ${last.ok ? "ok" : "err"}`} role="status">
-          {last.ok ? "연결 확인 성공" : "연결 확인 실패"}: {last.message}
-          {"at" in last && last.at ? <span className="muted"> ({fmtDate(last.at as string)})</span> : null}
-        </div>
-      )}
+      {test.error && <ErrorBox error={test.error} />}
+      {save.isSuccess && <div className="notice ok small" role="status">키를 저장했습니다.{g.testable ? " 연결 확인을 실행해 주세요." : ""}</div>}
     </form>
   );
 }
 
+const SERVICE_INFO: Record<string, { title: string; use: string; mark: string; keys: string[] }> = {
+  openai: { title: "OpenAI", use: "GPT 글쓰기 · 웹툰 이미지", mark: "O", keys: ["OPENAI_API_KEY"] },
+  anthropic: { title: "Claude", use: "글쓰기 · 원고 다듬기", mark: "A", keys: ["ANTHROPIC_API_KEY"] },
+  canva: { title: "Canva", use: "브랜드 템플릿 · 디자인", mark: "C", keys: ["CANVA_CLIENT_ID", "CANVA_CLIENT_SECRET"] },
+  naver: { title: "네이버", use: "뉴스 · 블로그 검색", mark: "N", keys: ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"] },
+  telegram: { title: "텔레그램", use: "검토 알림 · 채널 전송", mark: "T", keys: ["TELEGRAM_BOT_TOKEN"] },
+  cloudinary: { title: "Cloudinary", use: "게시용 이미지 주소", mark: "C", keys: ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"] },
+  instagram: { title: "Instagram", use: "게시 API 버전", mark: "I", keys: ["INSTAGRAM_API_VERSION"] },
+  ai: { title: "글쓰기 AI 선택", use: "기본 AI 변경", mark: "✎", keys: [] },
+};
+
+// A saved key is not proof of a working connection; old tests don't validate replacement keys.
+function currentTest(g: SecretGroup, data: Resp) {
+  const last = data.tests[g.id];
+  if (!last || SERVICE_INFO[g.id]?.keys.some(k => !["screen", "environment"].includes(data.statuses.find(s => s.key === k)?.source ?? "none"))) return undefined;
+  if (g.fields.some(f => { const updated = data.statuses.find(s => s.key === f.key)?.updatedAt; return updated && Date.parse(updated) > Date.parse(last.at); })) return undefined;
+  return last;
+}
+
+function ConnectionBoard({ data }: { data: Resp }) {
+  const search = useSearch();
+  const [, navigate] = useLocation();
+  const guard = useDirtyGuard();
+  const selected = new URLSearchParams(search).get("service") ?? "openai";
+  const group = data.groups.find(g => g.id === selected) ?? data.groups.find(g => g.id === "openai") ?? data.groups[0];
+  const groups = Object.keys(SERVICE_INFO).map(id => data.groups.find(g => g.id === id)).filter((g): g is SecretGroup => !!g);
+  const choose = (id: string) => guard.confirmLeave(() => navigate(`/connections?service=${id}`));
+  useEffect(() => { document.getElementById("connection-editor")?.focus({ preventScroll: true }); }, [group?.id]);
+  if (!group) return <p className="notice">관리할 서비스가 없습니다.</p>;
+  return <div className="connection-layout">
+    <nav className="connection-services" aria-label="API 서비스 선택">{groups.map(g => {
+      const info = SERVICE_INFO[g.id];
+      const states = info.keys.map(k => data.statuses.find(s => s.key === k)?.source ?? "none");
+      const last = currentTest(g, data);
+      const registered = states.length > 0 && states.every(s => s === "screen" || s === "environment");
+      const label = states.includes("unreadable") ? "재입력 필요" : last ? last.ok ? "최근 확인 성공" : "연결 확인 실패" : registered ? "등록됨 · 확인 필요" : states.some(s => s === "screen" || s === "environment") ? "일부 입력됨" : "미등록";
+      return <button key={g.id} className="connection-service" aria-current={group.id === g.id ? "page" : undefined} onClick={() => choose(g.id)}>
+        <span className={`connection-mark service-${g.id}`} aria-hidden>{info.mark}</span><span className="connection-service-copy"><strong>{info.title}</strong><span className="small muted">{info.use}</span>{g.id !== "ai" && <span className={`connection-state ${label.includes("실패") || label === "재입력 필요" ? "error" : ""}`}>{!g.testable && registered ? "설정 등록됨" : label}</span>}</span><span aria-hidden>→</span>
+      </button>;
+    })}</nav>
+    <section id="connection-editor" tabIndex={-1} className="connection-editor" aria-label={`${SERVICE_INFO[group.id]?.title ?? group.title} 설정`}>
+      {group.id === "ai" ? <AiProviderPanel data={data} /> : <GroupPanel key={group.id} g={group} data={data} />}
+      <p className="small muted connection-footnote">모든 채널에서 함께 사용합니다. 키는 암호화해 저장하며, 저장한 비밀값은 다시 표시하지 않습니다.</p>
+    </section>
+  </div>;
+}
+
 export function ConnectionsSection() {
   const q = useSecrets();
-  return (
-    <section className="stack" style={{ marginBottom: 16 }}>
-      <div>
-        <h2 style={{ marginBottom: 4 }}>서비스 연결</h2>
-        <p className="small muted" style={{ margin: 0 }}>
-          모든 채널에서 함께 사용합니다. 키는 암호화해 저장합니다.
-        </p>
-      </div>
-      {q.isLoading ? <Loading lines={2} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : (
-        <div className="grid grid-2">
-          {q.data!.groups.map((g) => (
-            g.id === "ai" ? <AiProviderPanel key={g.id} data={q.data!} /> : <GroupPanel key={g.id} g={g} data={q.data!} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
+  return q.isLoading ? <Loading lines={2} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : <ConnectionBoard data={q.data!} />;
+}
+
+export function ConnectionsPage() {
+  return <div className="connections-page"><header className="page-head"><div><span className="studio-eyebrow">WORKSPACE</span><h1>API 키 관리</h1><p className="muted">서비스를 고르고, 키를 저장하고, 연결을 확인하세요.</p></div><GuardedLink className="btn" href="/">제작 보드로</GuardedLink></header><ConnectionsSection /></div>;
 }
 

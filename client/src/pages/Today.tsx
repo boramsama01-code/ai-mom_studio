@@ -24,13 +24,13 @@ function SetupChecklist({ status, cid, discovery }: { status: Status; cid: numbe
   const dests = useQuery({ queryKey: ["ch", cid, "destinations"], queryFn: () => api<{ items: Array<{ enabled: boolean; connection: { ready: boolean } }> }>(`/channels/${cid}/destinations`) });
   const i = status.integrations as Record<string, boolean>;
   const steps = [
-    { done: !!i.naver, title: "네이버 검색 API 키 입력", desc: "수집에 꼭 필요합니다.", href: "/settings" },
+    { done: !!i.naver, title: "네이버 검색 API 키 입력", desc: "수집에 꼭 필요합니다.", href: "/connections?service=naver" },
     discovery
       ? { done: discovery.enabled, title: "자동 화제 발굴 확인", desc: "검색어 없이 뉴스를 훑어 화제를 찾습니다. 탐색 주제를 바꿀 수 있습니다.", href: "/rules" }
       : { done: (rules.data?.estimate.activeRules ?? 0) > 0, title: "검색어 확인", desc: "켜 둔 검색어로만 수집합니다.", href: "/rules" },
-    { done: !!i.aiConfigured, title: "GPT 또는 Claude API 키 입력", desc: "원문에서 일정·대상을 자동 정리합니다(선택이지만 권장).", href: "/settings" },
+    { done: !!i.aiConfigured, title: "GPT 또는 Claude API 키 입력", desc: "원문에서 일정·대상을 자동 정리합니다(선택이지만 권장).", href: "/connections" },
     { done: status.workerConnected, title: "자동 수집 예약 연결(선택)", desc: "'지금 수집'은 바로 됩니다. 매일 정해진 시각에 자동으로 수집·게시하려면 GitHub Actions 연결이 필요합니다(README 7단계).", href: "/runs" },
-    { done: !!i.telegramReview, title: "텔레그램 검토 알림(선택)", desc: "새 자료가 모이면 휴대폰으로 알려줍니다.", href: "/settings" },
+    { done: !!i.telegramReview, title: "텔레그램 검토 알림(선택)", desc: "새 자료가 모이면 휴대폰으로 알려줍니다.", href: "/connections?service=telegram" },
     { done: (dests.data?.items ?? []).some((d) => d.enabled && d.connection.ready), title: "게시 목적지 연결(선택)", desc: "텔레그램 채널·인스타그램 계정.", href: "/settings" },
   ];
   const doneN = steps.filter((s) => s.done).length;

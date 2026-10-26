@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useChannel, useDirtyGuard } from "../state";
-import { Badge, Empty, ErrorBox, Loading } from "../ui";
+import { Badge, Empty, ErrorBox, GuardedLink, Loading } from "../ui";
 import type { Channel, ChannelBudget, Destination } from "@shared/schema";
 import { ChannelDirectory } from "./ChannelDirectory";
 import { ConnectionsSection, SecretInput, useSecrets } from "./Connections";
@@ -35,7 +35,7 @@ export function ChannelSettingsPage() {
   return <div className="settings-page">
     <header className="page-head"><div><span className="studio-eyebrow">WORKSPACE</span><h1>설정</h1><p className="muted">내 채널과 제작 환경을 한곳에서 관리하세요.</p></div>
       {tab === "channels" && !creating && !current && <button className="btn primary" onClick={() => leave(() => setCreating(true))}>＋ 새 채널</button>}</header>
-    <nav className="settings-tabs" aria-label="설정 메뉴">{[["channels", "내 채널"], ["connections", "서비스 연결"], ["operations", "운영 설정"]].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} onClick={() => leave(() => { setTab(key); setEditing(null); setCreating(false); })}>{label}</button>)}</nav>
+    <nav className="settings-tabs" aria-label="설정 메뉴">{[["channels", "내 채널"], ["operations", "운영 설정"]].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} onClick={() => leave(() => { setTab(key); setEditing(null); setCreating(false); })}>{label}</button>)}<GuardedLink className="btn ghost" href="/connections">API 키 관리 →</GuardedLink></nav>
     {tab === "channels" && <>
       {(creating || current) && <button className="btn ghost settings-back" onClick={() => leave(() => { setEditing(null); setCreating(false); })}>← 내 채널 목록</button>}
       {creating ? <NewChannel onCreated={ch => { setCreating(false); setEditing(ch.id); }} /> : current ? <><ChannelForm key={current.id} ch={current} onArchived={() => setEditing(null)} /><details className="panel settings-details"><summary>수집 콘텐츠의 게시 계정</summary><p className="small muted">수집함 → 콘텐츠 초안 → 발행함에서 사용합니다. Studio 제작물은 편집 화면에서 내려받아 직접 게시하세요.</p><Destinations cid={current.id} /></details></> : <>

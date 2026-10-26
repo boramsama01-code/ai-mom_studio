@@ -17,6 +17,7 @@ import { DraftsPage } from "./pages/Drafts";
 import { RulesPage } from "./pages/Rules";
 import { PublishPage } from "./pages/Publish";
 import { ChannelSettingsPage } from "./pages/ChannelSettings";
+import { ConnectionsPage } from "./pages/Connections";
 import { RunsPage } from "./pages/Runs";
 import { DesignPage } from "./pages/Design";
 import { StudioPage } from "./pages/Studio";
@@ -44,7 +45,8 @@ const NAV: Array<{ group: string; items: Array<{ href: string; label: string; ic
     items: [
       { href: "/rules", label: "검색 설정", icon: "⌕" },
       { href: "/design", label: "수집 카드 디자인", icon: "▣" },
-      { href: "/settings", label: "채널·서비스 설정", icon: "⚙" },
+      { href: "/connections", label: "API 키 관리", icon: "⌘" },
+      { href: "/settings", label: "채널 설정", icon: "⚙" },
       { href: "/runs", label: "실행 기록", icon: "≡" },
     ],
   },
@@ -202,6 +204,7 @@ function Shell() {
           <Route path="/design" component={DesignPage} />
           <Route path="/publish" component={PublishPage} />
           <Route path="/settings" component={ChannelSettingsPage} />
+          <Route path="/connections" component={ConnectionsPage} />
           <Route path="/runs" component={RunsPage} />
           <Route>
             <Redirect to="/" />

@@ -50,6 +50,29 @@ p { margin: 0 0 var(--s3); }
 .panel + .panel { margin-top: var(--s4); }
 .grid { display: grid; gap: var(--s4); }
 .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.connection-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; align-items: start; }
+.connection-services { display: grid; gap: 8px; }
+.connection-service { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px; text-align: left; font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
+.connection-service:hover { border-color: var(--accent); }
+.connection-service[aria-current="page"] { border-color: var(--accent); background: var(--accent-weak); box-shadow: inset 3px 0 var(--accent); }
+.connection-mark { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 10px; background: var(--bg); color: var(--accent); font-weight: 700; }
+.service-openai { background: #e2eee9; color: #234d3e; }
+.service-anthropic { background: #f4e7de; color: #8f4c2d; }
+.service-canva { background: #e8e7fa; color: #554c95; }
+.connection-service-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.connection-state { color: var(--muted); font-size: 12px; }
+.connection-state.error { color: var(--error); font-weight: 600; }
+.connection-editor { min-width: 0; scroll-margin-top: 20px; }
+.connection-editor > .panel { margin: 0; }
+.connection-help { background: var(--accent-weak); border-radius: 8px; padding: 12px 14px; font-size: 14px; margin: 0; }
+.connection-footnote { margin: 16px 4px; }
+@media (max-width: 850px) {
+  .connection-layout { grid-template-columns: 1fr; gap: 16px; }
+  .connection-services { display: flex; overflow-x: auto; padding: 3px 3px 10px; scroll-snap-type: x proximity; }
+  .connection-service { flex: 0 0 205px; scroll-snap-align: start; }
+  .connection-service > span:last-child { display: none; }
+  .connection-editor .panel { padding: 18px; }
+}
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .stat { font-size: 32px; font-weight: 700; line-height: 1.1; }
 .row { display: flex; flex-wrap: wrap; gap: var(--s2); align-items: center; }
