@@ -200,6 +200,7 @@ ASEAN 과학영재 캠프`)],
 };
 
 export type CollectionOverview = {
+  searchReady?: boolean; sourceMode?: "public_rss"; publicFeeds?: string[];
   date: string; timezone: string; autoCollect: boolean; globalStop: boolean; naverReady: boolean; inlineWorker: boolean;
   nextAt: string | null; lastScheduledAt: string | null;
   channels: Array<{ id: number; version: number; slug: string; name: string; active: boolean; queries: number; discoveryQueries: number; boards: number; budget: number; profile: { label: string; count: number } | null;

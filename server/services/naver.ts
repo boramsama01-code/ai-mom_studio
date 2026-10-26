@@ -15,6 +15,10 @@ import { parseBlogPostDate, parseNewsPubDate, type ParsedDate } from "./dates";
 export type NaverEndpoint = "news" | "blog";
 
 export type NaverItem = {
+  provider?: "google_news_rss" | "rss_direct";
+  publisher?: string;
+  publisherUrl?: string;
+  feedUrl?: string;
   endpoint: NaverEndpoint;
   title: string;
   description: string;
@@ -56,7 +60,8 @@ export function __resetNaverProviderForTest() {
   known = null;
 }
 
-export type CallCounter = { naver: number; limit: number };
+export type CallCounter = { naver: number; rss?: number; limit: number };
+export const searchCalls = (counter: CallCounter) => counter.naver + (counter.rss ?? 0);
 
 export function mapNaverItem(endpoint: NaverEndpoint, it: Record<string, string>): NaverItem {
   return {
@@ -118,7 +123,7 @@ async function searchWith(
   const delays = [0, 1500, 4000];
   let lastErr: NaverError | null = null;
   for (const delay of delays) {
-    if (counter.naver >= counter.limit) throw new NaverError("이번 실행의 네이버 호출 한도 도달", "rate_limit");
+    if (searchCalls(counter) >= counter.limit) throw new NaverError("이번 실행의 검색 호출 한도 도달", "rate_limit");
     if (delay) await new Promise((r) => setTimeout(r, delay));
     counter.naver++;
     let res: Response;
@@ -154,3 +159,4 @@ export function applyExcludeTerms(
   }
   return null;
 }
+

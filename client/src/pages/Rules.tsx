@@ -260,7 +260,7 @@ function TrialModal({ cid, query, endpoint, excludeTerms, excludeScope, category
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const run = useQuery({
     queryKey: ["trial", cid, query, endpoint],
-    queryFn: () => api<{ items: TrialItem[] }>(`/channels/${cid}/trial-search`, { method: "POST", body: { query, endpoint, excludeTerms, excludeScope } }),
+    queryFn: () => api<{ items: TrialItem[]; warnings?: string[] }>(`/channels/${cid}/trial-search`, { method: "POST", body: { query, endpoint, excludeTerms, excludeScope } }),
     staleTime: Infinity,
     retry: false,
   });
@@ -270,7 +270,8 @@ function TrialModal({ cid, query, endpoint, excludeTerms, excludeScope, category
   });
   return (
     <Modal title={`시험 검색: ${query} (${endpoint === "news" ? "뉴스" : "블로그"})`} onClose={onClose}>
-      <p className="small muted">최대 5건 · 1회 호출. 자동으로 저장하지 않습니다.</p>
+      <p className="small muted">최대 5건 · {endpoint === "news" ? "공개 뉴스 RSS · API 키 불필요" : "네이버 블로그 · 연결 키 필요"}. 선택한 자료만 저장합니다.</p>
+      {!!run.data?.warnings?.length && <div className="notice warn small">일부 수집 경로를 확인하지 못했습니다.<ul>{run.data.warnings.map(w => <li key={w}>{w}</li>)}</ul></div>}
       {run.isLoading ? (
         <Loading lines={3} />
       ) : run.error ? (

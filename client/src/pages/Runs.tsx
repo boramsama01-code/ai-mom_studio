@@ -47,7 +47,7 @@ export function RunsPage() {
                     <span>추출 {r.counts.extracted ?? 0} · 실패 {r.counts.extractFailed ?? 0}</span>
                   </div>
                   <div className="meta">
-                    <span>호출(계획/실제): 네이버 {r.plannedCalls.naverAllowed ?? r.plannedCalls.naver ?? 0}/{r.actualCalls.naver ?? 0} · 원문 한도 {r.plannedCalls.fetch ?? 0}/{r.actualCalls.fetch ?? 0} · AI 한도 {r.plannedCalls.llm ?? 0}/{r.actualCalls.llm ?? 0}</span>
+                    <span>검색 {r.actualCalls.search ?? r.actualCalls.naver ?? 0}회 · 공개 RSS 요청 {r.actualCalls.rss ?? 0}회 · 네이버 API {r.actualCalls.naver ?? 0}회 · 원문 {r.actualCalls.fetch ?? 0}/{r.plannedCalls.fetch ?? 0}회 · AI {r.actualCalls.llm ?? 0}/{r.plannedCalls.llm ?? 0}회</span>
                     <span>토큰 입력 {r.llmUsage.inputTokens.toLocaleString()} · 출력 {r.llmUsage.outputTokens.toLocaleString()}{cost !== null ? ` · 추정 비용 $${cost.toFixed(4)}(입력한 단가 기준)` : ""}</span>
                   </div>
                   {r.unconnectedSources.length > 0 && <span className="small muted">미연결 공식 출처: {r.unconnectedSources.join(", ")}</span>}

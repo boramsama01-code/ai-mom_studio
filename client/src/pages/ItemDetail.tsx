@@ -25,7 +25,7 @@ type Detail = {
   defaultCaptions: { instagram: string; telegram: string } | null;
 };
 
-const SRC_KIND: Record<string, string> = { naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", official: "공식 게시물", manual: "직접 추가 자료" };
+const SRC_KIND: Record<string, string> = { naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 직접 RSS", official: "공식 게시물", manual: "직접 추가 자료" };
 
 export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
   const { selected, allChannels } = useChannel();
@@ -137,7 +137,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
             <a href={p.originalUrl} target="_blank" rel="noopener noreferrer" style={{ overflowWrap: "anywhere" }}>
               {p.title || p.originalUrl}
             </a>
-            {p.kind === "naver_news" && <p className="small muted">언론 기사입니다. 학교·기관의 공식 공고와 다를 수 있으니 공식 원문을 함께 확인하세요.</p>}
+            {["naver_news", "google_news_rss", "rss_direct"].includes(p.kind) && <p className="small muted">언론 기사입니다. 학교·기관의 공식 공고와 다를 수 있으니 공식 원문을 함께 확인하세요.</p>}
             {p.snippet && <div className="quote">{p.snippet}</div>}
             <div className="row">
               <Badge kind={p.fetchStatus === "ok" ? "ok" : p.fetchStatus === "not_fetched" ? "" : "err"}>

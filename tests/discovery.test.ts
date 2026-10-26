@@ -250,7 +250,9 @@ describe("수집 실행 안의 자동 발굴", () => {
 
   it("지금 수집: 웹 서버에서 바로 처리(워커 없이)", async () => {
     process.env.INLINE_WORKER = "true";
-    delete process.env.NAVER_CLIENT_ID; // 키가 없으면 빠르게 실패 처리되는지로 '바로 처리됨'을 확인
+    delete process.env.NAVER_CLIENT_ID; // 공개 뉴스 수집은 네이버 키 없이도 처리된다.
+    const transport = await import("../server/services/safeFetch");
+    const rss = vi.spyOn(transport, "safeFetch").mockImplementation(async url => ({ finalUrl: url, status: 200, contentType: "application/rss+xml", body: Buffer.from("<rss><channel></channel></rss>") }));
     try {
       const { agent, csrf } = await login(app);
       await agent.put(`/api/channels/${SCIENCE}/discovery`).set({ "x-csrf-token": csrf }).send({ enabled: true, queries: ["블랙홀"], picksPerRun: 2, autoDraft: false });
@@ -260,11 +262,12 @@ describe("수집 실행 안의 자동 발굴", () => {
       const { waitInlineIdle } = await import("../server/worker/inline");
       await waitInlineIdle();
       const [job] = await getDb().select().from(schema.jobs).where(eq(schema.jobs.id, r.body.job.id));
-      expect(job.status).toBe("failed");
-      expect(job.lastError).toContain("네이버");
+      expect(job.status).toBe("succeeded");
+      expect(job.result?.status).toBe("ok_zero");
     } finally {
       process.env.INLINE_WORKER = "false";
       process.env.NAVER_CLIENT_ID = "test-id";
+      rss.mockRestore();
     }
   });
 });

@@ -14,14 +14,14 @@ import { CollectionPanel, useKstToday } from "../collection";
 
 export type ListRow = {
   item: ContentItem;
-  source: { id: number; kind: string; url: string; publishedAt: string | null; publishedPrecision: string | null; fetchStatus: string; snippet: string } | null;
+  source: { id: number; kind: string; url: string; publisher?: string | null; publishedAt: string | null; publishedPrecision: string | null; fetchStatus: string; snippet: string } | null;
   channelSlug: string;
   channelName: string;
   matchedQuery?: string | null;
 };
 type ListResp = { total: number; page: number; pageSize: number; items: ListRow[] };
 
-const SOURCE_KIND: Record<string, string> = { naver_news: "뉴스", naver_blog: "블로그", official: "공식", manual: "직접 추가" };
+const SOURCE_KIND: Record<string, string> = { naver_news: "네이버 뉴스", naver_blog: "블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 RSS", official: "공식", manual: "직접 추가" };
 
 export function InboxPage() {
   const { selected, current } = useChannel();
@@ -182,7 +182,7 @@ function ItemBody({ row: { item, source, channelName, matchedQuery }, showChanne
         {showChannel && <span>{channelName}</span>}
         <span>{CONTENT_KIND_LABEL[item.kind as ContentKind]}</span>
         {item.category && <span>{item.category}</span>}
-        {source && <span>{SOURCE_KIND[source.kind] ?? source.kind} · 게시 {fmtDate(source.publishedAt, source.publishedPrecision)}</span>}
+        {source && <span>{source.publisher && `${source.publisher} · `}{SOURCE_KIND[source.kind] ?? source.kind} · 게시 {fmtDate(source.publishedAt, source.publishedPrecision)}</span>}
         <span>수집 {fmtDate(item.createdAt as unknown as string)}</span>
         {matchedQuery && <span>검색어: {matchedQuery}</span>}
       </div>

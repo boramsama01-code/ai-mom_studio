@@ -57,8 +57,9 @@ export function tokenize(text: string): Set<string> {
   return out;
 }
 
-export function outletOf(it: Pick<NaverItem, "originallink" | "link">): string {
-  const u = it.originallink || it.link;
+export function outletOf(it: Pick<NaverItem, "originallink" | "link" | "publisher" | "publisherUrl">): string {
+  if (it.publisher && !it.publisherUrl) return it.publisher;
+  const u = it.publisherUrl || it.originallink || it.link;
   try {
     const h = new URL(u).hostname.toLowerCase().replace(/^(www|m|news|n)\./, "");
     // 언론사 대표 도메인(마지막 두 단계, co.kr 등은 세 단계)
@@ -165,3 +166,4 @@ export function isRecentlyCovered(c: Cluster, recentTitles: string[]): boolean {
   });
   return c.articles.slice(0, 3).some((a) => recent.some((r) => similarity(a, r) >= SAME_STORY));
 }
+
