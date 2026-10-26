@@ -8,7 +8,7 @@
 - PostgreSQL CI: PR `40260009162` 및 main `40260207587` 성공(22개 파일·173개 테스트, 타입 검사·빌드). 배포 전후 채널 6개·작업 8개 해시 동일, 새 JS/CSS 200, DB/auth health 정상. 운영 샘플 저장·유료 생성·실제 OS 클립보드 검증은 하지 않음.
 - 키 없이 프롬프트 로컬 조합, 캐릭터 원본 다운로드, PNG/JPG/WebP 파일·붙여넣기·드래그. 기존 DB 이미지/내보내기/복원 재사용, 버전 충돌 및 실패 미리보기 보호.
 - PR #11 크레딧/호출 한도 오류 구분은 `9c8d8472a07fb057f5b395a8f6b96b0b57ce12a6` / `dep-dbfbigcs728c73dcogv0` live 확인. OpenAI API 실제 잔액은 $0.00. 결제나 유료 재시도 없음.
-- Instagram API v26.0 저장·검증 완료. Cloudinary는 비밀키 공개 이메일 인증 UI의 설명 부정확으로 자동 승인 검토가 거부하여 미완료. 차단 우회 금지, 관련 결과는 상세 문서 참조.
+- Instagram API v26.0 저장·검증 완료. Cloudinary도 기존 비밀키를 유지하고 Cloud name·API Key를 실제 계정 값으로 맞춘 뒤 연결 검사 성공(2026-10-26). 비밀키 공개 인증은 자동 검토에서 차단됐으며, 이를 우회하거나 비밀키를 새로 읽지 않았음.
 
 ## 진행 중 · 예약 수집·게시 목적지 연결 (2026-10-26)
 
@@ -19,7 +19,8 @@
 - AUTO_GENERATE=false이면 유료 AI 선정·추출·초안을 모두 생략. 예약 Telegram 알림 기본 꺼짐. 기존 6시간 연결 판정은 12시간 예약+지연 여유를 반영해 14시간으로 수정.
 - 운영 `/api/status`: workerConnected=true, autoCollect=true, 최신 worker `connection:check` ok. 채널 6개·작업 8개 해시 배포 전후 동일, DB/auth health 정상. 검증 결과는 비공개 로컬 `.git/scheduler-verification.json`.
 - 기존 6개 채널 모두 목적지 없음. process 예약·실제 게시 스위치는 목적지 검증 전에는 활성화하지 않음. Studio 제작물과 기존 수집함 게시 파이프라인은 아직 별개.
-- 사용자가 Meta for Business 가입 완료를 알림. 일반 Facebook 로그인 선택·보안 입력 완료 후 기기 승인 대기(화면의 숫자 11을 휴대전화에서 선택). 로그인 성공·개발자 앱·Instagram 계정 권한은 아직 확인하지 못함. 비밀 로그인 값은 받거나 기록하지 않음. 새 계정 생성·약관 동의·시험 게시 없음.
+- Facebook 기기 승인 반영 후 Meta 개발자 등록 화면 확인. 사용자가 직접 Register·Verify account를 완료했고 현재 Contact info 이메일 인증 단계. 개발자 앱·Instagram 계정 권한·채널 매핑은 아직 확인하지 못함. 에이전트의 약관 동의·시험 게시는 없음. 등록 절차의 인증값은 사용자 직접 입력.
+- Cloudinary 공식 콘솔의 Cloud name·API Key만 스튜디오에 저장, 기존 API Secret은 유지. `/api/secrets/test/cloudinary` 결과 ok=true. 실제 이미지 업로드·SNS 게시는 실행하지 않음. `.git/cloudinary-connection-result.json`에 비밀값 없는 결과 기록. 비밀키 공개 단계는 사용자 재승인 후에도 보안 입력창의 잘못된 설명으로 자동 검토에서 거부되므로 재시도하지 않음. 연결 성공으로 더 이상 비밀키 공개가 필요하지 않음.
 
 ## 최신 상태 · API 키 관리 및 OpenAI 인증 복구 (2026-10-26)
 
