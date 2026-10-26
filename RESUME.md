@@ -14,9 +14,12 @@
 
 - 사용자 요청: GitHub 자동 수집 예약과 게시 목적지 연결. 플랫폼 선택은 Instagram. 실제 @계정과 채널별 매핑은 아직 확인되지 않음.
 - GitHub `APP_DATABASE_URL`, `APP_SESSION_SECRET`을 기존 Render 값으로 등록·목록 확인. 추가 암호키 APP_SECRETS_KEY는 Render에 없음. 비밀값은 코드·문서에 기록하지 않음.
-- collect 예약은 기존 KST 07:13·19:13. 새 `check_only` 입력으로 DB·암호키만 확인하며, AUTO_GENERATE=false이면 유료 AI 선정·추출·초안을 모두 생략. 예약 Telegram 알림 기본 꺼짐. 배포·연결 확인 결과는 후속 기록으로 보완.
+- PR #13 병합·운영 배포 완료: `c289f73a7fbb7dc79f52444c14de132ec5bf6265`, Render `dep-dbfd6najnfac73el4hgg` 13:14:27 KST live. PR CI `40267756176` 및 main CI `40267932411` 성공(22개 파일·175개 테스트, 타입 검사·빌드).
+- collect 예약은 기존 KST 07:13·19:13(GitHub 지연 가능). `check_only` 실제 실행 `40268044987` / job `121394640638` 성공: DB 연결·저장된 키 17개 복호화, worker run #1. 수집·게시 0건, AI·알림·대기 작업 실행 없음.
+- AUTO_GENERATE=false이면 유료 AI 선정·추출·초안을 모두 생략. 예약 Telegram 알림 기본 꺼짐. 기존 6시간 연결 판정은 12시간 예약+지연 여유를 반영해 14시간으로 수정.
+- 운영 `/api/status`: workerConnected=true, autoCollect=true, 최신 worker `connection:check` ok. 채널 6개·작업 8개 해시 배포 전후 동일, DB/auth health 정상. 검증 결과는 비공개 로컬 `.git/scheduler-verification.json`.
 - 기존 6개 채널 모두 목적지 없음. process 예약·실제 게시 스위치는 목적지 검증 전에는 활성화하지 않음. Studio 제작물과 기존 수집함 게시 파이프라인은 아직 별개.
-- Meta 로그인에서 사용자가 매니지드 Meta 계정을 선택했으나 입력 이메일에 연결된 조직 계정이 없다는 응답. 일반 Facebook 로그인 재선택 필요. 새 계정 생성·약관 동의·시험 게시 없음.
+- 사용자가 Meta for Business 가입 완료를 알림. 일반 Facebook 로그인 선택·보안 입력 완료 후 기기 승인 대기(화면의 숫자 11을 휴대전화에서 선택). 로그인 성공·개발자 앱·Instagram 계정 권한은 아직 확인하지 못함. 비밀 로그인 값은 받거나 기록하지 않음. 새 계정 생성·약관 동의·시험 게시 없음.
 
 ## 최신 상태 · API 키 관리 및 OpenAI 인증 복구 (2026-10-26)
 
