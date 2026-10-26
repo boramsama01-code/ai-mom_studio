@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
+import sharp from "sharp";
 import { login, resetDb, setTestEnv } from "./helpers";
 setTestEnv();
 const mockText = vi.fn();
@@ -32,6 +33,47 @@ async function setup() {
   return { ...auth, headers, card: created.body };
 }
 describe("통합 제작 보드", () => {
+  it("붙여넣은 이미지를 원고와 함께 보존하고 새로고침·내보내기·기록 복원을 지원한다", async () => {
+    const { agent, headers, card } = await setup();
+    const panels = card.panels.map((p: object, i: number) => ({ ...p, scene: `직접 쓴 장면 ${i}`, dialogue: `직접 쓴 대사 ${i}` }));
+    await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: 1, panels, caption: "내 캡션" });
+    const jpeg = await sharp({ create: { width: 80, height: 60, channels: 3, background: "#285f6a" } }).jpeg().toBuffer();
+    const endpoint = `/api/studio/cards/${card.id}/panels/2/image`;
+    expect((await request(app).post(`${endpoint}?version=2`).type("image/jpeg").send(jpeg)).status).toBe(401);
+    expect((await agent.post(`${endpoint}?version=2`).type("image/jpeg").send(jpeg)).status).toBe(403);
+    const saved = await agent.post(`${endpoint}?version=2`).set(headers).type("image/jpeg").send(jpeg);
+    expect(saved.status).toBe(201);
+    expect(saved.body).toMatchObject({ version: 3, caption: "내 캡션", title: card.title });
+    expect(saved.body.panels[2]).toMatchObject({ scene: "직접 쓴 장면 2", dialogue: "직접 쓴 대사 2", imageId: expect.any(Number) });
+    expect(saved.body.panels[0]).toEqual(panels[0]);
+    const imageId = saved.body.panels[2].imageId;
+    const image = await agent.get(`/api/studio/images/${imageId}`);
+    expect(image.status).toBe(200); expect(image.headers["content-type"]).toContain("image/png");
+    expect((await sharp(image.body).metadata()).width).toBe(80);
+    const detail = (await agent.get(`/api/studio/cards/${card.id}`)).body;
+    expect(detail.card.panels[2].imageId).toBe(imageId);
+    expect(detail.revisions[0].instruction).toBe("3컷 이미지 가져오기");
+    expect((await agent.get(`/api/studio/cards/${card.id}/export.png?version=3`)).status).toBe(200);
+    // A stale duplicate must not create an orphan or overwrite a newer card.
+    expect((await agent.post(`${endpoint}?version=2`).set(headers).type("image/jpeg").send(jpeg)).status).toBe(409);
+    expect(await getDb().select().from(studioImages).where(eq(studioImages.cardId, card.id))).toHaveLength(1);
+    const replaced = await agent.post(`${endpoint}?version=3`).set(headers).type("image/jpeg").send(jpeg);
+    expect(replaced.status).toBe(201); expect(replaced.body.panels[2].imageId).not.toBe(imageId);
+    const restored = await agent.post(`/api/studio/cards/${card.id}/restore`).set(headers).send({ version: 4, revisionId: detail.revisions[0].id });
+    expect(restored.body.panels[2].imageId).toBe(imageId);
+    expect(mockImage).not.toHaveBeenCalled(); expect(mockText).not.toHaveBeenCalled();
+  });
+  it("파일·슬롯·버전 검증 실패에는 새 이미지나 새 버전을 남기지 않는다", async () => {
+    const { agent, headers, card } = await setup();
+    const endpoint = `/api/studio/cards/${card.id}/panels/0/image`;
+    for (const [suffix, type, bytes] of [["?version=1", "image/png", Buffer.from("invalid")], ["?version=1", "image/svg+xml", Buffer.from("<svg/>")], ["", "image/png", Buffer.from("invalid")]] as const) {
+      expect((await agent.post(`${endpoint}${suffix}`).set(headers).type(type).send(bytes)).status).toBe(400);
+    }
+    expect((await agent.post(`/api/studio/cards/${card.id}/panels/4/image?version=1`).set(headers).type("image/png").send(Buffer.from("invalid"))).status).toBe(400);
+    expect((await agent.post(`${endpoint}?version=1`).set(headers).type("image/png").send(Buffer.alloc(12 * 1024 * 1024 + 1))).status).toBe(413);
+    expect((await agent.get(`/api/studio/cards/${card.id}`)).body.card.version).toBe(1);
+    expect(await getDb().select().from(studioImages).where(eq(studioImages.cardId, card.id))).toHaveLength(0);
+  });
   it("캡션만 요청하면 원고·대사·그림·단계를 유지하고 캡션만 저장", async () => {
     const { agent, headers, card } = await setup();
     const panels = card.panels.map((p: object, i: number) => ({ ...p, scene: `내 장면 ${i}`, dialogue: `내 대사 ${i}` }));
