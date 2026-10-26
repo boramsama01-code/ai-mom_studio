@@ -41,6 +41,7 @@ export type CollectOptions = {
   fetchSource?: typeof fetchAndExtract; // 테스트용 주입
   fetchBoard?: typeof fetchBoardList; // 테스트용 주입
   heartbeat?: () => Promise<unknown>;
+  collectionOnly?: boolean;
 };
 
 export type CollectSummary = {
@@ -61,7 +62,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     .select()
     .from(searchRules)
     .where(and(eq(searchRules.channelId, channelId), eq(searchRules.enabled, true), isNull(searchRules.deletedAt)))
-    .orderBy(asc(searchRules.priority), asc(searchRules.id));
+    .orderBy(sql`${searchRules.lastRunAt} asc nulls first`, asc(searchRules.priority), asc(searchRules.id));
 
   const budget = channel.budget;
   const plannedNaver = rules.length; // 규칙 1개 = 호출 1회 (news/blog 각각 별도 규칙)
@@ -98,7 +99,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const llmBudget = new LlmBudget(budget.llmCallsPerRun);
 
   /* 1-2) 자동 화제 발굴(과학·시사 채널) — 사용자 검색어보다 먼저 */
-  const disc = await runDiscovery(db, channel, run.id, counter, llmBudget, now, opts.naverFetch);
+  const disc = await runDiscovery(db, channel, run.id, counter, llmBudget, now, opts.naverFetch, opts.collectionOnly);
   if (disc) {
     Object.assign(counts, disc.counts);
     errors.push(...disc.errors);
@@ -109,13 +110,16 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   }
 
   /* 2~3) 검색 → 저장 */
+  counts.rulesProcessed = 0;
   for (const rule of fatal ? [] : selected) {
+    if (counter.naver >= counter.limit) break;
     if (counts.results >= budget.resultsPerRun) {
       errors.push({ scope: `rule:${rule.id}`, message: "이번 실행 결과 한도 도달 — 남은 검색어 건너뜀" });
       break;
     }
     let items: NaverItem[] = [];
     let ruleNew = 0;
+    counts.rulesProcessed++;
     try {
       items = await naverSearch(rule.query, rule.endpoint as "news" | "blog", rule.display, counter, opts.naverFetch);
     } catch (e) {
@@ -176,7 +180,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   /* 4) 원문 확보 */
   const fetchTargets = newItemIds.slice(0, budget.fetchTargetsPerRun);
   if (newItemIds.length > fetchTargets.length)
-    errors.push({ scope: "fetch", message: `원문 확보 대상 한도(${budget.fetchTargetsPerRun}) 초과 — ${newItemIds.length - fetchTargets.length}건은 다음 실행/수동 처리` });
+    errors.push({ scope: "fetch", message: `원문 확보 대상 한도(${budget.fetchTargetsPerRun}) 초과 — ${newItemIds.length - fetchTargets.length}건은 제목·요약만 저장했습니다. 필요한 자료에서 원문을 추가 확인하세요.` });
   const fetcher = opts.fetchSource ?? fetchAndExtract;
   const fetchedOk: number[] = [];
   for (const itemId of fetchTargets) {
@@ -211,7 +215,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   /* 5) 구조화 추출 — 공고 채널 + AI 설정 시 */
   if (channel.contentType === "notice" && fetchedOk.length) {
-    if (!env.autoGenerate) {
+    if (!env.autoGenerate || opts.collectionOnly) {
       counts.extractionSkippedAutoGenerateOff = fetchedOk.length;
     } else if (!env.aiConfigured) {
       errors.push({ scope: "llm", message: "AI API 미연결 — 구조화 추출 건너뜀(수집함에서 수동 편집 가능)" });
@@ -234,7 +238,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   /* 5-2) 발굴한 화제로 대화 초안 자동 생성(AI 연결 + 채널 설정이 켜져 있을 때) — 생성돼도 검토 대기 */
   if (disc?.settings.autoDraft && disc.itemIds.length) {
-    if (!env.autoGenerate) {
+    if (!env.autoGenerate || opts.collectionOnly) {
       counts.draftSkippedAutoGenerateOff = disc.itemIds.length;
     } else if (!env.aiConfigured) {
       // 오류가 아니라 안내 — 화제는 저장됐고 초안만 건너뜀
@@ -262,6 +266,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   }
 
   /* 6) 실행 결과 확정 */
+  counts.rulesDeferred = rules.length - counts.rulesProcessed;
   const discoveryRan = !!disc && disc.counts.discoveryQueries + disc.errors.length > 0;
   const status = fatal || (counter.naver === 0 && (selected.length > 0 || discoveryRan) && errors.length)
     ? "failed"
@@ -283,7 +288,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     .where(eq(runs.id, run.id));
 
   /* 7) 개인 검토 알림 — 실패해도 저장은 유지 */
-  if (env.collectReviewNotifications && counts.newItems - counts.excluded > 0 && env.telegramReviewChatId) {
+  if (!opts.collectionOnly && env.collectReviewNotifications && counts.newItems - counts.excluded > 0 && env.telegramReviewChatId) {
     const msg = await buildReviewDigest(db, channel, newItemIds);
     const tg = await sendReviewMessage(msg);
     if (!tg.ok) {

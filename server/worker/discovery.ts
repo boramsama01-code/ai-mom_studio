@@ -37,6 +37,7 @@ export async function runDiscovery(
   llmBudget: LlmBudget,
   now: Date,
   naverFetch?: typeof fetch,
+  collectionOnly = false,
 ): Promise<DiscoveryResult | null> {
   const settings = channelDiscovery(channel);
   if (!settings) return null;
@@ -70,7 +71,7 @@ export async function runDiscovery(
   /* 2) 사건 묶기 → 순위 */
   const clusters = clusterArticles(articles);
   counts.discoveryClusters = clusters.length;
-  const useAI = env.autoGenerate && env.aiConfigured;
+  const useAI = !collectionOnly && env.autoGenerate && env.aiConfigured;
   const recent = await db
     .select({ discovery: contentItems.discovery, title: contentItems.title })
     .from(contentItems)

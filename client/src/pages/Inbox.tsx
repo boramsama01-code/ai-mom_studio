@@ -9,12 +9,15 @@ import { useChannel } from "../state";
 import { Badge, Empty, ErrorBox, fmtDate, GuardedLink, Loading, Pager, StatusBadge } from "../ui";
 import { NOTICE_CATEGORIES, CONTENT_KIND_LABEL, type ContentKind } from "@shared/domain";
 import type { ContentItem } from "@shared/schema";
+import { kstDay } from "@shared/collection";
+import { CollectionPanel, useKstToday } from "../collection";
 
 export type ListRow = {
   item: ContentItem;
   source: { id: number; kind: string; url: string; publishedAt: string | null; publishedPrecision: string | null; fetchStatus: string; snippet: string } | null;
   channelSlug: string;
   channelName: string;
+  matchedQuery?: string | null;
 };
 type ListResp = { total: number; page: number; pageSize: number; items: ListRow[] };
 
@@ -23,6 +26,8 @@ const SOURCE_KIND: Record<string, string> = { naver_news: "뉴스", naver_blog: 
 export function InboxPage() {
   const { selected, current } = useChannel();
   const params = new URLSearchParams(useSearch());
+  const today = useKstToday();
+  const [followToday, setFollowToday] = useState(!params.has("collectedOn"));
   const [f, setF] = useState({
     q: params.get("q") ?? "",
     review: params.get("review") ?? "",
@@ -30,13 +35,16 @@ export function InboxPage() {
     evidence: params.get("evidence") ?? "",
     category: params.get("category") ?? "",
     view: (params.get("view") as "inbox" | "excluded" | "all") ?? "inbox",
+    collectedOn: params.get("collectedOn") === "all" ? "" : params.get("collectedOn") ?? kstDay(),
   });
   const [page, setPage] = useState(1);
+  useEffect(() => { if (followToday) { setF(old => ({ ...old, collectedOn: today })); setPage(1); } }, [today, followToday]);
   const [qInput, setQInput] = useState(f.q);
   const query = useQuery({
     queryKey: ["ch", selected, "items", f, page],
-    queryFn: () => api<ListResp>(`/items?${qs({ channelId: selected, ...f, page, pageSize: 20 })}`),
+    queryFn: () => api<ListResp>(`/items?${qs({ channelId: selected, ...f, collectedOn: f.collectedOn || undefined, page, pageSize: 20 })}`),
     placeholderData: keepPreviousData,
+    refetchInterval: 60_000,
   });
   const set = (k: keyof typeof f, v: string) => {
     setF((o) => ({ ...o, [k]: v }));
@@ -51,6 +59,14 @@ export function InboxPage() {
           <h1>수집함</h1>
           <p className="muted small">검색·공식 출처에서 모은 자료입니다. 제목을 눌러 원문·근거를 확인하고 편집하세요.</p>
         </div>
+      </div>
+      <CollectionPanel date={f.collectedOn || undefined} />
+      <div className="row collection-date-filter" role="group" aria-label="수집 날짜">
+        <button className={`btn sm ${f.collectedOn === today ? "primary" : ""}`} onClick={() => { setFollowToday(true); set("collectedOn", today); }}>오늘</button>
+        <button className="btn sm" onClick={() => { setFollowToday(false); set("collectedOn", kstDay(new Date(Date.now() - 86400_000))); }}>어제</button>
+        <button className={`btn sm ${!f.collectedOn ? "primary" : ""}`} onClick={() => { setFollowToday(false); set("collectedOn", ""); }}>전체 기간</button>
+        <label className="field"><span className="sr-only">수집일 선택</span><input type="date" aria-label="수집일 선택" value={f.collectedOn} onChange={e => { setFollowToday(false); set("collectedOn", e.target.value); }} /></label>
+        <span className="small muted">{query.data?.total ?? 0}건{f.review ? " · 검토 상태 필터 적용 중" : ""}</span>
       </div>
       <form
         className="panel stack"
@@ -74,7 +90,7 @@ export function InboxPage() {
           <label className="field">
             보기
             <select value={f.view} onChange={(e) => set("view", e.target.value)}>
-              <option value="inbox">수집함(제외 제외)</option>
+              <option value="inbox">수집한 자료</option>
               <option value="excluded">제외된 자료</option>
               <option value="all">전부</option>
             </select>
@@ -130,7 +146,7 @@ export function InboxPage() {
         <ErrorBox error={query.error} retry={() => query.refetch()} />
       ) : !query.data?.items.length ? (
         <Empty>
-          조건에 맞는 자료가 없습니다.{" "}
+          {f.collectedOn ? `${f.collectedOn}에 새로 수집된 자료가 없습니다. ` : "조건에 맞는 자료가 없습니다. "}
           {f.view === "inbox" && !f.q && !f.review && !f.evidence ? "검색 설정에서 키워드를 켜고 수집을 요청하거나, 시험 검색 결과를 저장해 보세요." : "필터를 바꿔 보세요."}
         </Empty>
       ) : (
@@ -155,7 +171,7 @@ export function ItemList({ rows, showChannel }: { rows: ListRow[]; showChannel: 
   );
 }
 
-function ItemBody({ row: { item, source, channelName }, showChannel }: { row: ListRow; showChannel: boolean }) {
+function ItemBody({ row: { item, source, channelName, matchedQuery }, showChannel }: { row: ListRow; showChannel: boolean }) {
   return (
     <>
       <GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">
@@ -168,6 +184,7 @@ function ItemBody({ row: { item, source, channelName }, showChannel }: { row: Li
         {item.category && <span>{item.category}</span>}
         {source && <span>{SOURCE_KIND[source.kind] ?? source.kind} · 게시 {fmtDate(source.publishedAt, source.publishedPrecision)}</span>}
         <span>수집 {fmtDate(item.createdAt as unknown as string)}</span>
+        {matchedQuery && <span>검색어: {matchedQuery}</span>}
       </div>
       <div className="row">
         {item.isSample && <Badge kind="sample">샘플 · 실제 정보 아님</Badge>}
@@ -263,3 +280,4 @@ function TriageList({ rows, cid }: { rows: ListRow[]; cid: number }) {
     </div>
   );
 }
+

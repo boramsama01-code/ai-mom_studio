@@ -34,7 +34,7 @@ const NAV: Array<{ group: string; items: Array<{ href: string; label: string; ic
   {
     group: "자료 수집 · 발행",
     items: [
-      { href: "/today", label: "수집 현황", icon: "◎" },
+      { href: "/today", label: "아침 수집 브리핑", icon: "◎" },
       { href: "/inbox", label: "수집함", icon: "▤", count: "review" },
       { href: "/drafts", label: "콘텐츠 초안", icon: "✎", count: "ready" },
       { href: "/publish", label: "발행함", icon: "➤" },
@@ -95,11 +95,11 @@ function Shell() {
     location.href = "/";
   };
   const collect = useCallback(async () => {
-    if (selected === "all") return toast("err", "수집은 채널을 하나 고른 뒤 요청할 수 있습니다.");
     try {
-      const r = await api<{ duplicate: boolean }>(`/channels/${selected}/jobs/collect`, { method: "POST", body: {} });
-      toast("ok", r.duplicate ? "이미 대기 중인 수집 요청이 있습니다." : "수집 요청을 등록했습니다. 워커 실행 때 처리됩니다.");
+      const r = await api<{ inline: boolean }>("/collection/collect", { method: "POST", body: { channelId: selected } });
+      toast("ok", r.inline ? "자료 수집을 시작했습니다. 아침 수집 브리핑에서 결과를 확인하세요." : "수집 요청을 등록했습니다. 워커 실행을 기다립니다.");
       qc.invalidateQueries({ queryKey: ["ch", selected] });
+      qc.invalidateQueries({ queryKey: ["collection"] });
     } catch (e) {
       toast("err", (e as Error).message);
     }
