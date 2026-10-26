@@ -1,6 +1,11 @@
 # BUILD_STATUS — 우주펭귄상회 Studio
 
 마지막 갱신: 2026-10-26
+
+## 최신 상태 · ChatGPT 이미지 가져오기
+
+- PR #12 운영 배포 완료(`24ee3d0`, Render `dep-dbfbqu4s728c73dcuuh0`). 컷별 프롬프트 복사 → ChatGPT 생성 → PNG/JPG/WebP 붙여넣기·미리보기·DB 자동 저장. 기본 이미지 제작 모드는 ChatGPT 수동 방식이며 API 호출 없음.
+- PostgreSQL CI 173개 테스트·타입 검사·빌드 성공. 기존 채널 6개·작업 8개 데이터 해시 유지. 상세: `CHATGPT_IMAGE_WORKFLOW.md`, `RESUME.md`.
 기준 명세: `ai_mom_all_in_one.md`(2026-09-28) — Replit 대신 **Render(웹) + Neon(DB) + GitHub Actions(워커)**로 구현
 
 표기: ✅ 완료·검증 / 🟡 구현했으나 실제 외부 서비스로는 미검증 / ⛔ 차단(이 개발 환경에서 불가) / ⬜ 미구현

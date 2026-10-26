@@ -211,7 +211,9 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   /* 5) 구조화 추출 — 공고 채널 + AI 설정 시 */
   if (channel.contentType === "notice" && fetchedOk.length) {
-    if (!env.aiConfigured) {
+    if (!env.autoGenerate) {
+      counts.extractionSkippedAutoGenerateOff = fetchedOk.length;
+    } else if (!env.aiConfigured) {
       errors.push({ scope: "llm", message: "AI API 미연결 — 구조화 추출 건너뜀(수집함에서 수동 편집 가능)" });
     } else {
       for (const itemId of fetchedOk) {
@@ -232,7 +234,9 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   /* 5-2) 발굴한 화제로 대화 초안 자동 생성(AI 연결 + 채널 설정이 켜져 있을 때) — 생성돼도 검토 대기 */
   if (disc?.settings.autoDraft && disc.itemIds.length) {
-    if (!env.aiConfigured) {
+    if (!env.autoGenerate) {
+      counts.draftSkippedAutoGenerateOff = disc.itemIds.length;
+    } else if (!env.aiConfigured) {
       // 오류가 아니라 안내 — 화제는 저장됐고 초안만 건너뜀
       counts.draftSkippedNoClaude = disc.itemIds.length;
     } else {
@@ -279,7 +283,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     .where(eq(runs.id, run.id));
 
   /* 7) 개인 검토 알림 — 실패해도 저장은 유지 */
-  if (counts.newItems - counts.excluded > 0 && env.telegramReviewChatId) {
+  if (env.collectReviewNotifications && counts.newItems - counts.excluded > 0 && env.telegramReviewChatId) {
     const msg = await buildReviewDigest(db, channel, newItemIds);
     const tg = await sendReviewMessage(msg);
     if (!tg.ok) {

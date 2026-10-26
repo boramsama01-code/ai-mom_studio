@@ -8,6 +8,11 @@ setTestEnv();
 
 const fakeCurate = vi.fn();
 const fakeScience = vi.fn();
+const fakeReview = vi.fn();
+vi.mock("../server/services/telegram", async (orig) => {
+  const mod = await orig<typeof import("../server/services/telegram")>();
+  return { ...mod, sendReviewMessage: (...a: unknown[]) => fakeReview(...a) };
+});
 vi.mock("../server/services/llm", async (orig) => {
   const mod = await orig<typeof import("../server/services/llm")>();
   return { ...mod, curateIssues: (...a: unknown[]) => fakeCurate(...a), draftScience: (...a: unknown[]) => fakeScience(...a) };
@@ -117,7 +122,7 @@ describe("수집 실행 안의 자동 발굴", () => {
     expect(r.counts.discoveryQueries).toBe(4);
     expect(r.counts.discoveryPicked).toBe(2); // 누리호(4곳), 공룡 화석(2곳). 단독·주가 기사는 제외
     expect(r.status).toBe("ok"); // Claude 미연결은 오류가 아니라 안내(초안만 건너뜀)
-    expect(r.counts.draftSkippedNoClaude).toBe(2);
+    expect(r.counts.draftSkippedAutoGenerateOff).toBe(2);
 
     const items = await db.select().from(schema.contentItems).where(eq(schema.contentItems.channelId, SCIENCE));
     expect(items).toHaveLength(2);
@@ -148,6 +153,7 @@ describe("수집 실행 안의 자동 발굴", () => {
       delete from content_items where channel_id = ${SCIENCE};`);
     process.env.ANTHROPIC_API_KEY = "k";
     process.env.ANTHROPIC_MODEL = "m";
+    process.env.AUTO_GENERATE = "true";
     fakeCurate.mockImplementation(async (args: { candidates: Array<{ id: number; titles: string[] }>; budget: { take(): boolean } }) => {
       args.budget.take();
       const fossil = args.candidates.find((c) => c.titles[0].includes("공룡"))!;
@@ -174,7 +180,42 @@ describe("수집 실행 안의 자동 발굴", () => {
     } finally {
       delete process.env.ANTHROPIC_API_KEY;
       delete process.env.ANTHROPIC_MODEL;
+      process.env.AUTO_GENERATE = "false";
     }
+  });
+
+  it("자동 AI·알림을 끄면 키가 있어도 검색 자료만 저장한다", async () => {
+    const { getPool } = await import("../server/db");
+    await getPool().query(`delete from content_sources where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from content_revisions where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from content_items where channel_id = ${SCIENCE};`);
+    vi.stubEnv("ANTHROPIC_API_KEY", "configured-test-key");
+    vi.stubEnv("AUTO_GENERATE", "false");
+    vi.stubEnv("COLLECT_REVIEW_NOTIFICATIONS", "false");
+    vi.stubEnv("TELEGRAM_REVIEW_CHAT_ID", "configured-test-destination");
+    fakeCurate.mockClear(); fakeScience.mockClear(); fakeReview.mockClear();
+    try {
+      const r = await runCollect(getDb(), SCIENCE, { trigger: "schedule", now: NOW, naverFetch, fetchSource: okFetch });
+      expect(r.counts.discoveryPicked).toBe(2);
+      expect(r.counts.draftSkippedAutoGenerateOff).toBe(2);
+      expect(fakeCurate).not.toHaveBeenCalled();
+      expect(fakeScience).not.toHaveBeenCalled();
+      expect(fakeReview).not.toHaveBeenCalled();
+      const [run] = await getDb().select().from(schema.runs).where(eq(schema.runs.id, r.runId));
+      expect(run.llmUsage).toMatchObject({ calls: 0 });
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("연결 확인은 대기 작업을 실행하지 않고 12시간 수집 간격을 연결 상태로 유지한다", async () => {
+    const { checkWorkerConnection } = await import("../server/worker/run");
+    const r = await checkWorkerConnection();
+    expect(r).toMatchObject({ connected: true, collected: 0, published: 0 });
+    const db = getDb();
+    const { agent } = await login(app);
+    await db.update(schema.workerRuns).set({ startedAt: new Date(Date.now() - 12 * 3600_000) }).where(eq(schema.workerRuns.id, r.runId));
+    expect((await agent.get("/api/status")).body.workerConnected).toBe(true);
+    await db.update(schema.workerRuns).set({ startedAt: new Date(Date.now() - 15 * 3600_000) }).where(eq(schema.workerRuns.id, r.runId));
+    expect((await agent.get("/api/status")).body.workerConnected).toBe(false);
   });
 
   it("발굴 설정 저장·끄기, 끄면 탐색 호출 없음", async () => {
@@ -227,3 +268,4 @@ describe("수집 실행 안의 자동 발굴", () => {
     }
   });
 });
+

@@ -54,6 +54,9 @@ export const env = {
   get autoGenerate() {
     return bool(process.env.AUTO_GENERATE, false);
   },
+  get collectReviewNotifications() {
+    return bool(process.env.COLLECT_REVIEW_NOTIFICATIONS, true);
+  },
   get autoPublish() {
     return bool(process.env.AUTO_PUBLISH, false);
   },
