@@ -2,6 +2,13 @@
 
 갱신: 2026-10-26 (KST). 긴 대화 전체 대신 이 문서와 GitHub·Render의 현재 상태부터 대조합니다.
 
+## 최신 작업 · ChatGPT 이미지 붙여넣기 (2026-10-26)
+
+- 사용자가 API 추가 결제 대신 **컷별 프롬프트 복사 → ChatGPT에서 생성 → 이미지 붙여넣기·미리보기·자동 저장**을 요청. 구현과 로컬 검사 완료, CI·운영 배포 결과는 후속 기록에서 확인합니다. 상세: `CHATGPT_IMAGE_WORKFLOW.md`.
+- 키 없이 프롬프트 로컬 조합, 캐릭터 원본 다운로드, PNG/JPG/WebP 파일·붙여넣기·드래그. 기존 DB 이미지/내보내기/복원 재사용, 버전 충돌 및 실패 미리보기 보호.
+- PR #11 크레딧/호출 한도 오류 구분은 `9c8d8472a07fb057f5b395a8f6b96b0b57ce12a6` / `dep-dbfbigcs728c73dcogv0` live 확인. OpenAI API 실제 잔액은 $0.00. 결제나 유료 재시도 없음.
+- Instagram API v26.0 저장·검증 완료. Cloudinary는 비밀키 공개 이메일 인증 UI의 설명 부정확으로 자동 승인 검토가 거부하여 미완료. 차단 우회 금지, 관련 결과는 상세 문서 참조.
+
 ## 최신 상태 · API 키 관리 및 OpenAI 인증 복구 (2026-10-26)
 
 - PR #10 병합·운영 반영. 커밋 `5e16855e990f867939b414de6bd5cca62aeae184`, Render `dep-dbfbbhcs728c73dchvfg` 11:08:09 KST live. 상세 내용은 `API_KEY_BOARD.md`.

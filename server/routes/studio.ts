@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, raw } from "express";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
@@ -10,6 +10,8 @@ import { createStudioCard, importStudioBoard, loadStudioNotes, queueStudioGenera
 import { studioAiStatus } from "../services/studioAi";
 import { kickInlineStudio } from "../worker/studio";
 import { checkStudioExport, exportStudioZip, renderStudioOutput } from "../services/studioExport";
+import { importStudioPanelImage } from "../services/studioImageImport";
+import { STUDIO_IMAGE_MAX_BYTES, STUDIO_IMAGE_TYPES } from "../../shared/studioImageImport";
 
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -49,6 +51,12 @@ studioRoutes.get("/studio/cards/:id/export.zip", ah(async (req, res) => {
 studioRoutes.patch("/studio/cards/:id", ah(async (req, res) => {
   const { version, ...patch } = parse(studioPatchSchema, req.body);
   res.json(await saveStudioCard(getDb(), intParam(req.params.id), version, patch, actorOf(req)));
+}));
+studioRoutes.post("/studio/cards/:id/panels/:panelIndex/image", raw({ type: STUDIO_IMAGE_TYPES, limit: STUDIO_IMAGE_MAX_BYTES }), ah(async (req, res) => {
+  const id = intParam(req.params.id);
+  const panelIndex = parse(z.coerce.number().int().min(0).max(3), req.params.panelIndex);
+  const { version } = parse(z.object({ version: z.coerce.number().int().positive() }).strict(), req.query);
+  res.status(201).json(await importStudioPanelImage(getDb(), id, panelIndex, version, req.body, actorOf(req)));
 }));
 studioRoutes.post("/studio/cards/:id/generate", ah(async (req, res) => {
   const input = parse(studioGenerationSchema, req.body);
