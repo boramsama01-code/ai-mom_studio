@@ -12,6 +12,8 @@ import { studioCaptionDraft } from "@shared/studioWorkflow";
 import type { StudioGeneration } from "@shared/studio";
 import { StudioExport, StudioQuickExport } from "./StudioExport";
 import { StudioPanelImport } from "./StudioPanelImport";
+import { StudioPromptCopy, StudioTextImport } from "./StudioTextImport";
+import { studioChatGptCaptionPrompt } from "@shared/studioTextImport";
 import type { StudioChannel as Channel, StudioStage as Stage, StudioCharacter as Character, StudioFormat as Format, StudioPanel as Panel, StudioContent as CardInput, StudioCard as Card, StudioRevision as Revision, StudioJob as Job, StudioBoard as Board, StudioCardDetail as Detail } from "@shared/studio";
 const stages: Array<{ id: Stage; label: string }> = [{ id: "idea", label: "아이디어" }, { id: "writing", label: "원고" }, { id: "making", label: "제작" }, { id: "review", label: "검토" }, { id: "done", label: "완료" }];
 const formats: readonly Format[] = studioOutputFormats;
@@ -37,7 +39,7 @@ export function StudioPage({ cardId }: { cardId?: number }) {
   const guard = useDirtyGuard();
   if (cardId !== undefined) return Number.isSafeInteger(cardId) && cardId > 0 ? <StudioDetail key={cardId} id={cardId} /> : <div className="notice err">작업 주소를 확인해 주세요. <GuardedLink href="/">보드로</GuardedLink></div>;
   return <div className="studio">
-    <header className="page-head studio-heading"><div><span className="studio-eyebrow">우주펭귄상회</span><h1>{view === "board" ? "Studio Board" : "캐릭터 원본"}</h1></div><div className="row"><GuardedLink className="btn" href="/connections">API 키 관리</GuardedLink><button className="btn" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본" : "제작 보드"}</button><GuardedLink className="btn ghost" href="/settings">채널 관리</GuardedLink></div></header>
+    <header className="studio-home-top"><span className="studio-eyebrow">우주펭귄상회 · 콘텐츠 스튜디오</span><button className="btn sm ghost" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본 ↗" : "← 내 콘텐츠"}</button></header>
     {view === "board" ? <StudioBoard /> : <CharacterArchive />}
   </div>;
 }
@@ -51,6 +53,8 @@ function StudioBoard() {
   const [creating, setCreating] = useState(false);
   const [archived, setArchived] = useState(false);
   const [newStage, setNewStage] = useState<Stage>("idea");
+  const [layout, setLayout] = useState<"list" | "board">("list");
+  const [statusFilter, setStatusFilter] = useState<"active" | "done" | "all">("active");
   const qc = useQueryClient();
   const toast = useToast();
   const guard = useDirtyGuard();
@@ -58,20 +62,34 @@ function StudioBoard() {
   const cards = q.data?.cards ?? [];
   const visibleChannels = channels.filter(ch => archived ? !ch.active : ch.active);
   const visibleKeys = new Set(visibleChannels.map(ch => ch.id));
-  const filtered = cards.filter(c => visibleKeys.has(c.channel) && (filter === "all" || c.channel === filter) && `${c.title} ${c.memo} ${c.script}`.toLowerCase().includes(search.toLowerCase()));
+  const scoped = cards.filter(c => visibleKeys.has(c.channel) && (filter === "all" || c.channel === filter));
+  const filtered = scoped.filter(c => (layout === "board" || statusFilter === "all" || (statusFilter === "done" ? c.stage === "done" : c.stage !== "done")) && `${c.title} ${c.memo} ${c.script}`.toLowerCase().includes(search.toLowerCase())).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id - a.id);
   const move = useMutation({ mutationFn: ({ card, stage }: { card: Card; stage: Stage }) => api(`/studio/cards/${card.id}`, { method: "PATCH", body: { version: card.version, stage } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["studio"] }), onError: (e) => toast("err", e.message) });
   const { channels: legacyChannels, select } = useChannel();
-  const highway = legacyChannels.find((c) => c.slug === "opportunities");
-  const openHighway = () => guard.confirmLeave(() => { if (highway) select(highway.id); navigate("/inbox"); });
+  const openHighway = () => guard.confirmLeave(() => { const channel = legacyChannels.find(c => studioKey(c.slug) === filter); if (channel) select(channel.id); navigate("/inbox"); });
   function newCard(stage: Stage = "idea") { if (archived || !visibleChannels.length) return; setNewStage(stage); setCreating(true); }
   return <>
-    <section className="studio-brands" aria-label="채널 필터">{visibleChannels.map((ch) => <button key={ch.id} className="studio-brand" style={{ "--channel-accent": ch.accent } as CSSProperties} aria-pressed={filter === ch.id} onClick={() => setFilter(filter === ch.id ? "all" : ch.id)}><span><strong>{ch.name}</strong><span className="studio-brand-count">{q.data ? cards.filter((c) => c.channel === ch.id && c.stage !== "done").length : "—"}개 진행 중</span></span>{ch.image ? <img src={`/studio-assets/${ch.image}.png`} alt="" /> : <b className="studio-brand-initial" aria-hidden="true">{ch.name.slice(0, 1)}</b>}</button>)}</section>
-    <div className="studio-board-actions"><div className="row"><button className={`btn sm ${filter === "all" ? "primary" : ""}`} onClick={() => setFilter("all")}>전체</button><span className="small muted">{filter === "all" ? archived ? "보관된 채널" : "사용 중인 채널" : channelName(filter)} · {filtered.length}개</span>{channels.some(ch => !ch.active) && <button className="btn sm ghost" aria-pressed={archived} onClick={() => { setArchived(!archived); setFilter("all"); }}>{archived ? "사용 중인 채널 보기" : "보관된 채널 보기"}</button>}</div><div className="row"><button className="btn sm" onClick={openHighway}>수집함 ↗</button><button className="btn primary" disabled={archived || !visibleChannels.length} onClick={() => newCard()}>＋ 새 작업</button></div></div>
+    <header className="studio-home-heading"><div><h1>내 콘텐츠</h1><p>새 이야기를 시작하거나, 하던 작업을 이어가세요.</p></div><button className="btn primary studio-create" disabled={archived || !visibleChannels.length} onClick={() => newCard()}>＋ 새 콘텐츠 만들기</button></header>
+    <section className="studio-workspace" aria-label="내 작업">
+    <div className="studio-workspace-head"><div className="studio-status-filters" role="group" aria-label="작업 상태">{layout === "list" ? ([['active', '진행 중'], ['done', '완료'], ['all', '전체']] as const).map(([value, label]) => <button key={value} aria-pressed={statusFilter === value} onClick={() => setStatusFilter(value)}>{label}<span>{q.data ? scoped.filter(c => value === "all" || (value === "done" ? c.stage === "done" : c.stage !== "done")).length : "—"}</span></button>) : <h2>단계별 진행 상황</h2>}</div><div className="studio-view-switch" role="group" aria-label="작업 보기"><button aria-pressed={layout === "list"} onClick={() => setLayout("list")}>갤러리</button><button aria-pressed={layout === "board"} onClick={() => setLayout("board")}>단계 보드</button></div></div>
+    <div className="studio-home-filters"><label className="studio-home-search"><span className="sr-only">작업 검색</span><input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="작업 검색" /></label><label><span className="sr-only">채널 필터</span><select aria-label="채널 필터" value={filter} onChange={e => setFilter(e.target.value)}><option value="all">모든 {archived ? "보관 " : ""}채널</option>{visibleChannels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>{channels.some(ch => !ch.active) && <button className="btn sm ghost" aria-pressed={archived} onClick={() => { setArchived(!archived); setFilter("all"); }}>{archived ? "보관 보기 종료" : "보관 채널"}</button>}</div>
     {!visibleChannels.length && <p className="notice">{archived ? "보관된 채널이 없습니다." : <>사용 중인 채널이 없습니다. <GuardedLink href="/settings">채널 추가·복원 →</GuardedLink></>}</p>}
     {archived && <p className="notice">이전 작업은 열어서 편집하고 내려받을 수 있습니다. 새 작업과 AI 생성은 채널을 복원한 뒤 사용할 수 있습니다.</p>}
-    <label className="studio-search"><span className="sr-only">작업 검색</span><input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="제목·원고·메모 검색" /></label>
-    {q.isLoading ? <Loading lines={3} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : <div className="studio-board">{stages.map((stage) => <section key={stage.id} className={`studio-column stage-${stage.id}`} aria-label={stage.label} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const card = cards.find((c) => String(c.id) === e.dataTransfer.getData("text/studio-card")); if (!archived && card && card.stage !== stage.id && !move.isPending) move.mutate({ card, stage: stage.id }); }}><div className="studio-column-head"><h2>{stage.label}<span>{filtered.filter((c) => c.stage === stage.id).length}</span></h2><button className="studio-add" disabled={archived || !visibleChannels.length} aria-label={`${stage.label} 작업 추가`} onClick={() => newCard(stage.id)}>＋</button></div>{stage.id === "done" && <p className="studio-column-hint">파일 저장 후 직접 게시</p>}<div className="studio-task-list">{filtered.filter((c) => c.stage === stage.id).map((c) => <article key={c.id} className="studio-task" draggable={!move.isPending && !archived} onDragStart={(e) => e.dataTransfer.setData("text/studio-card", String(c.id))}><span className={`studio-channel-tag ${c.channel}`}>{channelName(c.channel)}</span><GuardedLink href={`/studio/${c.id}`} className="studio-task-open">{c.panels?.find((p) => p.imageId)?.imageId ? <img className="studio-task-thumb" src={imageUrl(c.panels.find((p) => p.imageId)!.imageId!)} alt="콘텐츠 미리보기" loading="lazy" /> : c.imagePath ? <img className="studio-task-thumb" src={c.imagePath} alt="이전 웹툰 시안" loading="lazy" /> : null}<h3>{c.title}</h3><p>{c.memo || c.script || "원고와 제작 지시를 작성하세요."}</p></GuardedLink><div className="studio-task-meta"><span>{c.format}</span>{c.dueDate && <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", ".")}</time>}</div><select aria-label={`${c.title} 제작 단계`} value={c.stage} disabled={move.isPending} onChange={(e) => move.mutate({ card: c, stage: e.target.value as Stage })}>{stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select>{stage.id === "done" && <StudioQuickExport card={c} />}</article>)}{!filtered.some((c) => c.stage === stage.id) && <button className="studio-empty-column" disabled={archived || !visibleChannels.length || !!search} onClick={() => newCard(stage.id)}>{search ? "검색 결과 없음" : archived ? "작업 없음" : "＋ 작업 추가"}</button>}</div></section>)}</div>}
-    <p className="small muted studio-board-foot">‘완료’는 제작 완료입니다. 이미지 저장 → 캡션 복사 → SNS 앱에서 직접 게시하세요.</p>
+    {q.isLoading ? <Loading lines={3} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : layout === "list" ? <>
+      {filtered.length ? <div className="studio-content-grid">{filtered.map(c => {
+        const channel = channels.find(ch => ch.id === c.channel);
+        const thumbnail = c.panels.find(p => p.imageId)?.imageId;
+        return <article key={c.id} className="studio-content-card" style={{ "--channel-accent": channel?.accent ?? "#285f6a" } as CSSProperties}>
+          <GuardedLink href={`/studio/${c.id}`} className="studio-content-open">
+            <div className={`studio-content-art ${thumbnail || c.imagePath ? "has-image" : ""}`}>{thumbnail ? <img src={imageUrl(thumbnail)} alt="" loading="lazy" /> : c.imagePath ? <img src={c.imagePath} alt="" loading="lazy" /> : <><span className={`studio-format-art ${c.format === "웹툰" ? "comic" : "slides"}`} aria-hidden="true"><i /><i /><i /><i /></span><span className="studio-art-label">그림 준비 중</span></>}</div>
+            <div className="studio-content-copy"><span className="studio-content-channel"><i aria-hidden="true" />{channelName(c.channel)}</span><h2>{c.title}</h2><span className="studio-content-meta">{c.format}{c.dueDate && <> · <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", "/")} 예정</time></>}</span><div className="studio-content-bottom"><span className={`studio-stage-pill stage-${c.stage}`}>{stages.find(s => s.id === c.stage)?.label}</span><span>{c.stage === "done" ? "결과 확인" : "이어서 편집"} <b aria-hidden="true">↗</b></span></div></div>
+          </GuardedLink>
+          {c.stage === "done" && <StudioQuickExport card={c} />}
+        </article>;
+      })}</div> : <div className="studio-home-empty"><span aria-hidden="true">✧</span><h2>{search ? "검색한 작업이 없어요" : statusFilter === "done" ? "완료한 콘텐츠가 여기에 모여요" : "새 이야기를 시작해 보세요"}</h2><p>{search ? "다른 검색어나 채널로 찾아보세요." : statusFilter === "done" ? "제작을 마치면 이미지와 캡션을 바로 꺼낼 수 있습니다." : "제목 하나면 충분해요. 원고와 그림은 차근차근 채워갑니다."}</p>{search && <button className="btn" onClick={() => setSearch("")}>검색 지우기</button>}</div>}
+    </> : <div className="studio-board">{stages.map((stage) => <section key={stage.id} className={`studio-column stage-${stage.id}`} aria-label={stage.label} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const card = filtered.find((c) => String(c.id) === e.dataTransfer.getData("text/studio-card")); if (!archived && card && card.stage !== stage.id && !move.isPending) move.mutate({ card, stage: stage.id }); }}><div className="studio-column-head"><h2>{stage.label}<span>{filtered.filter((c) => c.stage === stage.id).length}</span></h2><button className="studio-add" disabled={archived || !visibleChannels.length} aria-label={`${stage.label} 작업 추가`} onClick={() => newCard(stage.id)}>＋</button></div><div className="studio-task-list">{filtered.filter((c) => c.stage === stage.id).map((c) => <article key={c.id} className="studio-task" draggable={!move.isPending && !archived} onDragStart={(e) => e.dataTransfer.setData("text/studio-card", String(c.id))}><span className={`studio-channel-tag ${c.channel}`}>{channelName(c.channel)}</span><GuardedLink href={`/studio/${c.id}`} className="studio-task-open"><h3>{c.title}</h3></GuardedLink><div className="studio-task-meta"><span>{c.format}</span>{c.dueDate && <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", ".")}</time>}</div><select aria-label={`${c.title} 제작 단계`} value={c.stage} disabled={move.isPending || archived} onChange={(e) => move.mutate({ card: c, stage: e.target.value as Stage })}>{stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select>{stage.id === "done" && <StudioQuickExport card={c} />}</article>)}{!filtered.some((c) => c.stage === stage.id) && <p className="studio-column-hint">작업 없음</p>}</div></section>)}</div>}
+    </section>
+    <div className="studio-home-footer"><button className="btn sm ghost" onClick={openHighway}>수집한 자료에서 시작 ↗</button><GuardedLink className="btn sm ghost" href="/settings">채널 관리 ↗</GuardedLink><span>완료한 파일은 내려받아 SNS에 직접 게시할 수 있어요.</span></div>
     {q.data && <StudioNotes data={q.data} />}
     {creating && <NewCard channel={filter === "all" || !visibleKeys.has(filter) ? visibleChannels[0]?.id : filter} stage={newStage} onClose={() => setCreating(false)} />}
   </>;
@@ -142,6 +160,9 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const [instruction, setInstruction] = useState("");
   const [panelInstructions, setPanelInstructions] = useState(["", "", "", ""]);
   const [imageMode, setImageMode] = useState<"chatgpt" | "api">("chatgpt");
+  const [textMode, setTextMode] = useState<"chatgpt" | "api">("chatgpt");
+  const [editorStep, setEditorStep] = useState<"story" | "images" | "finish">(() => data.card.stage === "done" || data.card.stage === "review" ? "finish" : data.card.stage === "making" ? "images" : "story");
+  const [selectedPanel, setSelectedPanel] = useState(0);
   const [uploading, setUploading] = useState<number | null>(null);
   const uploadingRef = useRef(false);
   const [provider, setProvider] = useState<"openai" | "anthropic">("openai");
@@ -163,7 +184,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const accept = (c: Card) => { baseRef.current = c; setBase(c); setForm(inputOf(c)); };
   useEffect(() => { if (!dirty && data.card.version > base.version) accept(data.card); }, [data.card.version, dirty, base.version]);
   const save = useMutation({
-    mutationFn: () => api<Card | { card: Card }>(`/studio/cards/${base.id}`, { method: "PATCH", body: { ...form, version: base.version } }),
+    mutationFn: (next?: CardInput) => api<Card | { card: Card }>(`/studio/cards/${base.id}`, { method: "PATCH", body: { ...(next ?? form), version: base.version } }),
     onSuccess: (d) => { accept("card" in d ? d.card : d); invalidate(); },
   });
   const saveCurrent = useCallback(async (): Promise<Card> => { if (!dirty) return base; const d = await save.mutateAsync(); return "card" in d ? d.card : d; }, [dirty, base, form]);
@@ -222,7 +243,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   }
   const copyCaption = async () => { try { await navigator.clipboard.writeText(form.caption); toast("ok", "캡션을 복사했습니다."); } catch { toast("err", "캡션을 직접 선택해 복사해 주세요."); } };
   return <div className="studio studio-detail" style={{ "--channel-accent": channels.find(c => c.id === form.channel)?.accent ?? "#285f6a" } as CSSProperties}>
-    <GuardedLink href="/" className="studio-back">← Studio Board</GuardedLink>
+    <GuardedLink href="/" className="studio-back">← 내 콘텐츠</GuardedLink>
     <header className="page-head">
       <div><span className="studio-channel-tag">{channelName(form.channel)}</span><h1>{base.title}</h1><span className="small muted">버전 {base.version} · {dirty ? "저장 전 변경사항" : "저장됨"}</span></div>
       <button className="btn primary" onClick={() => save.mutate()} disabled={!dirty || busy || !form.title.trim()}>{save.isPending ? "저장 중…" : "저장"}</button>
@@ -230,10 +251,10 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
     {newer && dirty && <div className="notice warn row between"><span>서버에 새 버전이 있습니다. 현재 입력은 유지했습니다.</span><button className="btn sm" onClick={() => guard.confirmLeave(() => accept(data.card))}>새 버전 불러오기</button></div>}
     {(save.error || restore.error) && <ErrorBox error={save.error || restore.error} />}
     <div className="tabs" role="tablist" aria-label="콘텐츠 편집">
-      <button role="tab" aria-selected={tab === "content"} onClick={() => setTab("content")}>원고·구성</button>
+      <button role="tab" aria-selected={tab === "content"} onClick={() => setTab("content")}>콘텐츠 편집</button>
       <button role="tab" aria-selected={tab === "history"} onClick={() => guard.confirmLeave(() => setTab("history"))}>버전 기록 {data.revisions.length}</button>
     </div>
-    {(working || generate.error || latestJob?.status === "failed" || latestJob?.result?.applied === false) && <section className="panel stack studio-work-status" aria-label="생성 상태">
+    {(working || generate.error || latestJob?.status === "failed" || latestJob?.result?.applied === false) && <details className="panel studio-work-status" open={working || undefined}><summary>{working ? "API로 생성 중" : "이전 API 요청 결과"}</summary><div className="stack">
       {working && <p role="status">AI가 작업 중입니다. 완료되면 여기에 반영됩니다. 화면을 닫아도 요청은 보관됩니다.</p>}
       {generate.error && <ErrorBox error={generate.error} />}
       {!working && latestJob?.status === "failed" && <div role="alert" className="notice err"><strong>생성을 완료하지 못했습니다.</strong><p>{latestJob.lastError}</p></div>}
@@ -241,30 +262,34 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
       <div className="row"><button className="btn sm" onClick={() => refresh()}>상태 새로고침</button><GuardedLink href="/connections?service=openai" className="btn sm ghost">OpenAI 키 입력·수정</GuardedLink><button className="btn sm ghost" disabled={working || testConnection.isPending} onClick={() => testConnection.mutate()}>{testConnection.isPending ? "확인 중…" : "OpenAI 연결 확인 · 생성 비용 없음"}</button></div>
       {testConnection.data && <p role="status" className={testConnection.data.ok ? "notice ok" : "notice warn"}>{testConnection.data.message}</p>}
       {testConnection.error && <ErrorBox error={testConnection.error} />}
-    </section>}
+    </div></details>}
     {tab === "content" ? <div className="studio-editor-layout studio-guided-editor">
-      <section className="panel stack" id="studio-story">
-        <div className="studio-section-heading"><div><span className="studio-step">01 · 이야기</span><h2>아이디어를 컷 구성으로</h2></div>
-          <button className="btn primary" disabled={!canWrite || !hasBlanks} onClick={() => run({ kind: "text", textTarget: "fill" })}>빈칸 초안 채우기</button></div>
-        <p className="small muted">제목이나 기획을 쓰면 원고·컷 구성·캡션을 함께 작성합니다. 이미 쓴 글과 그림은 유지합니다. AI 사용료가 발생합니다.</p>
+      <nav className="studio-editor-steps" aria-label="제작 순서">{([['story','01','이야기'],['images','02','그림'],['finish','03','완성']] as const).map(([id, number, label]) => <button key={id} aria-current={editorStep === id ? "step" : undefined} onClick={() => setEditorStep(id)}><span>{number}</span><strong>{label}</strong></button>)}</nav>
+      <section className="panel stack" id="studio-story" hidden={editorStep !== "story"}>
+        <div className="studio-section-heading"><div><h2>어떤 이야기를 만들까요?</h2></div><span className="small muted">직접 쓰거나 ChatGPT 초안을 가져오세요.</span></div>
         <label className="field">제목<input id="studio-title" disabled={busy} value={form.title} maxLength={160} onChange={e => change("title", e.target.value)} /></label>
         <label className="field">기획·참고 자료<textarea disabled={busy} value={form.memo} rows={3} maxLength={12000} onChange={e => change("memo", e.target.value)} placeholder="이야기의 핵심이나 확인한 자료를 적어 주세요. 이미 컷을 썼다면 비워 두어도 됩니다." /></label>
-        <div className="studio-form-grid">
+        <label className="field">형식<select id="studio-format" disabled={busy} value={form.format} onChange={e => change("format", e.target.value as Format)}>{!formats.includes(form.format) && <option value={form.format}>{form.format} · 기획용</option>}{formats.map(f => <option key={f}>{f}</option>)}</select></label>
+        <div className="studio-image-mode" role="group" aria-label="초안 작성 방법"><button aria-pressed={textMode === "chatgpt"} onClick={() => setTextMode("chatgpt")}>ChatGPT로 초안 만들기</button><button aria-pressed={textMode === "api"} onClick={() => setTextMode("api")}>API 자동 작성</button></div>
+        <div hidden={textMode !== "chatgpt"}><StudioTextImport content={form} channelName={channelName(form.channel)} disabled={busy || working || newer} apply={setForm} /></div>
+        <div className="stack" hidden={textMode !== "api"}>
           <label className="field">작성 AI<select value={provider} disabled={busy || working} onChange={e => { providerInitialized.current = true; setProvider(e.target.value as typeof provider); }}><option value="openai">GPT</option><option value="anthropic">Claude</option></select></label>
-          <label className="field">형식<select id="studio-format" disabled={busy} value={form.format} onChange={e => change("format", e.target.value as Format)}>{!formats.includes(form.format) && <option value={form.format}>{form.format} · 기획용</option>}{formats.map(f => <option key={f}>{f}</option>)}</select></label>
+          <p className="small muted">원고·컷 구성·캡션의 빈칸을 작성합니다. API 사용료가 발생합니다.</p>
+          {settings.data?.ai.text[provider] === false && <p className="notice warn small">작성 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
+          <button className="btn" disabled={!canWrite || !hasBlanks} onClick={() => run({ kind: "text", textTarget: "fill" })}>빈칸 초안 채우기 · API</button>
         </div>
-        {settings.data?.ai.text[provider] === false && <p className="notice warn small">작성 AI의 키가 없습니다. 직접 편집은 계속할 수 있습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
         {archivedChannel && <p className="notice warn small">보관된 채널입니다. 새 AI 생성은 <GuardedLink href="/settings">채널 복원</GuardedLink> 후 사용할 수 있습니다.</p>}
-        <details className="studio-more"><summary>전체 원고·작업 정보</summary><div className="stack">
-          <label className="field">전체 원고<textarea disabled={busy} value={form.script} rows={6} maxLength={24000} onChange={e => change("script", e.target.value)} placeholder="전체 원고가 없어도 아래 장면·대사에서 바로 그림을 만들 수 있습니다." /></label>
+        <details className="studio-more" open={!!form.script || undefined}><summary>전체 원고·작업 정보</summary><div className="stack">
+          <label className="field">전체 원고<textarea disabled={busy} value={form.script} rows={6} maxLength={24000} onChange={e => change("script", e.target.value)} placeholder="전체 원고가 없어도 장면·대사에서 바로 그림을 만들 수 있습니다." /></label>
           <div className="studio-form-grid">
             <label className="field">채널<select disabled={busy} value={form.channel} onChange={e => change("channel", e.target.value)}>{channels.filter(c => c.active || c.id === form.channel).map(c => <option key={c.id} value={c.id}>{c.name}{c.active ? "" : " (보관됨)"}</option>)}</select></label>
             <label className="field">단계<select disabled={busy} value={form.stage} onChange={e => change("stage", e.target.value as Stage)}>{stages.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</select></label>
             <label className="field">예정일<input type="date" disabled={busy} value={form.dueDate} onChange={e => change("dueDate", e.target.value)} /></label>
           </div>
         </div></details>
+        <div className="studio-next-step"><button className="btn" onClick={() => setEditorStep("images")}>컷 구성과 그림으로 →</button></div>
       </section>
-      <section className="panel stack" id="studio-composition">
+      <section className="panel stack" id="studio-composition" hidden={editorStep !== "images"}>
         <div className="studio-section-heading"><div><span className="studio-step">02 · 그림 제작</span><h2>{form.format === "카드뉴스" ? "본문 4장" : "네컷 구성"}</h2></div><span className="small muted">{form.panels.filter(p => p.imageId).length} / 4 그림</span></div>
         <div className="studio-image-mode" role="group" aria-label="그림 제작 방법"><button aria-pressed={imageMode === "chatgpt"} disabled={busy} onClick={() => guard.confirmLeave(() => setImageMode("chatgpt"))}>ChatGPT로 만들기</button><button aria-pressed={imageMode === "api"} disabled={busy} onClick={() => guard.confirmLeave(() => setImageMode("api"))}>API로 자동 생성</button></div>
         <p className="small muted">{imageMode === "chatgpt" ? "프롬프트 복사 → ChatGPT에서 이미지 생성 → 해당 컷에 붙여넣기. 스튜디오 API 사용료 없이 저장합니다." : "장면·대사를 사용해 한 번에 한 컷을 생성합니다. 이미지 API 사용료가 발생합니다."}</p>
@@ -272,7 +297,8 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         {imageMode === "chatgpt" && form.characters.length > 0 && <div className="studio-reference-downloads"><span className="small muted">처음 만들 때 캐릭터 원본도 ChatGPT에 첨부하세요.</span><div className="row">{characters.filter(c => form.characters.includes(c.id)).map(c => <a key={c.id} className="btn sm" href={getCharacterImage(c.id)} download={`${c.name}-원본.png`}>{c.name} 원본 ↓</a>)}</div></div>}
         {imageMode === "api" && settings.data?.ai.image === false && <p className="notice warn small">API 자동 생성에는 OpenAI 키가 필요합니다. <GuardedLink href="/connections?service=openai">OpenAI 키 입력 →</GuardedLink></p>}
         {form.imagePath && <details className="studio-original"><summary>이전 웹툰 시안 보기</summary><img src={form.imagePath} alt="이전 네컷 웹툰 시안" /></details>}
-        <div className="studio-panels">{form.panels.map((p, i) => <article className="studio-comic-panel" key={i}>
+        <div className="studio-panel-selector" role="group" aria-label="편집할 컷">{form.panels.map((p, i) => <button key={i} aria-pressed={selectedPanel === i} onClick={() => setSelectedPanel(i)}><strong>{i + 1}{form.format === "카드뉴스" ? "번째 본문" : "컷"}</strong><span>{p.imageId ? "그림 있음" : p.scene || p.dialogue ? "구성 있음" : "비어 있음"}</span></button>)}</div>
+        <div className="studio-panels studio-focused-panel">{form.panels.map((p, i) => <article className="studio-comic-panel" key={i} hidden={selectedPanel !== i}>
           <div className="row between"><h3>{i + 1}{form.format === "카드뉴스" ? "번째 본문" : "컷"}</h3><span className="small muted">{p.imageId ? "그림 있음" : "구성 중"}</span></div>
           <label className="field small">장면<textarea disabled={busy} aria-label={panelLabel(i, "장면")} rows={3} value={p.scene} maxLength={4000} onChange={e => changePanel(i, "scene", e.target.value)} placeholder="등장인물, 표정, 배경, 소품" /></label>
           <label className="field small">{form.format === "카드뉴스" ? "본문" : "대사"}<textarea id={panelField(i)} disabled={busy} aria-label={panelLabel(i, "대사")} rows={2} value={p.dialogue} maxLength={3000} onChange={e => changePanel(i, "dialogue", e.target.value)} placeholder="그림 아래에 표시할 글" /></label>
@@ -285,15 +311,24 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
             {p.imageId && <><p className="small muted">다시 그려도 이전 그림은 버전 기록에 남습니다.</p><button className="btn sm ghost" disabled={busy} onClick={() => change("panels", form.panels.map((panel, n) => n === i ? { ...panel, imageId: null } : panel))}>그림 빼고 글로 구성</button></>}
           </div></details>
         </article>)}</div>
+        <div className="studio-next-step"><button className="btn ghost" onClick={() => setEditorStep("story")}>← 이야기</button><button className="btn" onClick={() => setEditorStep("finish")}>캡션과 최종 이미지 →</button></div>
       </section>
+      <div className="stack" hidden={editorStep !== "finish"}>
       <section className="panel stack" id="studio-caption">
-        <div className="studio-section-heading"><div><span className="studio-step">03 · 게시 글</span><h2>캡션</h2></div><button className="btn" disabled={!canWrite || (!form.caption.trim() && !studioCaptionDraft(form) && !form.memo.trim())} onClick={() => run({ kind: "text", textTarget: "caption" })}>{form.caption.trim() ? "캡션만 AI로 다듬기" : "캡션만 AI로 작성"}</button></div>
+        <div className="studio-section-heading"><div><h2>게시용 캡션</h2></div></div>
         {captionProposal && <div className="studio-caption-proposal"><span className="small muted">작성한 글에서 만든 기본 초안 · AI 사용 없음</span><p>{captionProposal}</p><button className="btn sm" disabled={busy} onClick={() => change("caption", captionProposal)}>이 초안 사용</button></div>}
         <label className="field">게시용 캡션<textarea disabled={busy} rows={5} value={form.caption} maxLength={8000} onChange={e => change("caption", e.target.value)} placeholder="대사나 원고를 쓰면 기본 초안이 자동으로 제안됩니다." /></label>
-        <div className="row between"><button className="btn sm" onClick={copyCaption} disabled={!form.caption.trim()}>캡션 복사</button><span className="small muted">AI 다듬기는 캡션만 변경 · API 사용료 발생</span></div>
+        <div className="row"><button className="btn" onClick={copyCaption} disabled={!form.caption.trim()}>캡션 복사</button></div>
+        <details className="studio-more"><summary>캡션 작성 도움받기</summary><div className="stack"><StudioPromptCopy prompt={studioChatGptCaptionPrompt(form, channelName(form.channel))} label="ChatGPT 캡션 프롬프트 복사" /><p className="small muted">받은 답변을 위 캡션 칸에 붙여넣으세요.</p><button className="btn" disabled={!canWrite || (!form.caption.trim() && !studioCaptionDraft(form) && !form.memo.trim())} onClick={() => run({ kind: "text", textTarget: "caption" })}>API로 캡션 작성 · 사용료 발생</button></div></details>
       </section>
-      <StudioExport form={form} base={base} dirty={dirty} busy={busy} change={change} save={saveCurrent} />
-      <details className="panel studio-more"><summary>전체 원고를 AI로 수정하기</summary><div className="stack">
+      <StudioExport form={form} base={base} dirty={dirty} busy={busy} change={change} save={saveCurrent} onFieldFocus={field => {
+        const panel = /^panels\.(\d+)\./.exec(field);
+        if (panel) { setEditorStep("images"); setSelectedPanel(Number(panel[1])); }
+        else if (field === "title" || field === "format") setEditorStep("story");
+      }} />
+      <div className="studio-next-step"><button className="btn ghost" onClick={() => setEditorStep("images")}>← 그림 편집</button>{form.stage === "done" ? <span className="studio-stage-pill stage-done">제작 완료{dirty ? " · 저장 전 변경사항 있음" : ""}</span> : <button className="btn" disabled={busy || working || newer || !form.title.trim()} onClick={() => save.mutate({ ...form, stage: "done" })}>저장하고 제작 완료</button>}</div>
+      </div>
+      <details className="panel studio-more" hidden={editorStep !== "story" || textMode !== "api"}><summary>전체 원고를 API로 수정하기</summary><div className="stack">
         <p className="small muted">제목·원고·컷 구성·캡션을 함께 변경합니다. 장면이 바뀐 컷의 그림은 분리되며, 이전 내용은 버전 기록에 남습니다.</p>
         <label className="field">바꿀 내용<textarea disabled={busy} rows={3} maxLength={6000} value={instruction} onChange={e => setInstruction(e.target.value)} placeholder="예: 마지막 반전은 유지하고 전체 흐름을 더 짧게 바꿔줘." /></label>
         <button className="btn" disabled={!canWrite || !instruction.trim()} onClick={() => run({ kind: "text", textTarget: "rewrite", instruction })}>전체 원고 수정 · API 사용료 발생</button>

@@ -28,11 +28,11 @@ const queryClient = new QueryClient({
 
 const NAV: Array<{ group: string; items: Array<{ href: string; label: string; icon: string; count?: "review" | "ready" }> }> = [
   {
-    group: "제작 · 내려받아 직접 게시",
-    items: [{ href: "/", label: "제작 보드", icon: "▦" }],
+    group: "스튜디오",
+    items: [{ href: "/", label: "내 콘텐츠", icon: "▦" }],
   },
   {
-    group: "수집 콘텐츠 · 승인 후 발행",
+    group: "자료 수집 · 발행",
     items: [
       { href: "/today", label: "수집 현황", icon: "◎" },
       { href: "/inbox", label: "수집함", icon: "▤", count: "review" },
