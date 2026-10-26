@@ -19,7 +19,7 @@
 - AUTO_GENERATE=false이면 유료 AI 선정·추출·초안을 모두 생략. 예약 Telegram 알림 기본 꺼짐. 기존 6시간 연결 판정은 12시간 예약+지연 여유를 반영해 14시간으로 수정.
 - 운영 `/api/status`: workerConnected=true, autoCollect=true, 최신 worker `connection:check` ok. 채널 6개·작업 8개 해시 배포 전후 동일, DB/auth health 정상. 검증 결과는 비공개 로컬 `.git/scheduler-verification.json`.
 - 기존 6개 채널 모두 목적지 없음. process 예약·실제 게시 스위치는 목적지 검증 전에는 활성화하지 않음. Studio 제작물과 기존 수집함 게시 파이프라인은 아직 별개.
-- Facebook 기기 승인 반영 후 Meta 개발자 등록 화면 확인. 사용자가 직접 Register·Verify account를 완료했고 현재 Contact info 이메일 인증 단계. 개발자 앱·Instagram 계정 권한·채널 매핑은 아직 확인하지 못함. 에이전트의 약관 동의·시험 게시는 없음. 등록 절차의 인증값은 사용자 직접 입력.
+- 사용자는 Meta 개발자 등록 완료 및 같은 Facebook 계정임을 확인했음. 2026-10-26 보안 로그인으로 비밀번호 재확인까지 통과했지만, 새 세션에서도 Meta가 Contact info 이메일 인증 미완료·About you 대기로 표시함. 앱 관리 화면에 진입하지 못해 등록 화면을 사용자에게 인계함. 사용자 완료 진술을 무시하고 재등록하거나 인증을 반복하지 말 것. 다음 턴에는 인계된 화면의 실제 완료 상태부터 확인. 개발자 앱·Instagram 계정 권한·채널 매핑은 아직 확인하지 못함. 에이전트의 약관 동의·시험 게시는 없음. 등록 절차의 인증값은 사용자 직접 입력.
 - Cloudinary 공식 콘솔의 Cloud name·API Key만 스튜디오에 저장, 기존 API Secret은 유지. `/api/secrets/test/cloudinary` 결과 ok=true. 실제 이미지 업로드·SNS 게시는 실행하지 않음. `.git/cloudinary-connection-result.json`에 비밀값 없는 결과 기록. 비밀키 공개 단계는 사용자 재승인 후에도 보안 입력창의 잘못된 설명으로 자동 검토에서 거부되므로 재시도하지 않음. 연결 성공으로 더 이상 비밀키 공개가 필요하지 않음.
 
 ## 최신 상태 · API 키 관리 및 OpenAI 인증 복구 (2026-10-26)
