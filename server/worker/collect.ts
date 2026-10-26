@@ -15,7 +15,8 @@ import {
   type Channel,
   type SearchRule,
 } from "../../shared/schema";
-import { naverSearch, applyExcludeTerms, NaverError, type CallCounter, type NaverItem } from "../services/naver";
+import { naverSearch, applyExcludeTerms, NaverError, searchCalls, type CallCounter, type NaverItem } from "../services/naver";
+import { createNewsSearch, type RssLoader } from "../services/newsSearch";
 import { normalizeUrl } from "../services/url";
 import { fetchAndExtract, extractPdf } from "../services/extract";
 import { safeFetch } from "../services/safeFetch";
@@ -38,6 +39,7 @@ export type CollectOptions = {
   trigger: "manual" | "worker" | "cli" | "schedule";
   now?: Date;
   naverFetch?: typeof fetch; // 테스트용 주입
+  rssLoad?: RssLoader; // 공개 RSS 수집 테스트용 주입
   fetchSource?: typeof fetchAndExtract; // 테스트용 주입
   fetchBoard?: typeof fetchBoardList; // 테스트용 주입
   heartbeat?: () => Promise<unknown>;
@@ -95,24 +97,26 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const errors: Array<{ scope: string; message: string }> = [];
   const counter: CallCounter = { naver: 0, limit: budget.naverCallsPerRun };
   const newItemIds: number[] = [];
-  let fatal = false;
+  const publicSearch = createNewsSearch({ now, loadXml: opts.rssLoad });
+  // Existing Naver fixtures exercise the same storage pipeline; production uses public RSS.
+  const search = opts.naverFetch ? ((q: string, e: "news" | "blog", d: number, c: CallCounter) => naverSearch(q, e, d, c, opts.naverFetch)) : publicSearch.search;
   const llmBudget = new LlmBudget(budget.llmCallsPerRun);
 
   /* 1-2) 자동 화제 발굴(과학·시사 채널) — 사용자 검색어보다 먼저 */
-  const disc = await runDiscovery(db, channel, run.id, counter, llmBudget, now, opts.naverFetch, opts.collectionOnly);
+  const disc = await runDiscovery(db, channel, run.id, counter, llmBudget, now, search, opts.collectionOnly);
   if (disc) {
     Object.assign(counts, disc.counts);
     errors.push(...disc.errors);
     counts.newItems += disc.itemIds.length;
     newItemIds.push(...disc.itemIds);
-    if (disc.fatal) fatal = true;
     await opts.heartbeat?.();
   }
 
   /* 2~3) 검색 → 저장 */
   counts.rulesProcessed = 0;
-  for (const rule of fatal ? [] : selected) {
-    if (counter.naver >= counter.limit) break;
+  counts.rulesSucceeded = 0;
+  for (const rule of selected) {
+    if (searchCalls(counter) >= counter.limit) break;
     if (counts.results >= budget.resultsPerRun) {
       errors.push({ scope: `rule:${rule.id}`, message: "이번 실행 결과 한도 도달 — 남은 검색어 건너뜀" });
       break;
@@ -121,15 +125,12 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     let ruleNew = 0;
     counts.rulesProcessed++;
     try {
-      items = await naverSearch(rule.query, rule.endpoint as "news" | "blog", rule.display, counter, opts.naverFetch);
+      items = await search(rule.query, rule.endpoint as "news" | "blog", rule.display, counter);
+      counts.rulesSucceeded++;
     } catch (e) {
       const ne = e as NaverError;
       errors.push({ scope: `rule:${rule.id}`, message: `${rule.query}(${rule.endpoint}): ${ne.message}` });
       await db.update(searchRules).set({ lastRunAt: now, lastRunStatus: "failed", lastRunError: ne.message, lastRunNewCount: 0 }).where(eq(searchRules.id, rule.id));
-      if (ne.kind === "not_configured" || ne.kind === "auth") {
-        fatal = true;
-        break;
-      }
       continue;
     }
     for (const it of items) {
@@ -267,8 +268,10 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   /* 6) 실행 결과 확정 */
   counts.rulesDeferred = rules.length - counts.rulesProcessed;
+  Object.assign(counts, publicSearch.counts);
+  errors.push(...publicSearch.warnings);
   const discoveryRan = !!disc && disc.counts.discoveryQueries + disc.errors.length > 0;
-  const status = fatal || (counter.naver === 0 && (selected.length > 0 || discoveryRan) && errors.length)
+  const status = (counts.rulesSucceeded + (disc?.counts.discoveryQueries ?? 0) === 0 && counts.officialNew === 0 && (selected.length > 0 || discoveryRan) && errors.length)
     ? "failed"
     : errors.length
       ? "partial"
@@ -281,7 +284,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       status,
       counts,
       errors,
-      actualCalls: { naver: counter.naver, fetch: fetchCalls, llm: llmBudget.used },
+      actualCalls: { naver: counter.naver, rss: publicSearch.counts.rssRequests, search: searchCalls(counter), fetch: fetchCalls, llm: llmBudget.used },
       llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used },
       finishedAt: new Date(),
     })

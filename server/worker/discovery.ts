@@ -3,10 +3,11 @@
  * 탐색 주제 검색 → 사건 묶기 → 화제도 순위 → (AI 선정) → 고른 화제만 수집함에 저장
  * 고른 화제의 대표 기사는 원문 확보 대상이 되고, 같은 사건을 다룬 다른 언론사 기사 몇 건은 보조 근거로 연결한다.
  */
-import { and, desc, eq, gte, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, sql } from "drizzle-orm";
 import type { DB } from "../db";
 import { contentItems, contentSources, sourceDocuments, type Channel } from "../../shared/schema";
-import { naverSearch, NaverError, type CallCounter, type NaverItem } from "../services/naver";
+import { NaverError, searchCalls, type CallCounter, type NaverItem } from "../services/naver";
+import { createNewsSearch, type SearchFunction } from "../services/newsSearch";
 import { clusterArticles, isRecentlyCovered, rankClusters, toArticle, type Article, type Cluster } from "../services/discover";
 import { curateIssues, type LlmBudget, type CuratePick } from "../services/llm";
 import { normalizeUrl } from "../services/url";
@@ -36,7 +37,7 @@ export async function runDiscovery(
   counter: CallCounter,
   llmBudget: LlmBudget,
   now: Date,
-  naverFetch?: typeof fetch,
+  search: SearchFunction = createNewsSearch({ now }).search,
   collectionOnly = false,
 ): Promise<DiscoveryResult | null> {
   const settings = channelDiscovery(channel);
@@ -48,21 +49,17 @@ export async function runDiscovery(
   /* 1) 탐색 주제별 최신 뉴스 */
   const articles: Article[] = [];
   for (const q of settings.queries) {
-    if (counter.naver >= counter.limit) {
-      errors.push({ scope: "discovery", message: `네이버 호출 한도 도달 — 탐색 주제 "${q}" 건너뜀` });
+    if (searchCalls(counter) >= counter.limit) {
+      errors.push({ scope: "discovery", message: `검색 한도 도달 — 탐색 주제 "${q}" 건너뜀` });
       break;
     }
     try {
-      const items = await naverSearch(q, "news", 100, counter, naverFetch);
+      const items = await search(q, "news", 100, counter);
       counts.discoveryQueries++;
       for (const it of items) articles.push(toArticle(it, q));
     } catch (e) {
       const ne = e as NaverError;
       errors.push({ scope: "discovery", message: `탐색 주제 "${q}": ${ne.message}` });
-      if (ne.kind === "not_configured" || ne.kind === "auth") {
-        result.fatal = true;
-        return result;
-      }
     }
   }
   counts.discoveryArticles = articles.length;
@@ -134,15 +131,24 @@ export async function upsertNaverDoc(db: DB, it: NaverItem): Promise<{ id: numbe
     return null;
   }
   const fetchUrl = it.endpoint === "news" && /n\.news\.naver\.com/.test(it.link) ? it.link : identityUrl;
+  // The same publisher/title/day can arrive via Google and the publisher feed.
+  if (it.provider && it.publisher && it.published.iso) {
+    const [existing] = await db.select({ id: sourceDocuments.id }).from(sourceDocuments).where(and(
+      eq(sourceDocuments.isSample, false), eq(sourceDocuments.title, it.title),
+      sql`${sourceDocuments.meta}->>'publisher' = ${it.publisher}`,
+      sql`(${sourceDocuments.publishedAt} at time zone 'Asia/Seoul')::date = (${it.published.iso}::timestamptz at time zone 'Asia/Seoul')::date`
+    )).limit(1);
+    if (existing) return existing;
+  }
   await db
     .insert(sourceDocuments)
     .values({
       normalizedUrl: normalized,
       originalUrl: identityUrl,
-      kind: it.endpoint === "news" ? "naver_news" : "naver_blog",
+      kind: it.provider ?? (it.endpoint === "news" ? "naver_news" : "naver_blog"),
       title: it.title,
       snippet: it.description,
-      meta: { naverLink: it.link, originallink: it.originallink ?? null, bloggername: it.bloggername ?? null, bloggerlink: it.bloggerlink ?? null, fetchUrl, raw: it.raw },
+      meta: { naverLink: it.provider ? null : it.link, originallink: it.originallink ?? null, bloggername: it.bloggername ?? null, bloggerlink: it.bloggerlink ?? null, publisher: it.publisher ?? null, publisherUrl: it.publisherUrl ?? null, feedUrl: it.feedUrl ?? null, fetchUrl, raw: it.raw },
       publishedRaw: it.published.raw,
       publishedAt: it.published.iso ? new Date(it.published.iso) : null,
       publishedPrecision: it.published.precision,

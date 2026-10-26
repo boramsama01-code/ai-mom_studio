@@ -41,7 +41,7 @@
         ▲
         │
 [GitHub Actions]        워커: 한 번 실행하고 끝나는 작업
-   ├ collect.yml        네이버 검색·공식 게시판 수집 → 원문 확보 → 구조화 추출
+   ├ collect.yml        공개 뉴스 RSS·선택 블로그·공식 게시판 수집 → 원문 확보 → 구조화 추출
    └ process.yml        화면에서 등록한 수집 요청 처리 + 예약된 게시 전송
 ```
 
@@ -237,7 +237,7 @@ Claude 비용은 **채널 설정 → 입력/출력 단가**를 넣으면 실행 
 | 로그인 버튼이 비활성 | `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, `APP_SESSION_SECRET` |
 | 로그인 5번 실패 후 막힘 | 15분 후 다시 시도 |
 | 수집 요청이 계속 "대기 중" | GitHub Actions의 process 실행 여부, Secrets의 `APP_DATABASE_URL` |
-| 실행 기록 "실패: 네이버 API 키 미연결/인증" | 네이버 키(Render가 아니라 GitHub Secrets에도 필요) |
+| 네이버 API 키 미연결/인증 실패 | 공개 뉴스 RSS는 키 없이 계속 수집합니다. 선택 블로그 수집을 사용하려면 API 키 관리에서 실제 발급 키를 저장·검사하세요. |
 | "Claude API 미연결" | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` |
 | 카드 "편집 필요: 영역 넘침" | 제목·요약을 줄여서 다시 저장 후 카드 다시 만들기 |
 | 게시 실패 "권한 없음" | 텔레그램 봇이 채널 관리자인지, 인스타그램 토큰 권한·만료 |

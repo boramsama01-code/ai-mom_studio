@@ -28,7 +28,6 @@ export async function checkWorkerConnection() {
   await db.execute(sql`select 1`);
   const secrets = await loadStoredSecrets(db);
   if (secrets.unreadable.length) throw new Error("저장된 연결 키 복호화 실패 — Render와 GitHub의 암호키를 확인하세요.");
-  if (!env.naverClientId || !env.naverClientSecret) throw new Error("수집용 네이버 키 미설정");
   const runId = await startRun(db, newWorkerId(), "connection:check");
   await endRun(db, runId, "ok", 0, 0, "DB·저장된 연결 키 읽기 확인. 수집·AI·알림·게시 실행 없음.");
   return { connected: true, storedKeysLoaded: secrets.loaded, runId, collected: 0, published: 0 };

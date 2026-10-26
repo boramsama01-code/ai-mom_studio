@@ -11,7 +11,8 @@ import { ah, conflict, HttpError, intParam, loadChannel, parse, zVersion } from 
 import { actorOf } from "../auth";
 import { audit } from "../audit";
 import { buildSchoolRuleCandidates, cleanQuery, normalizeQuery, parseBulkQueries, ADMISSION_KEYWORDS, resolveDiscovery } from "../../shared/domain";
-import { naverSearch, applyExcludeTerms, NaverError } from "../services/naver";
+import { applyExcludeTerms, NaverError } from "../services/naver";
+import { createNewsSearch } from "../services/newsSearch";
 import { normalizeUrl } from "../services/url";
 
 export const ruleRoutes = Router();
@@ -251,14 +252,17 @@ ruleRoutes.post(
       req.body,
     );
     try {
-      const items = await naverSearch(cleanQuery(body.query), body.endpoint, 5, { naver: 0, limit: 1 });
+      const session = createNewsSearch();
+      const counter = { naver: 0, rss: 0, limit: 2 };
+      const items = await session.search(cleanQuery(body.query), body.endpoint, 5, counter);
       await audit(getDb(), { actor: actorOf(req), action: "trial_search", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { query: body.query, endpoint: body.endpoint, results: items.length } });
       res.json({
         items: items.slice(0, 5).map((it) => ({
           ...it,
           excludedReason: applyExcludeTerms(it, body.excludeTerms ?? [], body.excludeScope ?? "title"),
         })),
-        calls: 1,
+        calls: counter.naver + session.counts.rssRequests,
+        warnings: session.warnings.map(w => w.message),
       });
     } catch (e) {
       if (e instanceof NaverError) throw new HttpError(e.kind === "not_configured" ? 503 : 502, e.message, { kind: e.kind });
@@ -283,6 +287,10 @@ ruleRoutes.post(
               description: z.string().max(2000),
               link: z.string().url(),
               originallink: z.string().url().optional().nullable(),
+              provider: z.enum(["google_news_rss", "rss_direct"]).optional(),
+              publisher: z.string().max(200).optional(),
+              publisherUrl: z.string().max(2000).optional(),
+              feedUrl: z.string().max(4000).optional(),
               published: z.object({ raw: z.string().nullable(), iso: z.string().nullable(), precision: z.enum(["datetime", "date", "unknown"]) }),
             }),
           )
@@ -301,10 +309,10 @@ ruleRoutes.post(
         .values({
           normalizedUrl: normalized,
           originalUrl: identity,
-          kind: it.endpoint === "news" ? "naver_news" : "naver_blog",
+          kind: it.provider ?? (it.endpoint === "news" ? "naver_news" : "naver_blog"),
           title: it.title,
           snippet: it.description,
-          meta: { naverLink: it.link, originallink: it.originallink ?? null, fetchUrl: it.endpoint === "news" && /n\.news\.naver\.com/.test(it.link) ? it.link : identity, via: "trial_search" },
+          meta: { naverLink: it.provider ? null : it.link, publisher: it.publisher ?? null, publisherUrl: it.publisherUrl ?? null, feedUrl: it.feedUrl ?? null, originallink: it.originallink ?? null, fetchUrl: it.endpoint === "news" && /n\.news\.naver\.com/.test(it.link) ? it.link : identity, via: "trial_search" },
           publishedRaw: it.published.raw,
           publishedAt: it.published.iso ? new Date(it.published.iso) : null,
           publishedPrecision: it.published.precision,
@@ -350,3 +358,4 @@ ruleRoutes.put(
     res.json({ discovery: resolveDiscovery(ch.contentType, discovery) });
   }),
 );
+

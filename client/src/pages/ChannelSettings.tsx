@@ -161,7 +161,7 @@ function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }
       <details className="settings-details">
         <summary>고급 설정 · 실행 한도와 비용</summary><div className="stack">
         <div className="grid grid-3">
-          {b("naverCallsPerRun", "네이버 호출", 100)}
+          {b("naverCallsPerRun", "검색 실행 한도", 100)}
           {b("resultsPerRun", "결과 수", 500)}
           {b("fetchTargetsPerRun", "원문 확보 대상", 100)}
           {b("fetchCallsPerRun", "원문 호출", 200)}

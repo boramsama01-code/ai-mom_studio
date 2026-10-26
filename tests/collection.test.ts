@@ -79,4 +79,27 @@ describe("실제 수집 설정·브리핑", () => {
     const b = await runCollect(db, 1, { trigger: "cli", naverFetch, collectionOnly: true });
     expect(called).toEqual(["순환 A", "순환 B"]); expect(a.counts.rulesDeferred).toBe(1); expect(b.status).toBe("ok_zero");
   });
+  it("네이버 키 없이 공개 RSS를 수집하고 다음 실행의 중복을 제외한다", async () => {
+    const db = getDb(), { agent } = await login(app);
+    await db.update(searchRules).set({ enabled: false }).where(eq(searchRules.channelId, 1));
+    const [ch] = await db.select().from(channels).where(eq(channels.id, 1));
+    await db.update(channels).set({ budget: { ...ch.budget, naverCallsPerRun: 10, fetchTargetsPerRun: 0 } }).where(eq(channels.id, 1));
+    await db.insert(searchRules).values({ channelId: 1, query: "공개 RSS", normalizedQuery: "공개 RSS", endpoint: "news", enabled: true });
+    const now = new Date("2026-10-26T01:00:00Z");
+    const rssLoad = vi.fn(async () => '<rss><channel><item><title>공개 RSS 뉴스</title><link>https://press.example/rss-keyless</link><pubDate>2026-10-26T00:00:00Z</pubDate><source url="https://press.example">테스트신문</source></item></channel></rss>');
+    delete process.env.NAVER_CLIENT_ID;
+    delete process.env.NAVER_CLIENT_SECRET;
+    try {
+      const a = await runCollect(db, 1, { trigger: "cli", now, rssLoad, collectionOnly: true });
+      expect(a.counts).toMatchObject({ newItems: 1, rssFeedOk: 6, googleQueries: 1 });
+      const b = await runCollect(db, 1, { trigger: "cli", now, rssLoad, collectionOnly: true });
+      expect(b.counts.newItems).toBe(0); expect(b.counts.duplicates).toBe(1);
+      const list = await agent.get("/api/items?channelId=1&q=공개%20RSS");
+      expect(list.body.items[0].source).toMatchObject({ kind: "rss_direct", publisher: "테스트신문" });
+      const overview = await agent.get("/api/collection/overview?channelId=all");
+      expect(overview.body).toMatchObject({ searchReady: true, naverReady: false, sourceMode: "public_rss" });
+    } finally {
+      process.env.NAVER_CLIENT_ID = "test-id"; process.env.NAVER_CLIENT_SECRET = "test-secret";
+    }
+  });
 });

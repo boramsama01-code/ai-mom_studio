@@ -12,6 +12,8 @@ import { actorOf } from "../auth";
 import { audit } from "../audit";
 import { enqueueJob } from "../worker/queue";
 import { kickInlineCollect } from "../worker/inline";
+import { orderedChannels } from "../services/channelOrder";
+import { PUBLIC_NEWS_FEEDS } from "../services/newsSearch";
 
 export const collectionRoutes = Router();
 const channelIdSchema = z.union([z.literal("all"), z.coerce.number().int().positive()]);
@@ -19,7 +21,7 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
   const q = parse(z.object({ channelId: channelIdSchema, date: collectionDateSchema.optional() }), req.query);
   const db = getDb(), now = new Date(), date = q.date ?? kstDay(now);
   const { start, end } = collectionDayRange(date);
-  const chs = await db.select().from(channels).where(q.channelId === "all" ? eq(channels.active, true) : eq(channels.id, q.channelId)).orderBy(asc(channels.id));
+  const chs = (await orderedChannels(db)).filter(ch => q.channelId === "all" ? ch.active : ch.id === q.channelId);
   const autoCollect = env.autoCollect || await getSetting(db, "auto_collect", false) === true;
   const globalStop = await getSetting(db, "global_stop", false) === true;
   const [scheduled] = await db.select({ startedAt: runs.startedAt }).from(runs).where(eq(runs.trigger, "schedule")).orderBy(desc(runs.id)).limit(1);
@@ -40,7 +42,7 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
       jobs: pendingJobs.map(j => ({ id: j.id, status: j.status, createdAt: j.createdAt, stale: j.status === "queued" ? now.getTime() - j.createdAt.getTime() > 120_000 : !j.leaseExpiresAt || j.leaseExpiresAt < now })),
       lastRun: lastRun ? { id: lastRun.id, status: lastRun.status, startedAt: lastRun.startedAt, finishedAt: lastRun.finishedAt, counts: lastRun.counts, errors: lastRun.errors } : null };
   }));
-  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, naverReady: !!env.naverClientId && !!env.naverClientSecret, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
+  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "public_rss", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
 }));
 
 collectionRoutes.post("/channels/:cid/collection-profile", ah(async (req, res) => {

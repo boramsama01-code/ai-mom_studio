@@ -78,7 +78,7 @@ itemRoutes.get(
     const rows = await db
       .select({
         item: contentItems,
-        source: { id: sourceDocuments.id, kind: sourceDocuments.kind, url: sourceDocuments.originalUrl, publishedAt: sourceDocuments.publishedAt, publishedPrecision: sourceDocuments.publishedPrecision, fetchStatus: sourceDocuments.fetchStatus, snippet: sourceDocuments.snippet },
+        source: { id: sourceDocuments.id, kind: sourceDocuments.kind, url: sourceDocuments.originalUrl, publisher: sql<string>`${sourceDocuments.meta}->>'publisher'`, publishedAt: sourceDocuments.publishedAt, publishedPrecision: sourceDocuments.publishedPrecision, fetchStatus: sourceDocuments.fetchStatus, snippet: sourceDocuments.snippet },
         channelSlug: channels.slug,
         channelName: channels.name,
         matchedQuery: sql<string | null>`coalesce((select r->>'query' from jsonb_array_elements(coalesce(${runs.snapshot}->'rules', '[]'::jsonb)) r where r->>'id' = ${contentItems.ruleId}::text limit 1), ${contentItems.discovery}->>'query')`,
