@@ -22,6 +22,18 @@ async function endRun(db: DB, id: number, status: string, processed: number, fai
   await db.update(workerRuns).set({ status, processed, failed, note: note.slice(0, 2000), finishedAt: new Date() }).where(eq(workerRuns.id, id));
 }
 
+/** 연결 확인만 수행. 자료 수집·대기 작업·AI·알림·게시 API를 호출하지 않는다. */
+export async function checkWorkerConnection() {
+  const db = getDb();
+  await db.execute(sql`select 1`);
+  const secrets = await loadStoredSecrets(db);
+  if (secrets.unreadable.length) throw new Error("저장된 연결 키 복호화 실패 — Render와 GitHub의 암호키를 확인하세요.");
+  if (!env.naverClientId || !env.naverClientSecret) throw new Error("수집용 네이버 키 미설정");
+  const runId = await startRun(db, newWorkerId(), "connection:check");
+  await endRun(db, runId, "ok", 0, 0, "DB·저장된 연결 키 읽기 확인. 수집·AI·알림·게시 실행 없음.");
+  return { connected: true, storedKeysLoaded: secrets.loaded, runId, collected: 0, published: 0 };
+}
+
 /** 수집 작업 1건 처리 — 성공 여부 반환(GitHub 워커와 웹 서버 즉시 실행이 함께 씀) */
 export async function processCollectJob(db: DB, job: Job, workerId: string): Promise<boolean> {
   if (!job.channelId) throw new Error("채널 없는 수집 작업");

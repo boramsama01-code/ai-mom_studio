@@ -52,6 +52,8 @@ jobs:
       IG_CURRENT_DIALOGUE_USER_ID: ${{ secrets.IG_CURRENT_DIALOGUE_USER_ID }}
       TG_CURRENT_DIALOGUE_CHAT_ID: ${{ secrets.TG_CURRENT_DIALOGUE_CHAT_ID }}
       DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+      AUTO_GENERATE: ${{ vars.AUTO_GENERATE || 'false' }}
+      COLLECT_REVIEW_NOTIFICATIONS: ${{ vars.COLLECT_REVIEW_NOTIFICATIONS || 'false' }}
       AUTO_PUBLISH: ${{ vars.AUTO_PUBLISH || 'false' }}
     steps:
       - uses: actions/checkout@v4

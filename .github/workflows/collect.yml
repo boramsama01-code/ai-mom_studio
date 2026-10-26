@@ -10,6 +10,10 @@ on:
         description: "채널 slug (비우면 활성 검색어가 있는 모든 채널)"
         required: false
         default: ""
+      check_only:
+        description: "연결만 확인 (수집·AI·알림·게시 안 함)"
+        type: boolean
+        default: false
   schedule:
     - cron: "13 10,22 * * *"
 permissions:
@@ -28,7 +32,7 @@ jobs:
       APP_SESSION_SECRET: ${{ secrets.APP_SESSION_SECRET }}
       APP_SECRETS_KEY: ${{ secrets.APP_SECRETS_KEY }}
       # 아래 키들은 선택: 화면에서 입력했다면 비워 둬도 됩니다(여기 값이 있으면 이 값이 우선)
-      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+      APP_BASE_URL: ${{ vars.APP_BASE_URL || 'https://ai-mom-studio.onrender.com' }}
       NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
       NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
       AI_PROVIDER: ${{ vars.AI_PROVIDER }}
@@ -41,6 +45,7 @@ jobs:
       TELEGRAM_REVIEW_CHAT_ID: ${{ secrets.TELEGRAM_REVIEW_CHAT_ID }}
       AUTO_COLLECT: ${{ vars.AUTO_COLLECT || 'false' }}
       AUTO_GENERATE: ${{ vars.AUTO_GENERATE || 'false' }}
+      COLLECT_REVIEW_NOTIFICATIONS: ${{ vars.COLLECT_REVIEW_NOTIFICATIONS || 'false' }}
       DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
     steps:
       - name: 연결 정보 확인
@@ -57,9 +62,14 @@ jobs:
         if: ${{ env.APP_DATABASE_URL != '' }}
       - name: 수집 1회
         if: ${{ env.APP_DATABASE_URL != '' }}
+        env:
+          CHANNEL_SLUG: ${{ inputs.channel }}
+          CHECK_ONLY: ${{ inputs.check_only }}
         run: |
-          if [ -n "${{ github.event.inputs.channel }}" ]; then
-            npm run collect:once -- --channel "${{ github.event.inputs.channel }}"
+          if [ "$CHECK_ONLY" = "true" ]; then
+            npm run collect:once -- --check
+          elif [ -n "$CHANNEL_SLUG" ]; then
+            npm run collect:once -- --channel "$CHANNEL_SLUG"
           else
             npm run collect:once
           fi

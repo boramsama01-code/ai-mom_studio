@@ -134,7 +134,9 @@ describe("수집 실행", () => {
     const r1 = await runCollect(db, 1, { trigger: "cli", now: NOW, naverFetch, fetchSource: okFetchSource });
     expect(calls).toEqual(["경기과학고 입학설명회"]);
     expect(r1.counts).toMatchObject({ results: 3, newItems: 3, excluded: 1, fetchedOk: 2 });
-    expect(r1.status).toBe("partial"); // Claude 미연결 안내가 오류로 기록됨
+    expect(r1.status).toBe("ok"); // 자동 AI를 끄면 키 없이도 자료 수집은 정상 완료
+    expect(r1.counts.extractionSkippedAutoGenerateOff).toBe(2);
+    expect(fakeExtract).not.toHaveBeenCalled();
     const [run] = await db.select().from(schema.runs).where(eq(schema.runs.id, r1.runId));
     expect((run.snapshot as { rules: Array<{ id: number; excludeTerms: string[] }> }).rules[0]).toMatchObject({ id: rule.id, excludeTerms: ["학원"] });
     const excluded = await db.select().from(schema.contentItems).where(eq(schema.contentItems.excluded, true));

@@ -70,7 +70,7 @@ export async function runDiscovery(
   /* 2) 사건 묶기 → 순위 */
   const clusters = clusterArticles(articles);
   counts.discoveryClusters = clusters.length;
-  const useAI = env.aiConfigured;
+  const useAI = env.autoGenerate && env.aiConfigured;
   const recent = await db
     .select({ discovery: contentItems.discovery, title: contentItems.title })
     .from(contentItems)
