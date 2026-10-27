@@ -20,6 +20,8 @@ export function setTestEnv() {
   process.env.INLINE_WORKER = "false";
   process.env.NAVER_CLIENT_ID = "test-id";
   process.env.NAVER_CLIENT_SECRET = "test-secret";
+  delete process.env.GEMINI_API_KEY;
+  delete process.env.GEMINI_MODEL;
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
   delete process.env.AI_PROVIDER;
