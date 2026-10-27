@@ -1,3 +1,4 @@
+import { aiProviders } from "../../shared/aiProviders";
 /**
  * 수집함 · 콘텐츠 초안 · 카드 · 승인
  */
@@ -357,11 +358,12 @@ itemRoutes.post(
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
     const db = getDb();
+    const { provider } = parse(z.object({ provider: z.enum(aiProviders).optional() }).strict(), req.body ?? {});
     if (item.kind === "notice") {
-      const r = await extractForItem(db, item.id, new LlmBudget(2), new Date());
+      const r = await extractForItem(db, item.id, new LlmBudget(2), new Date(), undefined, provider);
       if (!r.ok) throw new HttpError(r.kind === "not_configured" ? 503 : 400, r.error);
     } else {
-      const r = await generateDialogueDraft(db, item.id);
+      const r = await generateDialogueDraft(db, item.id, new Date(), provider);
       if (!r.ok) throw new HttpError(400, r.error);
     }
     await audit(db, { actor: actorOf(req), action: "generate", entity: "content_item", entityId: item.id, channelId: ch.id });
