@@ -15,6 +15,7 @@ const INTEG: Array<[string, string, string]> = [
   ["database", "데이터베이스", "APP_DATABASE_URL"],
   ["auth", "운영자 인증", "ADMIN_USERNAME, ADMIN_PASSWORD_HASH, APP_SESSION_SECRET"],
   ["naver", "네이버 검색 API", "NAVER_CLIENT_ID, NAVER_CLIENT_SECRET"],
+  ["gemini", "Gemini API", "GEMINI_API_KEY"],
   ["openai", "GPT · 이미지 생성", "OPENAI_API_KEY"],
   ["anthropic", "Claude API", "ANTHROPIC_API_KEY, ANTHROPIC_MODEL"],
   ["cloudinary", "Cloudinary(이미지 공개 URL)", "CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET"],
