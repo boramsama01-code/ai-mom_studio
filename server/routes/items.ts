@@ -2,6 +2,7 @@
  * 수집함 · 콘텐츠 초안 · 카드 · 승인
  */
 import { Router } from "express";
+import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
@@ -35,6 +36,9 @@ import { matchOfficialSource } from "../worker/evidence";
 import { collectionDateSchema, collectionDayRange } from "../../shared/collection";
 import { NOTICE_INTENTS } from "../../shared/noticeIntent";
 import { noticeIntentSql } from "../services/noticeIntent";
+import { itemPrimarySource, itemSourceIdSql } from "../services/itemSources";
+import { sha256 } from "../services/text";
+import { SOURCE_TEXT_LIMIT, SOURCE_QUOTE_LIMIT, SOURCE_QUOTE_COUNT, suggestSourceQuotes } from "../../shared/sourceText";
 
 export const itemRoutes = Router();
 
@@ -79,7 +83,7 @@ itemRoutes.get(
     const where = and(...conds);
     const db = getDb();
     const pageSize = q.pageSize ?? 20, page = q.page ?? 1;
-    const [{ total }] = (await db.select({ total: sql<number>`count(*)::int` }).from(contentItems).leftJoin(sourceDocuments, eq(sourceDocuments.id, contentItems.primarySourceId)).where(where)) as Array<{ total: number }>;
+    const [{ total }] = (await db.select({ total: sql<number>`count(*)::int` }).from(contentItems).leftJoin(sourceDocuments, eq(sourceDocuments.id, itemSourceIdSql())).where(where)) as Array<{ total: number }>;
     const rows = await db
       .select({
         item: contentItems,
@@ -91,7 +95,7 @@ itemRoutes.get(
       })
       .from(contentItems)
       .innerJoin(channels, eq(channels.id, contentItems.channelId))
-      .leftJoin(sourceDocuments, eq(sourceDocuments.id, contentItems.primarySourceId))
+      .leftJoin(sourceDocuments, eq(sourceDocuments.id, itemSourceIdSql()))
       .leftJoin(runs, eq(runs.id, contentItems.runId))
       .where(where)
       .orderBy(desc(contentItems.createdAt), desc(contentItems.id))
@@ -114,7 +118,7 @@ itemRoutes.get(
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
     const db = getDb();
-    const primary = item.primarySourceId ? (await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId)))[0] : null;
+    const primary = await itemPrimarySource(db, item);
     const linked = await db
       .select({ link: contentSources, doc: sourceDocuments })
       .from(contentSources)
@@ -271,6 +275,35 @@ itemRoutes.post(
   }),
 );
 
+/** Operator-supplied text: no network/AI call, isolated immutable source snapshot. */
+itemRoutes.post("/channels/:cid/items/:id/source-text", ah(async (req, res) => {
+  const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  const body = parse(z.object({ version: zVersion, url: z.string().url().max(2000), text: z.string().trim().min(20, "본문을 20자 이상 붙여넣어 주세요.").max(SOURCE_TEXT_LIMIT), quotes: z.array(z.string().trim().min(1).max(SOURCE_QUOTE_LIMIT)).max(SOURCE_QUOTE_COUNT).optional() }), req.body);
+  const url = new URL(body.url);
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new HttpError(400, "출처는 인증정보 없는 http/https 주소로 입력해 주세요.");
+  const quotes = [...new Set(body.quotes ?? suggestSourceQuotes(body.text))];
+  if (quotes.some(quote => !body.text.includes(quote))) throw new HttpError(400, "근거 구절은 붙여넣은 본문에 실제로 있는 문장이어야 합니다.");
+  const db = getDb();
+  const result = await db.transaction(async tx => {
+    const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+    if (fresh.version !== body.version) conflict(fresh);
+    const [doc] = await tx.insert(sourceDocuments).values({
+      normalizedUrl: `manual-text:${item.id}:${randomUUID()}`, originalUrl: url.href, kind: "manual_text", title: fresh.title,
+      fetchedText: body.text, snippet: body.text.slice(0, 500), contentHash: sha256(body.text), fetchStatus: "ok", isSample: fresh.isSample,
+      meta: { acquisition: "operator_paste", addedBy: actorOf(req), savedAt: new Date().toISOString(), copiedFromSourceId: fresh.primarySourceId, quotes },
+    }).returning();
+    await tx.update(contentSources).set({ role: "previous_manual" }).where(and(eq(contentSources.contentItemId, item.id), eq(contentSources.role, "manual_primary")));
+    await tx.insert(contentSources).values({ contentItemId: item.id, sourceDocumentId: doc.id, role: "manual_primary" });
+    const current = fresh.currentRevisionId ? (await tx.select().from(contentRevisions).where(eq(contentRevisions.id, fresh.currentRevisionId)))[0] : null;
+    // Copy the draft unchanged; this records the source change and invalidates old approvals.
+    await createRevision(tx, { contentItemId: item.id, author: current?.author === "operator" ? "operator" : "system", payload: current?.payload ?? emptyPayload(item.kind, fresh.title), note: `본문 직접 저장 · 자료 #${doc.id} · ${body.text.length}자 · 발췌 ${quotes.length}개` });
+    await tx.update(contentItems).set({ evidenceStatus: "needs_review", reviewStatus: "review_required", version: sql`${contentItems.version} + 1`, updatedAt: new Date() }).where(eq(contentItems.id, item.id));
+    await audit(tx, { actor: actorOf(req), action: "save_source_text", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { sourceId: doc.id, characters: body.text.length, quoteCount: quotes.length } });
+    return { sourceId: doc.id, version: fresh.version + 1, quoteCount: quotes.length };
+  });
+  res.status(201).json(result);
+}));
+
 /** 원문 다시 확보 */
 itemRoutes.post(
   "/channels/:cid/items/:id/fetch",
@@ -278,6 +311,7 @@ itemRoutes.post(
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
     if (!item.primarySourceId) throw new HttpError(400, "연결된 원문이 없습니다.");
     const db = getDb();
+    if ((await itemPrimarySource(db, item))?.kind === "manual_text") throw new HttpError(409, "직접 저장한 본문을 사용 중입니다. 본문 붙여넣기에서 수정해 주세요.");
     const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId));
     const r = await fetchAndExtract((doc.meta as { fetchUrl?: string }).fetchUrl || doc.originalUrl);
     const now = new Date();

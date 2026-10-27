@@ -35,6 +35,7 @@ import { runDiscovery, upsertNaverDoc } from "./discovery";
 import { generateDialogueDraft } from "./generate";
 import type { NoticePayload } from "../../shared/payloads";
 import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
+import { itemPrimarySource } from "../services/itemSources";
 
 export type CollectOptions = {
   trigger: "manual" | "worker" | "cli" | "schedule";
@@ -392,8 +393,8 @@ export async function extractForItem(
   officials?: Awaited<ReturnType<typeof loadOfficials>>,
 ) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
-  const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId!));
-  if (doc.fetchStatus !== "ok" || !doc.fetchedText) return { ok: false as const, kind: "no_source", error: "원문 미확보 — 추출하지 않음" };
+  const doc = await itemPrimarySource(db, item);
+  if (!doc || doc.fetchStatus !== "ok" || !doc.fetchedText) return { ok: false as const, kind: "no_source", error: "원문 미확보 — 추출하지 않음" };
   const offs = officials ?? (await loadOfficials(db, item.channelId));
   const sources: LlmSource[] = [
     { source_id: doc.id, kind: doc.kind, url: doc.originalUrl, title: doc.title, published: doc.publishedRaw, text: doc.fetchedText },
