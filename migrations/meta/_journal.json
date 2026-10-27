@@ -36,6 +36,13 @@
       "when": 1792454400000,
       "tag": "0004_studio",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793062800000,
+      "tag": "0005_notice_sources",
+      "breakpoints": true
     }
   ]
 }

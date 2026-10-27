@@ -33,6 +33,8 @@ import { approveItem, cancelApproval, renderCardForItem, retryDelivery, sourceOr
 import { buildCaptions } from "../services/cardModel";
 import { matchOfficialSource } from "../worker/evidence";
 import { collectionDateSchema, collectionDayRange } from "../../shared/collection";
+import { NOTICE_INTENTS } from "../../shared/noticeIntent";
+import { noticeIntentSql } from "../services/noticeIntent";
 
 export const itemRoutes = Router();
 
@@ -44,6 +46,7 @@ const listQuery = z.object({
   evidence: z.string().max(40).optional(),
   category: z.string().max(40).optional(),
   collectedOn: collectionDateSchema.optional(),
+  noticeIntent: z.enum([...NOTICE_INTENTS, "all"]).optional(),
   view: z.enum(["inbox", "drafts", "excluded", "all"]).optional(),
   sample: z.enum(["0", "1"]).optional(),
   page: z.coerce.number().int().min(1).max(1000).optional(),
@@ -67,6 +70,8 @@ itemRoutes.get(
     if (q.schedule) conds.push(inArray(contentItems.scheduleStatus, q.schedule.split(",")));
     if (q.evidence) conds.push(inArray(contentItems.evidenceStatus, q.evidence.split(",")));
     if (q.category) conds.push(eq(contentItems.category, q.category));
+    const intent = noticeIntentSql();
+    if (q.noticeIntent && q.noticeIntent !== "all") conds.push(sql`${intent} = ${q.noticeIntent}`);
     if (q.collectedOn) {
       const { start, end } = collectionDayRange(q.collectedOn);
       conds.push(gte(contentItems.createdAt, start), lt(contentItems.createdAt, end), inArray(contentItems.origin, ["collected", "discovered"]));
@@ -74,14 +79,15 @@ itemRoutes.get(
     const where = and(...conds);
     const db = getDb();
     const pageSize = q.pageSize ?? 20, page = q.page ?? 1;
-    const [{ total }] = (await db.select({ total: sql<number>`count(*)::int` }).from(contentItems).where(where)) as Array<{ total: number }>;
+    const [{ total }] = (await db.select({ total: sql<number>`count(*)::int` }).from(contentItems).leftJoin(sourceDocuments, eq(sourceDocuments.id, contentItems.primarySourceId)).where(where)) as Array<{ total: number }>;
     const rows = await db
       .select({
         item: contentItems,
         source: { id: sourceDocuments.id, kind: sourceDocuments.kind, url: sourceDocuments.originalUrl, publisher: sql<string>`${sourceDocuments.meta}->>'publisher'`, publishedAt: sourceDocuments.publishedAt, publishedPrecision: sourceDocuments.publishedPrecision, fetchStatus: sourceDocuments.fetchStatus, snippet: sourceDocuments.snippet },
         channelSlug: channels.slug,
         channelName: channels.name,
-        matchedQuery: sql<string | null>`coalesce((select r->>'query' from jsonb_array_elements(coalesce(${runs.snapshot}->'rules', '[]'::jsonb)) r where r->>'id' = ${contentItems.ruleId}::text limit 1), ${contentItems.discovery}->>'query')`,
+        noticeIntent: intent,
+        matchedQuery: sql<string | null>`coalesce((select coalesce(r->>'searchQuery', r->>'query') from jsonb_array_elements(coalesce(${runs.snapshot}->'rules', '[]'::jsonb)) r where r->>'id' = ${contentItems.ruleId}::text limit 1), ${contentItems.discovery}->>'query')`,
       })
       .from(contentItems)
       .innerJoin(channels, eq(channels.id, contentItems.channelId))

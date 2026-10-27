@@ -1,6 +1,6 @@
 /**
  * 수집 실행 1회 (채널 단위)
- * 1) 설정 스냅샷 고정 → 2) 네이버 검색 → 3) 원문 캐시·수집함 저장 → 4) 원문 확보 → 5) 구조화 추출(공고 채널, 키가 있을 때)
+ * 1) 설정 스냅샷 → 2) 공식 게시판 → 3) 공개 뉴스 검색·저장 → 4) 원문 확보 → 5) 선택적 구조화 추출
  * 실패를 "정상 0건"으로 숨기지 않는다. 처리하지 못한 자료는 사유와 함께 보존한다.
  */
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
@@ -34,6 +34,7 @@ import { categoryForSchoolType } from "../../shared/domain";
 import { runDiscovery, upsertNaverDoc } from "./discovery";
 import { generateDialogueDraft } from "./generate";
 import type { NoticePayload } from "../../shared/payloads";
+import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 
 export type CollectOptions = {
   trigger: "manual" | "worker" | "cli" | "schedule";
@@ -77,7 +78,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   const snapshot = {
     channel: { id: channel.id, slug: channel.slug, budget },
-    rules: selected.map(ruleSnapshot),
+    rules: selected.map(r => ({ ...ruleSnapshot(r), searchQuery: channel.contentType === "notice" && r.endpoint === "news" ? noticeSearchQuery(r.query) : r.query })),
     skippedRules: skippedRules.map(ruleSnapshot),
     flags: { dryRun: env.dryRun, autoGenerate: env.autoGenerate },
   };
@@ -97,7 +98,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const errors: Array<{ scope: string; message: string }> = [];
   const counter: CallCounter = { naver: 0, limit: budget.naverCallsPerRun };
   const newItemIds: number[] = [];
-  const publicSearch = createNewsSearch({ now, loadXml: opts.rssLoad });
+  const publicSearch = createNewsSearch({ now, loadXml: opts.rssLoad, recruitment: channel.contentType === "notice" });
   // Existing Naver fixtures exercise the same storage pipeline; production uses public RSS.
   const search = opts.naverFetch ? ((q: string, e: "news" | "blog", d: number, c: CallCounter) => naverSearch(q, e, d, c, opts.naverFetch)) : publicSearch.search;
   const llmBudget = new LlmBudget(budget.llmCallsPerRun);
@@ -112,7 +113,41 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     await opts.heartbeat?.();
   }
 
-  /* 2~3) 검색 → 저장 */
+  /* 2) 공식 게시판 우선 — 목록 조회도 원문 호출 예산에 포함 */
+  let fetchCalls = 0;
+  counts.officialBoards = boards.length;
+  counts.officialNew = 0;
+  for (const o of boards) {
+    if (fetchCalls >= budget.fetchCallsPerRun) {
+      errors.push({ scope: `official:${o.id}`, message: `${o.name}: 원문 호출 한도 도달 — 게시판 건너뜀` });
+      continue;
+    }
+    fetchCalls++;
+    const r = await (opts.fetchBoard ?? fetchBoardList)(o.boardUrl!, o.domain!, o.adapterConfig as BoardConfig);
+    if (!r.ok) {
+      errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판 조회 실패: ${r.error}` });
+      continue;
+    }
+    if (!r.entries.length) errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판에서 목록을 찾지 못함(선택자 확인 필요)` });
+    for (const e of r.entries) {
+      if (channel.contentType === "notice") {
+        const intent = classifyNotice(e.title);
+        if (intent === "retrospective" || intent === "off_topic") {
+          counts.noticeReportsSkipped = (counts.noticeReportsSkipped ?? 0) + 1;
+          continue;
+        }
+      }
+      const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e);
+      if (saved?.isNew) {
+        counts.officialNew++;
+        counts.newItems++;
+        newItemIds.push(saved.itemId);
+      }
+    }
+  }
+
+
+  /* 3) 검색 → 저장 */
   counts.rulesProcessed = 0;
   counts.rulesSucceeded = 0;
   for (const rule of selected) {
@@ -136,6 +171,13 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     for (const it of items) {
       if (counts.results >= budget.resultsPerRun) break;
       counts.results++;
+      if (channel.contentType === "notice") {
+        const intent = classifyNotice(it.title, it.description);
+        if (intent === "retrospective" || intent === "off_topic") {
+          counts.noticeReportsSkipped = (counts.noticeReportsSkipped ?? 0) + 1;
+          continue;
+        }
+      }
       const saved = await saveSearchItem(db, channel, rule, run.id, it);
       if (!saved) continue;
       if (saved.excluded) counts.excluded++;
@@ -150,32 +192,6 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       .set({ lastRunAt: now, lastRunStatus: "ok", lastRunError: null, lastRunNewCount: ruleNew })
       .where(eq(searchRules.id, rule.id));
     await opts.heartbeat?.();
-  }
-
-  /* 3-2) 공식 게시판(설정형 어댑터) — 목록 조회도 원문 호출 예산에 포함 */
-  let fetchCalls = 0;
-  counts.officialBoards = boards.length;
-  counts.officialNew = 0;
-  for (const o of boards) {
-    if (fetchCalls >= budget.fetchCallsPerRun) {
-      errors.push({ scope: `official:${o.id}`, message: `${o.name}: 원문 호출 한도 도달 — 게시판 건너뜀` });
-      continue;
-    }
-    fetchCalls++;
-    const r = await (opts.fetchBoard ?? fetchBoardList)(o.boardUrl!, o.domain!, o.adapterConfig as BoardConfig);
-    if (!r.ok) {
-      errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판 조회 실패: ${r.error}` });
-      continue;
-    }
-    if (!r.entries.length) errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판에서 목록을 찾지 못함(선택자 확인 필요)` });
-    for (const e of r.entries) {
-      const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e);
-      if (saved?.isNew) {
-        counts.officialNew++;
-        counts.newItems++;
-        newItemIds.push(saved.itemId);
-      }
-    }
   }
 
   /* 4) 원문 확보 */

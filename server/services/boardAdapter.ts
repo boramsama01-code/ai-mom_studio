@@ -13,6 +13,7 @@ export type BoardConfig = {
   titleSelector?: string | null; // 링크 안에서 제목을 찾을 선택자(없으면 링크 텍스트)
   dateSelector?: string | null; // 같은 행(tr/li) 안의 날짜 선택자
   maxItems?: number;
+  format?: "links" | "ged_selection";
 };
 
 export type BoardEntry = { url: string; title: string; dateText: string | null };
@@ -22,6 +23,21 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
   const out: BoardEntry[] = [];
   const seen = new Set<string>();
   const d = domain.toLowerCase().replace(/^www\./, "");
+  if (cfg.format === "ged_selection") {
+    if (d !== "ged.kedi.re.kr" || new URL(pageUrl).hostname !== d) return [];
+    // Public GED download-popup links: parameters verified against fn_down and its form.
+    $("a.sdown[onclick]").each((_, el) => {
+      if (out.length >= (cfg.maxItems ?? 10)) return false;
+      const args = ($(el).attr("onclick") || "").match(/fn_down\('(\d{4})','(\d+)','(\d+)'\)/);
+      if (!args) return;
+      const title = $(el).closest("tr").find("td").eq(2).text().replace(/\s+/g, " ").trim();
+      if (!title) return;
+      const url = new URL("/inno/slctNotiInnoPop.do", pageUrl);
+      url.search = new URLSearchParams({ pop1: "Y", stndYear: args[1], orgId: args[2], seq: args[3] }).toString();
+      if (!seen.has(url.href)) { seen.add(url.href); out.push({ url: url.href, title, dateText: null }); }
+    });
+    return out;
+  }
   $(cfg.linkSelector).each((_, el) => {
     if (out.length >= (cfg.maxItems ?? 10)) return false;
     const href = $(el).attr("href");
@@ -63,3 +79,4 @@ export function parseBoardDate(text: string | null): string | null {
   if (!m) return null;
   return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
 }
+

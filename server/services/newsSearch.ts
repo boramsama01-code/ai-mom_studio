@@ -8,6 +8,7 @@ import { load } from "cheerio";
 import { safeFetch } from "./safeFetch";
 import { stripHtml } from "./text";
 import { parseNewsPubDate } from "./dates";
+import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { naverSearch, NaverError, searchCalls, type NaverItem } from "./naver";
 
 export const PUBLIC_NEWS_FEEDS = [
@@ -75,7 +76,7 @@ async function pacedGoogle<T>(fn: () => Promise<T>, paced: boolean): Promise<T> 
   return result;
 }
 
-export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?: Feed[]; naver?: SearchFunction } = {}) {
+export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?: Feed[]; naver?: SearchFunction; recruitment?: boolean } = {}) {
   const now = opts.now ?? new Date(), feeds = opts.feeds ?? PUBLIC_NEWS_FEEDS;
   const counts = { rssRequests: 0, rssFeedOk: 0, rssFeedFailed: 0, googleQueries: 0, googleFailed: 0, blogSkipped: 0 };
   const warnings: Array<{ scope: string; message: string }> = [];
@@ -116,7 +117,7 @@ export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?
     let google: NaverItem[] = [], googleOk = false;
     if (!googleStopped) {
       const url = new URL("https://news.google.com/rss/search");
-      url.search = new URLSearchParams({ q: `${query} when:7d`, hl: "ko", gl: "KR", ceid: "KR:ko" }).toString();
+      url.search = new URLSearchParams({ q: `${opts.recruitment ? noticeSearchQuery(query) : query} when:7d`, hl: "ko", gl: "KR", ceid: "KR:ko" }).toString();
       try {
         google = await pacedGoogle(async () => {
           counts.rssRequests++; counts.googleQueries++;
@@ -130,7 +131,8 @@ export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?
       }
     }
     if (!googleOk && counts.rssFeedOk === 0) throw new NaverError("공개 뉴스 수집 경로가 모두 응답하지 않았습니다. 실행 기록을 확인하세요.", "network");
-    return uniqueNews([...matches, ...google]).sort((a, b) => (b.published.iso || "").localeCompare(a.published.iso || "")).slice(0, display);
+    const rank = (item: NaverItem) => !opts.recruitment ? 0 : ({ candidate: 0, uncertain: 1, retrospective: 2, closed: 3, off_topic: 4 }[classifyNotice(item.title, item.description)]);
+    return uniqueNews([...matches, ...google]).sort((a, b) => rank(a) - rank(b) || (b.published.iso || "").localeCompare(a.published.iso || "")).slice(0, display);
   };
   return { search, counts, warnings };
 }
