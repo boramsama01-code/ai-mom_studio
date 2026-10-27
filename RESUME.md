@@ -8,8 +8,8 @@
 - Gemini 키는 기존 암호화 저장을 재사용하고 클라이언트/응답/URL/로그에 비밀값을 노출하지 않음. 기본 gemini-2.5-flash, 고정 Google API origin, redirect error, 90초 timeout, 2MB 응답 한도, JSON Schema+Zod 검증, thought 제외, 출력/사고 토큰 계수. 한도·인증·네트워크 오류 시 재시도/다른 공급자 자동 전환 없음.
 - 제작 보드 원고·캡션·전체 수정 및 수집 항목 공고 추출/과학·시사 초안에서 Gemini/GPT/Claude 명시 선택. 자동 기본값은 등록된 Gemini→GPT→Claude 순서이며 저장된 명시 선택은 유지. 이미지 생성 경로는 기존 OpenAI 그대로.
 - 키 관리에 Google 무료 프로젝트/제한/데이터 이용 안내와 OpenAI Data controls/잔액/사용량/공식 조건 연결. 무료 혜택은 API 모델 조회로 검증 불가하므로 계정 확인 필요 표시. OpenAI $5 결제 보장 아님, 양수 잔액·대상 조직/모델·공유 프로젝트 일치 필요, 조직 공용 한도 초과 요청 과금 가능 명시. mini 모델 추천만 표시하고 실제 사용자 모델/키 변경 없음.
-- 공식 확인: ai.google.dev Gemini pricing/rate-limits/API keys/generate-content/models; help.openai.com article 10306912. 현재 개인 계정의 무료 등급·무료 토큰 자격·실제 남은 한도는 미확인.
-- 로컬 타입 검사·빌드와 관련 4개 파일 39개 테스트 통과. 실제 Google/OpenAI 생성 호출 없이 모의 응답으로 검증. DB 암호화/재로드/모델 GET 테스트 포함 전체 CI 및 배포는 진행 중.
+- 공식 확인: ai.google.dev Gemini pricing/rate-limits/API keys/generate-content/models; help.openai.com article 10306912. 실제 계정 읽기 확인: Google AI Studio /projects는 로그인된 기존 계정이지만 최초 약관·18세 이상/성인 대상 개발 확인 화면으로 차단. OpenAI Data controls는 저장된 계정 로그인 선택 화면. 동의/로그인 선택/키 발급/데이터 공유 변경은 하지 않음. 프로젝트 무료 등급·무료 토큰 자격·실제 남은 한도는 미확인.
+- 로컬 타입 검사·빌드와 관련 4개 파일 39개 테스트 통과. 실제 Google/OpenAI 생성 호출 없이 모의 응답으로 검증. PR #21 전체 CI 40471065138 / job 122078036194에서 PostgreSQL 포함 35개 파일·251개 테스트, 타입 검사·빌드 모두 성공. 검증 head 0e459ffaeee0f3d5fa3c6d01b01e67a806d24df4, squash main f10e4ff17ea900173a54ed88b4f65dd4a4e3f84b. Render dep-dbg5nf2jnfac739m6ssg, 2026-10-27 17:08:27 KST live. 운영 health 200/db connected/auth configured, 비로그인 studio/cards 401. 실제 운영 항목 #2617에서 Gemini 선택·키 미등록 안내·생성 버튼 disabled 확인. 키 관리에서 Gemini 입력/무료 프로젝트 안내 및 OpenAI 무료 혜택 계정 확인 필요·기존 등록 상태 확인. 실제 새 API 키 저장/생성 호출은 수행하지 않음.
 
 ## 2026-10-27 작업 · ChatGPT 초안 바로 연결
 
