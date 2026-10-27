@@ -22,6 +22,26 @@ it("한국 날짜 경계와 아침·저녁 예약 시각을 계산한다", () =>
   expect(nextCollectionAt(new Date("2026-10-26T10:14:00Z"))).toBe("2026-10-26T20:13:00.000Z");
 });
 describe("실제 수집 설정·브리핑", () => {
+  it("기존 자료를 삭제하지 않고 분류한 뒤 페이지를 나누며 후보 수를 따로 집계한다", async () => {
+    const db = getDb(), { agent } = await login(app);
+    const day = new Date("2026-10-24T01:00:00Z");
+    await db.insert(contentItems).values([
+      { channelId: 1, kind: "notice", origin: "collected", title: "품질검증 청소년 참가자 모집", createdAt: day },
+      { channelId: 1, kind: "notice", origin: "collected", title: "품질검증 초등·중등 모집요강", createdAt: day },
+      { channelId: 1, kind: "notice", origin: "collected", title: "품질검증 모집 마감 임박", createdAt: day },
+      { channelId: 1, kind: "notice", origin: "collected", title: "품질검증 모집 마감", createdAt: day },
+      { channelId: 1, kind: "notice", origin: "collected", title: "품질검증 연구교원 모집", createdAt: day },
+      { channelId: 1, kind: "notice", origin: "collected", title: "품질검증 캠프 성료…다음 기수 추가 모집", createdAt: day },
+      ...Array.from({ length: 23 }, (_, i) => ({ channelId: 1, kind: "notice", origin: "collected", title: `품질검증 과학캠프 성료 ${i}`, createdAt: new Date(day.getTime() + 1000) })),
+    ]);
+    const list = await agent.get("/api/items?channelId=1&q=품질검증&noticeIntent=candidate&pageSize=5");
+    expect(list.status).toBe(200); expect(list.body.total).toBe(3);
+    expect(list.body.items).toHaveLength(3); expect(list.body.items.every((r: any) => r.noticeIntent === "candidate")).toBe(true);
+    const all = await agent.get("/api/items?channelId=1&q=품질검증&noticeIntent=all");
+    expect(all.body.total).toBe(29);
+    const summary = await agent.get("/api/collection/overview?channelId=1&date=2026-10-24");
+    expect(summary.body.channels[0]).toMatchObject({ noticeCandidates: 3, noticeUncertain: 1, noticeReports: 25 });
+  });
   it("인증·CSRF 없이 수집 또는 설정을 바꿀 수 없다", async () => {
     expect((await request(app).get("/api/collection/overview?channelId=all")).status).toBe(401);
     const { agent } = await login(app);
