@@ -16,6 +16,8 @@ import {
 } from "../../shared/payloads";
 import { NOTICE_CATEGORIES } from "../../shared/domain";
 import { openaiFailureMessage } from "./openaiError";
+import type { AiProvider } from "../../shared/aiProviders";
+import { geminiRequest } from "./gemini";
 
 export const PROMPT_VERSION = {
   curate: "curate-v1",
@@ -90,7 +92,7 @@ export function verifyEvidence<T extends { evidence: Array<{ source_id: number; 
   return { data: { ...data, evidence: kept }, dropped: data.evidence.length - kept.length };
 }
 
-export type AiProvider = "openai" | "anthropic";
+export type { AiProvider } from "../../shared/aiProviders";
 
 export class AiServiceError extends Error {
   constructor(message: string, public kind: "not_configured" | "api" | "parse" = "api") {
@@ -101,7 +103,7 @@ export class AiServiceError extends Error {
 
 /** Provider errors never include upstream bodies, headers or credentials. */
 export function aiErrorMessage(provider: AiProvider, status?: number): string {
-  const name = provider === "openai" ? "OpenAI" : "Claude";
+  const name = provider === "gemini" ? "Gemini" : provider === "openai" ? "OpenAI" : "Claude";
   return status === 401 || status === 403 ? `${name} API 인증 실패 또는 권한 부족(설정의 키 확인)` :
     status === 404 ? `${name} 모델을 찾을 수 없습니다. 설정의 모델 ID를 확인하세요.` :
     status === 429 ? `${name} 호출 한도 초과 또는 API 크레딧 부족` :
@@ -172,13 +174,13 @@ export async function callTool<T>(opts: {
   maxAttempts?: number;
 }): Promise<LlmResult<T>> {
   const provider = opts.provider ?? env.aiProvider;
-  const model = provider === "openai" ? env.openaiModel : env.anthropicModel;
-  if (!(provider === "openai" ? env.openaiKey : env.anthropicKey))
-    return { ok: false, kind: "not_configured", error: `${provider === "openai" ? "GPT" : "Claude"} API 미연결: 설정에서 API 키를 입력하세요.` };
+  const model = provider === "gemini" ? env.geminiModel : provider === "openai" ? env.openaiModel : env.anthropicModel;
+  if (!(provider === "gemini" ? env.geminiKey : provider === "openai" ? env.openaiKey : env.anthropicKey))
+    return { ok: false, kind: "not_configured", error: `${provider === "gemini" ? "Gemini" : provider === "openai" ? "GPT" : "Claude"} API 미연결: 설정에서 API 키를 입력하세요.` };
   const usage = { inputTokens: 0, outputTokens: 0 };
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: opts.user }];
   let validationFeedback = "";
-  const attempts = Math.min(2, Math.max(1, opts.maxAttempts ?? 2));
+  const attempts = provider === "gemini" ? 1 : Math.min(2, Math.max(1, opts.maxAttempts ?? 2));
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (!opts.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달", usage };
     let payload: unknown;
@@ -187,7 +189,21 @@ export async function callTool<T>(opts: {
     let outputTokens = 0;
     let claudeResponse: Anthropic.Message | undefined;
     try {
-      if (provider === "openai") {
+      if (provider === "gemini") {
+        const resp = await geminiRequest({
+          systemInstruction: { parts: [{ text: `${opts.system}\n${opts.toolDescription}\n요청한 결과를 JSON 객체로만 반환하세요.` }] },
+          contents: [{ role: "user", parts: [{ text: opts.user }] }],
+          generationConfig: { responseMimeType: "application/json", responseJsonSchema: opts.inputSchema, maxOutputTokens: opts.maxTokens ?? 4000 },
+        });
+        responseModel = typeof resp.modelVersion === "string" ? resp.modelVersion : model;
+        inputTokens = Number(resp.usageMetadata?.promptTokenCount) || 0;
+        outputTokens = (Number(resp.usageMetadata?.candidatesTokenCount) || 0) + (Number(resp.usageMetadata?.thoughtsTokenCount) || 0);
+        const candidate = resp.candidates?.[0];
+        if (!resp.promptFeedback?.blockReason && candidate?.finishReason === "STOP" && Array.isArray(candidate.content?.parts)) {
+          const json = candidate.content.parts.filter((p: any) => !p.thought && typeof p.text === "string").map((p: any) => p.text).join("");
+          try { payload = JSON.parse(json); } catch { /* schema error below */ }
+        }
+      } else if (provider === "openai") {
         const resp = await openaiRequest("/responses", {
           model,
           store: false,
@@ -337,6 +353,7 @@ const currentJsonSchema = S("object", {
 
 export async function extractNotice(args: {
   sources: LlmSource[];
+  provider?: AiProvider;
   sourceHint: string | null;
   now: Date;
   budget: LlmBudget;
@@ -352,14 +369,14 @@ ${COMMON_RULES}`;
   const user = `${sourcesBlock(args.sources)}\n\n위 자료만 근거로 submit_notice 도구를 호출하라.`;
   const r = await callTool({
     system, user, toolName: "submit_notice", toolDescription: "공고 사실 구조화 결과 제출",
-    inputSchema: noticeJsonSchema, zod: noticePayloadSchema, budget: args.budget,
+    inputSchema: noticeJsonSchema, zod: noticePayloadSchema, budget: args.budget, provider: args.provider,
   });
   if (!r.ok) return r;
   const v = verifyEvidence(r.data, args.sources);
   return { ...r, data: v.data, droppedEvidence: v.dropped };
 }
 
-export async function draftScience(args: { topic: string; sources: LlmSource[]; now: Date; budget: LlmBudget }) {
+export async function draftScience(args: { topic: string; sources: LlmSource[]; now: Date; budget: LlmBudget; provider?: AiProvider }) {
   const system = `너는 중학생과 부모가 5~10분 동안 과학 질문으로 대화하도록 돕는 편집자다.
 기준 시각(Asia/Seoul): ${args.now.toISOString()}
 - 질문은 원리 적용·가설 비교·선택 중심으로 만든다. 정답을 외우게 하는 질문은 피한다.
@@ -371,14 +388,14 @@ ${COMMON_RULES}`;
   const user = `주제: ${args.topic}\n\n${args.sources.length ? sourcesBlock(args.sources) : "<sources>(없음)</sources>"}\n\nsubmit_science 도구를 호출하라.`;
   const r = await callTool({
     system, user, toolName: "submit_science", toolDescription: "과학 대화 초안 제출",
-    inputSchema: scienceJsonSchema, zod: sciencePayloadSchema, budget: args.budget,
+    inputSchema: scienceJsonSchema, zod: sciencePayloadSchema, budget: args.budget, provider: args.provider,
   });
   if (!r.ok) return r;
   const v = verifyEvidence(r.data, args.sources);
   return { ...r, data: v.data, droppedEvidence: v.dropped };
 }
 
-export async function draftCurrent(args: { sources: LlmSource[]; now: Date; budget: LlmBudget }) {
+export async function draftCurrent(args: { sources: LlmSource[]; now: Date; budget: LlmBudget; provider?: AiProvider }) {
   const system = `너는 중학생과 부모가 시사 주제를 두고 사실·해석·가치 선택을 구분해 대화하도록 돕는 편집자다.
 기준 시각(Asia/Seoul): ${args.now.toISOString()} — checked_at에는 이 시각을 쓴다.
 - 확인된 사실(verified_facts)과 확인 중인 내용(under_verification)을 분리한다.
@@ -389,7 +406,7 @@ ${COMMON_RULES}`;
   const user = `${sourcesBlock(args.sources)}\n\nsubmit_current 도구를 호출하라.`;
   const r = await callTool({
     system, user, toolName: "submit_current", toolDescription: "시사 대화 초안 제출",
-    inputSchema: currentJsonSchema, zod: currentPayloadSchema, budget: args.budget,
+    inputSchema: currentJsonSchema, zod: currentPayloadSchema, budget: args.budget, provider: args.provider,
   });
   if (!r.ok) return r;
   const v = verifyEvidence(r.data, args.sources);
