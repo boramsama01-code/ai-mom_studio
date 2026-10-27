@@ -12,6 +12,8 @@ import { CONTENT_KIND_LABEL, PUBLISH_LABEL, type ContentKind } from "@shared/dom
 import { studioKey } from "@shared/channelKeys";
 import type { Approval, ContentItem, ContentRevision, Delivery, SourceDocument } from "@shared/schema";
 import { SourceTextEditor } from "../SourceTextEditor";
+import { ChatGptLaunch } from "../ChatGptLaunch";
+import { itemChatGptPrompt } from "@shared/chatgptLink";
 
 type Detail = {
   item: ContentItem;
@@ -309,10 +311,18 @@ function EditPanel({ d, cid }: { d: Detail; cid: number }) {
     <section className="panel stack" id="edit-panel">
       <div className="row between">
         <h2 style={{ margin: 0 }}>편집</h2>
-        <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
-          {gen.isPending ? "생성 중…" : d.item.kind === "notice" ? "원문에서 자동 추출" : "AI로 초안 생성"}
-        </button>
       </div>
+      <ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, source: d.primary ? {
+        title: d.primary.title ?? d.item.title, url: d.primary.originalUrl,
+        text: d.primary.fetchStatus === "ok" ? d.primary.fetchedText ?? "" : "", snippet: d.primary.snippet ?? "",
+        quotes: Array.isArray(d.primary.meta.quotes) ? d.primary.meta.quotes.filter((q): q is string => typeof q === "string") : [],
+      } : null })} />
+      <p className="small muted">저장한 원문·근거로 초안을 요청합니다. 본문을 붙여넣었다면 먼저 저장해 주세요. 받은 초안은 아래 편집 칸에 옮기거나 제작 보드에서 사용할 수 있습니다.</p>
+      <details className="studio-more"><summary>API로 자동 작성 · 별도 사용료</summary>
+        <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
+          {gen.isPending ? "생성 중…" : d.item.kind === "notice" ? "API로 원문 추출 · 사용료 발생" : "API로 초안 생성 · 사용료 발생"}
+        </button>
+      </details>
       {d.current && (
         <p className="small muted">
           현재 버전 r{d.current.revisionNo} · {d.current.author === "operator" ? "운영자 편집본" : d.current.author === "llm" ? `자동 추출/초안 (${d.current.model ?? ""})` : "시스템"}
@@ -322,7 +332,7 @@ function EditPanel({ d, cid }: { d: Detail; cid: number }) {
       {gen.error && <ErrorBox error={gen.error} />}
       {gen.isSuccess && <div className="notice ok small">새 버전을 만들었습니다. 생성 성공은 검토 완료가 아닙니다 — 내용을 확인하세요.</div>}
       {!draft ? (
-        <p className="muted">아직 초안이 없습니다. 원문을 확보한 뒤 자동 추출/초안 생성을 누르거나, 직접 작성 항목을 만드세요.</p>
+        <p className="muted">아직 초안이 없습니다. 위에서 ChatGPT로 초안을 받으세요. 본문을 직접 저장하면 아래에 편집 칸이 생기며, ‘제작 보드로 가져오기’에서도 이어서 작성할 수 있습니다.</p>
       ) : (
         <form
           className="stack"
