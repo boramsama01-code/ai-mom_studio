@@ -1,3 +1,5 @@
+import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
+import { AiUsageGuide } from "../AiUsageGuide";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useToast } from "../toast";
 import { DiscoveryNote } from "../discovery";
@@ -302,8 +304,11 @@ function EditPanel({ d, cid }: { d: Detail; cid: number }) {
     return () => guard.setDirty(`item-${d.item.id}`, false);
   }, [dirty, doSave, guard, d.item.id]);
 
+  const ai = useQuery({ queryKey: ["status"], queryFn: () => api<{ integrations: { aiProvider: AiProvider } & Record<AiProvider, boolean> }>("/status") });
+  const [providerChoice, setProviderChoice] = useState<AiProvider | null>(null);
+  const provider = providerChoice ?? ai.data?.integrations.aiProvider ?? "gemini";
   const gen = useMutation({
-    mutationFn: () => api(`/channels/${cid}/items/${d.item.id}/generate`, { method: "POST", body: {} }),
+    mutationFn: () => api(`/channels/${cid}/items/${d.item.id}/generate`, { method: "POST", body: { provider } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
   });
 
@@ -318,9 +323,12 @@ function EditPanel({ d, cid }: { d: Detail; cid: number }) {
         quotes: Array.isArray(d.primary.meta.quotes) ? d.primary.meta.quotes.filter((q): q is string => typeof q === "string") : [],
       } : null })} />
       <p className="small muted">저장한 원문·근거로 초안을 요청합니다. 본문을 붙여넣었다면 먼저 저장해 주세요. 받은 초안은 아래 편집 칸에 옮기거나 제작 보드에서 사용할 수 있습니다.</p>
-      <details className="studio-more"><summary>API로 자동 작성 · 별도 사용료</summary>
-        <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
-          {gen.isPending ? "생성 중…" : d.item.kind === "notice" ? "API로 원문 추출 · 사용료 발생" : "API로 초안 생성 · 사용료 발생"}
+      <details className="studio-more"><summary>Gemini·GPT API로 자동 작성</summary>
+        <label className="field">작성 AI<select value={provider} disabled={gen.isPending} onChange={e => setProviderChoice(e.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}</option>)}</select></label>
+        <AiUsageGuide provider={provider} />
+        {ai.data?.integrations[provider] === false && <p className="notice warn small">선택한 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
+        <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty || !ai.data?.integrations[provider]} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
+          {gen.isPending ? "생성 중…" : d.item.kind === "notice" ? `${aiProviderLabels[provider]}로 원문 추출` : `${aiProviderLabels[provider]}로 초안 생성`}
         </button>
       </details>
       {d.current && (
