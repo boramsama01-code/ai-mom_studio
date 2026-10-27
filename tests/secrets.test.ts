@@ -109,3 +109,26 @@ describe("연결 키 API", () => {
     expect((await agent.get("/api/status")).body.integrations.naver).toBe(false);
   });
 });
+
+
+it("Gemini 키를 암호화 저장하고 무료 등급을 단정하지 않는 모델 조회로 연결을 확인한다", async () => {
+  const { agent, csrf } = await login(app);
+  const put = (key: string, value: string) => agent.put(`/api/secrets/${key}`).set("x-csrf-token", csrf).send({ value });
+  expect((await put("GEMINI_API_KEY", "gemini-secret-fixture")).status).toBe(200);
+  expect((await put("GEMINI_MODEL", "../../other")).status).toBe(400);
+  expect((await put("AI_PROVIDER", "gemini")).status).toBe(200);
+  const statuses = await agent.get("/api/secrets");
+  expect(statuses.text).not.toContain("gemini-secret-fixture");
+  expect(statuses.body.statuses.find((s: { key: string }) => s.key === "GEMINI_API_KEY")).toMatchObject({ source: "screen", secret: true, value: null });
+  const raw = await getPool().query("select ciphertext from stored_secrets where key = 'GEMINI_API_KEY'");
+  expect(raw.rows[0].ciphertext).not.toContain("gemini-secret-fixture");
+  delete process.env.GEMINI_API_KEY;
+  await store.loadStoredSecrets(getDb());
+  expect(process.env.GEMINI_API_KEY).toBe("gemini-secret-fixture");
+  const mock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", mock);
+  const result = await agent.post("/api/secrets/test/gemini").set("x-csrf-token", csrf).send({});
+  expect(result.body).toMatchObject({ ok: true, message: expect.stringContaining("별도로 확인") });
+  expect(mock).toHaveBeenCalledOnce(); expect(mock.mock.calls[0][1]).not.toHaveProperty("body");
+  expect((await agent.get("/api/status")).body.integrations).toMatchObject({ aiProvider: "gemini", gemini: true, aiConfigured: true });
+  vi.unstubAllGlobals();
+});
