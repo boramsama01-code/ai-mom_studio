@@ -21,6 +21,7 @@ export function matchOfficialSource(url: string, sources: OfficialSource[]): Off
 export function computeEvidenceStatus(doc: Pick<SourceDocument, "fetchStatus" | "normalizedUrl" | "kind">, payload: NoticePayload | null, officials: OfficialSource[]):
   "official_confirmed" | "secondary_only" | "needs_review" | "conflict" | "fetch_failed" {
   if (doc.fetchStatus !== "ok") return "fetch_failed";
+  if (doc.kind === "manual_text") return "needs_review";
   if (!payload) return "needs_review";
   if (payload.has_conflict) return "conflict";
   if (!payload.evidence.length) return "needs_review";
@@ -34,3 +35,4 @@ export function materialChange(a: Partial<NoticePayload> | null | undefined, b: 
   const pick = (p: Partial<NoticePayload>) => JSON.stringify([p.schedules ?? [], p.audience ?? null, p.eligibility ?? null, p.academic_year ?? null]);
   return pick(a) !== pick(b);
 }
+
