@@ -252,7 +252,7 @@ ruleRoutes.post(
       req.body,
     );
     try {
-      const session = createNewsSearch();
+      const session = createNewsSearch({ recruitment: ch.contentType === "notice" });
       const counter = { naver: 0, rss: 0, limit: 2 };
       const items = await session.search(cleanQuery(body.query), body.endpoint, 5, counter);
       await audit(getDb(), { actor: actorOf(req), action: "trial_search", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { query: body.query, endpoint: body.endpoint, results: items.length } });
