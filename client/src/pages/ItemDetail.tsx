@@ -11,6 +11,7 @@ import { cleanPayload, FIELD_LABEL, PayloadEditor } from "./editors";
 import { CONTENT_KIND_LABEL, PUBLISH_LABEL, type ContentKind } from "@shared/domain";
 import { studioKey } from "@shared/channelKeys";
 import type { Approval, ContentItem, ContentRevision, Delivery, SourceDocument } from "@shared/schema";
+import { SourceTextEditor } from "../SourceTextEditor";
 
 type Detail = {
   item: ContentItem;
@@ -25,7 +26,7 @@ type Detail = {
   defaultCaptions: { instagram: string; telegram: string } | null;
 };
 
-const SRC_KIND: Record<string, string> = { naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 직접 RSS", official: "공식 게시물", manual: "직접 추가 자료" };
+const SRC_KIND: Record<string, string> = { naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 직접 RSS", official: "공식 게시물", manual: "직접 추가 자료", manual_text: "직접 붙여넣은 본문 · 내용 확인 필요" };
 
 export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
   const { selected, allChannels } = useChannel();
@@ -120,6 +121,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
   });
   const p = d.primary;
   const evidence: Array<{ field: string; source_id: number; quote: string }> = d.current?.payload?.evidence ?? [];
+  const pastedQuotes = p?.kind === "manual_text" && Array.isArray(p.meta.quotes) ? p.meta.quotes.filter((q): q is string => typeof q === "string") : [];
   return (
     <div className="stack" id="source-panel">
       <section className="panel stack">
@@ -132,7 +134,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
               <span>{SRC_KIND[p.kind] ?? p.kind}</span>
               <span>게시 {fmtDate(p.publishedAt as unknown as string, p.publishedPrecision)}</span>
               {p.publishedRaw && <span>원본 날짜값 “{p.publishedRaw}”</span>}
-              <span>확인 {fmtDate(p.lastFetchedAt as unknown as string)}</span>
+              <span>{p.kind === "manual_text" ? `직접 저장 ${fmtDate(String(p.meta.savedAt ?? ""))}` : `확인 ${fmtDate(p.lastFetchedAt as unknown as string)}`}</span>
             </div>
             <a href={p.originalUrl} target="_blank" rel="noopener noreferrer" style={{ overflowWrap: "anywhere" }}>
               {p.title || p.originalUrl}
@@ -141,14 +143,14 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
             {p.snippet && <div className="quote">{p.snippet}</div>}
             <div className="row">
               <Badge kind={p.fetchStatus === "ok" ? "ok" : p.fetchStatus === "not_fetched" ? "" : "err"}>
-                원문 확보: {{ ok: "성공", not_fetched: "아직 안 함", failed: "실패", unsupported: "지원 안 되는 형식", blocked: "차단됨" }[p.fetchStatus] ?? p.fetchStatus}
+                {p.kind === "manual_text" ? "본문 직접 저장됨" : `원문 확보: ${{ ok: "성공", not_fetched: "아직 안 함", failed: "실패", unsupported: "지원 안 되는 형식", blocked: "차단됨" }[p.fetchStatus] ?? p.fetchStatus}`}
               </Badge>
-              <button className="btn sm" onClick={() => refetch.mutate()} disabled={refetch.isPending}>
+              {p.kind !== "manual_text" && <button className="btn sm" onClick={() => refetch.mutate()} disabled={refetch.isPending}>
                 {refetch.isPending ? "확보 중…" : "원문 다시 확보"}
-              </button>
+              </button>}
             </div>
             {p.fetchError && <div className="notice warn small">{p.fetchError}</div>}
-            {refetch.error && <ErrorBox error={refetch.error} />}
+            {refetch.error && !p.fetchError && p.kind !== "manual_text" && <ErrorBox error={refetch.error} />}
             {refetch.data?.changed && <div className="notice warn small">원문 내용이 이전과 달라졌습니다. 다시 검토하세요.</div>}
             {p.attachments.length > 0 && (
               <div className="stack">
@@ -176,11 +178,13 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
             )}
           </>
         )}
+        <SourceTextEditor key={d.item.id} cid={cid} itemId={d.item.id} version={d.item.version} source={p} />
       </section>
 
       <section className="panel stack">
         <h2>근거 구절</h2>
-        <p className="small muted">자동 추출값의 근거입니다. 원문에서 실제로 찾은 구절만 남깁니다.</p>
+        <p className="small muted">본문 발췌와 자동 추출값의 근거를 표시합니다. 직접 저장한 구절은 본문과 일치하는지 확인하며, 사실 여부나 신청 가능 여부를 자동 확정하지 않습니다.</p>
+        {!!pastedQuotes.length && <ul className="list">{pastedQuotes.map((quote, i) => <li key={i} className="stack" style={{ gap: 4 }}><span className="small muted">직접 저장한 본문 발췌 · 자료 #{p!.id}</span><div className="quote">{quote}</div></li>)}</ul>}
         {evidence.length ? (
           <ul className="list">
             {evidence.map((e, i) => (
@@ -193,17 +197,17 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
             ))}
           </ul>
         ) : (
-          <p className="muted small">근거 구절이 없습니다.</p>
+          !pastedQuotes.length && <p className="muted small">아직 근거 구절이 없습니다. 위에서 본문을 붙여넣고 구절을 선택해 저장할 수 있습니다.</p>
         )}
       </section>
 
       <section className="panel stack">
         <h2>함께 연결된 자료</h2>
-        {d.linked.length ? (
+        {d.linked.some(({ link }) => link.role !== "manual_primary") ? (
           <ul className="small">
-            {d.linked.map(({ link, doc }) => (
+            {d.linked.filter(({ link }) => link.role !== "manual_primary").map(({ link, doc }) => (
               <li key={doc.id}>
-                <Badge kind={link.role === "official" ? "ok" : ""}>{link.role === "official" ? "공식" : "보조"}</Badge>{" "}
+                <Badge kind={link.role === "official" ? "ok" : ""}>{link.role === "official" ? "공식" : link.role === "previous_manual" ? "이전 붙여넣기" : "보조"}</Badge>{" "}
                 <a href={doc.originalUrl} target="_blank" rel="noopener noreferrer">
                   {doc.title || doc.originalUrl}
                 </a>{" "}
