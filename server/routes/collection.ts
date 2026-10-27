@@ -2,7 +2,8 @@ import { Router } from "express";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
-import { channels, contentItems, jobs, officialSources, runs, searchRules } from "../../shared/schema";
+import { channels, contentItems, jobs, officialSources, runs, searchRules, sourceDocuments } from "../../shared/schema";
+import { noticeIntentSql } from "../services/noticeIntent";
 import { COLLECTION_PROFILES, collectionDateSchema, collectionDayRange, kstDay, nextCollectionAt } from "../../shared/collection";
 import { normalizeQuery, resolveDiscovery } from "../../shared/domain";
 import { ah, conflict, HttpError, loadChannel, parse, zVersion } from "./util";
@@ -32,7 +33,10 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
       newItems: sql<number>`count(*)::int`,
       pending: sql<number>`count(*) filter (where ${contentItems.reviewStatus} in ('pending','review_required'))::int`,
       fetched: sql<number>`count(*) filter (where ${contentItems.evidenceStatus} = 'official_confirmed')::int`,
-    }).from(contentItems).where(and(eq(contentItems.channelId, ch.id), eq(contentItems.isSample, !!req.session.demo), eq(contentItems.excluded, false), inArray(contentItems.origin, ["collected", "discovered"]), gte(contentItems.createdAt, start), lt(contentItems.createdAt, end)));
+      noticeCandidates: sql<number>`count(*) filter (where ${noticeIntentSql()} = 'candidate')::int`,
+      noticeUncertain: sql<number>`count(*) filter (where ${noticeIntentSql()} = 'uncertain')::int`,
+      noticeReports: sql<number>`count(*) filter (where ${noticeIntentSql()} in ('retrospective','off_topic','closed'))::int`,
+    }).from(contentItems).leftJoin(sourceDocuments, eq(sourceDocuments.id, contentItems.primarySourceId)).where(and(eq(contentItems.channelId, ch.id), eq(contentItems.isSample, !!req.session.demo), eq(contentItems.excluded, false), inArray(contentItems.origin, ["collected", "discovered"]), gte(contentItems.createdAt, start), lt(contentItems.createdAt, end)));
     const [lastRun] = await db.select().from(runs).where(and(eq(runs.channelId, ch.id), eq(runs.kind, "collect"))).orderBy(desc(runs.id)).limit(1);
     const pendingJobs = await db.select({ id: jobs.id, status: jobs.status, createdAt: jobs.createdAt, leaseExpiresAt: jobs.leaseExpiresAt }).from(jobs).where(and(eq(jobs.channelId, ch.id), eq(jobs.type, "collect"), inArray(jobs.status, ["queued", "running"])));
     const discovery = resolveDiscovery(ch.contentType, ch.budget.discovery);
