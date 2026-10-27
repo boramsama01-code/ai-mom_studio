@@ -38,7 +38,7 @@ export function StudioTextImport({ content, channelName, disabled, apply }: {
   return <div className="studio-text-import stack">
     <p className="small muted">ChatGPT에서 초안 받기 → 새 탭에서 결과 확인 → 답변 가져오기</p>
     {!!content.memo.trim() && <label className="studio-memo-option"><input type="checkbox" disabled={disabled} checked={includeMemo} onChange={event => setIncludeMemo(event.target.checked)} />기획·참고 자료도 프롬프트에 포함</label>}
-    <StudioPromptCopy prompt={studioChatGptTextPrompt(content, channelName, includeMemo)} label="프롬프트 복사" disabled={disabled || !content.title.trim()} />
+    <StudioPromptCopy prompt={studioChatGptTextPrompt(content, channelName, includeMemo)} label="초안 프롬프트 복사" disabled={disabled || !content.title.trim()} />
     <details className="studio-more studio-text-answer" open={reply ? true : undefined}>
       <summary>2 · ChatGPT 답변 가져오기</summary>
       <div className="stack">
