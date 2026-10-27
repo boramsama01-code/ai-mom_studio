@@ -7,6 +7,7 @@ import type { DB } from "../db";
 import { contentItems, contentSources, sourceDocuments } from "../../shared/schema";
 import { draftCurrent, draftScience, LlmBudget, PROMPT_VERSION, type LlmSource } from "../services/llm";
 import { createRevision } from "../content";
+import { itemPrimarySource } from "../services/itemSources";
 
 export async function generateDialogueDraft(db: DB, itemId: number, now = new Date()) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
@@ -15,9 +16,10 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
     return { ok: false as const, error: "공고 항목은 '구조화 추출'을 사용하세요" };
 
   const docIds = new Set<number>();
-  if (item.primarySourceId) docIds.add(item.primarySourceId);
+  const primary = await itemPrimarySource(db, item);
+  if (primary) docIds.add(primary.id);
   const linked = await db.select().from(contentSources).where(eq(contentSources.contentItemId, itemId));
-  linked.forEach((l) => docIds.add(l.sourceDocumentId));
+  linked.filter(l => l.role !== "previous_manual" && (primary?.kind !== "manual_text" || l.sourceDocumentId !== item.primarySourceId)).forEach((l) => docIds.add(l.sourceDocumentId));
   const docs = docIds.size
     ? await db.select().from(sourceDocuments).where(sql`${sourceDocuments.id} in (${sql.join([...docIds].map((i) => sql`${i}`), sql`, `)})`)
     : [];
@@ -38,7 +40,7 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   const payload = r.data as Record<string, unknown>;
   const evidenceCount = (payload.evidence as unknown[]).length;
   const indep = item.kind === "current_dialogue" ? Number(payload.independent_source_count ?? 0) : null;
-  const evidenceStatus = !sources.length || !evidenceCount ? "needs_review" : "secondary_only";
+  const evidenceStatus = !sources.length || !evidenceCount || sources.some(s => s.kind === "manual_text") ? "needs_review" : "secondary_only";
 
   const rev = await db.transaction(async (tx) => {
     const rev = await createRevision(tx, {
@@ -69,3 +71,4 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   });
   return { ok: true as const, revisionId: rev.id, usage: r.usage, model: r.model };
 }
+
