@@ -5,11 +5,11 @@
 import { eq, sql } from "drizzle-orm";
 import type { DB } from "../db";
 import { contentItems, contentSources, sourceDocuments } from "../../shared/schema";
-import { draftCurrent, draftScience, LlmBudget, PROMPT_VERSION, type LlmSource } from "../services/llm";
+import { draftCurrent, draftScience, LlmBudget, PROMPT_VERSION, type LlmSource, type AiProvider } from "../services/llm";
 import { createRevision } from "../content";
 import { itemPrimarySource } from "../services/itemSources";
 
-export async function generateDialogueDraft(db: DB, itemId: number, now = new Date()) {
+export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
   if (!item) return { ok: false as const, error: "항목 없음" };
   if (item.kind !== "science_dialogue" && item.kind !== "current_dialogue")
@@ -33,8 +33,8 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   const budget = new LlmBudget(2); // 한 항목: 본 호출 1 + 형식 수정 재시도 1
   const r =
     item.kind === "science_dialogue"
-      ? await draftScience({ topic: item.topicKey || item.title, sources, now, budget })
-      : await draftCurrent({ sources, now, budget });
+      ? await draftScience({ topic: item.topicKey || item.title, sources, now, budget, provider })
+      : await draftCurrent({ sources, now, budget, provider });
   if (!r.ok) return { ok: false as const, error: r.error };
 
   const payload = r.data as Record<string, unknown>;

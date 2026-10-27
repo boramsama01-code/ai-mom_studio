@@ -13,6 +13,7 @@ const input = { directive: "마지막 대사를 짧게", content: { title: "기�
 const response = (data: unknown, name = "save_studio_draft") => new Response(JSON.stringify({ status: "completed", model: "gpt-6.1-sol", output: [{ type: "function_call", name, arguments: JSON.stringify(data) }], usage: { input_tokens: 12, output_tokens: 30 } }), { status: 200 });
 
 beforeEach(() => {
+  vi.stubEnv("GEMINI_API_KEY", "");
   vi.stubEnv("OPENAI_API_KEY", "unit-openai-key");
   vi.stubEnv("OPENAI_MODEL", "");
   vi.stubEnv("OPENAI_IMAGE_MODEL", "");
@@ -62,7 +63,7 @@ describe("AI provider routing", () => {
     expect(env.aiProvider).toBe("anthropic");
     vi.stubEnv("AI_PROVIDER", "openai");
     expect(env.aiConfigured).toBe(false);
-    expect(studioAiStatus().text).toEqual({ openai: false, anthropic: true });
+    expect(studioAiStatus().text).toEqual({ gemini: false, openai: false, anthropic: true });
   });
 
   it("does not silently fall back or retry a paid call after API error", async () => {

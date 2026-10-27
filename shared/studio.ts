@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { aiProviders, type AiProvider } from "./aiProviders";
 
 export const studioChannels = ["penguin", "highway", "fryday", "news"] as const;
 export const studioFormats = ["웹툰", "카드뉴스", "릴스", "브랜드", "기타"] as const;
@@ -13,7 +14,7 @@ export type StudioChannel = string;
 export type StudioCharacter = typeof studioCharacters[number];
 export type StudioFormat = typeof studioFormats[number];
 export type StudioStage = typeof studioStages[number];
-export type StudioProvider = "openai" | "anthropic";
+export type StudioProvider = AiProvider;
 
 const date = z.string().refine(v => v === "" || (/^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(new Date(`${v}T00:00:00Z`).getTime()) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v), "올바른 날짜를 입력하세요.");
 export const studioPanelSchema = z.object({ scene: z.string().max(4000), dialogue: z.string().max(3000), imageId: z.number().int().positive().nullable().default(null) }).strict();
@@ -50,7 +51,7 @@ export const studioPatchSchema = z.object({
 }).strict();
 export const studioGenerationSchema = z.object({
   version: z.number().int().positive(), kind: z.enum(["text", "image"]),
-  provider: z.enum(["openai", "anthropic"]).default("openai"),
+  provider: z.enum(aiProviders).default("openai"),
   instruction: z.string().trim().max(8000).default(""), panelIndex: z.number().int().min(0).max(3).optional(),
   textTarget: z.enum(["rewrite", "fill", "caption"]).default("rewrite"),
   requestId: z.string().uuid(),
@@ -66,7 +67,7 @@ export type StudioCardInput = StudioContent;
 export type StudioCard = StudioContent & { id: number; version: number; sourceItemId: number | null; createdAt: string; updatedAt: string };
 export type StudioRevision = { id: number; cardId: number; version: number; snapshot: StudioContent; instruction: string; provider: string | null; model: string | null; applied: boolean; createdAt: string };
 export type StudioJob = { id: number; status: string; lastError: string | null; result: Record<string, unknown> | null; createdAt: string; finishedAt: string | null };
-export type StudioAiStatus = { defaultProvider: StudioProvider; text: { openai: boolean; anthropic: boolean }; image: boolean };
+export type StudioAiStatus = { defaultProvider: StudioProvider; text: Record<StudioProvider, boolean>; image: boolean };
 export type StudioBoard = { cards: StudioCard[]; notes: string; notesVersion: number; ai: StudioAiStatus };
 export type StudioCardDetail = { card: StudioCard; revisions: StudioRevision[]; jobs: StudioJob[] };
 export type StudioExportCheck = { errors: Array<{ field: string; message: string }>; warnings: string[]; pageCount: number };

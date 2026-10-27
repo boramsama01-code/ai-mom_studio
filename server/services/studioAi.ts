@@ -5,9 +5,9 @@ import { AiServiceError, callTool, LlmBudget, openaiRequest, type AiProvider } f
 export function studioAiStatus() {
   return {
     defaultProvider: env.aiProvider,
-    text: { openai: !!env.openaiKey, anthropic: !!env.anthropicKey },
+    text: { gemini: !!env.geminiKey, openai: !!env.openaiKey, anthropic: !!env.anthropicKey },
     image: !!env.openaiKey,
-    models: { openai: env.openaiModel, anthropic: env.anthropicModel, image: env.openaiImageModel },
+    models: { gemini: env.geminiModel, openai: env.openaiModel, anthropic: env.anthropicModel, image: env.openaiImageModel },
   };
 }
 

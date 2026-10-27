@@ -75,13 +75,21 @@ export const env = {
   get openaiImageModel() {
     return process.env.OPENAI_IMAGE_MODEL || "gpt-image-2.5-sunburst";
   },
-  get aiProvider(): "openai" | "anthropic" {
+  get geminiKey() {
+    return process.env.GEMINI_API_KEY || "";
+  },
+  get geminiModel() {
+    return process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  },
+  get aiProvider(): "openai" | "anthropic" | "gemini" {
+    if (process.env.AI_PROVIDER === "gemini") return "gemini";
     if (process.env.AI_PROVIDER === "anthropic") return "anthropic";
     if (process.env.AI_PROVIDER === "openai") return "openai";
+    if (this.geminiKey) return "gemini";
     return this.openaiKey || !this.anthropicKey ? "openai" : "anthropic";
   },
   get aiConfigured(): boolean {
-    return this.aiProvider === "openai" ? !!this.openaiKey : !!this.anthropicKey;
+    return this.aiProvider === "gemini" ? !!this.geminiKey : this.aiProvider === "openai" ? !!this.openaiKey : !!this.anthropicKey;
   },
   get anthropicKey() {
     return process.env.ANTHROPIC_API_KEY || "";
@@ -115,6 +123,7 @@ export function integrationStatus() {
     naver: !!(env.naverClientId && env.naverClientSecret),
     anthropic: !!(env.anthropicKey && env.anthropicModel),
     openai: !!env.openaiKey,
+    gemini: !!env.geminiKey,
     aiProvider: env.aiProvider,
     aiConfigured: env.aiConfigured,
     cloudinary: env.cloudinaryConfigured,

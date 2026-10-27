@@ -12,18 +12,27 @@ export const SECRET_GROUPS: SecretGroup[] = [
     description: "글은 선택한 AI로, 그림은 OpenAI로 만듭니다. 다른 AI 비교는 콘텐츠에서 직접 선택할 때만 실행됩니다.",
     testable: false,
     fields: [
-      { key: "AI_PROVIDER", label: "기본 글쓰기 AI", secret: false, hint: "API 키가 아닌 선택 항목입니다. 자동 선택은 GPT 키가 있으면 GPT, Claude 키만 있으면 Claude를 사용합니다.", options: [{ value: "auto", label: "자동 선택 · GPT 우선" }, { value: "openai", label: "GPT · OpenAI" }, { value: "anthropic", label: "Claude · Anthropic" }] },
+      { key: "AI_PROVIDER", label: "기본 글쓰기 AI", secret: false, hint: "자동 선택은 등록된 키 중 Gemini → GPT → Claude 순서입니다. 호출 실패 시 다른 AI로 전환하지 않습니다.", options: [{ value: "auto", label: "자동 선택 · Gemini 우선" }, { value: "gemini", label: "Gemini · Google" }, { value: "openai", label: "GPT · OpenAI" }, { value: "anthropic", label: "Claude · Anthropic" }] },
+    ],
+  },
+  {
+    id: "gemini", title: "Gemini · 무료 등급 지원",
+    description: "Google AI Studio에서 무료 등급 프로젝트의 키를 등록하세요. 기본 모델은 Gemini 2.5 Flash입니다. 무료 등급의 입력·응답은 Google 제품 개선에 사용될 수 있습니다. 한도는 프로젝트·모델별이며 유료 등급 프로젝트는 과금됩니다. 이 스튜디오는 결제를 연결하거나 다른 AI로 자동 전환하지 않습니다.",
+    docs: "https://aistudio.google.com/api-keys", testable: true,
+    fields: [
+      { key: "GEMINI_API_KEY", label: "Gemini API 키", secret: true },
+      { key: "GEMINI_MODEL", label: "글 모델", secret: false, placeholder: "gemini-2.5-flash", hint: "기본값: gemini-2.5-flash. 변경 전 해당 모델의 무료 등급 지원 여부를 확인하세요." },
     ],
   },
   {
     id: "openai",
     title: "GPT · 이미지 생성",
-    description: "ChatGPT 구독과 별도인 API 키입니다. 생성할 때 API 사용료가 발생합니다. 모델을 비워 두면 아래 기본 모델을 사용합니다.",
+    description: "ChatGPT 구독과 별도인 API입니다. 대상 조직은 입력·출력 데이터 공유를 활성화하면 대상 모델의 일일 무료 토큰을 받을 수 있습니다. 양수 잔액이 필요하며 한도를 넘기는 요청은 전체가 과금됩니다. 이미지·도구 등은 별도 요금입니다. 키 조회 성공만으로 무료 혜택이 확인되지는 않습니다.",
     docs: "https://platform.openai.com/api-keys",
     testable: true,
     fields: [
       { key: "OPENAI_API_KEY", label: "API 키", secret: true, placeholder: "sk-..." },
-      { key: "OPENAI_MODEL", label: "글 모델", secret: false, placeholder: "gpt-6.1-sol", hint: "기본값: gpt-6.1-sol" },
+      { key: "OPENAI_MODEL", label: "글 모델", secret: false, placeholder: "gpt-6.1-sol", hint: "기본값: gpt-6.1-sol. 무료 토큰의 mini 그룹을 사용하려면 gpt-5-mini-2025-08-07을 입력하고 대상 모델 목록을 확인하세요." },
       { key: "OPENAI_IMAGE_MODEL", label: "이미지 모델", secret: false, placeholder: "gpt-image-2.5-sunburst", hint: "기본값: gpt-image-2.5-sunburst" },
     ],
   },

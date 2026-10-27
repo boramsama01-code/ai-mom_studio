@@ -20,7 +20,7 @@ import { createNewsSearch, type RssLoader } from "../services/newsSearch";
 import { normalizeUrl } from "../services/url";
 import { fetchAndExtract, extractPdf } from "../services/extract";
 import { safeFetch } from "../services/safeFetch";
-import { extractNotice, LlmBudget, PROMPT_VERSION, type LlmSource } from "../services/llm";
+import { extractNotice, LlmBudget, PROMPT_VERSION, type LlmSource, type AiProvider } from "../services/llm";
 import { computeScheduleStatus } from "../services/dates";
 import { computeEvidenceStatus, materialChange } from "./evidence";
 import { createRevision } from "../content";
@@ -391,6 +391,7 @@ export async function extractForItem(
   budget: LlmBudget,
   now: Date,
   officials?: Awaited<ReturnType<typeof loadOfficials>>,
+  provider?: AiProvider,
 ) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
   const doc = await itemPrimarySource(db, item);
@@ -399,7 +400,7 @@ export async function extractForItem(
   const sources: LlmSource[] = [
     { source_id: doc.id, kind: doc.kind, url: doc.originalUrl, title: doc.title, published: doc.publishedRaw, text: doc.fetchedText },
   ];
-  const r = await extractNotice({ sources, sourceHint: item.category, now, budget });
+  const r = await extractNotice({ sources, sourceHint: item.category, now, budget, provider });
   if (!r.ok) {
     await db.update(contentItems).set({ updatedAt: now }).where(eq(contentItems.id, itemId));
     return r;

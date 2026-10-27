@@ -7,8 +7,22 @@ import { naverSearch, NaverError, naverProviderInUse } from "./naver";
 import { getClient } from "./llm";
 import { ensureCloudinary, CloudinaryNotConfigured } from "./cloudinary";
 import { openaiFailureMessage } from "./openaiError";
+import { geminiFailureMessage, geminiModelUrl } from "./gemini";
 
 export type TestResult = { ok: boolean; message: string };
+
+/** Model metadata only: does not generate tokens or verify billing/free-tier enrollment. */
+export async function testGemini(fetchImpl: typeof fetch = fetch): Promise<TestResult> {
+  if (!env.geminiKey) return { ok: false, message: "Gemini API 키가 없습니다." };
+  try {
+    const response = await fetchImpl(geminiModelUrl(), {
+      headers: { "x-goog-api-key": env.geminiKey }, signal: AbortSignal.timeout(15_000), redirect: "error",
+    });
+    await response.body?.cancel();
+    if (!response.ok) return { ok: false, message: geminiFailureMessage(response.status) };
+    return { ok: true, message: "Gemini 모델 조회에 성공했습니다. 글을 생성하지 않았습니다. 무료 등급·남은 한도는 AI Studio 프로젝트에서 별도로 확인하세요." };
+  } catch { return { ok: false, message: "Gemini에 연결할 수 없습니다. 키와 모델 ID를 확인하세요." }; }
+}
 
 export async function testNaver(fetchImpl: typeof fetch = fetch): Promise<TestResult> {
   try {

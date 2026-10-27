@@ -1,3 +1,5 @@
+import { aiProviderLabels, type AiProvider } from "@shared/aiProviders";
+import { AiUsageGuide } from "../AiUsageGuide";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -165,7 +167,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const [selectedPanel, setSelectedPanel] = useState(0);
   const [uploading, setUploading] = useState<number | null>(null);
   const uploadingRef = useRef(false);
-  const [provider, setProvider] = useState<"openai" | "anthropic">("openai");
+  const [provider, setProvider] = useState<AiProvider>("openai");
   const [tab, setTab] = useState<"content" | "history">("content");
   const [compareId, setCompareId] = useState<number | null>(null);
   const [awaitingJob, setAwaitingJob] = useState<number | null>(null);
@@ -273,8 +275,8 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         <div className="studio-image-mode" role="group" aria-label="초안 작성 방법"><button aria-pressed={textMode === "chatgpt"} onClick={() => setTextMode("chatgpt")}>ChatGPT로 초안 만들기</button><button aria-pressed={textMode === "api"} onClick={() => setTextMode("api")}>API 자동 작성</button></div>
         <div hidden={textMode !== "chatgpt"}><StudioTextImport content={form} channelName={channelName(form.channel)} disabled={busy || working || newer} apply={setForm} /></div>
         <div className="stack" hidden={textMode !== "api"}>
-          <label className="field">작성 AI<select value={provider} disabled={busy || working} onChange={e => { providerInitialized.current = true; setProvider(e.target.value as typeof provider); }}><option value="openai">GPT</option><option value="anthropic">Claude</option></select></label>
-          <p className="small muted">원고·컷 구성·캡션의 빈칸을 작성합니다. API 사용료가 발생합니다.</p>
+          <label className="field">작성 AI<select value={provider} disabled={busy || working} onChange={e => { providerInitialized.current = true; setProvider(e.target.value as typeof provider); }}><option value="gemini">Gemini · 무료 등급 지원</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude</option></select></label>
+          <p className="small muted">원고·컷 구성·캡션의 빈칸을 작성합니다.</p><AiUsageGuide provider={provider} />
           {settings.data?.ai.text[provider] === false && <p className="notice warn small">작성 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
           <button className="btn" disabled={!canWrite || !hasBlanks} onClick={() => run({ kind: "text", textTarget: "fill" })}>빈칸 초안 채우기 · API</button>
         </div>
@@ -319,7 +321,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         {captionProposal && <div className="studio-caption-proposal"><span className="small muted">작성한 글에서 만든 기본 초안 · AI 사용 없음</span><p>{captionProposal}</p><button className="btn sm" disabled={busy} onClick={() => change("caption", captionProposal)}>이 초안 사용</button></div>}
         <label className="field">게시용 캡션<textarea disabled={busy} rows={5} value={form.caption} maxLength={8000} onChange={e => change("caption", e.target.value)} placeholder="대사나 원고를 쓰면 기본 초안이 자동으로 제안됩니다." /></label>
         <div className="row"><button className="btn" onClick={copyCaption} disabled={!form.caption.trim()}>캡션 복사</button></div>
-        <details className="studio-more"><summary>캡션 작성 도움받기</summary><div className="stack"><StudioPromptCopy prompt={studioChatGptCaptionPrompt(form, channelName(form.channel))} label="ChatGPT 캡션 프롬프트 복사" /><p className="small muted">받은 답변을 위 캡션 칸에 붙여넣으세요.</p><button className="btn" disabled={!canWrite || (!form.caption.trim() && !studioCaptionDraft(form) && !form.memo.trim())} onClick={() => run({ kind: "text", textTarget: "caption" })}>API로 캡션 작성 · 사용료 발생</button></div></details>
+        <details className="studio-more"><summary>캡션 작성 도움받기</summary><div className="stack"><StudioPromptCopy prompt={studioChatGptCaptionPrompt(form, channelName(form.channel))} label="ChatGPT 캡션 프롬프트 복사" /><p className="small muted">받은 답변을 위 캡션 칸에 붙여넣으세요.</p><AiUsageGuide provider={provider} /><button className="btn" disabled={!canWrite || (!form.caption.trim() && !studioCaptionDraft(form) && !form.memo.trim())} onClick={() => run({ kind: "text", textTarget: "caption" })}>{aiProviderLabels[provider]}로 캡션 작성</button></div></details>
       </section>
       <StudioExport form={form} base={base} dirty={dirty} busy={busy} change={change} save={saveCurrent} onFieldFocus={field => {
         const panel = /^panels\.(\d+)\./.exec(field);
@@ -331,12 +333,12 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
       <details className="panel studio-more" hidden={editorStep !== "story" || textMode !== "api"}><summary>전체 원고를 API로 수정하기</summary><div className="stack">
         <p className="small muted">제목·원고·컷 구성·캡션을 함께 변경합니다. 장면이 바뀐 컷의 그림은 분리되며, 이전 내용은 버전 기록에 남습니다.</p>
         <label className="field">바꿀 내용<textarea disabled={busy} rows={3} maxLength={6000} value={instruction} onChange={e => setInstruction(e.target.value)} placeholder="예: 마지막 반전은 유지하고 전체 흐름을 더 짧게 바꿔줘." /></label>
-        <button className="btn" disabled={!canWrite || !instruction.trim()} onClick={() => run({ kind: "text", textTarget: "rewrite", instruction })}>전체 원고 수정 · API 사용료 발생</button>
+        <AiUsageGuide provider={provider} /><button className="btn" disabled={!canWrite || !instruction.trim()} onClick={() => run({ kind: "text", textTarget: "rewrite", instruction })}>전체 원고 수정 · {aiProviderLabels[provider]}</button>
       </div></details>
     </div> : <section className="panel stack">
       <div className="row between"><h2>버전 기록</h2><span className="small muted">복원해도 이전 기록은 유지됩니다.</span></div>
       {!data.revisions.length ? <p className="muted">저장한 버전이 없습니다.</p> : <div className="studio-history-layout">
-        <div className="studio-revision-list">{data.revisions.map(r => <button key={r.id} className={compareId === r.id ? "selected" : ""} onClick={() => setCompareId(r.id)}><strong>버전 {r.version}{!r.applied ? " · 미적용 결과" : ""}</strong><span>{r.provider === "openai" ? "GPT" : r.provider === "anthropic" ? "Claude" : "직접 편집"} · {dateTime(r.createdAt)}</span><small>{r.instruction || "작업 저장"}</small></button>)}</div>
+        <div className="studio-revision-list">{data.revisions.map(r => <button key={r.id} className={compareId === r.id ? "selected" : ""} onClick={() => setCompareId(r.id)}><strong>버전 {r.version}{!r.applied ? " · 미적용 결과" : ""}</strong><span>{r.provider === "gemini" ? "Gemini" : r.provider === "openai" ? "GPT" : r.provider === "anthropic" ? "Claude" : "직접 편집"} · {dateTime(r.createdAt)}</span><small>{r.instruction || "작업 저장"}</small></button>)}</div>
         <div>{compared ? <><div className="row between"><h3>버전 {compared.version} 비교</h3><button className="btn sm" disabled={busy || working} onClick={() => guard.confirmLeave(() => restore.mutate(compared.id))}>이 버전으로 복원</button></div><div className="studio-compare"><Snapshot title="현재 작업" card={form} /><Snapshot title={revisionLabel(compared.version)} card={compared.snapshot} /></div></> : <div className="studio-history-empty">왼쪽에서 비교할 버전을 선택하세요.</div>}</div>
       </div>}
     </section>}
