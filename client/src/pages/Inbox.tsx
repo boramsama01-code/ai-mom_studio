@@ -11,6 +11,7 @@ import { NOTICE_CATEGORIES, CONTENT_KIND_LABEL, type ContentKind } from "@shared
 import type { ContentItem } from "@shared/schema";
 import { kstDay } from "@shared/collection";
 import { CollectionPanel, useKstToday } from "../collection";
+import { NOTICE_INTENTS, NOTICE_INTENT_LABEL, type NoticeIntent } from "@shared/noticeIntent";
 
 export type ListRow = {
   item: ContentItem;
@@ -18,6 +19,7 @@ export type ListRow = {
   channelSlug: string;
   channelName: string;
   matchedQuery?: string | null;
+  noticeIntent?: NoticeIntent | null;
 };
 type ListResp = { total: number; page: number; pageSize: number; items: ListRow[] };
 
@@ -34,15 +36,17 @@ export function InboxPage() {
     schedule: params.get("schedule") ?? "",
     evidence: params.get("evidence") ?? "",
     category: params.get("category") ?? "",
+    noticeIntent: params.get("noticeIntent") ?? "candidate",
     view: (params.get("view") as "inbox" | "excluded" | "all") ?? "inbox",
     collectedOn: params.get("collectedOn") === "all" ? "" : params.get("collectedOn") ?? kstDay(),
   });
   const [page, setPage] = useState(1);
   useEffect(() => { if (followToday) { setF(old => ({ ...old, collectedOn: today })); setPage(1); } }, [today, followToday]);
   const [qInput, setQInput] = useState(f.q);
+  const noticeChannel = current?.contentType === "notice";
   const query = useQuery({
     queryKey: ["ch", selected, "items", f, page],
-    queryFn: () => api<ListResp>(`/items?${qs({ channelId: selected, ...f, collectedOn: f.collectedOn || undefined, page, pageSize: 20 })}`),
+    queryFn: () => api<ListResp>(`/items?${qs({ channelId: selected, ...f, noticeIntent: noticeChannel ? f.noticeIntent : undefined, collectedOn: f.collectedOn || undefined, page, pageSize: 20 })}`),
     placeholderData: keepPreviousData,
     refetchInterval: 60_000,
   });
@@ -61,6 +65,12 @@ export function InboxPage() {
         </div>
       </div>
       <CollectionPanel date={f.collectedOn || undefined} />
+      {noticeChannel && <section className="panel stack" aria-label="공고 선별" style={{ marginBottom: 16 }}>
+        <div className="row" role="group" aria-label="공고 성격">
+          {[...NOTICE_INTENTS, "all"].map(intent => <button key={intent} className={`btn sm ${f.noticeIntent === intent ? "primary" : ""}`} aria-pressed={f.noticeIntent === intent} onClick={() => set("noticeIntent", intent)}>{intent === "all" ? "전체 자료" : NOTICE_INTENT_LABEL[intent as NoticeIntent]}</button>)}
+        </div>
+        <p className="small muted" style={{ margin: 0 }}>모집·접수 단서가 있는 자료를 먼저 보여드립니다. 제목·요약에 따른 분류이며, 현재 신청 가능 여부·대상·마감일은 공식 원문에서 확인해야 합니다. 기존 자료는 삭제하지 않으며 ‘전체 자료’에서 볼 수 있습니다.</p>
+      </section>}
       <div className="row collection-date-filter" role="group" aria-label="수집 날짜">
         <button className={`btn sm ${f.collectedOn === today ? "primary" : ""}`} onClick={() => { setFollowToday(true); set("collectedOn", today); }}>오늘</button>
         <button className="btn sm" onClick={() => { setFollowToday(false); set("collectedOn", kstDay(new Date(Date.now() - 86400_000))); }}>어제</button>
@@ -146,7 +156,7 @@ export function InboxPage() {
         <ErrorBox error={query.error} retry={() => query.refetch()} />
       ) : !query.data?.items.length ? (
         <Empty>
-          {f.collectedOn ? `${f.collectedOn}에 새로 수집된 자료가 없습니다. ` : "조건에 맞는 자료가 없습니다. "}
+          {noticeChannel && f.noticeIntent !== "all" ? `선택한 기간에 ‘${NOTICE_INTENT_LABEL[f.noticeIntent as NoticeIntent] ?? "공고"}’ 자료가 없습니다. ‘확인 필요’ 또는 ‘전체 자료’도 확인하세요. ` : f.collectedOn ? `${f.collectedOn}에 새로 수집된 자료가 없습니다. ` : "조건에 맞는 자료가 없습니다. "}
           {f.view === "inbox" && !f.q && !f.review && !f.evidence ? "검색 설정에서 키워드를 켜고 수집을 요청하거나, 시험 검색 결과를 저장해 보세요." : "필터를 바꿔 보세요."}
         </Empty>
       ) : (
@@ -171,7 +181,7 @@ export function ItemList({ rows, showChannel }: { rows: ListRow[]; showChannel: 
   );
 }
 
-function ItemBody({ row: { item, source, channelName, matchedQuery }, showChannel }: { row: ListRow; showChannel: boolean }) {
+function ItemBody({ row: { item, source, channelName, matchedQuery, noticeIntent }, showChannel }: { row: ListRow; showChannel: boolean }) {
   return (
     <>
       <GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">
@@ -188,6 +198,7 @@ function ItemBody({ row: { item, source, channelName, matchedQuery }, showChanne
       </div>
       <div className="row">
         {item.isSample && <Badge kind="sample">샘플 · 실제 정보 아님</Badge>}
+        {noticeIntent && <Badge kind={noticeIntent === "candidate" ? "ok" : "warn"}>{NOTICE_INTENT_LABEL[noticeIntent]}</Badge>}
         <DiscoveryBadge info={item.discovery} />
         <StatusBadge type="review" value={item.reviewStatus} />
         <StatusBadge type="evidence" value={item.evidenceStatus} />
