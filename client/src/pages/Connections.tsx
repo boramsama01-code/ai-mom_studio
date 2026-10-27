@@ -4,6 +4,8 @@ import { useLocation, useSearch } from "wouter";
 import { api } from "../api";
 import { useDirtyGuard } from "../state";
 import { Badge, ErrorBox, fmtDate, GuardedLink, Loading } from "../ui";
+import { AiUsageGuide } from "../AiUsageGuide";
+import { aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import type { SecretField, SecretGroup } from "@shared/secretsCatalog";
 
 type Status = { key: string; source: "environment" | "screen" | "none" | "unreadable"; updatedAt: string | null; valueLength: number | null; secret: boolean; value: string | null };
@@ -66,7 +68,7 @@ export function SecretInput({ k, label, hint, placeholder, options, secret, stat
   );
 }
 
-type AiStatus = { integrations: { aiProvider: "openai" | "anthropic"; aiConfigured: boolean; openai: boolean } };
+type AiStatus = { integrations: { aiProvider: AiProvider; aiConfigured: boolean; openai: boolean } };
 
 function AiProviderPanel({ data }: { data: Resp }) {
   const qc = useQueryClient();
@@ -95,13 +97,13 @@ function AiProviderPanel({ data }: { data: Resp }) {
     <p className="small muted" style={{ margin: 0 }}>글을 만들 때 사용할 AI를 선택하고 아래에서 키를 등록하세요.</p>
     <label className="field" htmlFor="ai-provider-choice">기본 글쓰기 AI
       <select id="ai-provider-choice" value={selected} disabled={envOwned || save.isPending} onChange={e => setChoice(e.target.value)} aria-describedby="ai-provider-help">
-        <option value="auto">자동 선택 · GPT 우선</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude · Anthropic</option>
+        <option value="auto">자동 선택 · Gemini 우선</option><option value="gemini">Gemini · Google</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude · Anthropic</option>
       </select>
     </label>
-    <p id="ai-provider-help" className="small muted" style={{ margin: 0 }}>자동 선택은 GPT 키가 있으면 GPT, Claude 키만 있으면 Claude를 사용합니다. 그림 생성은 OpenAI 키를 사용합니다.</p>
-    {actual.data && <div className="ai-readiness" aria-live="polite"><div><strong>글쓰기 · {actual.data.integrations.aiProvider === "anthropic" ? "Claude" : "GPT"}</strong><Badge kind={actual.data.integrations.aiConfigured ? "ok" : ""}>{actual.data.integrations.aiConfigured ? "키 등록됨" : "키 등록 필요"}</Badge></div><div><strong>그림 · OpenAI</strong><Badge kind={actual.data.integrations.openai ? "ok" : ""}>{actual.data.integrations.openai ? "키 등록됨" : "키 등록 필요"}</Badge></div><small className="muted">키 등록 상태입니다. 실제 연결은 각 서비스에서 확인하세요.</small></div>}
+    <p id="ai-provider-help" className="small muted" style={{ margin: 0 }}>자동 선택은 등록된 키 중 Gemini → GPT → Claude 순서입니다. 한도·오류 발생 시 다른 AI로 전환하지 않습니다. 그림 생성은 별도 OpenAI 요금입니다.</p>
+    {actual.data && <div className="ai-readiness" aria-live="polite"><div><strong>글쓰기 · {aiProviderLabels[actual.data.integrations.aiProvider]}</strong><Badge kind={actual.data.integrations.aiConfigured ? "ok" : ""}>{actual.data.integrations.aiConfigured ? "키 등록됨" : "키 등록 필요"}</Badge></div><div><strong>그림 · OpenAI</strong><Badge kind={actual.data.integrations.openai ? "ok" : ""}>{actual.data.integrations.openai ? "키 등록됨" : "키 등록 필요"}</Badge></div><small className="muted">키 등록 상태입니다. 실제 연결은 각 서비스에서 확인하세요.</small></div>}
     {actual.error && <ErrorBox error={actual.error} retry={() => actual.refetch()} />}
-    <div className="row"><GuardedLink className="btn sm" href="/connections?service=openai">OpenAI 키 입력</GuardedLink><GuardedLink className="btn sm" href="/connections?service=anthropic">Claude 키 입력</GuardedLink></div>
+    <div className="row"><GuardedLink className="btn sm" href="/connections?service=gemini">Gemini 키 입력</GuardedLink><GuardedLink className="btn sm" href="/connections?service=openai">OpenAI 키 입력</GuardedLink><GuardedLink className="btn sm" href="/connections?service=anthropic">Claude 키 입력</GuardedLink></div>
     {envOwned ? <p className="small muted" style={{ margin: 0 }}>서버의 AI_PROVIDER 설정이 우선 적용되어 선택이 잠겨 있습니다. 화면에서 변경하려면 Render의 Environment에서 해당 항목을 제거한 뒤 재배포하세요.</p> : <div className="row"><button className="btn primary" disabled={!changed || save.isPending}>{save.isPending ? "저장 중…" : "선택 저장"}</button>{changed && <span className="small muted">저장하면 적용됩니다.</span>}</div>}
     {save.error && <ErrorBox error={save.error} />}
     {save.isSuccess && !changed && <div className="notice ok small" role="status">글쓰기 AI 선택을 저장했습니다.</div>}
@@ -149,6 +151,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
           </a>
         )}
       </div>
+      {(g.id === "gemini" || g.id === "openai") && <AiUsageGuide provider={g.id} setup />}
       {g.id === "openai" && <p className="connection-help">아래 API 키 칸에 붙여 넣고 <strong>키 저장 → 연결 확인</strong> 순서로 누르세요.</p>}
       {g.id === "naver" && <p className="connection-help">공개 뉴스 RSS 수집은 키 없이 사용할 수 있습니다. 네이버 블로그 검색을 추가하려면 NAVER API HUB → Application → 인증 정보에서 발급된 두 값을 입력한 뒤 <strong>키 저장 → 연결 확인</strong>을 누르세요.</p>}
       {last && <div className={`notice small ${last.ok ? "ok" : "err"}`} role="status"><strong>{last.ok ? "최근 연결 확인 성공" : "연결 확인 실패"}</strong><p style={{ margin: "6px 0" }}>{last.message}</p><span className="muted">{fmtDate(last.at)}</span></div>}
@@ -160,7 +163,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
         </button>
         {g.testable && (
           <button type="button" className="btn" onClick={() => test.mutate()} disabled={test.isPending || save.isPending || changed.length > 0} title={changed.length ? "먼저 키를 저장하세요" : undefined}>
-            {test.isPending ? "확인 중…" : sendsMessage ? "확인 메시지 보내기" : paidTest ? "테스트 호출 (유료)" : g.id === "openai" ? "연결 확인 · 생성 비용 없음" : "연결 확인"}
+            {test.isPending ? "확인 중…" : sendsMessage ? "확인 메시지 보내기" : paidTest ? "테스트 호출 (유료)" : (g.id === "openai" || g.id === "gemini") ? "연결 확인 · 생성 비용 없음" : "연결 확인"}
           </button>
         )}
       </div>
@@ -177,6 +180,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
 }
 
 const SERVICE_INFO: Record<string, { title: string; use: string; mark: string; keys: string[] }> = {
+  gemini: { title: "Gemini", use: "글쓰기 · 무료 등급 지원", mark: "G", keys: ["GEMINI_API_KEY"] },
   openai: { title: "OpenAI", use: "GPT 글쓰기 · 웹툰 이미지", mark: "O", keys: ["OPENAI_API_KEY"] },
   anthropic: { title: "Claude", use: "글쓰기 · 원고 다듬기", mark: "A", keys: ["ANTHROPIC_API_KEY"] },
   canva: { title: "Canva", use: "브랜드 템플릿 · 디자인", mark: "C", keys: ["CANVA_CLIENT_ID", "CANVA_CLIENT_SECRET"] },
