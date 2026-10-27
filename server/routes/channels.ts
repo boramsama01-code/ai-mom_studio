@@ -134,6 +134,7 @@ const officialPatch = z.object({
       titleSelector: z.string().trim().max(200).nullable().optional(),
       dateSelector: z.string().trim().max(200).nullable().optional(),
       maxItems: z.number().int().min(1).max(30).optional(),
+      format: z.enum(["links", "ged_selection"]).optional(),
     })
     .optional(),
 });
