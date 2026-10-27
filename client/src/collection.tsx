@@ -14,7 +14,7 @@ export function useKstToday() {
 }
 
 export function CollectionPanel({ date, detailed = false }: { date?: string; detailed?: boolean }) {
-  const { selected, select } = useChannel();
+  const { selected, select, current } = useChannel();
   const qc = useQueryClient(), toast = useToast();
   const [, navigate] = useLocation();
   const today = useKstToday();
@@ -58,6 +58,7 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
       <span className="muted">05:13 · 07:13 · 19:13 예약 / GitHub 실행 지연 가능</span>
     </div>
     {d.sourceMode === "public_rss" && <div className="small muted">최근 7일 뉴스 · Google 뉴스 RSS + 언론사 RSS {d.publicFeeds?.length ?? 0}곳 · 뉴스 수집은 API 키 없이 이용</div>}
+    {current?.contentType === "notice" && <div className="small muted">공식 모집 게시판부터 확인하고, 뉴스는 모집·접수 단어로 좁혀 검색합니다. 사후 홍보·대상 외 모집은 새로 저장하지 않습니다.</div>}
     {!d.naverReady && d.sourceMode !== "public_rss" && <div className="notice warn">네이버 검색 연결이 필요합니다. <GuardedLink href="/connections?service=naver">연결 확인</GuardedLink></div>}
     {searchAuthFailed && <div className="notice err" role="alert"><strong>최근 수집이 네이버 인증 단계에서 멈췄습니다.</strong><p style={{ margin: "6px 0" }}>저장된 Client ID·Client Secret 또는 검색 API 권한을 확인해 주세요. 신규 0건은 검색할 자료가 없다는 뜻이 아닙니다.</p><GuardedLink href="/connections?service=naver">네이버 키 확인·수정 →</GuardedLink><span className="small"> 키 저장 → 연결 확인 → 지금 수집 순서로 재개할 수 있습니다.</span></div>}
     {d.globalStop && <div className="notice warn">전역 정지 중이므로 수집이 실행되지 않습니다.</div>}
@@ -65,8 +66,10 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
     {detailed ? <div className="collection-channels">{d.channels.map(c => <article key={c.id} className="collection-channel">
       <div className="row between"><h3>{c.name}</h3><strong>{c.newItems}건</strong></div>
       <p className="small muted">검색어 {c.queries}개 · 화제 탐색 {c.discoveryQueries}개 · 연결된 공식 게시판 {c.boards}개</p>
+      {!!((c.noticeCandidates ?? 0) + (c.noticeUncertain ?? 0) + (c.noticeReports ?? 0)) && <p className="small"><strong>모집·접수 후보 {c.noticeCandidates ?? 0}건</strong> · 확인 필요 {c.noticeUncertain ?? 0}건 · 사후·대상 외·마감 {c.noticeReports ?? 0}건</p>}
       <div className="row small">{c.lastRun ? <><StatusBadge type="run" value={c.lastRun.status} /><span>{fmtDate(c.lastRun.startedAt)}</span><span>신규 {c.lastRun.counts.newItems ?? 0} · 중복 {c.lastRun.counts.duplicates ?? 0}</span></> : <span>아직 수집을 실행하지 않았습니다.</span>}</div>
       {c.lastRun && c.lastRun.counts.rssRequests !== undefined && <p className="small muted">공개 RSS {c.lastRun.counts.rssRequests}회 확인 · 언론사 피드 {c.lastRun.counts.rssFeedOk ?? 0}곳 응답 · Google 검색 {c.lastRun.counts.googleQueries ?? 0}회</p>}
+      {!!c.lastRun?.counts.noticeReportsSkipped && <p className="small muted">사후 홍보·대상 외 모집 {c.lastRun.counts.noticeReportsSkipped}건은 신규 저장에서 제외했습니다.</p>}
       {!!c.lastRun?.errors.length && <details className="small"><summary>최근 실행에서 확인할 내용 {c.lastRun.errors.length}개</summary><ul>{c.lastRun.errors.map((e, i) => <li key={i}>{e.message}</li>)}</ul></details>}
       {c.jobs.some(j => j.stale) && <p className="notice warn small">오래 대기하거나 중단된 요청이 있습니다. 위의 ‘대기 수집 재개’로 다시 처리할 수 있습니다.</p>}
       <div className="row"><button className="btn sm" onClick={() => showItems(c.id)}>이 날짜 자료 보기</button><button className="btn sm ghost" onClick={() => { select(c.id); navigate("/rules"); }}>검색어 관리</button></div>
