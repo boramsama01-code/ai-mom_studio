@@ -9,7 +9,9 @@
 - POST source-text는 인증·CSRF·채널·낙관적 버전을 검사하고 본문에 없는 구절/비HTTP·자격증명 URL을 거부. 수동 저장은 네트워크·유료 AI를 호출하지 않음. 실패·409 시 클라이언트 입력 유지 및 명시적 최신 상태 확인 후 재시도.
 - 수동 본문은 항목별 불변 source_documents 스냅샷 및 content_sources.manual_primary 연결로 보관. 원래 primarySourceId는 유지하여 다음 수집 중복 제거 및 다른 채널 공유 원문을 보존. 이전 수동 본문은 previous_manual로 남김. 목록·상세·후속 공고 추출/대화 생성은 현재 수동 본문 사용. 직접 입력 자료는 자동 공식 확인으로 승격하지 않음.
 - 기존 편집 payload는 복사하여 보존하고 새 이력 생성·기존 승인 무효화·재검토 처리. 원문 재확보 요청으로 수동 본문을 덮거나 실패 상태로 되돌리지 않음. 새 DB 스키마 변경 없음.
-- 로컬 타입 검사·본문/입력 UI/수집 UI 8개 테스트·빌드 완료. 실제 PostgreSQL 검증과 배포 결과는 GitHub PR 및 Render에서 후속 확인.
+- 로컬 타입 검사·본문/입력 UI/수집 UI 8개 테스트·빌드 완료. PR #19 CI `40460680653`, job `122044280078`: PostgreSQL 통합 포함 32개 파일·234개 테스트, 타입 검사·빌드 모두 성공. 검증 head `e3fb0e93623f91ed4253f77b03d9ea94640ad46e`. PR #19 squash 병합 완료, main `fdcb2ef5ae93e994a1d0f3afb00a9da87b2eee22`. https://github.com/boramsama01-code/ai-mom_studio/pull/19
+- **PR #19 운영 배포 완료**: Render `dep-dbg471qjnfac739kmbf0`, main `fdcb2ef5ae93e994a1d0f3afb00a9da87b2eee22`, 2026-10-27 15:25:17 KST live. 서버 시작 정상, health HTTP 200/DB connected/auth configured, 비로그인 source-text POST 401. 새 JS `index-DiS_GgjC.js` HTTP 200 및 본문 직접 붙여넣기/본문과 근거 구절 저장/직접 저장한 본문 발췌/source-text 경로 포함 확인.
+- 실제 본문 저장·재조회·편집본 보존은 PostgreSQL CI에서 검증. 운영 로그인 후 실제 저장은 미검증이며 운영 업무 데이터에 테스트 본문을 넣지 않음. 자동 크롤링의 모든 원문 확보 실패를 해결한 것은 아니며 이번 수정은 실패 시 수동 입력과 근거 확인을 계속할 수 있는 경로다. 같은 PR 재배포·재승인 요청 불필요.
 
 ## 2026-10-27 작업 · 모집 공고 품질 개선
 
