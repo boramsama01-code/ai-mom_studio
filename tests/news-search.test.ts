@@ -8,6 +8,16 @@ const feed = { name: "과학신문", url: "https://science.example/rss", site: "
 const rss = (title = "과학고 입학설명회", link = "https://science.example/1", date = "2026-10-26T00:00:00Z", source = "") => `<rss><channel><item><title>${title}</title><link>${link}</link><description>입학 설명회 안내</description><pubDate>${date}</pubDate>${source}</item></channel></rss>`;
 
 describe("노들섬 방식의 독립적인 공개 뉴스 수집", () => {
+  it("공고 채널만 모집 검색을 좁히고 오래된 신청 공고를 최신 사후 기사보다 먼저 반환한다", async () => {
+    const xml = `<rss><channel>${rss("과학캠프 성료", "https://science.example/report").match(/<item>.*<\/item>/)![0]}${rss("과학캠프 참가자 모집", "https://science.example/invite", "2026-10-25T00:00:00Z").match(/<item>.*<\/item>/)![0]}</channel></rss>`;
+    for (const recruitment of [true, false]) {
+      const urls: string[] = [];
+      const session = createNewsSearch({ now, recruitment, feeds: [], loadXml: async url => { urls.push(url); return xml; } });
+      const result = await session.search("과학캠프", "news", 1, { naver: 0, limit: 5 });
+      expect(result[0].title).toBe(recruitment ? "과학캠프 참가자 모집" : "과학캠프 성료");
+      expect(new URL(urls[0]).searchParams.get("q")!.includes("모집 OR 접수")).toBe(recruitment);
+    }
+  });
   it("Google RSS 언론사와 게시일을 보존하고 오래된 자료와 잘못된 링크를 제외한다", () => {
     const item = parseNewsRss(rss("블랙홀 관측 - 과학신문", "https://news.google.com/rss/articles/1", undefined, '<source url="https://science.example">과학신문</source>'), feed, now, true)[0];
     expect(item).toMatchObject({ title: "블랙홀 관측", publisher: "과학신문", provider: "google_news_rss" });
