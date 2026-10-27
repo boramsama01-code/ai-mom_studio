@@ -1,24 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { StudioContent } from "@shared/studio";
 import { applyStudioTextReply, parseStudioTextReply, STUDIO_TEXT_REPLY_LIMIT, studioChatGptTextPrompt, studioTextAdditions, type StudioTextDraft } from "@shared/studioTextImport";
 import { useDirtyGuard } from "../state";
 import { useToast } from "../toast";
+import { ChatGptLaunch } from "../ChatGptLaunch";
 
 export function StudioPromptCopy({ prompt, label, disabled = false }: { prompt: string; label: string; disabled?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  const [show, setShow] = useState(false);
-  const field = useRef<HTMLTextAreaElement>(null);
-  const toast = useToast();
-  useEffect(() => { setCopied(false); }, [prompt]);
-  useEffect(() => { if (show) field.current?.select(); }, [show]);
-  async function copy() {
-    try { await navigator.clipboard.writeText(prompt); setCopied(true); toast("ok", "프롬프트를 복사했습니다. ChatGPT에 붙여넣어 주세요."); }
-    catch { setShow(true); toast("err", "아래 프롬프트를 직접 선택해 복사해 주세요."); }
-  }
-  return <div className="studio-prompt-copy">
-    <div className="row"><button type="button" className="btn primary" disabled={disabled} onClick={copy}>{copied ? "✓ 프롬프트 복사됨" : label}</button><button type="button" className="btn ghost sm" aria-expanded={show} onClick={() => setShow(!show)}>프롬프트 보기</button></div>
-    {show && <label className="field small">복사할 프롬프트<textarea ref={field} readOnly rows={6} value={prompt} onFocus={event => event.target.select()} /></label>}
-  </div>;
+  return <ChatGptLaunch prompt={prompt} disabled={disabled} copyLabel={label} label={label.includes("캡션") ? "ChatGPT에서 캡션 받기 ↗" : "ChatGPT에서 초안 받기 ↗"} />;
 }
 
 export function StudioTextImport({ content, channelName, disabled, apply }: {
@@ -48,9 +36,9 @@ export function StudioTextImport({ content, channelName, disabled, apply }: {
     toast("ok", "빈칸에 초안을 반영했습니다. 내용을 검토한 뒤 상단의 저장을 눌러 주세요.");
   }
   return <div className="studio-text-import stack">
-    <p className="small muted">프롬프트 복사 → ChatGPT에서 초안 작성 → 답변 가져오기</p>
+    <p className="small muted">ChatGPT에서 초안 받기 → 새 탭에서 결과 확인 → 답변 가져오기</p>
     {!!content.memo.trim() && <label className="studio-memo-option"><input type="checkbox" disabled={disabled} checked={includeMemo} onChange={event => setIncludeMemo(event.target.checked)} />기획·참고 자료도 프롬프트에 포함</label>}
-    <StudioPromptCopy prompt={studioChatGptTextPrompt(content, channelName, includeMemo)} label="1 · 초안 프롬프트 복사" disabled={disabled || !content.title.trim()} />
+    <StudioPromptCopy prompt={studioChatGptTextPrompt(content, channelName, includeMemo)} label="프롬프트 복사" disabled={disabled || !content.title.trim()} />
     <details className="studio-more studio-text-answer" open={reply ? true : undefined}>
       <summary>2 · ChatGPT 답변 가져오기</summary>
       <div className="stack">
