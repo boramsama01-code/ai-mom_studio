@@ -4,6 +4,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { safeFetch, FetchFailure } from "./safeFetch";
 import { sha256 } from "./text";
 import { articleAccessProblem, decodeGoogleNewsUrl, googleArticleLink, isGoogleNewsUrl, publisherArticleLink, structuredArticleBody, type ArticleContext } from "./articleSource";
+import { resolveGoogleNewsArticle } from "./googleNewsResolve";
 
 export type Attachment = { url: string; name: string; kind: string; status: string; reason?: string };
 export type ExtractResult =
@@ -64,13 +65,11 @@ export function extractHtml(html: string, baseUrl: string): { title: string; tex
     const choices = $(selector).toArray().map(el => cleanText($(el).text())).filter(t => t.length >= 80);
     if (choices.length) { text = choices.sort((a, b) => b.length - a.length)[0]; break; }
   }
-  // Prefer a real articleBody over a short visible teaser. Metadata summaries are never bodies.
   if (structured.text.length >= 80 && structured.text.length > text.length) text = structured.text;
   if (!text) {
     for (const selector of ["main", "#content", "body"]) {
       const node = $(selector).first();
       const paragraphs = node.find("p").toArray().map(el => cleanText($(el).text())).filter(t => t.length >= 30);
-      // Generic layouts need prose paragraphs, not a long navigation/menu string.
       if (paragraphs.join("\n").length >= 80) { text = paragraphs.join("\n"); break; }
       const t = cleanText(node.text());
       if (node.find("a").length === 0 && t.length >= 80) { text = t; break; }
@@ -94,7 +93,7 @@ function failure(e: unknown): ExtractResult {
   return { ok: false, status: "failed", error: "원문 조회 실패 — 원문 주소와 연결 상태를 확인해 주세요." };
 }
 
-/** At most three page fetches and one allowlisted publisher feed, within a shared deadline. */
+/** Bounded page/URL-lookup/feed requests, all using the shared deadline and caller budget. */
 export async function fetchAndExtract(url: string, fetchImpl = safeFetch, context: ArticleContext = {}): Promise<ExtractResult> {
   let target = preferReadableUrl(decodeGoogleNewsUrl(url) || url);
   const visited = new Set<string>(), deadline = Date.now() + 24_000;
@@ -119,12 +118,18 @@ export async function fetchAndExtract(url: string, fetchImpl = safeFetch, contex
     if (restriction) return { ok: false, status: "blocked", error: restriction };
     if (isGoogleNewsUrl(res.finalUrl)) {
       let original = googleArticleLink(html, res.finalUrl);
+      // Modern opaque IDs need Google's public per-article signature + URL lookup.
+      // Reuse the page already fetched; do not request a second Google article page.
+      if (!original) {
+        try { original = await resolveGoogleNewsArticle(res.finalUrl, html, fetchImpl, { deadline, takeExtraCall: context.takeExtraCall }); }
+        catch (e) { return failure(e); }
+      }
       if (!original && Date.now() < deadline) {
         try { original = await publisherArticleLink(context, fetchImpl, deadline - Date.now()); }
         catch (e) { return failure(e); }
       }
       if (original) { target = preferReadableUrl(original); continue; }
-      return { ok: false, status: "unsupported", error: "Google 뉴스 중간 링크에서 언론사 원문 주소를 확인하지 못했습니다. 기사 제목·요약을 본문으로 대신 저장하지 않았습니다. 원문을 열어 언론사 주소를 근거 자료로 추가하거나 본문을 붙여넣어 주세요." };
+      return { ok: false, status: "unsupported", error: "Google 뉴스 중간 링크의 원문 주소 조회를 완료하지 못했습니다. Google 응답 형식 변경 또는 원문 연결 정보 누락 가능성이 있습니다. 다른 기사를 추측하거나 제목·요약을 본문으로 저장하지 않았습니다." };
     }
     const { title, text, attachments } = extractHtml(html, res.finalUrl);
     if (text.length < 80) return { ok: false, status: "unsupported", error: "공개 HTML·구조화 데이터에서 충분한 본문을 찾지 못했습니다. 자바스크립트로만 표시되는 페이지이거나 본문 형식 확인이 필요합니다. 원문을 직접 열어 확인하거나 본문을 붙여넣어 주세요.", attachments };
