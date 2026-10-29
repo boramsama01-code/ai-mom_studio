@@ -15,13 +15,12 @@ if (process.env.APP_DATABASE_URL) {
     await client.query("BEGIN READ ONLY");
     await client.query("SET LOCAL statement_timeout = '8s'");
     const r = await client.query(`SELECT id, title, original_url, meta FROM source_documents
-      WHERE kind = 'google_news_rss' AND is_sample = false AND fetch_status <> 'ok'
-      ORDER BY updated_at DESC, id DESC LIMIT 3`);
+      WHERE kind = 'google_news_rss' AND is_sample = false AND fetch_status IN ('failed', 'unsupported')
+      ORDER BY last_fetched_at DESC NULLS LAST, id DESC LIMIT 3`);
     samples = r.rows.map(row => ({ sourceId: row.id, title: row.title, url: row.original_url,
       publisherUrl: typeof row.meta?.publisherUrl === "string" ? row.meta.publisherUrl : undefined }));
     await client.query("ROLLBACK");
   } catch {
-    // Do not log database exception text: some drivers include connection details.
     notices.push("Saved-source read unavailable; no production data was changed.");
   } finally { await client.end().catch(() => undefined); }
 }
@@ -44,7 +43,7 @@ for (const sample of samples) {
   };
   const result = await fetchAndExtract(sample.url, fetcher, { title: sample.title, publisherUrl: sample.publisherUrl });
   results.push({ ...sample, resolvedUrl, calls, bodyOk: result.ok,
-    ...(result.ok ? { finalUrl: result.finalUrl, characters: result.text.length, pageTitle: result.title }
+    ...(result.ok ? { finalUrl: result.finalUrl, characters: result.text.length, pageTitle: result.title, bodySample: result.text.slice(0, 160) }
       : { status: result.status, reason: result.error }) });
   await new Promise(r => setTimeout(r, 1500));
 }
