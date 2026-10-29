@@ -1,39 +1,25 @@
-# Render Blueprint — 관리자 웹앱 (무료 플랜)
-# DB는 Render 무료 DB(30일 후 만료)가 아니라 Neon을 사용합니다. APP_DATABASE_URL에 Neon 주소를 넣으세요.
 services:
   - type: web
-    name: ai-mom-studio
+    name: woori-ledger
     runtime: node
-    plan: free
+    repo: https://github.com/boramsama01-code/ai-mom_studio
+    branch: woori-ledger-render
     region: singapore
+    plan: 0.5c-512mb
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
-    autoDeploy: true
+    autoDeployTrigger: commit
+    disk:
+      name: ledger-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
-      - key: NODE_VERSION
-        value: "22"
-      - key: APP_ENV
+      - key: NODE_ENV
         value: production
-      # 처음 만들 때 입력하는 값은 아래 3개뿐입니다(sync: false는 빈칸으로 둘 수 없음).
-      # GPT·Claude·네이버 등 API 키는 배포 후 앱의 API 설정에서 입력할 수 있습니다.
-      # 기존 DB·APP_SESSION_SECRET·APP_SECRETS_KEY는 재배포 시 유지하세요.
-      - key: APP_DATABASE_URL
-        sync: false
-      - key: ADMIN_USERNAME
-        sync: false
-      - key: ADMIN_PASSWORD_HASH
-        sync: false
-      - key: APP_SESSION_SECRET
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: DATA_DIR
+        value: /var/data
+      - key: OWNER_SETUP_KEY
         generateValue: true
-      - key: DEMO_MODE
-        value: "false"
-      - key: DRY_RUN
-        value: "true"
-      - key: AUTO_COLLECT
-        value: "false"
-      - key: AUTO_GENERATE
-        value: "false"
-      - key: AUTO_PUBLISH
-        value: "false"
-

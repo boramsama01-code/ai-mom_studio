@@ -1,1 +1,0 @@
-ALTER TABLE "content_items" ADD COLUMN "discovery" jsonb;
