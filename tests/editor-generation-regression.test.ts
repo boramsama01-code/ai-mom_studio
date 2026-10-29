@@ -45,10 +45,21 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); });
-async function settle() { await act(async () => { await new Promise(r => setTimeout(r, 25)); }); }
+// Detail loading mounts a second component which starts the settings query. Drain both
+// query notifications and React effects, rather than assuming one fixed delay is enough.
+async function settle() {
+  for (let i = 0; i < 30; i++) {
+    await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+    if (!client.isFetching() && !client.isMutating()) {
+      await act(async () => { await new Promise(r => setTimeout(r, 10)); });
+      if (!client.isFetching() && !client.isMutating()) return;
+    }
+  }
+  throw new Error("Mock queries did not settle");
+}
 async function render(element: React.ReactNode) { await act(async () => root.render(createElement(QueryClientProvider, { client }, element))); await settle(); }
 function button(text: string) { const b = [...host.querySelectorAll("button")].find(b => b.textContent?.includes(text) && !b.closest("[hidden]")); if (!b) throw new Error(`Button not found: ${text}`); return b; }
-async function click(text: string) { await act(async () => button(text).click()); await settle(); }
+async function click(text: string) { const b = button(text); expect(b.disabled, `${text} should be enabled`).toBe(false); await act(async () => b.click()); await settle(); }
 async function input(el: HTMLTextAreaElement | HTMLInputElement, value: string) {
   await act(async () => { const prototype = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(el, value); el.dispatchEvent(new Event("input", { bubbles: true })); });
 }
@@ -82,8 +93,7 @@ describe("webtoon API-first generation", () => {
     expect(host.textContent).not.toContain("저장 전 변경사항");
   });
   it("saves typed changes before requesting generation and rejects double clicks", async () => {
-    await render(createElement(StudioPage, { cardId: 8 }));
-    await input(field("제목"), "직접 쓴 제목");
+    await render(createElement(StudioPage, { cardId: 8 })); await input(field("제목"), "직접 쓴 제목");
     await act(async () => { button("빈칸 초안 채우기").click(); button("빈칸 초안 채우기").click(); }); await settle();
     const writes = mocks.api.mock.calls.filter(([, o]) => o?.method === "PATCH" || o?.method === "POST");
     expect(writes.map(([p]) => p)).toEqual(["/studio/cards/8", "/studio/cards/8/generate"]);
@@ -93,23 +103,22 @@ describe("webtoon API-first generation", () => {
   it("preserves edits made while generation is running", async () => {
     await render(createElement(StudioPage, { cardId: 8 })); await click("빈칸 초안 채우기");
     await input(field("전체 원고"), "생성 중 직접 고친 원고"); await finishJob();
-    expect(field("전체 원고").value).toBe("생성 중 직접 고친 원고");
-    expect(host.textContent).toContain("서버에 새 버전이 있습니다");
+    expect(field("전체 원고").value).toBe("생성 중 직접 고친 원고"); expect(host.textContent).toContain("서버에 새 버전이 있습니다");
   });
   it("keeps fields and saved version intact on API failure", async () => {
     failGeneration = true; await render(createElement(StudioPage, { cardId: 8 })); await click("빈칸 초안 채우기");
     expect(field("전체 원고").value).toBe(""); expect(detail.card.version).toBe(1);
-    expect(host.textContent).toContain("API 테스트 실패");
+    expect(host.textContent, host.innerHTML).toContain("API 테스트 실패");
+    expect(host.querySelector<HTMLDetailsElement>("details.studio-work-status")?.open).toBe(true);
     expect(mocks.api.mock.calls.filter(([p]) => String(p).endsWith("/generate"))).toHaveLength(1);
   });
   it("shows missing-key guidance rather than silently switching mode or invoking an API", async () => {
     connected = false; await render(createElement(StudioPage, { cardId: 8 }));
     expect(button("빈칸 초안 채우기").disabled).toBe(true);
-    expect(host.textContent).toContain("작성 AI의 키가 없습니다");
+    expect(host.textContent, host.innerHTML).toContain("작성 AI의 키가 없습니다");
     expect(mocks.api.mock.calls.some(([p]) => String(p).includes("generate"))).toBe(false);
   });
 });
-
 function itemDetail(payload = emptyPayload("science_dialogue", "과학 주제"), version = 1): any {
   return { item: { id: 9, kind: "science_dialogue", title: "과학 주제", version }, primary: null,
     current: { id: version, revisionNo: version, payload, author: "llm", model: "test-model" }, linked: [], revisions: [], cards: [], approvals: [], deliveries: [], similar: [], defaultCaptions: null };
@@ -118,21 +127,17 @@ const science = { ...emptyPayload("science_dialogue", "과학 주제"), key_ques
 describe("collected-item editor generation regression", () => {
   it("places API before ChatGPT and fills all fields when a new server revision arrives", async () => {
     await render(createElement(EditPanel, { d: itemDetail(), cid: 1 }));
-    expect(host.querySelector("details summary")?.textContent).toContain("API 자동 작성");
-    await click("GPT로 초안 생성");
+    expect(host.querySelector("details summary")?.textContent).toContain("API 자동 작성"); await click("GPT로 초안 생성");
     await render(createElement(EditPanel, { d: itemDetail(science, 2), cid: 1 }));
-    expect(field("핵심 질문").value).toBe(science.key_question);
-    expect(field("과학적 근거").value).toBe(science.scientific_basis);
+    expect(field("핵심 질문").value).toBe(science.key_question); expect(field("과학적 근거").value).toBe(science.scientific_basis);
     expect(host.querySelector<HTMLTextAreaElement>('[aria-label="쉬운 배경 (3문장) 1"]')!.value).toBe(science.background[0]);
     expect(host.querySelector<HTMLTextAreaElement>('[aria-label="대화 질문 (3개) 3"]')!.value).toBe(science.discussion_questions[2]);
     expect(button("새 버전으로 저장").disabled).toBe(true);
   });
   it("does not overwrite genuine user edits when a server revision arrives", async () => {
-    await render(createElement(EditPanel, { d: itemDetail(), cid: 1 }));
-    await input(field("핵심 질문"), "사용자가 직접 쓴 질문");
+    await render(createElement(EditPanel, { d: itemDetail(), cid: 1 })); await input(field("핵심 질문"), "사용자가 직접 쓴 질문");
     await render(createElement(EditPanel, { d: itemDetail(science, 2), cid: 1 }));
-    expect(field("핵심 질문").value).toBe("사용자가 직접 쓴 질문");
-    expect(host.textContent).toContain("직접 입력한 내용은 유지했습니다");
+    expect(field("핵심 질문").value).toBe("사용자가 직접 쓴 질문"); expect(host.textContent).toContain("직접 입력한 내용은 유지했습니다");
   });
   it("adopts the saved baseline instead of leaving the save button permanently dirty", async () => {
     await render(createElement(EditPanel, { d: itemDetail(), cid: 1 }));
