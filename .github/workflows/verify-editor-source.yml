@@ -39,6 +39,8 @@ jobs:
       - name: All tests including database and React UI regressions
         run: npm test -- --reporter=default --reporter=json --outputFile=test-report.json
       - run: npm run build
+      - name: Public article smoke checks (no AI or database writes)
+        run: ./node_modules/.bin/tsx scripts/smoke-public-articles.ts
       - name: Commit only verified application files to this fix branch
         run: |
           test "${GITHUB_REF_NAME}" = 'fix/api-first-webtoon-20261029'
@@ -50,13 +52,27 @@ jobs:
             git push origin HEAD:fix/api-first-webtoon-20261029
           fi
           git rev-parse HEAD
-      - name: Focused editor diagnostics
-        if: failure()
-        run: nl -ba client/src/pages/ItemDetail.tsx | sed -n '260,380p'
+      - name: Structured verification summary
+        if: always()
+        run: |
+          node --input-type=module <<'JS'
+          import { existsSync, readFileSync } from 'node:fs';
+          if (existsSync('test-report.json')) {
+            const r = JSON.parse(readFileSync('test-report.json', 'utf8'));
+            console.log(`::notice::Tests ${r.numPassedTests}/${r.numTotalTests} passed; ${r.numFailedTests} failed; ${r.numPendingTests} pending.`);
+            for (const file of r.testResults ?? []) for (const t of file.assertionResults ?? []) if (t.status === 'failed') {
+              const message = (t.failureMessages ?? []).join(' ').replace(/\u001b\[[0-9;]*m/g, '').replace(/\n/g, '%0A').slice(0, 2500);
+              console.log(`::error::${t.fullName}: ${message}`);
+            }
+          }
+          if (existsSync('public-article-smoke.json')) console.log('::notice::Public article checks ' + readFileSync('public-article-smoke.json','utf8').replace(/\n/g,' '));
+          JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: editor-article-test-report
-          path: test-report.json
+          path: |
+            test-report.json
+            public-article-smoke.json
           if-no-files-found: ignore
           retention-days: 3
