@@ -1,0 +1,49 @@
+name: Verify public studio release
+on:
+  push:
+    branches: [verify/studio-release-20261029]
+permissions:
+  contents: read
+jobs:
+  public-read-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Check health and new frontend markers
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          const origin = 'https://ai-mom-studio.onrender.com';
+          const attempts = [];
+          for (let attempt = 0; attempt < 12; attempt++) {
+            const result = { checkedAt: new Date().toISOString(), attempt: attempt + 1 };
+            try {
+              const health = await fetch(origin + '/api/health', { signal: AbortSignal.timeout(15000) });
+              result.healthStatus = health.status;
+              const root = await fetch(origin + '/?release-check=20261029-' + Date.now(), { signal: AbortSignal.timeout(15000), headers: { 'cache-control': 'no-cache' } });
+              result.pageStatus = root.status;
+              const html = await root.text();
+              const scripts = [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map(m => new URL(m[1], origin)).filter(u => u.origin === origin).slice(0, 4);
+              result.assets = scripts.map(u => u.pathname);
+              let code = '';
+              for (const url of scripts) {
+                const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+                if (response.ok) code += await response.text();
+              }
+              result.studioApiFirstMarker = code.includes('studio-api-writing');
+              result.itemApiFirstMarker = code.includes('API 자동 작성 · Gemini·GPT');
+              result.verified = health.ok && root.ok && result.studioApiFirstMarker && result.itemApiFirstMarker;
+            } catch (e) { result.error = e.message; }
+            attempts.push(result);
+            console.log(JSON.stringify(result));
+            writeFileSync('public-release-check.json', JSON.stringify({ expectedCommit: '4da65b85375e4e6fcdec2a180276b10dbf4cc91b', scope: 'Public health and frontend assets only. No login, paid AI request, production data modification, or external posting.', verified: result.verified === true, attempts }, null, 2));
+            if (result.verified) break;
+            if (attempt < 11) await new Promise(r => setTimeout(r, 10000));
+          }
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-studio-release-check
+          path: public-release-check.json
+          retention-days: 3
