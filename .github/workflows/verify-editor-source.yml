@@ -50,6 +50,9 @@ jobs:
             git push origin HEAD:fix/api-first-webtoon-20261029
           fi
           git rev-parse HEAD
+      - name: Focused editor diagnostics
+        if: failure()
+        run: nl -ba client/src/pages/ItemDetail.tsx | sed -n '260,380p'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
