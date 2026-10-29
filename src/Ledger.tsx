@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowDownToLine, ArrowRight, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, FileImage, FileText, GraduationCap, LoaderCircle, LogOut, Paperclip, Pencil, Plus, ReceiptText, RefreshCw, Search, Trash2, UploadCloud, WalletCards, X } from "lucide-react";
+import { ArrowDownToLine, ArrowRight, CalendarDays, Check, CheckCircle2, ChevronLeft, ChevronRight, FileImage, FileText, GraduationCap, LoaderCircle, Paperclip, Pencil, Plus, ReceiptText, RefreshCw, Search, Trash2, UploadCloud, WalletCards, X } from "lucide-react";
 import { CATEGORIES, MAX_AMOUNT, MAX_FILE_BYTES, MAX_TOTAL_FILE_BYTES, MAX_FILES, RECEIPT_ACCEPT, formatWon, isDate, monthRange, todayKST, validateExpense, type Category, type Child, type Expense, type Receipt } from "./ledger";
+import { ledgerRequest, receiptBlob, exportBackup, importBackup } from "./browser-store";
 
 type Draft = { id: string; paidOn: string; category: Category; child: Child | ""; title: string; amount: string; version?: number; receipts: Receipt[]; files: File[] };
 type Range = { from: string; to: string };
@@ -12,7 +13,7 @@ function createEntryId() {
   const hex = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-const categoryColors: Record<Category, string> = { "교육비": "#8270ed", "식비": "#f4a259", "생활용품": "#d8ba69", "주거·통신": "#748fe7", "교통·차량": "#64b5b3", "의료·건강": "#e58caa", "쇼핑": "#b28dde", "문화·여가": "#edba55", "여행": "#5fa9dc", "기타": "#a4a8b4" };
+const categoryColors: Record<Category, string> = { "교육비": "#187d73", "식비": "#d99045", "생활용품": "#b59d50", "주거·통신": "#5d86ad", "교통·차량": "#4d9d99", "의료·건강": "#cf806e", "쇼핑": "#899958", "문화·여가": "#d0a544", "여행": "#5c9cae", "기타": "#8e9997" };
 function sizeLabel(size: number) { return size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`; }
 function dateLabel(date: string) { return date.replaceAll("-", "."); }
 function monthLabel(date: string) { const [, month, day] = date.split("-"); return `${Number(month)}월 ${Number(day)}일`; }
@@ -20,8 +21,8 @@ function csvCell(value: string | number) { const str = String(value); return `"$
 async function readResponse(response: Response) {
   const data = await response.json().catch(() => null);
   const result = data && typeof data === "object" && !Array.isArray(data) ? data as { error?: string; expenses?: Expense[]; ok?: boolean; id?: string } : null;
-  if (!response.ok) throw new Error((typeof result?.error === "string" && result.error) || (response.status === 401 ? "로그인이 만료되었어요. 새로고침한 후 다시 로그인해 주세요." : "요청을 완료하지 못했어요. 잠시 후 다시 시도해 주세요."));
-  if (!result) throw new Error("서버 응답을 확인하지 못했어요. 새로고침한 후 다시 로그인해 주세요.");
+  if (!response.ok) throw new Error((typeof result?.error === "string" && result.error) || "요청을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.");
+  if (!result) throw new Error("저장된 내역을 확인하지 못했습니다. 새로고침한 후 다시 시도해 주세요.");
   return result;
 }
 
@@ -46,11 +47,24 @@ function Modal({ title, description, children, onClose, busy = false, className 
   return <div className="modal-shade"><div className={`modal ${className}`} ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}><div className="modal-heading"><div><h2 id={titleId}>{title}</h2>{description && <p className="muted">{description}</p>}</div><button className="icon-button" aria-label="창 닫기" onClick={onClose} disabled={busy}><X size={21}/></button></div>{children}</div></div>;
 }
 
+function useReceiptUrl(receipt: Receipt) {
+  const [url, setUrl] = useState(""); const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true; let objectUrl = ""; setUrl(""); setError("");
+    receiptBlob(receipt.id).then(blob => { if (!active) return; objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); }).catch(e => { if (active) setError(e instanceof Error ? e.message : "영수증을 불러오지 못했습니다."); });
+    return () => { active = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [receipt.id]);
+  return { url, error };
+}
+function ReceiptFileLink({ receipt }: { receipt: Receipt }) {
+  const { url, error } = useReceiptUrl(receipt);
+  return error ? <span title={error}>{receipt.name} · 파일 없음</span> : <a href={url || undefined} aria-disabled={!url} onClick={event => { if (!url) event.preventDefault(); }} target="_blank" rel="noopener noreferrer">{receipt.name}</a>;
+}
 function ReceiptViewer({ expense, onClose }: { expense: Expense; onClose: () => void }) {
-  const [selected, setSelected] = useState(expense.receipts[0]);
-  const [failed, setFailed] = useState(false);
+  const [selected, setSelected] = useState(expense.receipts[0]); const [failed, setFailed] = useState(false);
+  const { url, error } = useReceiptUrl(selected);
   useEffect(() => setFailed(false), [selected.id]);
-  return <Modal title="영수증 보기" description={expense.title} onClose={onClose} className="receipt-modal"><div className="receipt-tabs">{expense.receipts.map((r, i) => <button key={r.id} className={`receipt-tab ${selected.id === r.id ? "selected" : ""}`} onClick={() => setSelected(r)}>{r.mime === "application/pdf" ? <FileText size={16}/> : <FileImage size={16}/>}영수증 {i + 1}</button>)}</div><div className="receipt-preview">{failed ? <p>미리보기를 불러오지 못했어요. 아래에서 원본을 열어 주세요.</p> : selected.mime === "application/pdf" ? <iframe src={`/api/receipts/${selected.id}`} title={selected.name}/> : <img src={`/api/receipts/${selected.id}`} alt={selected.name} onError={() => setFailed(true)}/>}</div><div className="receipt-bottom"><div className="receipt-name"><strong>{selected.name}</strong><span>{sizeLabel(selected.size)}</span></div><div className="button-row"><a className="button secondary small" href={`/api/receipts/${selected.id}`} target="_blank" rel="noopener noreferrer">원본 열기</a><a className="button primary small" href={`/api/receipts/${selected.id}?download=1`} download><ArrowDownToLine size={16}/>다운로드</a></div></div></Modal>;
+  return <Modal title="영수증 보기" description={expense.title} onClose={onClose} className="receipt-modal"><div className="receipt-tabs">{expense.receipts.map((r, i) => <button key={r.id} className={`receipt-tab ${selected.id === r.id ? "selected" : ""}`} onClick={() => setSelected(r)}>{r.mime === "application/pdf" ? <FileText size={16}/> : <FileImage size={16}/>}영수증 {i + 1}</button>)}</div><div className="receipt-preview">{error ? <p role="alert">{error}</p> : !url ? <LoaderCircle className="spin" size={24}/> : failed ? <p>미리보기를 불러오지 못했어요. 아래에서 원본을 열어 주세요.</p> : selected.mime === "application/pdf" ? <iframe src={url} title={selected.name}/> : <img src={url} alt={selected.name} onError={() => setFailed(true)}/>}</div><div className="receipt-bottom"><div className="receipt-name"><strong>{selected.name}</strong><span>{sizeLabel(selected.size)}</span></div>{url && <div className="button-row"><a className="button secondary small" href={url} target="_blank" rel="noopener noreferrer">원본 열기</a><a className="button primary small" href={url} download={selected.name}><ArrowDownToLine size={16}/>다운로드</a></div>}</div></Modal>;
 }
 
 function ExpenseEditor({ draft: initialDraft, onClose, onSaved }: { draft: Draft; onClose: () => void; onSaved: (paidOn: string) => void }) {
@@ -77,15 +91,15 @@ function ExpenseEditor({ draft: initialDraft, onClose, onSaved }: { draft: Draft
       const payload = validateExpense({ id: draft.id, paidOn: draft.paidOn, category: draft.category, child: draft.category === "교육비" ? draft.child : null, title: draft.title, amount, version: draft.version, retainedReceiptIds: draft.receipts.map(r => r.id) });
       const form = new FormData(); form.append("payload", JSON.stringify(payload)); for (const file of draft.files) form.append("files", file);
       busyRef.current = true; setBusy(true);
-      await readResponse(await fetch(editing ? `/api/expenses/${draft.id}` : "/api/expenses", { method: editing ? "PUT" : "POST", body: form }));
+      await readResponse(await ledgerRequest(editing ? `/api/expenses/${draft.id}` : "/api/expenses", { method: editing ? "PUT" : "POST", body: form }));
       onSaved(draft.paidOn);
     } catch (e) { setError(e instanceof Error ? e.message : "저장하지 못했어요. 다시 시도해 주세요."); }
     finally { busyRef.current = false; setBusy(false); }
   }
-  return <Modal title={editing ? "지출 수정" : "지출 추가"} onClose={onClose} busy={busy}><form onSubmit={submit} className="expense-form"><fieldset disabled={busy}><div className="form-grid"><label className="field">결제일 <span className="required">*</span><input type="date" value={draft.paidOn} onChange={e => setField("paidOn", e.target.value)} required min="1900-01-01" max="2200-12-31"/></label><label className="field">카테고리 <span className="required">*</span><select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value as Category, child: e.target.value === "교육비" ? d.child : "" }))}>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></label></div>{draft.category === "교육비" && <div className="child-field"><span className="field-label">교육비 대상 <span className="required">*</span></span><div className="child-options">{(["현우", "정우"] as Child[]).map(child => <label key={child} className={`child-option ${draft.child === child ? "selected" : ""}`}><input type="radio" name="child" value={child} checked={draft.child === child} onChange={() => setField("child", child)} required/><GraduationCap size={18}/>{child}{draft.child === child && <Check size={16}/>}</label>)}</div></div>}<label className="field">항목 <span className="required">*</span><input type="text" value={draft.title} maxLength={100} placeholder="예: 수학 학원비, 주말 장보기" onChange={e => setField("title", e.target.value)} required/></label><label className="field">금액 <span className="required">*</span><span className="amount-input"><input type="text" inputMode="numeric" placeholder="0" value={draft.amount} maxLength={18} onChange={e => setField("amount", e.target.value)} onBlur={() => { if (/^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(draft.amount.trim())) { const n = Number(draft.amount.replaceAll(",", "")); if (Number.isSafeInteger(n) && n <= MAX_AMOUNT) setField("amount", formatWon(n)); } }} required/><span>원</span></span></label><div className="attachment-heading"><span className="field-label">영수증 첨부 <span className="optional">선택</span></span><span>{draft.receipts.length + draft.files.length} / {MAX_FILES}</span></div><div className={`upload-area ${drag ? "dragging" : ""}`} onDragOver={e => { e.preventDefault(); if (!busy) setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}><input ref={fileRef} className="visually-hidden" type="file" multiple accept={RECEIPT_ACCEPT} aria-label="영수증 파일 선택" onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/><UploadCloud size={28} strokeWidth={1.6}/><button type="button" className="upload-trigger" onClick={() => fileRef.current?.click()}>클릭하여 파일 선택<span className="desktop-only"> 또는 여기에 끌어놓기</span></button><p>JPG · PNG · WebP · PDF / 파일당 10MB, 총 20MB</p></div>{(draft.receipts.length > 0 || draft.files.length > 0) && <ul className="attachment-list">{draft.receipts.map(r => <li key={r.id}><span className="file-symbol">{r.mime === "application/pdf" ? <FileText size={18}/> : <FileImage size={18}/>}</span><div className="file-detail"><a href={`/api/receipts/${r.id}`} target="_blank" rel="noopener noreferrer">{r.name}</a><small>{sizeLabel(r.size)} · 저장된 영수증</small></div><button type="button" className="icon-button small" aria-label={`${r.name} 첨부 제거`} onClick={() => setField("receipts", draft.receipts.filter(x => x.id !== r.id))}><X size={17}/></button></li>)}{draft.files.map((f, i) => <li key={`${f.name}-${f.lastModified}-${i}`}><span className="file-symbol">{/\.pdf$/i.test(f.name) ? <FileText size={18}/> : <FileImage size={18}/>}</span><div className="file-detail"><strong>{f.name}</strong><small>{sizeLabel(f.size)} · 저장 대기</small></div><button type="button" className="icon-button small" aria-label={`${f.name} 첨부 제거`} onClick={() => setField("files", draft.files.filter((_, index) => index !== i))}><X size={17}/></button></li>)}</ul>}</fieldset>{error && <div className="error-message" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="button secondary" onClick={onClose} disabled={busy}>취소</button><button className="button primary" type="submit" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17}/> : <Check size={17}/>} {busy ? "저장 중…" : "저장"}</button></div></form></Modal>;
+  return <Modal title={editing ? "지출 수정" : "지출 추가"} onClose={onClose} busy={busy}><form onSubmit={submit} className="expense-form"><fieldset disabled={busy}><div className="form-grid"><label className="field">결제일 <span className="required">*</span><input type="date" value={draft.paidOn} onChange={e => setField("paidOn", e.target.value)} required min="1900-01-01" max="2200-12-31"/></label><label className="field">카테고리 <span className="required">*</span><select value={draft.category} onChange={e => setDraft(d => ({ ...d, category: e.target.value as Category, child: e.target.value === "교육비" ? d.child : "" }))}>{CATEGORIES.map(c => <option key={c}>{c}</option>)}</select></label></div>{draft.category === "교육비" && <div className="child-field"><span className="field-label">교육비 대상 <span className="required">*</span></span><div className="child-options">{(["현우", "정우"] as Child[]).map(child => <label key={child} className={`child-option ${draft.child === child ? "selected" : ""}`}><input type="radio" name="child" value={child} checked={draft.child === child} onChange={() => setField("child", child)} required/><GraduationCap size={18}/>{child}{draft.child === child && <Check size={16}/>}</label>)}</div></div>}<label className="field">항목 <span className="required">*</span><input type="text" value={draft.title} maxLength={100} placeholder="예: 수학 학원비, 주말 장보기" onChange={e => setField("title", e.target.value)} required/></label><label className="field">금액 <span className="required">*</span><span className="amount-input"><input type="text" inputMode="numeric" placeholder="0" value={draft.amount} maxLength={18} onChange={e => setField("amount", e.target.value)} onBlur={() => { if (/^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(draft.amount.trim())) { const n = Number(draft.amount.replaceAll(",", "")); if (Number.isSafeInteger(n) && n <= MAX_AMOUNT) setField("amount", formatWon(n)); } }} required/><span>원</span></span></label><div className="attachment-heading"><span className="field-label">영수증 첨부 <span className="optional">선택</span></span><span>{draft.receipts.length + draft.files.length} / {MAX_FILES}</span></div><div className={`upload-area ${drag ? "dragging" : ""}`} onDragOver={e => { e.preventDefault(); if (!busy) setDrag(true); }} onDragLeave={() => setDrag(false)} onDrop={e => { e.preventDefault(); setDrag(false); addFiles(e.dataTransfer.files); }}><input ref={fileRef} className="visually-hidden" type="file" multiple accept={RECEIPT_ACCEPT} aria-label="영수증 파일 선택" onChange={e => { if (e.target.files) addFiles(e.target.files); e.target.value = ""; }}/><UploadCloud size={28} strokeWidth={1.6}/><button type="button" className="upload-trigger" onClick={() => fileRef.current?.click()}>클릭하여 파일 선택<span className="desktop-only"> 또는 여기에 끌어놓기</span></button><p>JPG · PNG · WebP · PDF / 파일당 10MB, 총 20MB</p></div>{(draft.receipts.length > 0 || draft.files.length > 0) && <ul className="attachment-list">{draft.receipts.map(r => <li key={r.id}><span className="file-symbol">{r.mime === "application/pdf" ? <FileText size={18}/> : <FileImage size={18}/>}</span><div className="file-detail"><ReceiptFileLink receipt={r}/><small>{sizeLabel(r.size)} · 저장된 영수증</small></div><button type="button" className="icon-button small" aria-label={`${r.name} 첨부 제거`} onClick={() => setField("receipts", draft.receipts.filter(x => x.id !== r.id))}><X size={17}/></button></li>)}{draft.files.map((f, i) => <li key={`${f.name}-${f.lastModified}-${i}`}><span className="file-symbol">{/\.pdf$/i.test(f.name) ? <FileText size={18}/> : <FileImage size={18}/>}</span><div className="file-detail"><strong>{f.name}</strong><small>{sizeLabel(f.size)} · 저장 대기</small></div><button type="button" className="icon-button small" aria-label={`${f.name} 첨부 제거`} onClick={() => setField("files", draft.files.filter((_, index) => index !== i))}><X size={17}/></button></li>)}</ul>}</fieldset>{error && <div className="error-message" role="alert">{error}</div>}<div className="modal-actions"><button type="button" className="button secondary" onClick={onClose} disabled={busy}>취소</button><button className="button primary" type="submit" disabled={busy}>{busy ? <LoaderCircle className="spin" size={17}/> : <Check size={17}/>} {busy ? "저장 중…" : "저장"}</button></div></form></Modal>;
 }
 
-export default function Ledger({ userName, onLogout, logoutBusy = false }: { userName: string; onLogout: () => void; logoutBusy?: boolean }) {
+export default function Ledger() {
   const [range, setRange] = useState<Range>(() => monthRange());
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,6 +115,13 @@ export default function Ledger({ userName, onLogout, logoutBusy = false }: { use
   const [viewer, setViewer] = useState<Expense | null>(null);
   const [toast, setToast] = useState("");
   const [today, setToday] = useState(todayKST());
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupError, setBackupError] = useState("");
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreError, setRestoreError] = useState("");
+  const restoreRef = useRef<HTMLInputElement>(null);
+  const transferRef = useRef(false);
   const requestRef = useRef(0);
   const deleteRef = useRef(false);
   const invalidRange = (!!range.from && !isDate(range.from)) || (!!range.to && !isDate(range.to)) || (!!range.from && !!range.to && range.from > range.to);
@@ -122,7 +143,7 @@ export default function Ledger({ userName, onLogout, logoutBusy = false }: { use
     const params = new URLSearchParams();
     if (range.from) params.set("from", range.from);
     if (range.to) params.set("to", range.to);
-    fetch(`/api/expenses?${params}`, { signal: controller.signal, cache: "no-store" })
+    ledgerRequest(`/api/expenses?${params}`, { signal: controller.signal, cache: "no-store" })
       .then(readResponse)
       .then(result => {
         if (!Array.isArray(result.expenses)) throw new Error("내역을 불러오지 못했습니다.");
@@ -160,7 +181,7 @@ export default function Ledger({ userName, onLogout, logoutBusy = false }: { use
     if (!deleting || deleteRef.current) return;
     deleteRef.current = true; setDeleteBusy(true); setDeleteError("");
     try {
-      await readResponse(await fetch(`/api/expenses/${deleting.id}?version=${deleting.version}`, { method: "DELETE" }));
+      await readResponse(await ledgerRequest(`/api/expenses/${deleting.id}?version=${deleting.version}`, { method: "DELETE" }));
       setDeleting(null); setRefresh(x => x + 1); setToast("지출과 첨부 영수증을 삭제했습니다.");
     } catch (e) { setDeleteError(e instanceof Error ? e.message : "삭제하지 못했습니다."); }
     finally { deleteRef.current = false; setDeleteBusy(false); }
@@ -173,12 +194,31 @@ export default function Ledger({ userName, onLogout, logoutBusy = false }: { use
     setTimeout(() => URL.revokeObjectURL(url), 5000); setToast("CSV 파일을 내보냈습니다.");
   }
 
+  async function downloadBackup() {
+    if (transferRef.current) return; transferRef.current = true; setBackupBusy(true); setBackupError("");
+    try {
+      const blob = await exportBackup(); const url = URL.createObjectURL(blob); const link = document.createElement("a");
+      link.href = url; link.download = `가계부_백업_${todayKST()}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setToast("내역과 영수증을 백업했습니다.");
+    } catch (e) { setBackupError(e instanceof Error ? e.message : "백업하지 못했습니다."); }
+    finally { transferRef.current = false; setBackupBusy(false); }
+  }
+  async function restore() {
+    if (!restoreFile || transferRef.current) return; transferRef.current = true; setRestoreBusy(true); setRestoreError("");
+    try {
+      const result = await importBackup(restoreFile); setRestoreFile(null); setRefresh(x => x + 1); setRange({ from: "", to: "" }); resetFilter();
+      setToast(`${result.imported}건을 복원했습니다.${result.preserved ? ` 기존 내역 ${result.preserved}건은 그대로 유지했습니다.` : ""}`);
+    } catch (e) { setRestoreError(e instanceof Error ? e.message : "복원하지 못했습니다."); }
+    finally { transferRef.current = false; setRestoreBusy(false); }
+  }
+
   return <div className="app-shell">
     <header className="app-header">
       <a className="brand" href="/" aria-label="가계부 홈"><span className="brand-mark"><WalletCards size={22} strokeWidth={1.8}/></span><h1>가계부</h1></a>
-      <div className="header-account"><span className="account-avatar">{userName.slice(0, 1) || "나"}</span><span className="account-name">{userName}</span><button className="icon-button logout-button" aria-label="로그아웃" title="로그아웃" onClick={onLogout} disabled={logoutBusy}>{logoutBusy ? <LoaderCircle className="spin" size={17}/> : <LogOut size={17}/>}</button></div>
+      <div className="header-account storage-controls"><span className="storage-label">이 브라우저에 저장</span><button className="button secondary small" onClick={downloadBackup} disabled={backupBusy || restoreBusy}>{backupBusy ? <LoaderCircle size={15} className="spin"/> : <ArrowDownToLine size={15}/>}백업</button><button className="button secondary small" onClick={() => restoreRef.current?.click()} disabled={backupBusy || restoreBusy}><UploadCloud size={15}/>복원</button><input ref={restoreRef} type="file" accept=".json,application/json" className="visually-hidden" aria-label="가계부 백업 파일 선택" onChange={event => { const file = event.target.files?.[0]; if (file) { setRestoreError(""); setRestoreFile(file); } event.target.value = ""; }}/></div>
     </header>
     <main className="main">
+      {backupError && <div className="error-message" role="alert">{backupError}</div>}
       <section className="period-toolbar" aria-label="조회 기간">
         <div className="month-selector"><button className="icon-button" aria-label="이전 달" onClick={() => changeMonth(-1)}><ChevronLeft size={19}/></button><h2>{selectedMonth}</h2><button className="icon-button" aria-label="다음 달" onClick={() => changeMonth(1)}><ChevronRight size={19}/></button></div>
         <div className="quick-ranges">{[
@@ -216,6 +256,7 @@ export default function Ledger({ userName, onLogout, logoutBusy = false }: { use
     {draft && <ExpenseEditor key={draft.id} draft={draft} onClose={() => setDraft(null)} onSaved={saved}/>}
     {viewer && <ReceiptViewer expense={viewer} onClose={() => setViewer(null)}/>}
     {deleting && <Modal title="지출 삭제" onClose={() => setDeleting(null)} busy={deleteBusy} className="confirm-modal"><div className="delete-summary"><span>{dateLabel(deleting.paidOn)} · {deleting.category}{deleting.child ? ` / ${deleting.child}` : ""}</span><strong>{deleting.title}</strong><b>{formatWon(deleting.amount)}원</b></div><p className="delete-description">첨부 영수증 {deleting.receipts.length}개도 함께 삭제됩니다. 삭제한 내역은 복구할 수 없습니다.</p>{deleteError && <div className="error-message" role="alert">{deleteError}</div>}<div className="modal-actions"><button className="button secondary" onClick={() => setDeleting(null)} disabled={deleteBusy}>취소</button><button className="button danger" onClick={confirmDelete} disabled={deleteBusy}>{deleteBusy ? <LoaderCircle size={16} className="spin"/> : <Trash2 size={16}/>}삭제</button></div></Modal>}
+    {restoreFile && <Modal title="백업 복원" onClose={() => setRestoreFile(null)} busy={restoreBusy} className="confirm-modal"><div className="delete-summary"><strong>{restoreFile.name}</strong><span>{sizeLabel(restoreFile.size)}</span></div><p className="delete-description">지출 내역과 영수증을 추가합니다. 같은 ID의 기존 내역은 덮어쓰지 않습니다.</p>{restoreError && <div className="error-message" role="alert">{restoreError}</div>}<div className="modal-actions"><button className="button secondary" onClick={() => setRestoreFile(null)} disabled={restoreBusy}>취소</button><button className="button primary" onClick={restore} disabled={restoreBusy}>{restoreBusy ? <LoaderCircle size={16} className="spin"/> : <UploadCloud size={16}/>}복원</button></div></Modal>}
     {toast && <div className="toast" role="status"><CheckCircle2 size={19}/><span>{toast}</span><button className="icon-button tiny" onClick={() => setToast("")} aria-label="알림 닫기"><X size={15}/></button></div>}
   </div>;
 }
