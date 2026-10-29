@@ -4,6 +4,14 @@ import { CATEGORIES, MAX_AMOUNT, MAX_FILE_BYTES, MAX_TOTAL_FILE_BYTES, MAX_FILES
 
 type Draft = { id: string; paidOn: string; category: Category; child: Child | ""; title: string; amount: string; version?: number; receipts: Receipt[]; files: File[] };
 type Range = { from: string; to: string };
+function createEntryId() {
+  // getRandomValues is also available on HTTP development previews.
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 const categoryColors: Record<Category, string> = { "교육비": "#8270ed", "식비": "#f4a259", "생활용품": "#d8ba69", "주거·통신": "#748fe7", "교통·차량": "#64b5b3", "의료·건강": "#e58caa", "쇼핑": "#b28dde", "문화·여가": "#edba55", "여행": "#5fa9dc", "기타": "#a4a8b4" };
 function sizeLabel(size: number) { return size < 1024 * 1024 ? `${Math.max(1, Math.round(size / 1024))} KB` : `${(size / 1024 / 1024).toFixed(1)} MB`; }
 function dateLabel(date: string) { return date.replaceAll("-", "."); }
@@ -141,7 +149,7 @@ export default function Ledger({ userName, onLogout, logoutBusy = false }: { use
     if (category === "교육비" && child === name) { setCategory(""); setChild(""); }
     else { setCategory("교육비"); setChild(name); }
   }
-  function addExpense() { setDraft({ id: crypto.randomUUID(), paidOn: todayKST(), category: "식비", child: "", title: "", amount: "", receipts: [], files: [] }); }
+  function addExpense() { setDraft({ id: createEntryId(), paidOn: todayKST(), category: "식비", child: "", title: "", amount: "", receipts: [], files: [] }); }
   function editExpense(expense: Expense) { setDraft({ ...expense, child: expense.child ?? "", amount: formatWon(expense.amount), files: [] }); }
   function saved(paidOn: string) {
     setDraft(null); setRefresh(x => x + 1);
