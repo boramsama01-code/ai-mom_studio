@@ -22,7 +22,7 @@ import { geminiRequest } from "./gemini";
 export const PROMPT_VERSION = {
   curate: "curate-v1",
   notice: "notice-v1",
-  science: "science-v1",
+  science: "science-v2",
   current: "current-v1",
 };
 
@@ -311,6 +311,20 @@ const noticeJsonSchema = S("object", {
   required: ["relevance", "title", "organization", "notice_type", "category", "school_type", "academic_year", "audience", "eligibility", "schedules", "deadline_type", "key_details", "one_line_summary", "uncertainties", "has_conflict", "evidence"],
 });
 
+
+// Generation requires nonempty editorial fields; manual drafts may remain incomplete.
+const generatedScienceSchema = sciencePayloadSchema.superRefine((data, ctx) => {
+  for (const field of ["topic", "age_band", "key_question", "scientific_basis"] as const) {
+    if (!data[field].trim()) ctx.addIssue({ code: "custom", path: [field], message: "필수 생성 항목은 비워 둘 수 없습니다" });
+  }
+  for (const field of ["background", "discussion_questions", "parent_hints"] as const) {
+    if (!data[field].length) ctx.addIssue({ code: "custom", path: [field], message: "최소 한 항목이 필요합니다" });
+    data[field].forEach((value, index) => {
+      if (!value.trim()) ctx.addIssue({ code: "custom", path: [field, index], message: "빈 문장은 허용되지 않습니다" });
+    });
+  }
+});
+
 const scienceJsonSchema = S("object", {
   properties: {
     topic: S("string"),
@@ -379,6 +393,8 @@ ${COMMON_RULES}`;
 export async function draftScience(args: { topic: string; sources: LlmSource[]; now: Date; budget: LlmBudget; provider?: AiProvider }) {
   const system = `너는 중학생과 부모가 5~10분 동안 과학 질문으로 대화하도록 돕는 편집자다.
 기준 시각(Asia/Seoul): ${args.now.toISOString()}
+- topic, age_band, key_question, scientific_basis는 비어 있지 않게 작성한다. background는 쉬운 배경 3문장, discussion_questions는 대화 질문 3개, parent_hints는 한 개 이상의 진행 힌트로 채운다.
+- misconceptions는 관련 오개념이 없으면 빈 배열, safe_activity는 적절한 활동이 없으면 null로 둔다.
 - 질문은 원리 적용·가설 비교·선택 중심으로 만든다. 정답을 외우게 하는 질문은 피한다.
 - 확립된 과학 사실과 근거 없는 주장을 억지로 찬반처럼 배치하지 않는다.
 - 부모 진행 힌트는 정답 강요 대신 "그렇게 생각한 근거는?", "어떤 정보가 더 필요할까?" 같은 질문을 쓴다.
@@ -388,7 +404,7 @@ ${COMMON_RULES}`;
   const user = `주제: ${args.topic}\n\n${args.sources.length ? sourcesBlock(args.sources) : "<sources>(없음)</sources>"}\n\nsubmit_science 도구를 호출하라.`;
   const r = await callTool({
     system, user, toolName: "submit_science", toolDescription: "과학 대화 초안 제출",
-    inputSchema: scienceJsonSchema, zod: sciencePayloadSchema, budget: args.budget, provider: args.provider,
+    inputSchema: scienceJsonSchema, zod: generatedScienceSchema, budget: args.budget, provider: args.provider,
   });
   if (!r.ok) return r;
   const v = verifyEvidence(r.data, args.sources);
@@ -476,4 +492,5 @@ submit_picks 도구를 호출하라.`;
   const picks = r.data.picks.filter((p) => valid.has(p.candidate_id) && !seen.has(p.candidate_id) && seen.add(p.candidate_id)).slice(0, args.picks);
   return { ...r, data: { picks } };
 }
+
 
