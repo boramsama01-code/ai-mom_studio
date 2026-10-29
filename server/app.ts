@@ -35,10 +35,10 @@ export function createApp() {
   );
   app.use(express.json({ limit: "512kb" }));
 
-  // 공개: 헬스체크(비밀값 없음)
+  // 공개: 헬스체크(비밀값 없음). Resolver version verifies the actual running backend.
   app.get("/api/health", async (_req, res) => {
     const db = await dbHealth();
-    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured" });
+    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", sourceResolver: "google-news-signed-v1" });
   });
 
   const sessionOk = env.databaseUrl ? installSession(app) : false;
@@ -48,7 +48,6 @@ export function createApp() {
     );
   } else {
     installAuthRoutes(app);
-    // 인증 미설정 + 샘플 모드 불가 → 운영 API 차단
     app.use("/api", (req, res, next) => {
       if (!authConfigured() && !demoAllowed()) return res.status(503).json({ error: "운영자 인증이 설정되지 않아 운영 API를 차단했습니다.", code: "auth_not_configured" });
       next();
@@ -57,7 +56,6 @@ export function createApp() {
   }
   app.use("/api", (_req, res) => res.status(404).json({ error: "없는 API입니다." }));
 
-  // 프런트엔드(빌드 결과)
   const publicDir = [path.resolve(process.cwd(), "dist/public"), path.resolve(import.meta.dirname ?? ".", "../public")].find((p) => fs.existsSync(path.join(p, "index.html")));
   if (publicDir) {
     app.use(express.static(publicDir, { index: false, maxAge: "1h" }));
@@ -73,4 +71,3 @@ export function createApp() {
   });
   return app;
 }
-
