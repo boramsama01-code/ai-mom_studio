@@ -1,6 +1,6 @@
 import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import { AiUsageGuide } from "../AiUsageGuide";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../toast";
 import { DiscoveryNote } from "../discovery";
 import { TemplatePicker, useTemplates } from "./Design";
@@ -270,8 +270,12 @@ function EditPanel({ d, cid }: { d: Detail; cid: number }) {
   const [conflictMsg, setConflict] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(base);
+  const previousBase = useRef(base);
   useEffect(() => {
-    if (!dirty) {
+    // Compare edits with the previously displayed revision, before accepting a new one.
+    const hadLocalEdits = JSON.stringify(draft) !== JSON.stringify(previousBase.current);
+    previousBase.current = base;
+    if (!hadLocalEdits || JSON.stringify(draft) === JSON.stringify(base)) {
       setDraft(base);
       setVersion(d.item.version);
     }
@@ -796,4 +800,5 @@ function Progress({ d, onGo }: { d: Detail; onGo: (tab: "source" | "edit" | "pub
     </>
   );
 }
+
 
