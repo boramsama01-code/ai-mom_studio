@@ -207,8 +207,8 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       break;
     }
     const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
+    fetchCalls++; // Reserve the primary request before any redirect/feed/attachment request.
     const r = await fetchDoc(db, item.primarySourceId!, fetcher, now, () => (fetchCalls < budget.fetchCallsPerRun && !opts.fetchSource ? (fetchCalls++, true) : false));
-    fetchCalls++;
     if (!r.ok) {
       counts.fetchFailed++;
       await db.update(contentItems).set({ evidenceStatus: "fetch_failed", updatedAt: now }).where(eq(contentItems.id, itemId));
@@ -468,7 +468,7 @@ async function fetchDoc(db: DB, docId: number, fetcher: typeof fetchAndExtract, 
   if (!doc) return { ok: false };
   if (doc.fetchStatus === "ok" && doc.fetchedText) return { ok: true }; // 이미 확보(다른 실행·채널)
   const meta = doc.meta as { fetchUrl?: string };
-  const r = await fetcher(meta.fetchUrl || doc.originalUrl);
+  const r = await fetcher(meta.fetchUrl || doc.originalUrl, undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined, takeExtraCall });
   if (!r.ok) {
     await db
       .update(sourceDocuments)

@@ -162,7 +162,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const [instruction, setInstruction] = useState("");
   const [panelInstructions, setPanelInstructions] = useState(["", "", "", ""]);
   const [imageMode, setImageMode] = useState<"chatgpt" | "api">("chatgpt");
-  const [textMode, setTextMode] = useState<"chatgpt" | "api">("chatgpt");
+  const [textMode, setTextMode] = useState<"chatgpt" | "api">("api");
   const [editorStep, setEditorStep] = useState<"story" | "images" | "finish">(() => data.card.stage === "done" || data.card.stage === "review" ? "finish" : data.card.stage === "making" ? "images" : "story");
   const [selectedPanel, setSelectedPanel] = useState(0);
   const [uploading, setUploading] = useState<number | null>(null);
@@ -256,7 +256,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
       <button role="tab" aria-selected={tab === "content"} onClick={() => setTab("content")}>콘텐츠 편집</button>
       <button role="tab" aria-selected={tab === "history"} onClick={() => guard.confirmLeave(() => setTab("history"))}>버전 기록 {data.revisions.length}</button>
     </div>
-    {(working || generate.error || latestJob?.status === "failed" || latestJob?.result?.applied === false) && <details className="panel studio-work-status" open={working || undefined}><summary>{working ? "API로 생성 중" : "이전 API 요청 결과"}</summary><div className="stack">
+    {(working || generate.error || latestJob?.status === "failed" || latestJob?.result?.applied === false) && <details className="panel studio-work-status" open={working || !!generate.error || latestJob?.status === "failed" || latestJob?.result?.applied === false}><summary>{working ? "API로 생성 중" : "이전 API 요청 결과"}</summary><div className="stack">
       {working && <p role="status">AI가 작업 중입니다. 완료되면 여기에 반영됩니다. 화면을 닫아도 요청은 보관됩니다.</p>}
       {generate.error && <ErrorBox error={generate.error} />}
       {!working && latestJob?.status === "failed" && <div role="alert" className="notice err"><strong>생성을 완료하지 못했습니다.</strong><p>{latestJob.lastError}</p></div>}
@@ -268,18 +268,18 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
     {tab === "content" ? <div className="studio-editor-layout studio-guided-editor">
       <nav className="studio-editor-steps" aria-label="제작 순서">{([['story','01','이야기'],['images','02','그림'],['finish','03','완성']] as const).map(([id, number, label]) => <button key={id} aria-current={editorStep === id ? "step" : undefined} onClick={() => setEditorStep(id)}><span>{number}</span><strong>{label}</strong></button>)}</nav>
       <section className="panel stack" id="studio-story" hidden={editorStep !== "story"}>
-        <div className="studio-section-heading"><div><h2>어떤 이야기를 만들까요?</h2></div><span className="small muted">직접 쓰거나 ChatGPT 초안을 가져오세요.</span></div>
+        <div className="studio-section-heading"><div><h2>어떤 이야기를 만들까요?</h2></div><span className="small muted">API로 자동 작성하거나 ChatGPT 초안을 가져오세요.</span></div>
         <label className="field">제목<input id="studio-title" disabled={busy} value={form.title} maxLength={160} onChange={e => change("title", e.target.value)} /></label>
         <label className="field">기획·참고 자료<textarea disabled={busy} value={form.memo} rows={3} maxLength={12000} onChange={e => change("memo", e.target.value)} placeholder="이야기의 핵심이나 확인한 자료를 적어 주세요. 이미 컷을 썼다면 비워 두어도 됩니다." /></label>
         <label className="field">형식<select id="studio-format" disabled={busy} value={form.format} onChange={e => change("format", e.target.value as Format)}>{!formats.includes(form.format) && <option value={form.format}>{form.format} · 기획용</option>}{formats.map(f => <option key={f}>{f}</option>)}</select></label>
-        <div className="studio-image-mode" role="group" aria-label="초안 작성 방법"><button aria-pressed={textMode === "chatgpt"} onClick={() => setTextMode("chatgpt")}>ChatGPT로 초안 만들기</button><button aria-pressed={textMode === "api"} onClick={() => setTextMode("api")}>API 자동 작성</button></div>
-        <div hidden={textMode !== "chatgpt"}><StudioTextImport content={form} channelName={channelName(form.channel)} disabled={busy || working || newer} apply={setForm} /></div>
-        <div className="stack" hidden={textMode !== "api"}>
+        <div className="studio-image-mode" role="group" aria-label="초안 작성 방법"><button aria-pressed={textMode === "api"} onClick={() => setTextMode("api")}>API 자동 작성</button><button aria-pressed={textMode === "chatgpt"} onClick={() => setTextMode("chatgpt")}>ChatGPT로 초안 만들기</button></div>
+        <div className="stack" hidden={textMode !== "api"} data-testid="studio-api-writing">
           <label className="field">작성 AI<select value={provider} disabled={busy || working} onChange={e => { providerInitialized.current = true; setProvider(e.target.value as typeof provider); }}><option value="gemini">Gemini · 무료 등급 지원</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude</option></select></label>
           <p className="small muted">원고·컷 구성·캡션의 빈칸을 작성합니다.</p><AiUsageGuide provider={provider} />
           {settings.data?.ai.text[provider] === false && <p className="notice warn small">작성 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
           <button className="btn" disabled={!canWrite || !hasBlanks} onClick={() => run({ kind: "text", textTarget: "fill" })}>빈칸 초안 채우기 · API</button>
         </div>
+        <div hidden={textMode !== "chatgpt"}><StudioTextImport content={form} channelName={channelName(form.channel)} disabled={busy || working || newer} apply={setForm} /></div>
         {archivedChannel && <p className="notice warn small">보관된 채널입니다. 새 AI 생성은 <GuardedLink href="/settings">채널 복원</GuardedLink> 후 사용할 수 있습니다.</p>}
         <details className="studio-more" open={!!form.script || undefined}><summary>전체 원고·작업 정보</summary><div className="stack">
           <label className="field">전체 원고<textarea disabled={busy} value={form.script} rows={6} maxLength={24000} onChange={e => change("script", e.target.value)} placeholder="전체 원고가 없어도 장면·대사에서 바로 그림을 만들 수 있습니다." /></label>

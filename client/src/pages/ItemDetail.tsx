@@ -1,6 +1,6 @@
 import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import { AiUsageGuide } from "../AiUsageGuide";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../toast";
 import { DiscoveryNote } from "../discovery";
 import { TemplatePicker, useTemplates } from "./Design";
@@ -124,6 +124,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
     },
   });
   const p = d.primary;
+  const sourceUrl = p && typeof p.meta.finalUrl === "string" && /^https?:\/\//.test(p.meta.finalUrl) ? p.meta.finalUrl : p?.originalUrl;
   const evidence: Array<{ field: string; source_id: number; quote: string }> = d.current?.payload?.evidence ?? [];
   const pastedQuotes = p?.kind === "manual_text" && Array.isArray(p.meta.quotes) ? p.meta.quotes.filter((q): q is string => typeof q === "string") : [];
   return (
@@ -140,7 +141,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
               {p.publishedRaw && <span>원본 날짜값 “{p.publishedRaw}”</span>}
               <span>{p.kind === "manual_text" ? `직접 저장 ${fmtDate(String(p.meta.savedAt ?? ""))}` : `확인 ${fmtDate(p.lastFetchedAt as unknown as string)}`}</span>
             </div>
-            <a href={p.originalUrl} target="_blank" rel="noopener noreferrer" style={{ overflowWrap: "anywhere" }}>
+            <a href={sourceUrl} target="_blank" rel="noopener noreferrer" style={{ overflowWrap: "anywhere" }}>
               {p.title || p.originalUrl}
             </a>
             {["naver_news", "google_news_rss", "rss_direct"].includes(p.kind) && <p className="small muted">언론 기사입니다. 학교·기관의 공식 공고와 다를 수 있으니 공식 원문을 함께 확인하세요.</p>}
@@ -175,7 +176,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
               </div>
             )}
             {p.fetchedText && (
-              <details>
+              <details open>
                 <summary>확보한 원문 텍스트 보기 ({p.fetchedText.length.toLocaleString()}자)</summary>
                 <div className="source-text">{p.fetchedText}</div>
               </details>
@@ -261,26 +262,33 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
 }
 
 /* ───────────── 편집 ───────────── */
-function EditPanel({ d, cid }: { d: Detail; cid: number }) {
+export function EditPanel({ d, cid }: { d: Detail; cid: number }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
-  const base = useMemo(() => d.current?.payload ?? null, [d.current]);
+  const incoming = useMemo(() => d.current?.payload ?? null, [d.current]);
+  const [base, setBase] = useState<Record<string, any> | null>(incoming);
+  const submittedDraft = useRef<Record<string, any> | null>(null);
   const [draft, setDraft] = useState<Record<string, any> | null>(base);
   const [version, setVersion] = useState(d.item.version);
   const [conflictMsg, setConflict] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(base);
   useEffect(() => {
-    if (!dirty) {
-      setDraft(base);
+    // Compare edits with the accepted baseline, never with the newly arrived AI payload.
+    if (!dirty && d.item.version >= version) {
+      setBase(incoming);
+      setDraft(incoming);
       setVersion(d.item.version);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, d.item.version]);
+  }, [incoming, d.item.version, dirty, version]);
 
   const save = useMutation({
-    mutationFn: () => api<ContentItem>(`/channels/${cid}/items/${d.item.id}`, { method: "PATCH", body: { version, payload: cleanPayload(draft!), title: (draft?.title || draft?.key_question || d.item.title).toString().slice(0, 200) } }),
+    mutationFn: () => {
+      submittedDraft.current = draft;
+      return api<ContentItem>(`/channels/${cid}/items/${d.item.id}`, { method: "PATCH", body: { version, payload: cleanPayload(draft!), title: (draft?.title || draft?.key_question || d.item.title).toString().slice(0, 200) } });
+    },
     onSuccess: async (it) => {
+      setBase(submittedDraft.current); // Do not erase edits made while saving.
       setVersion(it.version);
       setConflict(null);
       setSaved(true);
@@ -317,13 +325,7 @@ function EditPanel({ d, cid }: { d: Detail; cid: number }) {
       <div className="row between">
         <h2 style={{ margin: 0 }}>편집</h2>
       </div>
-      <ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, source: d.primary ? {
-        title: d.primary.title ?? d.item.title, url: d.primary.originalUrl,
-        text: d.primary.fetchStatus === "ok" ? d.primary.fetchedText ?? "" : "", snippet: d.primary.snippet ?? "",
-        quotes: Array.isArray(d.primary.meta.quotes) ? d.primary.meta.quotes.filter((q): q is string => typeof q === "string") : [],
-      } : null })} />
-      <p className="small muted">저장한 원문·근거로 초안을 요청합니다. 본문을 붙여넣었다면 먼저 저장해 주세요. 받은 초안은 아래 편집 칸에 옮기거나 제작 보드에서 사용할 수 있습니다.</p>
-      <details className="studio-more"><summary>Gemini·GPT API로 자동 작성</summary>
+      <details className="studio-more" open><summary>API 자동 작성 · Gemini·GPT</summary>
         <label className="field">작성 AI<select value={provider} disabled={gen.isPending} onChange={e => setProviderChoice(e.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}</option>)}</select></label>
         <AiUsageGuide provider={provider} />
         {ai.data?.integrations[provider] === false && <p className="notice warn small">선택한 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
@@ -331,16 +333,23 @@ function EditPanel({ d, cid }: { d: Detail; cid: number }) {
           {gen.isPending ? "생성 중…" : d.item.kind === "notice" ? `${aiProviderLabels[provider]}로 원문 추출` : `${aiProviderLabels[provider]}로 초안 생성`}
         </button>
       </details>
+      <ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, source: d.primary ? {
+        title: d.primary.title ?? d.item.title, url: d.primary.originalUrl,
+        text: d.primary.fetchStatus === "ok" ? d.primary.fetchedText ?? "" : "", snippet: d.primary.snippet ?? "",
+        quotes: Array.isArray(d.primary.meta.quotes) ? d.primary.meta.quotes.filter((q): q is string => typeof q === "string") : [],
+      } : null })} />
+      <p className="small muted">저장한 원문·근거로 초안을 요청합니다. 본문을 붙여넣었다면 먼저 저장해 주세요. 받은 초안은 아래 편집 칸에 옮기거나 제작 보드에서 사용할 수 있습니다.</p>
       {d.current && (
         <p className="small muted">
           현재 버전 r{d.current.revisionNo} · {d.current.author === "operator" ? "운영자 편집본" : d.current.author === "llm" ? `자동 추출/초안 (${d.current.model ?? ""})` : "시스템"}
           {d.current.note ? ` · ${d.current.note}` : ""}
         </p>
       )}
+      {d.item.version > version && dirty && <div className="notice warn">서버에 새 초안이 있습니다. 직접 입력한 내용은 유지했습니다. <button className="btn sm" onClick={() => guard.confirmLeave(() => { setBase(incoming); setDraft(incoming); setVersion(d.item.version); })}>새 초안 불러오기</button></div>}
       {gen.error && <ErrorBox error={gen.error} />}
       {gen.isSuccess && <div className="notice ok small">새 버전을 만들었습니다. 생성 성공은 검토 완료가 아닙니다 — 내용을 확인하세요.</div>}
       {!draft ? (
-        <p className="muted">아직 초안이 없습니다. 위에서 ChatGPT로 초안을 받으세요. 본문을 직접 저장하면 아래에 편집 칸이 생기며, ‘제작 보드로 가져오기’에서도 이어서 작성할 수 있습니다.</p>
+        <p className="muted">아직 초안이 없습니다. 위의 API 자동 작성으로 초안을 만들거나 ChatGPT 초안을 가져오세요. 본문을 직접 저장하면 아래에 편집 칸이 생기며, ‘제작 보드로 가져오기’에서도 이어서 작성할 수 있습니다.</p>
       ) : (
         <form
           className="stack"
