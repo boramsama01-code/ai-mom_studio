@@ -1,0 +1,59 @@
+name: Verify editor and article fixes
+on:
+  push:
+    branches: [fix/api-first-webtoon-20261029]
+permissions:
+  contents: read
+concurrency:
+  group: verify-editor-source-fixes
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aimom_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/aimom_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/api-first-webtoon-20261029
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Apply exact guarded patches
+        run: node scripts/apply-editor-source-fixes.mjs
+      - run: npm ci
+      - run: npm run typecheck
+      - name: All tests including database and React UI regressions
+        run: npm test -- --reporter=default --reporter=json --outputFile=test-report.json
+      - run: npm run build
+      - name: Commit only verified application files to this fix branch
+        run: |
+          test "${GITHUB_REF_NAME}" = 'fix/api-first-webtoon-20261029'
+          git add client/src/pages/Studio.tsx client/src/pages/ItemDetail.tsx server/routes/items.ts server/worker/collect.ts
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Fix API-first editor order and generated draft synchronization; pass article source context'
+            git push origin HEAD:fix/api-first-webtoon-20261029
+          fi
+          git rev-parse HEAD
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: editor-article-test-report
+          path: test-report.json
+          if-no-files-found: ignore
+          retention-days: 3
