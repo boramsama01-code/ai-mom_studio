@@ -27,7 +27,7 @@ edit('client/src/pages/ItemDetail.tsx', [
   ['      {gen.error && <ErrorBox error={gen.error} />}', '      {d.item.version > version && dirty && <div className="notice warn">서버에 새 초안이 있습니다. 직접 입력한 내용은 유지했습니다. <button className="btn sm" onClick={() => guard.confirmLeave(() => { setBase(incoming); setDraft(incoming); setVersion(d.item.version); })}>새 초안 불러오기</button></div>}\n      {gen.error && <ErrorBox error={gen.error} />}'],
   ['              <details>\n                <summary>확보한 원문 텍스트 보기', '              <details open>\n                <summary>확보한 원문 텍스트 보기'],
   ['아직 초안이 없습니다. 위에서 ChatGPT로 초안을 받으세요.', '아직 초안이 없습니다. 위의 API 자동 작성으로 초안을 만들거나 ChatGPT 초안을 가져오세요.'],
-  ['  const p = d.primary;\n', '  const p = d.primary;\n  const sourceUrl = p && typeof p.meta.finalUrl === "string" && /^https?:\\/\\//.test(p.meta.finalUrl) ? p.meta.finalUrl : p?.originalUrl;\n'],
+  ['  const p = d.primary;\n  const evidence:', '  const p = d.primary;\n  const sourceUrl = p && typeof p.meta.finalUrl === "string" && /^https?:\\/\\//.test(p.meta.finalUrl) ? p.meta.finalUrl : p?.originalUrl;\n  const evidence:'],
   ['            <a href={p.originalUrl} target="_blank" rel="noopener noreferrer" style={{ overflowWrap: "anywhere" }}>', '            <a href={sourceUrl} target="_blank" rel="noopener noreferrer" style={{ overflowWrap: "anywhere" }}>'],
 ]);
 {
