@@ -15,6 +15,13 @@ for (const name of ["동아일보", "한국경제", "전자신문"]) {
       : { publisher: name, ok: false, url: item.link, status: result.status, reason: result.error });
   } catch (e) { results.push({ publisher: name, ok: false, reason: (e as Error).message }); }
 }
+// Public source matching the screenshot; this does not change its saved production record.
+{
+  const url = "https://m.etnews.com/20261027000007";
+  const result = await fetchAndExtract(url);
+  results.push(result.ok ? { case: "screenshot-article", publisher: "전자신문", ok: true, url: result.finalUrl, title: result.title, characters: result.text.length }
+    : { case: "screenshot-article", publisher: "전자신문", ok: false, url, status: result.status, reason: result.error });
+}
 try {
   const url = "https://news.google.com/rss/search?q=" + encodeURIComponent("과학 when:2d") + "&hl=ko&gl=KR&ceid=KR:ko";
   const response = await safeFetch(url, { timeoutMs: 8000, maxBytes: 2 * 1024 * 1024 });
