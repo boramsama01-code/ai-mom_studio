@@ -6,10 +6,10 @@ import dns from "node:dns";
 import { Agent, fetch as undiciFetch } from "undici";
 import { assertPublicHttpUrl, BlockedUrlError, isPrivateIp } from "./url";
 
-/**
- * 연결 시점에 다시 DNS를 풀어 사설 주소면 거부(DNS 리바인딩 방지).
- * 사전 검사(assertPublicHttpUrl)와 실제 연결 사이에 주소가 바뀌어도 막힌다.
- */
+/** Public, unauthenticated URL lookup only. POSTs are never allowed to arbitrary hosts. */
+export const GOOGLE_NEWS_RPC_URL = "https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je";
+
+/** Recheck DNS at connection time to prevent DNS rebinding. */
 const guardedAgent = new Agent({
   connect: {
     lookup(hostname, options, callback) {
@@ -25,39 +25,47 @@ const guardedAgent = new Agent({
   },
 });
 
-export type SafeFetchResult = {
-  finalUrl: string;
-  status: number;
-  contentType: string;
-  body: Buffer;
+export type SafeFetchResult = { finalUrl: string; status: number; contentType: string; body: Buffer };
+export type SafeFetchOptions = {
+  maxBytes?: number; timeoutMs?: number; maxRedirects?: number; accept?: string;
+  /** Only accepted for GOOGLE_NEWS_RPC_URL; cookies/auth headers are not supported. */
+  googleNewsForm?: string;
 };
-
 export class FetchFailure extends Error {
-  constructor(
-    message: string,
-    public kind: "blocked" | "http" | "timeout" | "too_large" | "network" | "too_many_redirects",
-    public status?: number,
-  ) {
+  constructor(message: string, public kind: "blocked" | "http" | "timeout" | "too_large" | "network" | "too_many_redirects", public status?: number) {
     super(message);
   }
 }
 
-export async function safeFetch(
-  url: string,
-  opts: { maxBytes?: number; timeoutMs?: number; maxRedirects?: number; accept?: string } = {},
-): Promise<SafeFetchResult> {
+/** Validate before any network access; exported so the narrow POST boundary is testable. */
+export function validateGoogleNewsForm(url: string, form: string): void {
+  if (url !== GOOGLE_NEWS_RPC_URL || typeof form !== "string" || form.length > 60_000)
+    throw new FetchFailure("허용되지 않은 원문 주소 조회 요청", "blocked");
+  try {
+    const params = new URLSearchParams(form);
+    if ([...params.keys()].join(",") !== "f.req") throw new Error("unexpected form");
+    const envelope = JSON.parse(params.get("f.req") || "");
+    if (!Array.isArray(envelope) || envelope.length !== 1 || !Array.isArray(envelope[0]) || envelope[0].length !== 1) throw new Error("unexpected envelope");
+    const call = envelope[0][0];
+    if (!Array.isArray(call) || call[0] !== "Fbv4je" || typeof call[1] !== "string") throw new Error("unexpected RPC");
+    const args = JSON.parse(call[1]);
+    if (!Array.isArray(args) || args[0] !== "garturlreq" || args.length !== 5) throw new Error("unexpected operation");
+  } catch {
+    throw new FetchFailure("허용되지 않은 Google 뉴스 조회 형식", "blocked");
+  }
+}
+
+export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promise<SafeFetchResult> {
+  const isRpc = opts.googleNewsForm !== undefined;
+  if (isRpc) validateGoogleNewsForm(url, opts.googleNewsForm!);
   const maxBytes = opts.maxBytes ?? 3 * 1024 * 1024;
   const timeoutMs = opts.timeoutMs ?? 12_000;
-  const maxRedirects = opts.maxRedirects ?? 4;
+  const maxRedirects = isRpc ? 0 : opts.maxRedirects ?? 4;
   let current = url;
   const deadline = Date.now() + timeoutMs;
-
   for (let hop = 0; hop <= maxRedirects; hop++) {
-    try {
-      await assertPublicHttpUrl(current);
-    } catch (e) {
-      throw new FetchFailure(e instanceof BlockedUrlError ? e.message : "URL 검사 실패", "blocked");
-    }
+    try { await assertPublicHttpUrl(current); }
+    catch (e) { throw new FetchFailure(e instanceof BlockedUrlError ? e.message : "URL 검사 실패", "blocked"); }
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new FetchFailure("시간 초과", "timeout");
     const ctrl = new AbortController();
@@ -65,13 +73,13 @@ export async function safeFetch(
     let res: Awaited<ReturnType<typeof undiciFetch>>;
     try {
       res = await undiciFetch(current, {
-        dispatcher: guardedAgent,
-        redirect: "manual",
-        signal: ctrl.signal,
+        dispatcher: guardedAgent, redirect: "manual", signal: ctrl.signal,
+        ...(isRpc ? { method: "POST", body: opts.googleNewsForm } : {}),
         headers: {
           "user-agent": "ai-mom-studio/0.1 (+education notice monitor; contact via site operator)",
           accept: opts.accept ?? "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.5",
           "accept-language": "ko-KR,ko;q=0.9",
+          ...(isRpc ? { "content-type": "application/x-www-form-urlencoded;charset=UTF-8", referer: "https://news.google.com/" } : {}),
         },
       });
     } catch (e) {
@@ -80,21 +88,21 @@ export async function safeFetch(
       throw new FetchFailure("네트워크 오류", "network");
     }
     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
-      clearTimeout(timer);
+      clearTimeout(timer); await res.body?.cancel();
+      if (isRpc) throw new FetchFailure("Google 뉴스 주소 조회가 다른 페이지로 이동했습니다. 로그인·동의 화면은 자동 통과하지 않습니다.", "blocked", res.status);
       current = new URL(res.headers.get("location")!, current).toString();
       continue;
     }
     if (!res.ok) {
-      clearTimeout(timer);
+      clearTimeout(timer); await res.body?.cancel();
       throw new FetchFailure(`HTTP ${res.status}`, "http", res.status);
     }
     const len = Number(res.headers.get("content-length") || 0);
     if (len > maxBytes) {
-      clearTimeout(timer);
+      clearTimeout(timer); await res.body?.cancel();
       throw new FetchFailure("응답이 너무 큼", "too_large");
     }
-    const chunks: Buffer[] = [];
-    let total = 0;
+    const chunks: Buffer[] = []; let total = 0;
     try {
       const reader = res.body?.getReader();
       if (reader) {
@@ -102,10 +110,7 @@ export async function safeFetch(
           const { done, value } = await reader.read();
           if (done) break;
           total += value.byteLength;
-          if (total > maxBytes) {
-            await reader.cancel();
-            throw new FetchFailure("응답이 너무 큼", "too_large");
-          }
+          if (total > maxBytes) { await reader.cancel(); throw new FetchFailure("응답이 너무 큼", "too_large"); }
           chunks.push(Buffer.from(value));
         }
       }
@@ -113,15 +118,8 @@ export async function safeFetch(
       if (e instanceof FetchFailure) throw e;
       if ((e as Error).name === "AbortError") throw new FetchFailure("시간 초과", "timeout");
       throw new FetchFailure("본문 읽기 실패", "network");
-    } finally {
-      clearTimeout(timer);
-    }
-    return {
-      finalUrl: current,
-      status: res.status,
-      contentType: res.headers.get("content-type") || "",
-      body: Buffer.concat(chunks),
-    };
+    } finally { clearTimeout(timer); }
+    return { finalUrl: current, status: res.status, contentType: res.headers.get("content-type") || "", body: Buffer.concat(chunks) };
   }
   throw new FetchFailure("리디렉트가 너무 많음", "too_many_redirects");
 }
