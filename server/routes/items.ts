@@ -314,7 +314,7 @@ itemRoutes.post(
     const db = getDb();
     if ((await itemPrimarySource(db, item))?.kind === "manual_text") throw new HttpError(409, "직접 저장한 본문을 사용 중입니다. 본문 붙여넣기에서 수정해 주세요.");
     const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId));
-    const r = await fetchAndExtract((doc.meta as { fetchUrl?: string }).fetchUrl || doc.originalUrl);
+    const r = await fetchAndExtract((doc.meta as { fetchUrl?: string }).fetchUrl || doc.originalUrl, undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined });
     const now = new Date();
     if (!r.ok) {
       await db.update(sourceDocuments).set({ fetchStatus: r.status, fetchError: r.error, attachments: r.attachments ?? doc.attachments, lastFetchedAt: now }).where(eq(sourceDocuments.id, doc.id));
@@ -324,6 +324,7 @@ itemRoutes.post(
     }
     const changed = doc.contentHash && doc.contentHash !== r.hash;
     await db.update(sourceDocuments).set({ fetchStatus: "ok", fetchError: null, fetchedText: r.text, contentHash: r.hash, attachments: r.attachments, lastFetchedAt: now, meta: { ...(doc.meta as object), finalUrl: r.finalUrl, pageTitle: r.title } }).where(eq(sourceDocuments.id, doc.id));
+    if (item.evidenceStatus === "fetch_failed") await db.update(contentItems).set({ evidenceStatus: "needs_review", updatedAt: now }).where(eq(contentItems.id, item.id));
     if (changed && item.reviewStatus === "reviewed") await db.update(contentItems).set({ reviewStatus: "review_required", updatedAt: now }).where(eq(contentItems.id, item.id));
     res.json({ ok: true, changed: !!changed, length: r.text.length });
   }),
