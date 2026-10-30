@@ -38,7 +38,7 @@ export function createApp() {
   // 공개: 헬스체크(비밀값 없음). Resolver version verifies the actual running backend.
   app.get("/api/health", async (_req, res) => {
     const db = await dbHealth();
-    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", sourceResolver: "google-news-signed-v1" });
+    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", sourceResolver: "google-news-redirect-v2" });
   });
 
   const sessionOk = env.databaseUrl ? installSession(app) : false;

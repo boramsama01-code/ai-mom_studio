@@ -32,9 +32,26 @@ export type SafeFetchOptions = {
   googleNewsForm?: string;
 };
 export class FetchFailure extends Error {
-  constructor(message: string, public kind: "blocked" | "http" | "timeout" | "too_large" | "network" | "too_many_redirects", public status?: number) {
+  constructor(message: string, public kind: "blocked" | "redirect" | "http" | "timeout" | "too_large" | "network" | "too_many_redirects", public status?: number, public redirectUrl?: string) {
     super(message);
   }
+}
+
+/** A redirect is not an access denial. Never forward the signed POST to its destination. */
+export function googleNewsRedirectFailure(status: number, location: string, base = GOOGLE_NEWS_RPC_URL): FetchFailure {
+  let target: URL;
+  try { target = new URL(location, base); }
+  catch { return new FetchFailure(`Google 뉴스 원문 주소 조회가 잘못된 이동 주소를 반환했습니다(HTTP ${status}).`, "redirect", status); }
+  const host = target.hostname.toLowerCase();
+  const googleHost = ["news.google.com", "google.com", "www.google.com"].includes(host);
+  const login = host === "accounts.google.com" || host === "consent.google.com";
+  const challenge = googleHost && /^\/(sorry|recaptcha|challenge|signin|ServiceLogin)(?:\/|$)/i.test(target.pathname);
+  if (login || challenge) return new FetchFailure(
+    `Google 뉴스 원문 주소 조회가 ${login ? "로그인·동의" : "자동 요청 확인"} 화면으로 이동했습니다(HTTP ${status}; ${host}). 언론사 원문의 접근 제한이 아니라 Google 조회 단계의 제한입니다. 확인 화면은 자동 통과하지 않았습니다.`,
+    "blocked", status);
+  return new FetchFailure(
+    `Google 뉴스 원문 주소 조회에서 주소 이동 응답을 받았습니다(HTTP ${status}; ${host}). 이 응답만으로 로그인·구독·접근 차단을 판단하지 않습니다.`,
+    "redirect", status, target.href);
 }
 
 /** Validate before any network access; exported so the narrow POST boundary is testable. */
@@ -89,7 +106,7 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
     }
     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
       clearTimeout(timer); await res.body?.cancel();
-      if (isRpc) throw new FetchFailure("Google 뉴스 주소 조회가 다른 페이지로 이동했습니다. 로그인·동의 화면은 자동 통과하지 않습니다.", "blocked", res.status);
+      if (isRpc) throw googleNewsRedirectFailure(res.status, res.headers.get("location")!, current);
       current = new URL(res.headers.get("location")!, current).toString();
       continue;
     }

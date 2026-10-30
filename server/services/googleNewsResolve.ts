@@ -91,10 +91,23 @@ export async function resolveGoogleNewsArticle(
   const remaining = context.deadline - Date.now();
   if (remaining <= 0) throw new FetchFailure("원문 주소 확인 시간 한도를 초과했습니다.", "timeout");
   if (context.takeExtraCall && !context.takeExtraCall()) throw new FetchFailure("이번 수집의 원문 호출 한도에 도달했습니다. 원문 다시 확보를 눌러 확인해 주세요.", "too_large");
-  const response = await fetchImpl(GOOGLE_NEWS_RPC_URL, {
-    googleNewsForm: googleNewsRequestForm(parameters), maxBytes: 512_000,
-    timeoutMs: Math.min(8000, remaining), maxRedirects: 0, accept: "application/json,text/plain,*/*;q=0.1",
-  });
+  let response;
+  try {
+    response = await fetchImpl(GOOGLE_NEWS_RPC_URL, {
+      googleNewsForm: googleNewsRequestForm(parameters), maxBytes: 512_000,
+      timeoutMs: Math.min(8000, remaining), maxRedirects: 0, accept: "application/json,text/plain,*/*;q=0.1",
+    });
+  } catch (e) {
+    // A public publisher redirect is URL-resolution data, NOT permission to forward the POST.
+    // The caller fetches that URL with GET and repeats all DNS/SSRF checks.
+    if (e instanceof FetchFailure && e.kind === "redirect" && e.redirectUrl) {
+      const resolved = publisherUrl(e.redirectUrl);
+      if (resolved && !/\/(login|signin|captcha|challenge|consent|paywall|subscribe)(?:\/|$)/i.test(new URL(resolved).pathname)) return resolved;
+    }
+    if (e instanceof FetchFailure && e.kind === "http" && [401, 402, 403, 429].includes(e.status ?? 0))
+      throw new FetchFailure(`Google 뉴스 원문 주소 조회가 제한되었습니다(HTTP ${e.status}). 아직 언론사 본문을 요청한 단계가 아닙니다. 자동 재시도하지 않았습니다.`, "blocked", e.status);
+    throw e;
+  }
   const text = response.body.toString("utf8");
   if (response.finalUrl !== GOOGLE_NEWS_RPC_URL || /text\/html/i.test(response.contentType)) {
     const reason = articleAccessProblem(text);

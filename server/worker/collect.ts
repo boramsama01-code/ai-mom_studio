@@ -19,6 +19,7 @@ import { naverSearch, applyExcludeTerms, NaverError, searchCalls, type CallCount
 import { createNewsSearch, type RssLoader } from "../services/newsSearch";
 import { normalizeUrl } from "../services/url";
 import { fetchAndExtract, extractPdf } from "../services/extract";
+import { sourceFetchUrl } from "../services/sourceFetchUrl";
 import { safeFetch } from "../services/safeFetch";
 import { extractNotice, LlmBudget, PROMPT_VERSION, type LlmSource, type AiProvider } from "../services/llm";
 import { computeScheduleStatus } from "../services/dates";
@@ -467,8 +468,7 @@ async function fetchDoc(db: DB, docId: number, fetcher: typeof fetchAndExtract, 
   const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, docId));
   if (!doc) return { ok: false };
   if (doc.fetchStatus === "ok" && doc.fetchedText) return { ok: true }; // 이미 확보(다른 실행·채널)
-  const meta = doc.meta as { fetchUrl?: string };
-  const r = await fetcher(meta.fetchUrl || doc.originalUrl, undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined, takeExtraCall });
+  const r = await fetcher(sourceFetchUrl(doc), undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined, takeExtraCall });
   if (!r.ok) {
     await db
       .update(sourceDocuments)

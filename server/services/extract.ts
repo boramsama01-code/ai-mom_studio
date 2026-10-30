@@ -85,7 +85,10 @@ export async function extractPdf(buf: Buffer): Promise<string> {
 }
 function failure(e: unknown): ExtractResult {
   if (e instanceof FetchFailure) {
-    const restricted = e.kind === "blocked" || [401, 402, 403, 429].includes(e.status ?? 0);
+    // Keep the failed stage and redirect reason; do not turn every Google 302 into a publisher denial.
+    if (e.kind === "redirect") return { ok: false, status: "unsupported", error: e.message };
+    if (e.kind === "blocked") return { ok: false, status: "blocked", error: e.message };
+    const restricted = [401, 402, 403, 429].includes(e.status ?? 0);
     return { ok: false, status: restricted ? "blocked" : "failed", error: restricted
       ? `원문 접근 제한(${e.status ? `HTTP ${e.status}` : e.message}) — 로그인·구독·봇 검증·호출 제한은 우회하지 않습니다. 원문을 직접 확인해 주세요.`
       : e.message };
