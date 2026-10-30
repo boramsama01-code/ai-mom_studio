@@ -1,0 +1,164 @@
+diff --git a/server/app.ts b/server/app.ts
+--- a/server/app.ts
++++ b/server/app.ts
+@@ -38,7 +38,7 @@
+   // 공개: 헬스체크(비밀값 없음). Resolver version verifies the actual running backend.
+   app.get("/api/health", async (_req, res) => {
+     const db = await dbHealth();
+-    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", sourceResolver: "google-news-signed-v1" });
++    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", sourceResolver: "google-news-redirect-v2" });
+   });
+ 
+   const sessionOk = env.databaseUrl ? installSession(app) : false;
+diff --git a/server/routes/items.ts b/server/routes/items.ts
+--- a/server/routes/items.ts
++++ b/server/routes/items.ts
+@@ -27,6 +27,7 @@
+ import { createRevision } from "../content";
+ import { computeScheduleStatus } from "../services/dates";
+ import { fetchAndExtract } from "../services/extract";
++import { sourceFetchUrl } from "../services/sourceFetchUrl";
+ import { normalizeUrl } from "../services/url";
+ import { extractForItem } from "../worker/collect";
+ import { LlmBudget } from "../services/llm";
+@@ -314,7 +315,7 @@
+     const db = getDb();
+     if ((await itemPrimarySource(db, item))?.kind === "manual_text") throw new HttpError(409, "직접 저장한 본문을 사용 중입니다. 본문 붙여넣기에서 수정해 주세요.");
+     const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId));
+-    const r = await fetchAndExtract((doc.meta as { fetchUrl?: string }).fetchUrl || doc.originalUrl, undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined });
++    const r = await fetchAndExtract(sourceFetchUrl(doc), undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined });
+     const now = new Date();
+     if (!r.ok) {
+       await db.update(sourceDocuments).set({ fetchStatus: r.status, fetchError: r.error, attachments: r.attachments ?? doc.attachments, lastFetchedAt: now }).where(eq(sourceDocuments.id, doc.id));
+diff --git a/server/services/extract.ts b/server/services/extract.ts
+--- a/server/services/extract.ts
++++ b/server/services/extract.ts
+@@ -85,7 +85,10 @@
+ }
+ function failure(e: unknown): ExtractResult {
+   if (e instanceof FetchFailure) {
+-    const restricted = e.kind === "blocked" || [401, 402, 403, 429].includes(e.status ?? 0);
++    // Keep the failed stage and redirect reason; do not turn every Google 302 into a publisher denial.
++    if (e.kind === "redirect") return { ok: false, status: "unsupported", error: e.message };
++    if (e.kind === "blocked") return { ok: false, status: "blocked", error: e.message };
++    const restricted = [401, 402, 403, 429].includes(e.status ?? 0);
+     return { ok: false, status: restricted ? "blocked" : "failed", error: restricted
+       ? `원문 접근 제한(${e.status ? `HTTP ${e.status}` : e.message}) — 로그인·구독·봇 검증·호출 제한은 우회하지 않습니다. 원문을 직접 확인해 주세요.`
+       : e.message };
+diff --git a/server/services/googleNewsResolve.ts b/server/services/googleNewsResolve.ts
+--- a/server/services/googleNewsResolve.ts
++++ b/server/services/googleNewsResolve.ts
+@@ -91,10 +91,23 @@
+   const remaining = context.deadline - Date.now();
+   if (remaining <= 0) throw new FetchFailure("원문 주소 확인 시간 한도를 초과했습니다.", "timeout");
+   if (context.takeExtraCall && !context.takeExtraCall()) throw new FetchFailure("이번 수집의 원문 호출 한도에 도달했습니다. 원문 다시 확보를 눌러 확인해 주세요.", "too_large");
+-  const response = await fetchImpl(GOOGLE_NEWS_RPC_URL, {
+-    googleNewsForm: googleNewsRequestForm(parameters), maxBytes: 512_000,
+-    timeoutMs: Math.min(8000, remaining), maxRedirects: 0, accept: "application/json,text/plain,*/*;q=0.1",
+-  });
++  let response;
++  try {
++    response = await fetchImpl(GOOGLE_NEWS_RPC_URL, {
++      googleNewsForm: googleNewsRequestForm(parameters), maxBytes: 512_000,
++      timeoutMs: Math.min(8000, remaining), maxRedirects: 0, accept: "application/json,text/plain,*/*;q=0.1",
++    });
++  } catch (e) {
++    // A public publisher redirect is URL-resolution data, NOT permission to forward the POST.
++    // The caller fetches that URL with GET and repeats all DNS/SSRF checks.
++    if (e instanceof FetchFailure && e.kind === "redirect" && e.redirectUrl) {
++      const resolved = publisherUrl(e.redirectUrl);
++      if (resolved && !/\/(login|signin|captcha|challenge|consent|paywall|subscribe)(?:\/|$)/i.test(new URL(resolved).pathname)) return resolved;
++    }
++    if (e instanceof FetchFailure && e.kind === "http" && [401, 402, 403, 429].includes(e.status ?? 0))
++      throw new FetchFailure(`Google 뉴스 원문 주소 조회가 제한되었습니다(HTTP ${e.status}). 아직 언론사 본문을 요청한 단계가 아닙니다. 자동 재시도하지 않았습니다.`, "blocked", e.status);
++    throw e;
++  }
+   const text = response.body.toString("utf8");
+   if (response.finalUrl !== GOOGLE_NEWS_RPC_URL || /text\/html/i.test(response.contentType)) {
+     const reason = articleAccessProblem(text);
+diff --git a/server/services/safeFetch.ts b/server/services/safeFetch.ts
+--- a/server/services/safeFetch.ts
++++ b/server/services/safeFetch.ts
+@@ -32,11 +32,28 @@
+   googleNewsForm?: string;
+ };
+ export class FetchFailure extends Error {
+-  constructor(message: string, public kind: "blocked" | "http" | "timeout" | "too_large" | "network" | "too_many_redirects", public status?: number) {
++  constructor(message: string, public kind: "blocked" | "redirect" | "http" | "timeout" | "too_large" | "network" | "too_many_redirects", public status?: number, public redirectUrl?: string) {
+     super(message);
+   }
+ }
+ 
++/** A redirect is not an access denial. Never forward the signed POST to its destination. */
++export function googleNewsRedirectFailure(status: number, location: string, base = GOOGLE_NEWS_RPC_URL): FetchFailure {
++  let target: URL;
++  try { target = new URL(location, base); }
++  catch { return new FetchFailure(`Google 뉴스 원문 주소 조회가 잘못된 이동 주소를 반환했습니다(HTTP ${status}).`, "redirect", status); }
++  const host = target.hostname.toLowerCase();
++  const googleHost = /(^|\.)google\.[a-z.]+$/.test(host);
++  const login = host === "accounts.google.com" || host === "consent.google.com";
++  const challenge = googleHost && /^\/(sorry|recaptcha|challenge|signin|ServiceLogin)(?:\/|$)/i.test(target.pathname);
++  if (login || challenge) return new FetchFailure(
++    `Google 뉴스 원문 주소 조회가 ${login ? "로그인·동의" : "자동 요청 확인"} 화면으로 이동했습니다(HTTP ${status}; ${host}). 언론사 원문의 접근 제한이 아니라 Google 조회 단계의 제한입니다. 확인 화면은 자동 통과하지 않았습니다.`,
++    "blocked", status);
++  return new FetchFailure(
++    `Google 뉴스 원문 주소 조회에서 주소 이동 응답을 받았습니다(HTTP ${status}; ${host}). 이 응답만으로 로그인·구독·접근 차단을 판단하지 않습니다.`,
++    "redirect", status, target.href);
++}
++
+ /** Validate before any network access; exported so the narrow POST boundary is testable. */
+ export function validateGoogleNewsForm(url: string, form: string): void {
+   if (url !== GOOGLE_NEWS_RPC_URL || typeof form !== "string" || form.length > 60_000)
+@@ -89,7 +106,7 @@
+     }
+     if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
+       clearTimeout(timer); await res.body?.cancel();
+-      if (isRpc) throw new FetchFailure("Google 뉴스 주소 조회가 다른 페이지로 이동했습니다. 로그인·동의 화면은 자동 통과하지 않습니다.", "blocked", res.status);
++      if (isRpc) throw googleNewsRedirectFailure(res.status, res.headers.get("location")!, current);
+       current = new URL(res.headers.get("location")!, current).toString();
+       continue;
+     }
+diff --git a/server/services/sourceFetchUrl.ts b/server/services/sourceFetchUrl.ts
+new file mode 100644
+--- /dev/null
++++ b/server/services/sourceFetchUrl.ts
+@@ -0,0 +1,18 @@
++/** Reuse only an actually fetched article URL. Never infer one from a title or publisher homepage. */
++import { isIP } from "node:net";
++import { isPrivateIp } from "./url";
++
++type Source = { originalUrl: string; meta: Record<string, unknown>; fetchedText?: string | null; contentHash?: string | null };
++const isGoogle = (value: string) => { try { return new URL(value).hostname === "news.google.com"; } catch { return false; } };
++export function sourceFetchUrl(source: Source): string {
++  const fallback = typeof source.meta.fetchUrl === "string" && source.meta.fetchUrl ? source.meta.fetchUrl : source.originalUrl;
++  if (!isGoogle(source.originalUrl) && !isGoogle(fallback)) return fallback;
++  if (!source.contentHash || !source.fetchedText || typeof source.meta.finalUrl !== "string") return fallback;
++  try {
++    const u = new URL(source.meta.finalUrl), host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
++    if (!["http:", "https:"].includes(u.protocol) || u.username || u.password || (u.port && !["80", "443"].includes(u.port))) return fallback;
++    if (/(^|\.)google\.[a-z.]+$/.test(host) || /(^|\.)(localhost|internal|local)$/.test(host) || (isIP(host) && isPrivateIp(host))) return fallback;
++    u.hash = "";
++    return u.href; // safeFetch still validates DNS before making the GET request.
++  } catch { return fallback; }
++}
+diff --git a/server/worker/collect.ts b/server/worker/collect.ts
+--- a/server/worker/collect.ts
++++ b/server/worker/collect.ts
+@@ -19,6 +19,7 @@
+ import { createNewsSearch } from "../services/newsSearch";
+ import { normalizeUrl } from "../services/url";
+ import { fetchAndExtract, extractPdf } from "../services/extract";
++import { sourceFetchUrl } from "../services/sourceFetchUrl";
+ import { safeFetch } from "../services/safeFetch";
+ import { extractNotice, LlmBudget, PROMPT_VERSION, type LlmSource, type AiProvider } from "../services/llm";
+ import { computeScheduleStatus } from "../services/dates";
+@@ -467,8 +468,7 @@
+   const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, docId));
+   if (!doc) return { ok: false };
+   if (doc.fetchStatus === "ok" && doc.fetchedText) return { ok: true }; // 이미 확보(다른 실행·채널)
+-  const meta = doc.meta as { fetchUrl?: string };
+-  const r = await fetcher(meta.fetchUrl || doc.originalUrl, undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined, takeExtraCall });
++  const r = await fetcher(sourceFetchUrl(doc), undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined, takeExtraCall });
+   if (!r.ok) {
+     await db
+       .update(sourceDocuments)
