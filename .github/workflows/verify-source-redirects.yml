@@ -8,27 +8,82 @@ concurrency:
   group: verify-source-redirects
   cancel-in-progress: true
 jobs:
-  diagnose:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 12
+    permissions:
+      contents: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aimom_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/aimom_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Apply bounded source changes
+        run: |
+          node --input-type=module <<'JS'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          const p='scripts/source-redirects.patch';
+          writeFileSync(p,readFileSync(p,'utf8').replace('import { createNewsSearch } from','import { createNewsSearch, type RssLoader } from'));
+          JS
+          if ! grep -q 'google-news-redirect-v2' server/app.ts; then
+            git apply --check scripts/source-redirects.patch
+            git apply scripts/source-redirects.patch
+          fi
+          node --input-type=module <<'JS'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          const p='server/services/safeFetch.ts';
+          const lines=readFileSync(p,'utf8').split('\n');
+          writeFileSync(p,lines.map(s=>s.includes('const googleHost =') ? '  const googleHost = ["news.google.com", "google.com", "www.google.com"].includes(host);' : s).join('\n'));
+          JS
       - run: npm ci
-      - name: Diagnose failed source redirects (READ ONLY)
+      - run: npm run typecheck
+      - run: npm test -- --reporter=default --reporter=json --outputFile=test-report.json
+      - run: npm run build
+      - name: Commit only verified application files to the fix branch
+        run: |
+          test "$GITHUB_REF_NAME" = 'fix/source-redirects-20261030'
+          git add server/app.ts server/routes/items.ts server/services/extract.ts server/services/googleNewsResolve.ts server/services/safeFetch.ts server/services/sourceFetchUrl.ts server/worker/collect.ts
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Distinguish Google redirects and reuse verified publisher source URLs'
+            git push origin HEAD:fix/source-redirects-20261030
+          fi
+      - name: Recover the single user-reported source only (no drafts or publishing)
         env:
           APP_DATABASE_URL: ${{ secrets.APP_DATABASE_URL }}
-        run: ./node_modules/.bin/tsx scripts/diagnose-source-redirects.ts
-      - name: Snapshot only tracked application code (no credentials or font assets)
-        run: git archive --format=tar.gz --output=source-code.tar.gz HEAD -- client server shared tests scripts package.json package-lock.json tsconfig.json vitest.config.ts vite.config.ts .nvmrc
+          REPAIR_REPORTED_SOURCE: '2600'
+        run: ./node_modules/.bin/tsx scripts/repair-reported-source.ts
+      - name: Summarize verification
+        if: always()
+        run: |
+          node --input-type=module <<'JS'
+          import {existsSync,readFileSync} from 'node:fs';
+          if(existsSync('test-report.json')){
+            const r=JSON.parse(readFileSync('test-report.json','utf8'));
+            console.log(`Tests: ${r.numPassedTests}/${r.numTotalTests} passed; ${r.numFailedTests} failed; ${r.numPendingTests} pending`);
+            for(const f of r.testResults??[]) for(const t of f.assertionResults??[]) if(t.status==='failed') console.log(t.fullName,(t.failureMessages??[]).join('\n').slice(0,4000));
+          }
+          if(existsSync('reported-source-repair.json')) console.log(readFileSync('reported-source-repair.json','utf8'));
+          JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: source-redirect-diagnostic
+          name: source-redirect-verification
           path: |
-            source-redirect-diagnostic.json
-            source-code.tar.gz
+            test-report.json
+            reported-source-repair.json
+          if-no-files-found: ignore
           retention-days: 3
