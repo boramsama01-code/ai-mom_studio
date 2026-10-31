@@ -8,7 +8,7 @@ const makeImage = vi.fn();
 vi.mock("../server/services/studioAi", async original => ({ ...await original<object>(), generateStudioImage: (...args: unknown[]) => makeImage(...args) }));
 const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
-const { mediaAssets, studioCards } = await import("../shared/schema");
+const { mediaAssets, studioCards, approvals, deliveries, destinations } = await import("../shared/schema");
 const { loadCardPages } = await import("../server/services/cardCarousel");
 let app: ReturnType<typeof createApp>;
 const payload = { topic: "빛", age_band: "중학생", key_question: "하늘은 왜 파랄까요?", background: ["빛에는 여러 색이 있습니다.", "공기가 빛을 산란합니다.", "색마다 정도가 다릅니다."], scientific_basis: "짧은 파장이 더 많이 산란합니다.", misconceptions: [], discussion_questions: ["노을은 왜 다를까요?", "달에서도 같을까요?", "무엇을 관찰할까요?"], parent_hints: ["하늘을 관찰해요."], safe_activity: null, sources: [], evidence: [] };
@@ -22,6 +22,45 @@ async function setup() {
   return { agent, H, id, endpoint: `/api/channels/2/items/${id}` };
 }
 describe("source cards automatically reach the board", () => {
+  it("trashes linked output, cancels scheduled delivery, and restores every page without reviving the schedule", async () => {
+    const { agent, H, id, endpoint } = await setup();
+    const generated = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography" });
+    expect(generated.status).toBe(200);
+    const cardId = generated.body.studioCardId;
+    const before = (await agent.get(`/api/studio/cards/${cardId}`)).body.card;
+    const [destination] = await getDb().insert(destinations).values({ channelId: 2, platform: "telegram_channel", label: "trash test" }).returning();
+    const [approval] = await getDb().insert(approvals).values({ channelId: 2, contentItemId: id, revisionId: generated.body.revisionId, mediaAssetId: generated.body.id, cardSha256: generated.body.sha256, captions: { instagram: "캡션", telegram: "캡션" }, scheduledAt: new Date(), approvedBy: "test" }).returning();
+    const [delivery] = await getDb().insert(deliveries).values({ channelId: 2, approvalId: approval.id, destinationId: destination.id }).returning();
+    const trashed = await agent.post(`/api/studio/cards/${cardId}/trash`).set(H).send({ version: before.version });
+    expect(trashed.body).toMatchObject({ cancelledDeliveries: 1, alreadyProcessing: 0 });
+    expect((await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography" })).status).toBe(409);
+    expect((await agent.post("/api/studio/cards").set(H).send({ title: "중복 가져오기", channel: "science-dialogue", sourceItemId: id })).status).toBe(409);
+    const restored = await agent.post(`/api/studio/cards/${cardId}/untrash`).set(H).send({ version: trashed.body.card.version });
+    expect(restored.status).toBe(200);
+    expect((await agent.get(`/api/studio/cards/${cardId}`)).body.card.sourceOutput).toEqual(before.sourceOutput);
+    expect((await getDb().select().from(deliveries).where(eq(deliveries.id, delivery.id)))[0].status).toBe("cancelled");
+    expect((await getDb().select().from(approvals).where(eq(approvals.id, approval.id)))[0].status).toBe("cancelled");
+    expect(await getDb().select().from(studioCards).where(eq(studioCards.sourceItemId, id))).toHaveLength(1);
+  });
+  it("does not attach a late AI cover after the board is trashed and restored", async () => {
+    const { agent, H, id, endpoint } = await setup();
+    const original = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography" });
+    const cardId = original.body.studioCardId;
+    const board = (await agent.get(`/api/studio/cards/${cardId}`)).body.card;
+    const beforeAssets = await getDb().select().from(mediaAssets).where(eq(mediaAssets.contentItemId, id));
+    process.env.OPENAI_API_KEY = "test-key";
+    makeImage.mockImplementationOnce(async () => {
+      const moved = await agent.post(`/api/studio/cards/${cardId}/trash`).set(H).send({ version: board.version });
+      expect(moved.status).toBe(200);
+      expect((await agent.post(`/api/studio/cards/${cardId}/untrash`).set(H).send({ version: moved.body.card.version })).status).toBe(200);
+      return { bytes: await sharp({ create: { width: 32, height: 32, channels: 3, background: "blue" } }).png().toBuffer(), model: "test-image" };
+    });
+    const response = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "ai" });
+    expect(response.status).toBe(409);
+    expect((await agent.get(`/api/studio/cards/${cardId}`)).body.card.sourceOutput).toEqual(board.sourceOutput);
+    expect(await getDb().select().from(mediaAssets).where(eq(mediaAssets.contentItemId, id))).toHaveLength(beforeAssets.length);
+    delete process.env.OPENAI_API_KEY; makeImage.mockReset();
+  });
   it("persists five ordered images, previews and downloads them, and never duplicates or overwrites board work", async () => {
     const { agent, H, id, endpoint } = await setup();
     const before = (await agent.get(endpoint)).body;

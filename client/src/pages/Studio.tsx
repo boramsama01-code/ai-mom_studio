@@ -1,3 +1,4 @@
+import { StudioTrashButton, StudioTrashView, TrashedStudioDetail } from "./StudioTrash";
 import { SourceStudioCard } from "./SourceStudioCard";
 import { aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import { AiUsageGuide } from "../AiUsageGuide";
@@ -39,16 +40,16 @@ const activeJob = (j: Job) => ["queued", "running", "processing"].includes(j.sta
 const inputOf = (c: CardInput): CardInput => ({ title: c.title, channel: c.channel, format: c.format, stage: c.stage, dueDate: c.dueDate ?? "", memo: c.memo ?? "", script: c.script ?? "", caption: c.caption ?? "", exportDesign: c.exportDesign ?? "editorial", sourceLabel: c.sourceLabel ?? "", panels: c.panels ?? Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), characters: c.characters ?? [], imagePath: c.imagePath ?? "" });
 
 export function StudioPage({ cardId }: { cardId?: number }) {
-  const [view, setView] = useState<"board" | "characters">("board");
+  const [view, setView] = useState<"board" | "characters" | "trash">("board");
   const guard = useDirtyGuard();
   if (cardId !== undefined) return Number.isSafeInteger(cardId) && cardId > 0 ? <StudioDetail key={cardId} id={cardId} /> : <div className="notice err">작업 주소를 확인해 주세요. <GuardedLink href="/">보드로</GuardedLink></div>;
   return <div className="studio">
     <header className="studio-home-top"><span className="studio-eyebrow">MY STUDIO <span className="studio-today">{new Date().toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", weekday: "long" })}</span></span><button className="btn sm ghost" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본 ↗" : "← 내 콘텐츠"}</button></header>
-    {view === "board" ? <StudioBoard /> : <CharacterArchive />}
+    {view === "trash" ? <StudioTrashView onBack={() => setView("board")} /> : view === "board" ? <StudioBoard onTrash={() => guard.confirmLeave(() => setView("trash"))} /> : <CharacterArchive />}
   </div>;
 }
 
-function StudioBoard() {
+function StudioBoard({ onTrash }: { onTrash: () => void }) {
   const channels = useStudioChannels(true);
   const channelName = (id: string) => channels.find(c => c.id === id)?.name ?? id;
   const q = useQuery({ queryKey: ["studio", "cards"], queryFn: () => api<Board>("/studio/cards") });
@@ -76,7 +77,7 @@ function StudioBoard() {
   const openHighway = () => guard.confirmLeave(() => { const channel = legacyChannels.find(c => studioKey(c.slug) === filter); if (channel) select(channel.id); navigate("/inbox"); });
   function newCard(stage: Stage = "idea") { if (archived || !visibleChannels.length) return; setNewStage(stage); setCreating(true); }
   return <>
-    <header className="studio-home-heading"><div><h1>내 콘텐츠</h1><p>생각을 모으고, 나다운 콘텐츠로 완성하는 곳.</p></div><button className="btn primary studio-create" disabled={archived || !visibleChannels.length} onClick={() => newCard()}><Icon name="plus" size={18} />새 콘텐츠 만들기</button></header>
+    <header className="studio-home-heading"><div><h1>내 콘텐츠</h1><p>생각을 모으고, 나다운 콘텐츠로 완성하는 곳.</p></div><div className="studio-home-actions"><button className="btn ghost" onClick={onTrash}><Icon name="trash" size={17} />휴지통{q.data?.trashCount ? <span className="studio-trash-count">{q.data.trashCount}</span> : null}</button><button className="btn primary studio-create" disabled={archived || !visibleChannels.length} onClick={() => newCard()}><Icon name="plus" size={18} />새 콘텐츠 만들기</button></div></header>
     <div className="studio-overview">
       <section className="studio-resume" aria-label="최근 작업 이어하기">
         <div className="studio-resume-label"><span className="resume-indicator" />{latest ? "이어서 만들어 볼까요?" : "다음 이야기를 기다리는 중"}</div>
@@ -100,10 +101,11 @@ function StudioBoard() {
             <div className={`studio-content-art ${sourceThumbnail || thumbnail || c.imagePath ? "has-image" : ""}`}>{sourceThumbnail ? <img src={sourceThumbnail} alt="" loading="lazy" /> : thumbnail ? <img src={imageUrl(thumbnail)} alt="" loading="lazy" /> : c.imagePath ? <img src={c.imagePath} alt="" loading="lazy" /> : <><span className={`studio-format-art ${c.format === "웹툰" ? "comic" : "slides"}`} aria-hidden="true"><i /><i /><i /><i /></span><span className="studio-art-label">{c.format} · {stages.find(s => s.id === c.stage)?.label}</span></>}</div>
             <div className="studio-content-copy"><span className="studio-content-channel"><i aria-hidden="true" />{channelName(c.channel)}</span><h2>{c.title}</h2><span className="studio-content-meta">{c.format}{c.sourceOutput && ` · ${c.sourceOutput.pages.length}장${c.sourceOutput.stale ? " · 재생성 필요" : ""}`}{c.dueDate && <> · <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", "/")} 예정</time></>}</span><div className="studio-content-bottom"><span className={`studio-stage-pill stage-${c.stage}`}>{stages.find(s => s.id === c.stage)?.label}</span><span className="card-open-label">{c.sourceOutput ? "카드뉴스 보기" : c.stage === "done" ? "결과 확인" : "이어서 편집"} <Icon name="arrow" size={15} /></span></div></div>
           </GuardedLink>
+          <div className="studio-card-actions"><StudioTrashButton card={c} disabled={move.isPending} /></div>
           {(c.stage === "done" || c.sourceOutput) && <StudioQuickExport card={c} />}
         </article>;
       })}</div> : <div className="studio-home-empty"><span aria-hidden="true">✧</span><h2>{search ? "검색한 작업이 없어요" : statusFilter === "done" ? "완료한 콘텐츠가 여기에 모여요" : "새 이야기를 시작해 보세요"}</h2><p>{search ? "검색어를 바꾸거나 필터를 초기화해 보세요." : statusFilter === "done" ? "제작을 마치면 이미지와 캡션을 바로 꺼낼 수 있습니다." : "제목 하나면 충분해요. 원고와 그림은 차근차근 채워갑니다."}</p>{(search || filter !== "all" || statusFilter !== "active" || archived) ? <button className="btn" onClick={resetFilters}>필터 초기화</button> : <button className="btn primary" disabled={!visibleChannels.length} onClick={() => newCard()}>첫 콘텐츠 만들기</button>}</div>}
-    </> : <div className="studio-board">{stages.map((stage) => <section key={stage.id} className={`studio-column stage-${stage.id}`} aria-label={stage.label} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const card = filtered.find((c) => String(c.id) === e.dataTransfer.getData("text/studio-card")); if (!archived && card && card.stage !== stage.id && !move.isPending) move.mutate({ card, stage: stage.id }); }}><div className="studio-column-head"><h2>{stage.label}<span>{filtered.filter((c) => c.stage === stage.id).length}</span></h2><button className="studio-add" disabled={archived || !visibleChannels.length} aria-label={`${stage.label} 작업 추가`} onClick={() => newCard(stage.id)}>＋</button></div><div className="studio-task-list">{filtered.filter((c) => c.stage === stage.id).map((c) => <article key={c.id} className="studio-task" draggable={!move.isPending && !archived} onDragStart={(e) => e.dataTransfer.setData("text/studio-card", String(c.id))}><span className={`studio-channel-tag ${c.channel}`}>{channelName(c.channel)}</span><GuardedLink href={`/studio/${c.id}`} className="studio-task-open">{c.sourceOutput && <img className="studio-task-preview" src={`/api/channels/${c.sourceOutput.channelId}/media/${c.sourceOutput.assetId}`} alt={`${c.sourceOutput.pages.length}장 카드뉴스 표지`} loading="lazy" />}<h3>{c.title}</h3></GuardedLink><div className="studio-task-meta"><span>{c.format}</span>{c.dueDate && <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", ".")}</time>}</div><select aria-label={`${c.title} 제작 단계`} value={c.stage} disabled={move.isPending || archived} onChange={(e) => move.mutate({ card: c, stage: e.target.value as Stage })}>{stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select>{stage.id === "done" && <StudioQuickExport card={c} />}</article>)}{!filtered.some((c) => c.stage === stage.id) && <p className="studio-column-hint">작업 없음</p>}</div></section>)}</div>}
+    </> : <div className="studio-board">{stages.map((stage) => <section key={stage.id} className={`studio-column stage-${stage.id}`} aria-label={stage.label} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const card = filtered.find((c) => String(c.id) === e.dataTransfer.getData("text/studio-card")); if (!archived && card && card.stage !== stage.id && !move.isPending) move.mutate({ card, stage: stage.id }); }}><div className="studio-column-head"><h2>{stage.label}<span>{filtered.filter((c) => c.stage === stage.id).length}</span></h2><button className="studio-add" disabled={archived || !visibleChannels.length} aria-label={`${stage.label} 작업 추가`} onClick={() => newCard(stage.id)}>＋</button></div><div className="studio-task-list">{filtered.filter((c) => c.stage === stage.id).map((c) => <article key={c.id} className="studio-task" draggable={!move.isPending && !archived} onDragStart={(e) => e.dataTransfer.setData("text/studio-card", String(c.id))}><span className={`studio-channel-tag ${c.channel}`}>{channelName(c.channel)}</span><GuardedLink href={`/studio/${c.id}`} className="studio-task-open">{c.sourceOutput && <img className="studio-task-preview" src={`/api/channels/${c.sourceOutput.channelId}/media/${c.sourceOutput.assetId}`} alt={`${c.sourceOutput.pages.length}장 카드뉴스 표지`} loading="lazy" />}<h3>{c.title}</h3></GuardedLink><div className="studio-task-meta"><span>{c.format}</span>{c.dueDate && <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", ".")}</time>}</div><select aria-label={`${c.title} 제작 단계`} value={c.stage} disabled={move.isPending || archived} onChange={(e) => move.mutate({ card: c, stage: e.target.value as Stage })}>{stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select><div className="studio-card-actions"><StudioTrashButton card={c} disabled={move.isPending} /></div>{stage.id === "done" && <StudioQuickExport card={c} />}</article>)}{!filtered.some((c) => c.stage === stage.id) && <p className="studio-column-hint">작업 없음</p>}</div></section>)}</div>}
     </section>
     <div className="studio-home-footer"><button className="btn sm ghost" onClick={openHighway}>수집한 자료에서 시작 ↗</button><GuardedLink className="btn sm ghost" href="/settings">채널 관리 ↗</GuardedLink><span>완료한 파일은 내려받아 SNS에 직접 게시할 수 있어요.</span></div>
     {q.data && <StudioNotes data={q.data} />}
@@ -161,6 +163,7 @@ function StudioDetail({ id }: { id: number }) {
   const q = useQuery({ queryKey: ["studio", "card", id], queryFn: () => api<Detail>(`/studio/cards/${id}`), refetchInterval: (query) => query.state.data?.jobs.some(activeJob) ? 3000 : false });
   if (q.isLoading) return <Loading lines={5} />;
   if (!q.data) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
+  if (q.data.card.trashedAt) return <TrashedStudioDetail card={q.data.card} />;
   if (!editBoard && q.data.card.sourceOutput && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard card={q.data.card} /><div className="source-output-detail"><button className="btn ghost sm" onClick={() => setEditBoard(true)}>보드 제목·메모 편집</button></div></>;
   // A background polling failure must not unmount the editor and discard unsaved work.
   return <>{q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}<StudioEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} /></>;
@@ -264,7 +267,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
     <GuardedLink href="/" className="studio-back">← 내 콘텐츠</GuardedLink>
     <header className="page-head">
       <div><span className="studio-channel-tag">{channelName(form.channel)}</span><h1>{base.title}</h1><span className="small muted">버전 {base.version} · {dirty ? "저장 전 변경사항" : "저장됨"}</span></div>
-      <button className="btn primary" onClick={() => save.mutate()} disabled={!dirty || busy || !form.title.trim()}>{save.isPending ? "저장 중…" : "저장"}</button>
+      <div className="row"><StudioTrashButton card={base} disabled={busy} prepare={saveCurrent} leave /><button className="btn primary" onClick={() => save.mutate()} disabled={!dirty || busy || !form.title.trim()}>{save.isPending ? "저장 중…" : "저장"}</button></div>
     </header>
     {newer && dirty && <div className="notice warn row between"><span>서버에 새 버전이 있습니다. 현재 입력은 유지했습니다.</span><button className="btn sm" onClick={() => guard.confirmLeave(() => accept(data.card))}>새 버전 불러오기</button></div>}
     {(save.error || restore.error) && <ErrorBox error={save.error || restore.error} />}

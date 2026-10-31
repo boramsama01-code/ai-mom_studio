@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
-import { channels, appSettings, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
+import { channels, appSettings, approvals, deliveries, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
 import { channelSlug } from "../../shared/channelKeys";
 import { studioContentSchema, type StudioGeneration, type StudioContent, type StudioCard, type StudioJob, type StudioRevision } from "../../shared/studio";
 import { conflict, HttpError, parse } from "../routes/util";
@@ -11,7 +11,7 @@ import { audit } from "../audit";
 import { renderStudioOutput } from "./studioExport";
 import { getSetting } from "../seed";
 
-export const studioCardDto = (row: typeof studioCards.$inferSelect): StudioCard => ({ ...studioContentSchema.parse(row.content), id: row.id, version: row.version, sourceItemId: row.sourceItemId, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() });
+export const studioCardDto = (row: typeof studioCards.$inferSelect): StudioCard => ({ ...studioContentSchema.parse(row.content), id: row.id, version: row.version, sourceItemId: row.sourceItemId, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(), trashedAt: row.trashedAt?.toISOString() ?? null });
 /** Attach immutable source output without copying rendered pages into the four-panel editor. */
 export async function studioCardsWithOutput(db: DB, rows: Array<typeof studioCards.$inferSelect>): Promise<StudioCard[]> {
   const itemIds = rows.flatMap(row => row.sourceItemId ? [row.sourceItemId] : []);
@@ -31,10 +31,46 @@ export async function studioCardsWithOutput(db: DB, rows: Array<typeof studioCar
 export const studioRevisionDto = (r: typeof studioRevisions.$inferSelect): StudioRevision => ({ ...r, createdAt: r.createdAt.toISOString() });
 export const studioJobDto = (j: typeof jobs.$inferSelect): StudioJob => ({ id: j.id, status: j.status, lastError: j.lastError, result: j.result, createdAt: j.createdAt.toISOString(), finishedAt: j.finishedAt?.toISOString() ?? null });
 
-export async function loadStudioCard(db: DB, id: number) {
-  const [row] = await db.select().from(studioCards).where(eq(studioCards.id, id));
+export async function loadStudioCard(db: DB, id: number, lock = false) {
+  const query = db.select().from(studioCards).where(eq(studioCards.id, id));
+  const [row] = await (lock ? query.for("update") : query);
   if (!row) throw new HttpError(404, "콘텐츠를 찾을 수 없습니다.");
   return row;
+}
+export function assertStudioActive(card: { trashedAt: Date | null }) {
+  if (card.trashedAt) throw new HttpError(409, "휴지통에 있는 콘텐츠입니다. 내 콘텐츠의 휴지통에서 복원한 뒤 작업하세요.");
+}
+
+/** Lock source → card → jobs, matching rendering and generation; cancelled work never resumes on restore. */
+export async function setStudioTrash(db: DB, cardId: number, version: number, trash: boolean, actor: string) {
+  return db.transaction(async tx => {
+    const initial = await loadStudioCard(tx as unknown as DB, cardId);
+    if (initial.sourceItemId) await tx.select({ id: contentItems.id }).from(contentItems).where(eq(contentItems.id, initial.sourceItemId)).for("update");
+    const current = await loadStudioCard(tx as unknown as DB, cardId, true);
+    if (current.version !== version) conflict(studioCardDto(current));
+    if (!!current.trashedAt === trash) return { card: studioCardDto(current), cancelledJobs: 0, cancelledDeliveries: 0, alreadyProcessing: 0 };
+    const now = new Date();
+    let cancelledJobs = 0, cancelledDeliveries = 0, alreadyProcessing = 0;
+    if (trash) {
+      const cancelled = await tx.update(jobs).set({ status: "cancelled", finishedAt: now, leaseOwner: null, leaseExpiresAt: null, lastError: "콘텐츠를 휴지통으로 이동해 취소했습니다." })
+        .where(and(eq(jobs.type, "studio_generate"), sql`${jobs.payload}->>'cardId' = ${String(cardId)}`, inArray(jobs.status, ["queued", "running"]))).returning({ id: jobs.id });
+      cancelledJobs = cancelled.length;
+      if (current.sourceItemId) {
+        const active = await tx.update(approvals).set({ status: "cancelled", updatedAt: now }).where(and(eq(approvals.contentItemId, current.sourceItemId), eq(approvals.status, "active"))).returning({ id: approvals.id });
+        if (active.length) {
+          const ids = active.map(a => a.id);
+          const stopped = await tx.update(deliveries).set({ status: "cancelled", lastError: "콘텐츠를 휴지통으로 이동해 취소했습니다.", updatedAt: now }).where(and(inArray(deliveries.approvalId, ids), eq(deliveries.status, "scheduled"))).returning({ id: deliveries.id });
+          cancelledDeliveries = stopped.length;
+          const sent = await tx.select({ id: deliveries.id }).from(deliveries).where(and(inArray(deliveries.approvalId, ids), inArray(deliveries.status, ["processing", "succeeded", "unknown"])));
+          alreadyProcessing = sent.length;
+          if (!alreadyProcessing) await tx.update(contentItems).set({ publishStatus: "cancelled" }).where(eq(contentItems.id, current.sourceItemId));
+        }
+      }
+    }
+    const [saved] = await tx.update(studioCards).set({ trashedAt: trash ? now : null, version: current.version + 1, updatedAt: now }).where(eq(studioCards.id, cardId)).returning();
+    await audit(tx, { actor, action: trash ? "trash" : "untrash", entity: "studio_card", entityId: cardId, detail: { cancelledJobs, cancelledDeliveries, alreadyProcessing } });
+    return { card: studioCardDto(saved), cancelledJobs, cancelledDeliveries, alreadyProcessing };
+  });
 }
 export async function loadStudioNotes(db: DB): Promise<{ notes: string; notesVersion: number }> {
   const [row] = await db.select().from(appSettings).where(eq(appSettings.key, "studio_notes"));
@@ -70,7 +106,7 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
       const [source] = await tx.select().from(contentItems).where(eq(contentItems.id, sourceItemId));
       if (!source) throw new HttpError(404, "연결할 수집 콘텐츠가 없습니다.");
       const [existing] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, sourceItemId));
-      if (existing) return studioCardDto(existing);
+      if (existing) { assertStudioActive(existing); return studioCardDto(existing); }
       // Copy explicit source material as editable context; never infer a new channel mapping.
       if (!content.memo) {
         const [document] = source.primarySourceId ? await tx.select().from(sourceDocuments).where(eq(sourceDocuments.id, source.primarySourceId)) : [];
@@ -80,7 +116,7 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
     const [card] = await tx.insert(studioCards).values({ content, sourceItemId: sourceItemId ?? null }).onConflictDoNothing().returning();
     if (!card && sourceItemId) {
       const [existing] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, sourceItemId));
-      if (existing) return studioCardDto(existing);
+      if (existing) { assertStudioActive(existing); return studioCardDto(existing); }
     }
     if (!card) throw new HttpError(409, "이미 생성된 콘텐츠입니다. 보드를 새로고침하세요.");
     await tx.insert(studioRevisions).values({ cardId: card.id, version: 1, snapshot: content, instruction: sourceItemId ? "수집 콘텐츠에서 가져오기" : "새 콘텐츠" });
@@ -90,7 +126,8 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
 }
 export async function saveStudioCard(db: DB, cardId: number, version: number, patch: Partial<StudioContent>, actor: string, instruction = "직접 수정") {
   return db.transaction(async tx => {
-    const current = await loadStudioCard(tx as unknown as DB, cardId);
+    const current = await loadStudioCard(tx as unknown as DB, cardId, true);
+    assertStudioActive(current);
     const content = parse(studioContentSchema, { ...current.content, ...patch });
     if (patch.channel && patch.channel !== current.content.channel) await validateStudioChannel(tx as unknown as DB, content.channel);
     await validateStudioImages(tx as unknown as DB, cardId, content);
@@ -113,7 +150,8 @@ export async function queueStudioGeneration(db: DB, cardId: number, input: Studi
   if (await getSetting(db, "global_stop", false)) throw new HttpError(409, "전역 정지 상태입니다. 정지를 해제한 뒤 생성하세요.");
   const inputHash = crypto.createHash("sha256").update(JSON.stringify({ cardId, ...input })).digest("hex");
   return db.transaction(async tx => {
-    const card = await loadStudioCard(tx as unknown as DB, cardId);
+    const card = await loadStudioCard(tx as unknown as DB, cardId, true);
+    assertStudioActive(card);
     await validateStudioChannel(tx as unknown as DB, card.content.channel);
     const reserved = await tx.insert(studioRequests).values({ requestId: input.requestId, cardId, inputHash }).onConflictDoNothing().returning();
     if (!reserved.length) {
