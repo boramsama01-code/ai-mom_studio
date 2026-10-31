@@ -363,7 +363,7 @@ describe("카드·승인·게시", () => {
     const H = { "x-csrf-token": csrf };
     const created = await agent.post("/api/channels/1/items").set(H).send({ title: "넘침" });
     const d = (await agent.get(`/api/channels/1/items/${created.body.id}`)).body;
-    await agent.patch(`/api/channels/1/items/${created.body.id}`).set(H).send({ version: d.item.version, payload: payload({ title: "아주 긴 제목 ".repeat(25) }) });
+    await agent.patch(`/api/channels/1/items/${created.body.id}`).set(H).send({ version: d.item.version, payload: payload({ title: "아주 긴 제목 ".repeat(150) }) });
     const r = await agent.post(`/api/channels/1/items/${created.body.id}/card`).set(H);
     expect(r.status).toBe(422);
     expect(r.body.code).toBe("overflow");
@@ -397,4 +397,5 @@ describe("재시작 후 영속성", () => {
     expect(r.body.items.some((x: { query: string }) => x.query === "서울과학고 모집요강")).toBe(true);
   });
 });
+
 

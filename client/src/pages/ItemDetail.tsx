@@ -1,3 +1,5 @@
+import { CardCarousel } from "../CardCarousel";
+import type { CardCarousel as CarouselData } from "@shared/carousel";
 import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import { AiUsageGuide } from "../AiUsageGuide";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -18,12 +20,13 @@ import { ChatGptLaunch } from "../ChatGptLaunch";
 import { itemChatGptPrompt } from "@shared/chatgptLink";
 
 type Detail = {
+  imageAiAvailable?: boolean;
   item: ContentItem;
   primary: SourceDocument | null;
   linked: Array<{ link: { role: string }; doc: SourceDocument }>;
   revisions: Array<Pick<ContentRevision, "id" | "revisionNo" | "author" | "model" | "promptVersion" | "note"> & { createdAt: string; usage: { inputTokens: number; outputTokens: number } | null }>;
   current: (ContentRevision & { payload: Record<string, any> }) | null;
-  cards: Array<{ id: number; revisionId: number; sha256: string; createdAt: string; cloudinaryUrl: string | null; source?: string; templateKey?: string | null }>;
+  cards: Array<{ id: number; revisionId: number; sha256: string; createdAt: string; cloudinaryUrl: string | null; source?: string; templateKey?: string | null; carousel?: CarouselData | null }>;
   approvals: Approval[];
   deliveries: Array<{ d: Delivery; dest: { label: string; platform: string } }>;
   similar: Array<{ id: number; title: string; reviewStatus: string }>;
@@ -55,6 +58,7 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
   if (q.isLoading) return <Loading lines={5} />;
   if (q.error) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   const d = q.data!;
+  const go = (t: "source" | "edit" | "publish" | "history", anchor: string) => guard.confirmLeave(() => { setTab(t); setTimeout(() => { const node = document.getElementById(anchor); node?.scrollIntoView({ behavior: "smooth", block: "start" }); node?.focus({ preventScroll: true }); }, 30); });
   const tabs: Array<[typeof tab, string]> = [["source", "원문·근거"], ["edit", "편집"], ["publish", "카드·승인"], ["history", "이력"]];
   return (
     <>
@@ -79,7 +83,7 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
       </div>
       {transfer.error && <ErrorBox error={transfer.error} />}
       <DiscoveryNote info={d.item.discovery} />
-      <Progress d={d} onGo={(t, anchor) => { setTab(t); setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); }} />
+      <Progress d={d} />
       <div className="tabs only-mobile" role="tablist">
         {tabs.map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
@@ -90,14 +94,17 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
       <div className="split">
         <div className={tab === "source" ? "" : "hide-mobile"}>
           <SourcePanel d={d} cid={cid} />
+          <Progress d={d} onGo={go} actionsOnly forTab="source" />
         </div>
         <div className="stack">
           <div className={tab === "edit" ? "" : "hide-mobile"}>
             <EditPanel d={d} cid={cid} />
+            <Progress d={d} onGo={go} actionsOnly forTab="edit" />
           </div>
           <div className={tab === "publish" ? "" : "hide-mobile"}>
             <ReviewPanel d={d} cid={cid} />
             <CardApprovePanel d={d} cid={cid} />
+            <Progress d={d} onGo={go} actionsOnly forTab="publish" />
           </div>
           <div className={tab === "history" ? "" : "hide-mobile"}>
             <HistoryPanel d={d} />
@@ -128,7 +135,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
   const evidence: Array<{ field: string; source_id: number; quote: string }> = d.current?.payload?.evidence ?? [];
   const pastedQuotes = p?.kind === "manual_text" && Array.isArray(p.meta.quotes) ? p.meta.quotes.filter((q): q is string => typeof q === "string") : [];
   return (
-    <div className="stack" id="source-panel">
+    <div className="stack" id="source-panel" tabIndex={-1}>
       <section className="panel stack">
         <h2>원문</h2>
         {!p ? (
@@ -321,7 +328,7 @@ export function EditPanel({ d, cid }: { d: Detail; cid: number }) {
   });
 
   return (
-    <section className="panel stack" id="edit-panel">
+    <section className="panel stack" id="edit-panel" tabIndex={-1}>
       <div className="row between">
         <h2 style={{ margin: 0 }}>편집</h2>
       </div>
@@ -405,7 +412,7 @@ function ReviewPanel({ d, cid }: { d: Detail; cid: number }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
   });
   return (
-    <section className="panel stack" id="review-panel">
+    <section className="panel stack" id="review-panel" tabIndex={-1}>
       <h2>검토</h2>
       <p className="small muted">검토 완료는 내용 확인 표시이며, 게시에는 별도의 최종 승인이 필요합니다.</p>
       <div className="row">
@@ -436,6 +443,8 @@ function toLocalInput(date: Date) {
 function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
   const qc = useQueryClient();
   const toast = useToast();
+  const [coverChoice, setCoverChoice] = useState<"ai" | "typography" | null>(null);
+  const coverMode = coverChoice ?? (d.imageAiAvailable ? "ai" : "typography");
   const revCards = d.cards.filter((c) => c.revisionId === d.current?.id);
   const [pickedCard, setPickedCard] = useState<number | null>(null);
   const currentCard = revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
@@ -452,10 +461,11 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
     setPickedCard(null);
   }, [d.current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const render = useMutation({
-    mutationFn: () => api<{ id: number }>(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body: { templateKey: tpl } }),
+    mutationFn: () => api<{ id: number; carousel: CarouselData; studioCardId: number }>(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body: { templateKey: tpl, coverMode } }),
     onSuccess: (a) => {
       setPickedCard(a.id);
-      toast("ok", "카드를 만들었습니다.");
+      toast("ok", `${a.carousel.pages.length}장 카드뉴스를 만들고 제작 보드에 저장했습니다.`);
+      qc.invalidateQueries({ queryKey: ["studio"] });
       qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
     },
   });
@@ -500,29 +510,34 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
   const cd = d.item.canvaDesign;
   const SRC: Record<string, string> = { builtin: "기본 템플릿", custom: "내 배경 템플릿", canva: "Canva" };
   return (
-    <section className="panel stack" style={{ marginTop: 16 }} id="card-panel">
-      <h2 style={{ margin: 0 }}>카드·최종 승인</h2>
+    <section className="panel stack" style={{ marginTop: 16 }} id="card-panel" tabIndex={-1}>
+      <h2 style={{ margin: 0 }}>카드뉴스·최종 승인</h2>
       {!d.current ? (
         <p className="muted">초안이 있어야 카드를 만들 수 있습니다.</p>
       ) : (
         <>
+          <p className="small muted">표지와 본문을 기본 5장으로 구성합니다. 긴 원고는 최대 10장까지 나누며, 완성된 이미지는 제작 보드에 자동 저장됩니다.</p>
+          <label className="field">표지 이미지<select value={coverMode} disabled={render.isPending} onChange={e => setCoverChoice(e.target.value as "ai" | "typography")}><option value="ai" disabled={!d.imageAiAvailable}>주제에 맞는 AI 일러스트</option><option value="typography">글자 중심 · 선택한 배경 템플릿</option></select><span className="hint">{coverMode === "ai" ? "OpenAI 이미지 API 비용이 발생합니다. 같은 원고로 다시 만들면 저장된 표지를 재사용합니다." : "이미지 생성 비용 없이 만듭니다."}</span></label>
+          {!d.imageAiAvailable && <p className="notice small">AI 표지를 사용하려면 <GuardedLink href="/connections?service=openai">OpenAI 이미지 연결</GuardedLink>을 설정해 주세요.</p>}
           <div className="row">
             <button className="btn primary" onClick={() => render.mutate()} disabled={render.isPending}>
-              {render.isPending ? "카드 만드는 중…" : revCards.length ? "새 카드 만들기" : "카드 만들기"}
+              {render.isPending ? "카드뉴스 만드는 중…" : revCards.length ? "카드뉴스 다시 만들기" : "카드뉴스 만들기"}
             </button>
             <button className="btn" onClick={() => setShowTpl((v) => !v)} aria-expanded={showTpl}>
               템플릿: {tpls.data?.items.find((t) => t.key === (tpl ?? tpls.data?.current))?.name ?? "기본"} ▾
             </button>
             {currentCard && (
               <a className="btn" href={`/api/channels/${cid}/media/${currentCard.id}?download=1`}>
-                JPEG 다운로드
+                표지 JPEG 다운로드
               </a>
             )}
           </div>
           {showTpl && tpls.data && (
             <TemplatePicker cid={cid} value={tpl ?? tpls.data.current} onChange={(k) => setTpl(k)} items={tpls.data.items} version={ch?.accentColor} />
           )}
+          {render.isPending && <p className="notice small" role="status">{coverMode === "ai" ? "표지 일러스트와 각 페이지를 만들고 있어요. 몇 분 정도 걸릴 수 있습니다." : "원고를 페이지로 나누고 보드에 저장하고 있어요."}</p>}
           {render.error && <ErrorBox error={render.error} />}
+          {render.data && <div className="notice ok row between" role="status"><span>{render.data.carousel.pages.length}장 모두 제작 보드에 저장됐어요.</span><GuardedLink className="btn sm" href={`/studio/${render.data.studioCardId}`}>보드에서 보기 →</GuardedLink></div>}
 
           {canva.data?.connected && (
             <div className="notice stack" style={{ gap: 8 }}>
@@ -564,6 +579,7 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
           )}
           {!currentCard && <p className="small muted">현재 버전(r{d.current.revisionNo})으로 만든 카드가 없습니다.</p>}
 
+          {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} />}
           <CopyFields cid={cid} itemId={d.item.id} revisionId={d.current.id} />
 
           <h3 style={{ margin: "8px 0 0" }}>캡션 (목적지별)</h3>
@@ -751,7 +767,7 @@ function CopyFields({ cid, itemId, revisionId }: { cid: number; itemId: number; 
 }
 
 /* ───────────── 작업 단계 + 다음 할 일 ───────────── */
-function Progress({ d, onGo }: { d: Detail; onGo: (tab: "source" | "edit" | "publish" | "history", anchor: string) => void }) {
+function Progress({ d, onGo, actionsOnly = false, forTab }: { d: Detail; onGo?: (tab: "source" | "edit" | "publish" | "history", anchor: string) => void; actionsOnly?: boolean; forTab?: "source" | "edit" | "publish" }) {
   const p = d.primary;
   const curId = d.current?.id;
   const hasCard = d.cards.some((c) => c.revisionId === curId);
@@ -781,28 +797,30 @@ function Progress({ d, onGo }: { d: Detail; onGo: (tab: "source" | "edit" | "pub
               : cur === 6
                 ? { text: "승인되었습니다. 예약 시각 이후 워커가 게시합니다(기본은 모의 실행).", btn: "전송 상태", tab: "publish", anchor: "card-panel" }
                 : null;
+  const action = forTab === "source" ? (!d.item.excluded && (!p || p.fetchStatus === "ok") ? { text: "본문을 확인했다면 초안을 작성하고 내용을 다듬어 주세요.", btn: "다음 단계로 · 초안 편집", tab: "edit" as const, anchor: "edit-panel" } : null) : forTab === "edit" ? (d.current && !d.item.excluded ? { text: "초안 내용을 확인한 뒤 검토를 마치고 카드뉴스를 만들어 주세요.", btn: "다음 단계로 · 검토·카드뉴스", tab: "publish" as const, anchor: "review-panel" } : null) : next;
   return (
     <>
-      <ol className="stepper" aria-label="작업 단계">
+      {!actionsOnly && <ol className="stepper" aria-label="작업 단계">
         {steps.map((s, i) => (
           <li key={s.label} className={s.done ? "done" : i === cur ? "current" : ""}>
             {s.label}
             <span className="sr-only">{s.done ? " 완료" : i === cur ? " 진행 중" : " 대기"}</span>
           </li>
         ))}
-      </ol>
-      {next && (
-        <div className="next-action">
+      </ol>}
+      {actionsOnly && action && (
+        <div className="next-action next-action-bottom">
           <span>
             <strong>다음 할 일 · </strong>
-            {next.text}
+            {action.text}
           </span>
-          <button className="btn primary sm" onClick={() => onGo(next.tab, next.anchor)}>
-            {next.btn}
+          <button className="btn primary sm" onClick={() => onGo?.(action.tab, action.anchor)}>
+            {action.btn}
           </button>
         </div>
       )}
     </>
   );
 }
+
 

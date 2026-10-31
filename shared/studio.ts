@@ -64,7 +64,7 @@ export type StudioGeneration = z.infer<typeof studioGenerationSchema>;
 export type StudioPanel = z.infer<typeof studioPanelSchema>;
 export type StudioContent = z.infer<typeof studioContentSchema>;
 export type StudioCardInput = StudioContent;
-export type StudioCard = StudioContent & { id: number; version: number; sourceItemId: number | null; createdAt: string; updatedAt: string };
+export type StudioCard = StudioContent & { id: number; version: number; sourceItemId: number | null; createdAt: string; updatedAt: string; sourceOutput?: import("./carousel").SourceOutput };
 export type StudioRevision = { id: number; cardId: number; version: number; snapshot: StudioContent; instruction: string; provider: string | null; model: string | null; applied: boolean; createdAt: string };
 export type StudioJob = { id: number; status: string; lastError: string | null; result: Record<string, unknown> | null; createdAt: string; finishedAt: string | null };
 export type StudioAiStatus = { defaultProvider: StudioProvider; text: Record<StudioProvider, boolean>; image: boolean };
@@ -72,3 +72,4 @@ export type StudioBoard = { cards: StudioCard[]; notes: string; notesVersion: nu
 export type StudioCardDetail = { card: StudioCard; revisions: StudioRevision[]; jobs: StudioJob[] };
 export type StudioExportCheck = { errors: Array<{ field: string; message: string }>; warnings: string[]; pageCount: number };
 export function emptyStudioCard(): StudioContent { return studioContentSchema.parse({ title: "새 콘텐츠" }); }
+

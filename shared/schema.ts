@@ -263,6 +263,7 @@ export const mediaAssets = pgTable(
     kind: text("kind").notNull().default("card"),
     source: text("source").notNull().default("builtin"), // builtin | custom | canva
     templateKey: text("template_key"),
+    carousel: jsonb("carousel").$type<import("./carousel").CardCarousel>(),
     sha256: text("sha256").notNull(),
     mime: text("mime").notNull().default("image/jpeg"),
     width: integer("width").notNull(),
@@ -482,4 +483,5 @@ export const studioRequests = pgTable("studio_requests", {
   requestId: text("request_id").primaryKey(), cardId: integer("card_id").notNull().references(() => studioCards.id),
   inputHash: text("input_hash").notNull(), jobId: integer("job_id").references(() => jobs.id), createdAt: createdAt(),
 });
+
 

@@ -7,7 +7,7 @@
  * - DRY_RUN=true(기본)면 외부로 생성/게시 POST를 보내지 않고 succeeded로 저장하지 않는다.
  * - 응답 유실은 unknown. Telegram은 자동 재전송하지 않는다. exactly-once를 보장하지 않는다.
  */
-import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { DB } from "../db";
 import {
   approvals,
@@ -18,21 +18,28 @@ import {
   destinations,
   mediaAssets,
   sourceDocuments,
+  studioCards,
   type Delivery,
 } from "../../shared/schema";
 import { payloadSchemaFor } from "../../shared/payloads";
-import { buildCardModel, validateCaptions } from "../services/cardModel";
-import { renderCardJpeg, CardOverflowError, CardFontError } from "../services/card";
+import { validateCaptions } from "../services/cardModel";
+import { CardOverflowError, CardFontError } from "../services/card";
 import { sha256 } from "../services/text";
 import { computeScheduleStatus, kstToday, KST_OFFSET_MIN } from "../services/dates";
 import { env } from "../env";
 import { getSetting } from "../seed";
 import { resolveSecrets } from "../services/secrets";
 import { uploadCard } from "../services/cloudinary";
-import { sendPhotoToChannel, telegramPostUrl } from "../services/telegram";
+import { sendPhotoToChannel, sendAlbumToChannel, telegramPostUrl } from "../services/telegram";
 import * as ig from "../services/instagram";
 import { audit } from "../audit";
 import { resolveStyle } from "../services/templates";
+import { cardApprovalHash, loadCardPages, planCarousel, renderCarouselCover, renderCarouselPages } from "../services/cardCarousel";
+import { generateStudioImage } from "../services/studioAi";
+import { createStudioCard } from "../services/studio";
+import { studioContentSchema } from "../../shared/studio";
+import { studioKey } from "../../shared/channelKeys";
+import type { CardCarousel } from "../../shared/carousel";
 
 export async function currentRevision(db: DB, itemId: number) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
@@ -55,7 +62,14 @@ export async function sourceOrgFor(db: DB, item: { primarySourceId: number | nul
 }
 
 /* ───────────── 카드 생성 ───────────── */
-export async function renderCardForItem(db: DB, itemId: number, now = new Date(), templateKey?: string | null) {
+export async function renderCardForItem(db: DB, itemId: number, now = new Date(), templateKey?: string | null, options: { coverMode?: "ai" | "typography"; actor?: string } = {}) {
+  // Serialize per item across web processes: concurrent clicks reuse the same cover art.
+  return db.transaction(async tx => {
+    await tx.execute(sql`select pg_advisory_xact_lock(7193202, ${itemId})`);
+    return renderCarouselForItem(tx as unknown as DB, itemId, now, templateKey, options);
+  });
+}
+async function renderCarouselForItem(db: DB, itemId: number, now: Date, templateKey: string | null | undefined, options: { coverMode?: "ai" | "typography"; actor?: string }) {
   const cr = await currentRevision(db, itemId);
   if (!cr) return { ok: false as const, code: "not_found", error: "항목 없음" };
   const { item, rev } = cr;
@@ -63,42 +77,57 @@ export async function renderCardForItem(db: DB, itemId: number, now = new Date()
   const parsed = payloadSchemaFor(item.kind).safeParse(rev.payload);
   if (!parsed.success) return { ok: false as const, code: "invalid_payload", error: "초안 형식이 올바르지 않습니다. 편집 화면에서 필수 항목을 채우세요." };
   const [ch] = await db.select().from(channels).where(eq(channels.id, item.channelId));
+  if (!ch?.active) return { ok: false as const, code: "channel", error: "채널을 복원한 뒤 카드를 만들어 주세요." };
   const payload = rev.payload as Record<string, any>;
   const title = payload.title || payload.key_question;
   if (!title || !String(title).trim()) return { ok: false as const, code: "invalid_payload", error: "카드 제목(제목/핵심 질문)이 비어 있습니다." };
-  const model = buildCardModel({
-    kind: item.kind,
-    payload,
-    channelName: ch.name,
-    accent: ch.accentColor,
-    sourceOrg: await sourceOrgFor(db, item, payload),
-    checkedDate: kstToday(now),
-  });
+  const coverMode = options.coverMode ?? (env.openaiKey ? "ai" : "typography");
+  if (coverMode === "ai" && !env.openaiKey) return { ok: false as const, code: "ai_not_configured", error: "AI 표지는 OpenAI 이미지 연결이 필요합니다. 연결 설정에서 키를 입력하거나 글자 중심 표지를 선택하세요." };
+  if (coverMode === "ai" && await getSetting(db, "global_stop", false)) return { ok: false as const, code: "global_stop", error: "전역 정지 상태입니다. 정지를 해제한 뒤 AI 표지를 만들어 주세요." };
   const key = templateKey || ch.cardTemplate || "builtin:classic";
   let style;
+  try { style = await resolveStyle(db, key, ch.id); }
+  catch (e) { return { ok: false as const, code: "template", error: (e as Error).message }; }
+  let output;
+  let cover: CardCarousel["cover"] = { kind: "typography", credit: style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오" };
   try {
-    style = await resolveStyle(db, key, ch.id);
-  } catch (e) {
-    return { ok: false as const, code: "template", error: (e as Error).message };
-  }
-  let out;
-  try {
-    out = await renderCardJpeg(model, style);
+    const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
+    // Check the title and source line before spending an image-generation call.
+    await renderCarouselCover(plan.base, plan.count, null, cover.credit, style);
+    let art: Buffer | null = null;
+    if (coverMode === "ai") {
+      const [cached] = await db.select().from(mediaAssets).where(and(eq(mediaAssets.revisionId, rev.id), eq(mediaAssets.kind, "cover_art"))).orderBy(desc(mediaAssets.id)).limit(1);
+      if (cached) {
+        art = cached.bytes;
+        cover = { kind: "ai", credit: "표지: AI 생성 · OpenAI", model: cached.templateKey ?? undefined };
+      } else {
+        const generated = await generateStudioImage({ purpose: "cover", prompt: JSON.stringify({ title, topic: payload.topic, summary: payload.summary ?? payload.one_line_summary ?? payload.background, channel: ch.name }) });
+        art = generated.bytes;
+        await db.insert(mediaAssets).values({ channelId: ch.id, contentItemId: item.id, revisionId: rev.id, kind: "cover_art", source: "ai", templateKey: generated.model, mime: "image/png", width: 1024, height: 1024, bytes: art, sha256: sha256(art) }).onConflictDoNothing();
+        cover = { kind: "ai", credit: "표지: AI 생성 · OpenAI", model: generated.model };
+      }
+    }
+    output = await renderCarouselPages(plan, style, art, cover.credit);
   } catch (e) {
     if (e instanceof CardOverflowError) return { ok: false as const, code: "overflow", field: e.field, error: `편집 필요: ${e.message}` };
     if (e instanceof CardFontError) return { ok: false as const, code: "font", error: e.message };
-    return { ok: false as const, code: "render", error: `카드 렌더러 오류: ${(e as Error).message}` };
+    return { ok: false as const, code: "render", error: `카드뉴스를 완성하지 못했습니다: ${(e as Error).message}` };
   }
-  const hash = sha256(out.jpeg);
-  await db
-    .insert(mediaAssets)
-    .values({ channelId: item.channelId, contentItemId: item.id, revisionId: rev.id, sha256: hash, width: out.width, height: out.height, bytes: out.jpeg, source: key.startsWith("custom:") ? "custom" : "builtin", templateKey: key })
-    .onConflictDoNothing();
-  const [asset] = await db
-    .select({ id: mediaAssets.id, sha256: mediaAssets.sha256, revisionId: mediaAssets.revisionId, createdAt: mediaAssets.createdAt, source: mediaAssets.source, templateKey: mediaAssets.templateKey })
-    .from(mediaAssets)
-    .where(and(eq(mediaAssets.revisionId, rev.id), eq(mediaAssets.sha256, hash)));
-  return { ok: true as const, asset };
+  const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+  if (fresh.currentRevisionId !== rev.id) return { ok: false as const, code: "conflict", error: "생성 중 원고가 변경됐습니다. 최신 원고를 확인한 뒤 다시 만들어 주세요." };
+  const pages: CardCarousel["pages"] = [];
+  for (const [index, page] of output.entries()) {
+    const hash = sha256(page.bytes);
+    await db.insert(mediaAssets).values({ channelId: ch.id, contentItemId: item.id, revisionId: rev.id, kind: index === 0 ? "card" : "carousel_page", sha256: hash, width: 1080, height: 1350, bytes: page.bytes, source: key.startsWith("custom:") ? "custom" : "builtin", templateKey: key }).onConflictDoNothing();
+    const [stored] = await db.select({ id: mediaAssets.id }).from(mediaAssets).where(and(eq(mediaAssets.revisionId, rev.id), eq(mediaAssets.sha256, hash)));
+    pages.push({ id: stored.id, sha256: hash, title: page.title });
+  }
+  const carousel: CardCarousel = { version: 1, pages, cover };
+  await db.update(mediaAssets).set({ carousel }).where(eq(mediaAssets.id, pages[0].id));
+  const board = await createStudioCard(db, studioContentSchema.parse({ title: String(title).slice(0, 160), channel: studioKey(ch.slug), format: "카드뉴스", stage: "review" }), options.actor ?? "system", item.id);
+  // Keep all manually edited board fields and version history; only its generated output changes.
+  await db.update(studioCards).set({ updatedAt: now, importedMeta: sql`coalesce(${studioCards.importedMeta}, '{}'::jsonb) || ${JSON.stringify({ generatedAssetId: pages[0].id })}::jsonb` }).where(eq(studioCards.id, board.id));
+  return { ok: true as const, asset: { id: pages[0].id, sha256: pages[0].sha256, revisionId: rev.id, createdAt: now, source: key.startsWith("custom:") ? "custom" : "builtin", templateKey: key, carousel, studioCardId: board.id } };
 }
 
 /* ───────────── 최종 승인 ───────────── */
@@ -113,8 +142,11 @@ export async function approveItem(
   if (rev.id !== a.revisionId) return { ok: false as const, error: "최신 버전이 아닙니다. 새로고침 후 다시 확인하세요." };
   if (item.reviewStatus !== "reviewed") return { ok: false as const, error: "먼저 '검토 완료'로 표시해야 최종 승인할 수 있습니다." };
   if (item.relevance === "irrelevant" || item.excluded) return { ok: false as const, error: "관련 없음/제외 항목은 승인할 수 없습니다." };
-  const [asset] = await db.select({ id: mediaAssets.id, revisionId: mediaAssets.revisionId, sha256: mediaAssets.sha256 }).from(mediaAssets).where(eq(mediaAssets.id, a.mediaAssetId));
-  if (!asset || asset.revisionId !== rev.id) return { ok: false as const, error: "현재 버전으로 만든 카드가 아닙니다. 카드를 다시 생성하세요." };
+  const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, a.mediaAssetId));
+  if (!asset || asset.kind !== "card" || asset.revisionId !== rev.id) return { ok: false as const, error: "현재 버전으로 만든 카드가 아닙니다. 카드를 다시 생성하세요." };
+  let approvedHash: string;
+  try { approvedHash = cardApprovalHash(await loadCardPages(db, asset)); }
+  catch (e) { return { ok: false as const, error: (e as Error).message }; }
   if (item.kind === "notice") {
     const st = computeScheduleStatus((rev.payload as any).schedules, now);
     if (st === "closed") return { ok: false as const, error: "접수가 마감된 공고는 승인할 수 없습니다." };
@@ -133,13 +165,13 @@ export async function approveItem(
     }
     const [ap] = await tx
       .insert(approvals)
-      .values({ channelId: item.channelId, contentItemId: item.id, revisionId: rev.id, mediaAssetId: asset.id, cardSha256: asset.sha256, captions: a.captions, scheduledAt: a.scheduledAt, approvedBy: a.actor })
+      .values({ channelId: item.channelId, contentItemId: item.id, revisionId: rev.id, mediaAssetId: asset.id, cardSha256: approvedHash, captions: a.captions, scheduledAt: a.scheduledAt, approvedBy: a.actor })
       .returning();
     for (const d of dests) {
       await tx.insert(deliveries).values({ channelId: item.channelId, approvalId: ap.id, destinationId: d.id, status: "scheduled" }).onConflictDoNothing();
     }
     await tx.update(contentItems).set({ publishStatus: dests.length ? "scheduled" : "waiting", updatedAt: now }).where(eq(contentItems.id, item.id));
-    await audit(tx, { actor: a.actor, action: "approve", entity: "content_item", entityId: item.id, channelId: item.channelId, detail: { approvalId: ap.id, revisionId: rev.id, cardSha256: asset.sha256, destinations: dests.map((d) => d.id), scheduledAt: a.scheduledAt } });
+    await audit(tx, { actor: a.actor, action: "approve", entity: "content_item", entityId: item.id, channelId: item.channelId, detail: { approvalId: ap.id, revisionId: rev.id, cardSha256: approvedHash, destinations: dests.map((d) => d.id), scheduledAt: a.scheduledAt } });
     return ap;
   });
   return { ok: true as const, approval, destinations: dests.length };
@@ -239,7 +271,11 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
   if (!ch?.active) return block("보관된 채널 — 게시 중단");
   if (ap.status !== "active") return block("승인이 더 이상 유효하지 않음");
   if (item.currentRevisionId !== ap.revisionId) return block("승인 이후 콘텐츠가 수정됨 — 재승인 필요");
-  if (!asset || sha256(asset.bytes) !== ap.cardSha256) return block("카드 파일이 승인본과 다름");
+  if (!asset) return block("카드 파일 없음");
+  let cardPages;
+  try { cardPages = await loadCardPages(db, asset); }
+  catch { return block("카드뉴스 파일이 승인본과 다름"); }
+  if (cardApprovalHash(cardPages) !== ap.cardSha256) return block("카드 파일이 승인본과 다름");
   if (!dest?.enabled) return block("목적지 비활성");
   if (item.kind === "notice" && computeScheduleStatus((rev.payload as any).schedules, now) === "closed") return block("접수 마감 — 게시 중단");
   if (!d.externalContainerId) {
@@ -264,7 +300,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
   }
 
   if (dest.platform === "telegram_channel") {
-    const r = await sendPhotoToChannel(sec.values.chatId, asset.bytes, ap.captions.telegram);
+    const r = cardPages.length > 1 ? await sendAlbumToChannel(sec.values.chatId, cardPages.map(p => p.bytes), ap.captions.telegram) : await sendPhotoToChannel(sec.values.chatId, asset.bytes, ap.captions.telegram);
     if (r.ok) {
       await finish(db, d, { status: "succeeded", externalId: String(r.messageId), externalUrl: telegramPostUrl(r.chatUsername, r.messageId), completedAt: new Date(), lastError: null });
       return "succeeded";
@@ -281,18 +317,22 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
     const token = sec.values.accessToken, userId = sec.values.userId;
     let containerId = d.externalContainerId;
     if (!containerId) {
-      let url = asset.cloudinaryUrl;
-      if (!url) {
-        try {
-          const up = await uploadCard(asset.bytes, `ai-mom/${ch.slug}/approval-${ap.id}-${ap.cardSha256.slice(0, 12)}`);
-          url = up.url;
-          await db.update(mediaAssets).set({ cloudinaryPublicId: up.publicId, cloudinaryUrl: up.url }).where(eq(mediaAssets.id, asset.id));
-        } catch (e) {
-          await finish(db, d, { status: "failed", errorKind: "transient", lastError: `이미지 업로드 실패: ${(e as Error).message}` });
-          return "failed";
+      const urls: string[] = [];
+      try {
+        for (const [index, page] of cardPages.entries()) {
+          let url = page.cloudinaryUrl;
+          if (!url) {
+            const up = await uploadCard(page.bytes, `ai-mom/${ch.slug}/approval-${ap.id}-${ap.cardSha256.slice(0, 12)}-${index + 1}`);
+            url = up.url;
+            await db.update(mediaAssets).set({ cloudinaryPublicId: up.publicId, cloudinaryUrl: up.url }).where(eq(mediaAssets.id, page.id));
+          }
+          urls.push(url);
         }
+      } catch (e) {
+        await finish(db, d, { status: "failed", errorKind: "transient", lastError: `이미지 업로드 실패: ${(e as Error).message}` });
+        return "failed";
       }
-      const c = await ig.createContainer(userId, token, url, ap.captions.instagram);
+      const c = urls.length > 1 ? await ig.createCarouselContainer(userId, token, urls, ap.captions.instagram) : await ig.createContainer(userId, token, urls[0], ap.captions.instagram);
       if (!c.ok) {
         // 컨테이너 생성 응답 유실은 게시가 아니므로(발행 전 단계) 실패로 기록
         await finish(db, d, { status: "failed", errorKind: c.err.kind, lastError: c.err.error });
@@ -343,4 +383,5 @@ export async function retryDelivery(db: DB, deliveryId: number, actor: string, c
   await audit(db, { actor, action: "retry_delivery", entity: "delivery", entityId: d.id, channelId: d.channelId, detail: { from: d.status, confirmNotPosted } });
   return { ok: true as const };
 }
+
 

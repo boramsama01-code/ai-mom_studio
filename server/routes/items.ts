@@ -1,3 +1,6 @@
+import { loadCardPages } from "../services/cardCarousel";
+import { zipFiles } from "../services/zip";
+import { studioAiStatus } from "../services/studioAi";
 import { aiProviders } from "../../shared/aiProviders";
 /**
  * 수집함 · 콘텐츠 초안 · 카드 · 승인
@@ -133,9 +136,9 @@ itemRoutes.get(
       .orderBy(desc(contentRevisions.revisionNo));
     const current = item.currentRevisionId ? (await db.select().from(contentRevisions).where(eq(contentRevisions.id, item.currentRevisionId)))[0] : null;
     const cards = await db
-      .select({ id: mediaAssets.id, revisionId: mediaAssets.revisionId, sha256: mediaAssets.sha256, createdAt: mediaAssets.createdAt, cloudinaryUrl: mediaAssets.cloudinaryUrl, source: mediaAssets.source, templateKey: mediaAssets.templateKey })
+      .select({ id: mediaAssets.id, revisionId: mediaAssets.revisionId, sha256: mediaAssets.sha256, createdAt: mediaAssets.createdAt, cloudinaryUrl: mediaAssets.cloudinaryUrl, source: mediaAssets.source, templateKey: mediaAssets.templateKey, carousel: mediaAssets.carousel })
       .from(mediaAssets)
-      .where(eq(mediaAssets.contentItemId, item.id))
+      .where(and(eq(mediaAssets.contentItemId, item.id), eq(mediaAssets.kind, "card")))
       .orderBy(desc(mediaAssets.id))
       .limit(5);
     const aps = await db.select().from(approvals).where(eq(approvals.contentItemId, item.id)).orderBy(desc(approvals.id)).limit(5);
@@ -157,7 +160,7 @@ itemRoutes.get(
             .limit(5)
         : [];
     const defaultCaptions = current ? buildCaptions({ kind: item.kind, payload: current.payload, sourceUrl: primary?.originalUrl ?? null, sourceOrg: await sourceOrgFor(db, item, current.payload) }) : null;
-    res.json({ item, primary, linked, revisions, current, cards, approvals: aps, deliveries: dels, similar, defaultCaptions });
+    res.json({ item, primary, linked, revisions, current, cards, approvals: aps, deliveries: dels, similar, defaultCaptions, imageAiAvailable: studioAiStatus().image });
   }),
 );
 
@@ -379,13 +382,27 @@ itemRoutes.post(
   "/channels/:cid/items/:id/card",
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
-    const body = parse(z.object({ templateKey: z.string().max(40).nullable().optional() }), req.body ?? {});
-    const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey);
+    const body = parse(z.object({ templateKey: z.string().max(40).nullable().optional(), coverMode: z.enum(["ai", "typography"]).optional() }), req.body ?? {});
+    const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey, { coverMode: body.coverMode, actor: actorOf(req) });
     if (!r.ok) return res.status(r.code === "font" || r.code === "render" ? 500 : r.code === "template" ? 400 : 422).json({ error: r.error, code: r.code, field: (r as { field?: string }).field });
     await audit(getDb(), { actor: actorOf(req), action: "render_card", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { assetId: r.asset.id, sha256: r.asset.sha256 } });
     res.json(r.asset);
   }),
 );
+
+itemRoutes.get("/channels/:cid/media/:mid/deck.zip", ah(async (req, res) => {
+  const ch = await loadChannel(req.params.cid);
+  const [cover] = await getDb().select().from(mediaAssets).where(and(eq(mediaAssets.id, intParam(req.params.mid)), eq(mediaAssets.channelId, ch.id), eq(mediaAssets.kind, "card")));
+  if (!cover) throw new HttpError(404, "카드뉴스를 찾을 수 없습니다.");
+  const pages = await loadCardPages(getDb(), cover);
+  const [revision] = await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, cover.revisionId));
+  const [item] = await getDb().select().from(contentItems).where(eq(contentItems.id, cover.contentItemId));
+  const primary = await itemPrimarySource(getDb(), item);
+  const captions = buildCaptions({ kind: item.kind, payload: revision.payload, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), sourceUrl: primary?.originalUrl ?? null });
+  const files = pages.map((page, i) => ({ name: `page-${String(i + 1).padStart(2, "0")}.jpg`, bytes: page.bytes }));
+  files.push({ name: "caption.txt", bytes: Buffer.from(captions.instagram) }, { name: "credits.txt", bytes: Buffer.from(cover.carousel?.cover.credit ?? "출처는 각 카드 하단을 확인하세요.") });
+  res.type("application/zip").set("Content-Disposition", `attachment; filename="cardnews-${cover.contentItemId}-r${cover.revisionId}.zip"`).send(zipFiles(files));
+}));
 
 itemRoutes.get(
   "/channels/:cid/media/:mid",
@@ -491,4 +508,5 @@ itemRoutes.post(
     res.json({ updated: upd.length });
   }),
 );
+
 

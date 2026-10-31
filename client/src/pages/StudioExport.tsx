@@ -6,9 +6,9 @@ import { ErrorBox } from "../ui";
 import { useToast } from "../toast";
 
 async function downloadCard(card: StudioCard) {
-  const zip = card.format === "카드뉴스";
+  const zip = !!card.sourceOutput || card.format === "카드뉴스";
   const extension = zip ? "zip" : "png";
-  const blob = await apiBlob(`/studio/cards/${card.id}/export.${extension}?version=${card.version}`, zip ? "application/zip" : "image/png");
+  const blob = await apiBlob(card.sourceOutput ? `/channels/${card.sourceOutput.channelId}/media/${card.sourceOutput.assetId}/deck.zip` : `/studio/cards/${card.id}/export.${extension}?version=${card.version}`, zip ? "application/zip" : "image/png");
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -22,7 +22,7 @@ export function StudioQuickExport({ card }: { card: StudioCard }) {
   const download = useMutation({ mutationFn: () => downloadCard(card), onError: error => toast("err", error.message) });
   if (!["웹툰", "카드뉴스"].includes(card.format)) return null;
   return <div className="studio-quick-export">
-    <button className="btn sm" disabled={download.isPending} onClick={() => download.mutate()}>{download.isPending ? "만드는 중…" : card.format === "카드뉴스" ? "6장 ZIP 저장" : "PNG 저장"}</button>
+    <button className="btn sm" disabled={download.isPending} onClick={() => download.mutate()}>{download.isPending ? "만드는 중…" : card.sourceOutput ? `${card.sourceOutput.pages.length}장 ZIP 저장` : card.format === "카드뉴스" ? "6장 ZIP 저장" : "PNG 저장"}</button>
     <button className="btn sm ghost" disabled={!card.caption} onClick={async () => {
       try { await navigator.clipboard.writeText(card.caption); toast("ok", "캡션을 복사했습니다."); }
       catch { toast("err", "작업을 열어 캡션을 직접 복사해 주세요."); }
@@ -81,3 +81,4 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
     <p className="small studio-handoff">이미지를 내려받고 위 캡션을 복사해 SNS에 직접 게시하세요. ‘완료’는 제작 완료를 뜻합니다.</p>
   </section>;
 }
+

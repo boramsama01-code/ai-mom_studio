@@ -6,7 +6,7 @@ import { actorOf } from "../auth";
 import { jobs, studioCards, studioImages, studioRevisions } from "../../shared/schema";
 import { studioContentSchema, studioCreateSchema, studioGenerationSchema, studioPatchSchema } from "../../shared/studio";
 import { ah, HttpError, intParam, parse } from "./util";
-import { createStudioCard, importStudioBoard, loadStudioNotes, queueStudioGeneration, saveStudioCard, saveStudioNotes, studioCardDto, studioDetail, studioImportSchema, studioJobDto } from "../services/studio";
+import { createStudioCard, importStudioBoard, loadStudioNotes, queueStudioGeneration, saveStudioCard, saveStudioNotes, studioCardDto, studioCardsWithOutput, studioDetail, studioImportSchema, studioJobDto } from "../services/studio";
 import { studioAiStatus } from "../services/studioAi";
 import { kickInlineStudio } from "../worker/studio";
 import { checkStudioExport, exportStudioZip, renderStudioOutput } from "../services/studioExport";
@@ -18,7 +18,7 @@ studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-
 studioRoutes.get("/studio/cards", ah(async (_req, res) => {
   const db = getDb();
   const cards = await db.select().from(studioCards).orderBy(desc(studioCards.updatedAt));
-  res.json({ cards: cards.map(studioCardDto), ...await loadStudioNotes(db), ai: studioAiStatus() });
+  res.json({ cards: await studioCardsWithOutput(db, cards), ...await loadStudioNotes(db), ai: studioAiStatus() });
 }));
 studioRoutes.post("/studio/cards", ah(async (req, res) => {
   const { sourceItemId, ...content } = parse(studioCreateSchema, req.body);
@@ -91,3 +91,4 @@ studioRoutes.patch("/studio/notes", ah(async (req, res) => {
 studioRoutes.post("/studio/import", ah(async (req, res) => {
   res.json(await importStudioBoard(getDb(), parse(studioImportSchema, req.body), actorOf(req)));
 }));
+
