@@ -11,6 +11,7 @@ import { createNewsSearch, type SearchFunction } from "../services/newsSearch";
 import { clusterArticles, isRecentlyCovered, rankClusters, toArticle, type Article, type Cluster } from "../services/discover";
 import { curateIssues, type LlmBudget, type CuratePick } from "../services/llm";
 import { normalizeUrl } from "../services/url";
+import { samePublisherUrl } from "../services/publisherLookup";
 import { env } from "../env";
 import { resolveDiscovery, type DiscoveryInfo, type DiscoverySettings } from "../../shared/domain";
 
@@ -133,12 +134,21 @@ export async function upsertNaverDoc(db: DB, it: NaverItem): Promise<{ id: numbe
   const fetchUrl = it.endpoint === "news" && /n\.news\.naver\.com/.test(it.link) ? it.link : identityUrl;
   // The same publisher/title/day can arrive via Google and the publisher feed.
   if (it.provider && it.publisher && it.published.iso) {
-    const [existing] = await db.select({ id: sourceDocuments.id }).from(sourceDocuments).where(and(
+    const [existing] = await db.select().from(sourceDocuments).where(and(
       eq(sourceDocuments.isSample, false), eq(sourceDocuments.title, it.title),
       sql`${sourceDocuments.meta}->>'publisher' = ${it.publisher}`,
       sql`(${sourceDocuments.publishedAt} at time zone 'Asia/Seoul')::date = (${it.published.iso}::timestamptz at time zone 'Asia/Seoul')::date`
     )).limit(1);
-    if (existing) return existing;
+    if (existing) {
+      // Upgrade a known duplicate address; never replace its identity or fetched body.
+      const direct = it.provider === "rss_direct" && it.publisherUrl ? samePublisherUrl(identityUrl, it.publisherUrl) : null;
+      if (direct && existing.kind === "google_news_rss" && !existing.fetchedText &&
+          typeof existing.meta.publisherUrl === "string" && samePublisherUrl(direct, existing.meta.publisherUrl)) {
+        await db.update(sourceDocuments).set({ meta: sql`${sourceDocuments.meta} || ${JSON.stringify({ fetchUrl: direct, directSource: "publisher_rss_exact" })}::jsonb`, updatedAt: new Date() })
+          .where(and(eq(sourceDocuments.id, existing.id), sql`${sourceDocuments.fetchedText} IS NULL`));
+      }
+      return { id: existing.id };
+    }
   }
   await db
     .insert(sourceDocuments)

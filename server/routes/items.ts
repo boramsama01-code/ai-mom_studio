@@ -26,7 +26,7 @@ import { audit } from "../audit";
 import { emptyPayload, payloadSchemaFor } from "../../shared/payloads";
 import { createRevision } from "../content";
 import { computeScheduleStatus } from "../services/dates";
-import { fetchAndExtract } from "../services/extract";
+import { fetchPublisherArticle as fetchAndExtract } from "../services/publisherLookup";
 import { sourceFetchUrl } from "../services/sourceFetchUrl";
 import { normalizeUrl } from "../services/url";
 import { extractForItem } from "../worker/collect";

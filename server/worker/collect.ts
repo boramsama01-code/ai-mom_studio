@@ -18,7 +18,8 @@ import {
 import { naverSearch, applyExcludeTerms, NaverError, searchCalls, type CallCounter, type NaverItem } from "../services/naver";
 import { createNewsSearch, type RssLoader } from "../services/newsSearch";
 import { normalizeUrl } from "../services/url";
-import { fetchAndExtract, extractPdf } from "../services/extract";
+import { extractPdf } from "../services/extract";
+import { fetchPublisherArticle as fetchAndExtract } from "../services/publisherLookup";
 import { sourceFetchUrl } from "../services/sourceFetchUrl";
 import { safeFetch } from "../services/safeFetch";
 import { extractNotice, LlmBudget, PROMPT_VERSION, type LlmSource, type AiProvider } from "../services/llm";

@@ -7,6 +7,7 @@ const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
 const { channels, contentItems, searchRules, jobs } = await import("../shared/schema");
 const { runCollect } = await import("../server/worker/collect");
+const { PUBLIC_NEWS_FEEDS } = await import("../server/services/newsSearch");
 const { enqueueJob } = await import("../server/worker/queue");
 const { eq, and } = await import("drizzle-orm");
 let app: ReturnType<typeof createApp>;
@@ -111,7 +112,7 @@ describe("실제 수집 설정·브리핑", () => {
     delete process.env.NAVER_CLIENT_SECRET;
     try {
       const a = await runCollect(db, 1, { trigger: "cli", now, rssLoad, collectionOnly: true });
-      expect(a.counts).toMatchObject({ newItems: 1, rssFeedOk: 6, googleQueries: 1 });
+      expect(a.counts).toMatchObject({ newItems: 1, rssFeedOk: PUBLIC_NEWS_FEEDS.length, googleQueries: 1 });
       const b = await runCollect(db, 1, { trigger: "cli", now, rssLoad, collectionOnly: true });
       expect(b.counts.newItems).toBe(0); expect(b.counts.duplicates).toBe(1);
       const list = await agent.get("/api/items?channelId=1&q=공개%20RSS");

@@ -12,6 +12,7 @@ import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { naverSearch, NaverError, searchCalls, type NaverItem } from "./naver";
 
 export const PUBLIC_NEWS_FEEDS = [
+  { name: "포천좋은신문", url: "https://www.pcgoodnews.co.kr/data/rss/news.xml", site: "https://www.pcgoodnews.co.kr" },
   { name: "연합뉴스", url: "https://www.yna.co.kr/rss/news.xml", site: "https://www.yna.co.kr" },
   { name: "동아일보", url: "https://rss.donga.com/total.xml", site: "https://www.donga.com" },
   { name: "한국경제", url: "https://www.hankyung.com/feed/all-news", site: "https://www.hankyung.com" },
@@ -132,7 +133,7 @@ export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?
     }
     if (!googleOk && counts.rssFeedOk === 0) throw new NaverError("공개 뉴스 수집 경로가 모두 응답하지 않았습니다. 실행 기록을 확인하세요.", "network");
     const rank = (item: NaverItem) => !opts.recruitment ? 0 : ({ candidate: 0, uncertain: 1, retrospective: 2, closed: 3, off_topic: 4 }[classifyNotice(item.title, item.description)]);
-    return uniqueNews([...matches, ...google]).sort((a, b) => rank(a) - rank(b) || (b.published.iso || "").localeCompare(a.published.iso || "")).slice(0, display);
+    return uniqueNews([...matches, ...google]).sort((a, b) => rank(a) - rank(b) || Number(a.provider === "google_news_rss") - Number(b.provider === "google_news_rss") || (b.published.iso || "").localeCompare(a.published.iso || "")).slice(0, display);
   };
   return { search, counts, warnings };
 }
