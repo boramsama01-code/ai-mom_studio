@@ -1,0 +1,28 @@
+{
+  "credit": "이미지: AI 생성 · 연출 이미지",
+  "tool": "Built-in imagegen",
+  "created": "2026-11-01",
+  "notes": "Original fictional conceptual artwork, no external source imagery. Do not label as documentary photographs of a real institution or current event. JPEG derivatives preserve original dimensions; source PNGs retained.",
+  "assets": [
+    {
+      "id": "lab",
+      "file": "lab.jpg",
+      "prompt": "Use case: photorealistic-natural. Asset type: original editorial cover art for a Korean educational Instagram carousel, artwork only. Make a premium editorial photograph of a modern sunlit EMPTY school science and robotics lab. A small elegant robotic arm on a clean cream workbench, beautiful authentic brushed metal and glass details, a restrained few scientific instruments and large soft sky-blue windows, quietly aspirational and credible, architectural daylight photograph, subtle grain, generous breathing room. Composition square, strong focal point slightly right of center, layered foreground and background. Palette sky blue, warm ivory, soft metallic grey with tiny orange details. No people. Absolutely no typography, no lettering, no logos, no watermarks, no charts or labels. This is an illustrative fictional scene, not documentation of a real institution."
+    },
+    {
+      "id": "rocket",
+      "file": "rocket.jpg",
+      "prompt": "Use case: stylized-concept. Asset type: original editorial cover art for an educational Instagram carousel, artwork only. A charming premium handmade sculptural rocket taking off from a beautifully crafted open book. The rocket is modeled in tactile matte clay and cut paper, creamy white body, small coral nose, cobalt fins, warm ochre exhaust represented by elegant curled paper ribbons and a few soft clouds. Open book has unprinted warm ivory paper pages. Set on warm ivory studio backdrop with soft directional shadows and beautiful material detail. Restrained sophisticated contemporary editorial craft illustration, playful enough for teens and parents, no childish face. Square composition, entire small sculpture visible with generous empty space. No people, no typography, no lettering, no labels, no watermark, no logo. Not an instructional diagram."
+    },
+    {
+      "id": "city",
+      "file": "city.jpg",
+      "prompt": "Use case: photorealistic-natural. Asset type: original conceptual editorial cover art for a current-affairs Instagram carousel, image only, NOT an actual news event. A wide anonymous contemporary urban crosswalk in rain at blue hour, evocative of Seoul or Tokyo without any recognizable landmark. Few very distant anonymous silhouettes with umbrellas, no visible faces. Luminous warm amber traffic-light reflections on wet dark blue asphalt, cinematic city perspective, refined documentary-style photography with natural atmospheric grain, restraint and premium editorial quality. Architecture is contemporary, street signs and billboards contain absolutely no legible writing or logos. Square composition, clear large geometric diagonal crosswalk in foreground, dark navy/cool teal and warm amber contrast. No text, no watermark, no actual incident, no emergency vehicles, no disaster."
+    },
+    {
+      "id": "globe",
+      "file": "globe.jpg",
+      "prompt": "Use case: stylized-concept. Asset type: original sophisticated editorial artwork for a breaking-news/current-affairs Instagram carousel, no lettering. A luminous frosted-glass cobalt-blue planet-like sphere suspended in a dark midnight-navy studio. A single narrow radiant burnt-orange orbital arc sweeps elegantly around the sphere in three-dimensional space. Subtle abstract misty shapes within the glass suggest interconnected continents without forming an accurate geographical map. Beautiful refraction, soft glow, minimal fine grain, premium conceptual editorial still life, dramatic but tasteful. Square composition, entire sphere and arc visible, generous navy negative space, controlled high contrast, no extra objects. This is a symbolic illustration not a scientific chart. No text, no numbers, no logo, no watermark."
+    }
+  ]
+}

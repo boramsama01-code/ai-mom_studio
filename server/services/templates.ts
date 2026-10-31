@@ -7,10 +7,17 @@ import type { DB } from "../db";
 import { cardTemplates, type Channel } from "../../shared/schema";
 import { BUILTIN_LAYOUTS, renderCardJpeg, type CardLayout, type CardStyle } from "./card";
 import { buildCardModel } from "./cardModel";
+import { CARD_DESIGNS, cardDesign } from "../../shared/cardDesigns";
+import { renderCollectionPreview } from "./cardDesignSamples";
 
 export class TemplateNotFound extends Error {}
 
 export async function resolveStyle(db: DB, key: string, channelId: number): Promise<CardStyle> {
+  if (key.startsWith("set:")) {
+    const id = key.slice(4);
+    if (!cardDesign(id)) throw new TemplateNotFound(`알 수 없는 템플릿: ${key}`);
+    return { layout: "minimal", collection: id };
+  }
   if (key.startsWith("builtin:")) {
     const layout = key.slice(8) as CardLayout;
     if (!BUILTIN_LAYOUTS.some((b) => b.key === layout)) throw new TemplateNotFound(`알 수 없는 템플릿: ${key}`);
@@ -34,6 +41,7 @@ export async function listTemplates(db: DB, channelId: number) {
     .from(cardTemplates)
     .where(and(isNull(cardTemplates.deletedAt), or(isNull(cardTemplates.channelId), eq(cardTemplates.channelId, channelId))));
   return [
+    ...CARD_DESIGNS.map(d => ({ key: `set:${d.id}`, name: d.name, description: d.description, kind: "builtin" as const, family: d.family, setId: d.id, pageCount: 5 })),
     ...BUILTIN_LAYOUTS.map((b) => ({ key: `builtin:${b.key}`, name: b.name, description: b.description, kind: "builtin" as const })),
     ...customs.map((c) => ({ key: `custom:${c.id}`, name: c.name, description: `내 배경 · ${c.textTone === "light" ? "밝은 글자" : "어두운 글자"}${c.overlay ? ` · 막 ${c.overlay}%` : ""}`, kind: "custom" as const, id: c.id, layout: c.layout, textTone: c.textTone, overlay: c.overlay, allChannels: c.channelId === null })),
   ];
@@ -64,11 +72,17 @@ const SAMPLE: Record<string, Record<string, unknown>> = {
 
 /** 미리보기(예시 문구) — 메모리 캐시 */
 const cache = new Map<string, Buffer>();
-export async function renderPreview(db: DB, key: string, channel: Channel): Promise<Buffer> {
-  const ck = `${key}|${channel.id}|${channel.accentColor}|${channel.name}|${channel.contentType}`;
+export async function renderPreview(db: DB, key: string, channel: Channel, page = 0): Promise<Buffer> {
+  const ck = key.startsWith("set:") ? `${key}|${page}` : `${key}|${channel.id}|${channel.accentColor}|${channel.name}|${channel.contentType}`;
   const hit = cache.get(ck);
   if (hit) return hit;
   const style = await resolveStyle(db, key, channel.id);
+  if (style.collection) {
+    const jpeg = await renderCollectionPreview(style.collection, page);
+    if (cache.size >= 120) cache.clear();
+    cache.set(ck, jpeg);
+    return jpeg;
+  }
   const model = buildCardModel({ kind: channel.contentType, payload: SAMPLE[channel.contentType] ?? SAMPLE.notice, channelName: channel.name, accent: channel.accentColor, sourceOrg: "예시 기관", checkedDate: "2026-09-29" });
   const { jpeg } = await renderCardJpeg(model, style);
   if (cache.size > 60) cache.clear();
@@ -79,3 +93,4 @@ export async function renderPreview(db: DB, key: string, channel: Channel): Prom
 export function clearPreviewCache() {
   cache.clear();
 }
+

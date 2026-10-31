@@ -22,6 +22,7 @@ import {
   type Delivery,
 } from "../../shared/schema";
 import { payloadSchemaFor } from "../../shared/payloads";
+import { collectionUsesArt } from "../../shared/cardDesigns";
 import { validateCaptions } from "../services/cardModel";
 import { CardOverflowError, CardFontError } from "../services/card";
 import { sha256 } from "../services/text";
@@ -84,13 +85,13 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   const payload = rev.payload as Record<string, any>;
   const title = payload.title || payload.key_question;
   if (!title || !String(title).trim()) return { ok: false as const, code: "invalid_payload", error: "카드 제목(제목/핵심 질문)이 비어 있습니다." };
-  const coverMode = options.coverMode ?? (env.openaiKey ? "ai" : "typography");
-  if (coverMode === "ai" && !env.openaiKey) return { ok: false as const, code: "ai_not_configured", error: "AI 표지는 OpenAI 이미지 연결이 필요합니다. 연결 설정에서 키를 입력하거나 글자 중심 표지를 선택하세요." };
-  if (coverMode === "ai" && await getSetting(db, "global_stop", false)) return { ok: false as const, code: "global_stop", error: "전역 정지 상태입니다. 정지를 해제한 뒤 AI 표지를 만들어 주세요." };
   const key = templateKey || ch.cardTemplate || "builtin:classic";
   let style;
   try { style = await resolveStyle(db, key, ch.id); }
   catch (e) { return { ok: false as const, code: "template", error: (e as Error).message }; }
+  const coverMode = style.collection && !collectionUsesArt(style.collection) ? "typography" : options.coverMode ?? (env.openaiKey ? "ai" : "typography");
+  if (coverMode === "ai" && !env.openaiKey) return { ok: false as const, code: "ai_not_configured", error: "AI 표지는 OpenAI 이미지 연결이 필요합니다. 연결 설정에서 키를 입력하거나 글자 중심 표지를 선택하세요." };
+  if (coverMode === "ai" && await getSetting(db, "global_stop", false)) return { ok: false as const, code: "global_stop", error: "전역 정지 상태입니다. 정지를 해제한 뒤 AI 표지를 만들어 주세요." };
   let output;
   let newCoverArt: { bytes: Buffer; model: string } | null = null;
   let cover: CardCarousel["cover"] = { kind: "typography", credit: style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오" };

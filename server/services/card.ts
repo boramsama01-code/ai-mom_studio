@@ -119,6 +119,7 @@ function drawBrand(c: Ctx, label: string, y: number, color: string, maxWidth = c
 export type CardLayout = "classic" | "header" | "magazine" | "minimal";
 export type CardStyle = {
   layout: CardLayout;
+  collection?: string; // paired cover/body system from shared/cardDesigns
   tone?: "dark" | "light"; // 글자색 계열(배경 이미지 템플릿용)
   background?: Buffer | null; // 내 템플릿 배경(이미지)
   overlay?: number; // 0~80, 가독성용 반투명 막
@@ -291,4 +292,5 @@ export async function renderCardJpeg(model: CardModel, style: CardStyle = { layo
   if (meta.width !== CARD_W || meta.height !== CARD_H || meta.channels !== 3) throw new Error("카드 결과 검증 실패(크기/채널)");
   return { jpeg, width: CARD_W, height: CARD_H };
 }
+
 

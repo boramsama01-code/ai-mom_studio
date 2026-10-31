@@ -40,7 +40,9 @@ describe("카드 템플릿", () => {
     const { agent, csrf } = await login(app);
     const H = { "x-csrf-token": csrf };
     const list = await agent.get("/api/channels/1/templates");
-    expect(list.body.items.map((t: { key: string }) => t.key)).toEqual(["builtin:classic", "builtin:header", "builtin:magazine", "builtin:minimal"]);
+    expect(list.body.items.filter((t: { key: string }) => t.key.startsWith("builtin:")).map((t: { key: string }) => t.key)).toEqual(["builtin:classic", "builtin:header", "builtin:magazine", "builtin:minimal"]);
+    expect(list.body.items.filter((t: { family: string }) => t.family === "recruitment")).toHaveLength(10);
+    expect(list.body.items.filter((t: { family: string }) => t.family === "news")).toHaveLength(10);
     expect(list.body.current).toBe("builtin:classic");
     const pv = await agent.get("/api/channels/1/templates/preview?key=builtin:header&size=sm");
     expect(pv.status).toBe(200);
@@ -55,6 +57,15 @@ describe("카드 템플릿", () => {
     const b = await agent.post(`/api/channels/1/items/${id}/card`).set(H).send({ templateKey: "builtin:minimal" });
     expect(b.body.templateKey).toBe("builtin:minimal");
     expect(b.body.sha256).not.toBe(a.body.sha256);
+    const collection = await agent.post(`/api/channels/1/items/${id}/card`).set(H).send({ templateKey: "set:r03", coverMode: "typography" });
+    expect(collection.status).toBe(200);
+    expect(collection.body.templateKey).toBe("set:r03");
+    expect(collection.body.carousel.pages).toHaveLength(5);
+    const bodyPreview = await agent.get("/api/channels/1/templates/preview?key=set:r03&page=4&size=sm");
+    expect(bodyPreview.status).toBe(200);
+    expect((await sharp(bodyPreview.body).metadata()).width).toBe(360);
+    expect((await agent.get("/api/channels/1/templates/preview?key=set:r03&page=5")).status).toBe(400);
+    expect((await agent.put("/api/channels/1/design").set(H).send({ cardTemplate: "set:missing" })).status).toBe(400);
   });
 
   it("배경 이미지 업로드 → 정규화(1080×1350) → 카드 생성 → 삭제 시 기본값 복귀", async () => {
@@ -195,3 +206,4 @@ describe("Canva(가짜 응답)", () => {
     expect(process.env.CANVA_REFRESH_TOKEN).toBe("RT2");
   });
 });
+

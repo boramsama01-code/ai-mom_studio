@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { aiProviders, type AiProvider } from "./aiProviders";
+import { CARD_DESIGNS } from "./cardDesigns";
 
 export const studioChannels = ["penguin", "highway", "fryday", "news"] as const;
 export const studioFormats = ["웹툰", "카드뉴스", "릴스", "브랜드", "기타"] as const;
-export const studioExportDesigns = ["editorial", "spotlight", "minimal"] as const;
+export const studioExportDesigns = ["editorial", "spotlight", "minimal", ...CARD_DESIGNS.map(d => `set:${d.id}` as const)] as const;
+export const studioPageCount = (content: { format: string; exportDesign: string }) => content.format === "카드뉴스" ? content.exportDesign.startsWith("set:") ? 5 : 6 : 1;
 export const studioOutputFormats = ["웹툰", "카드뉴스"] as const;
-export const studioOutputDescription = (format: string) => format === "웹툰" ? "네컷 이미지 1장 · 1080 × 1350 PNG" : format === "카드뉴스" ? "표지 + 본문 4장 + 마무리 · 1080 × 1350 PNG 6장 (ZIP)" : "기획용 형식 · 이미지·영상 내보내기 미지원";
+export const studioOutputDescription = (format: string, design = "editorial") => format === "웹툰" ? "네컷 이미지 1장 · 1080 × 1350 PNG" : format === "카드뉴스" ? design.startsWith("set:") ? "표지 + 본문 4장 · 1080 × 1350 PNG 5장 (ZIP)" : "표지 + 본문 4장 + 마무리 · 1080 × 1350 PNG 6장 (ZIP)" : "기획용 형식 · 이미지·영상 내보내기 미지원";
 export const studioStages = ["idea", "writing", "making", "review", "done"] as const;
 export const studioCharacters = ["pengpeng", "pempem", "penguin", "pengki"] as const;
 export const studioChannelLabels = { penguin: "우주펭귄상회", highway: "Highway", fryday: "Fryday", news: "시사 채널 · 이름 미정" };

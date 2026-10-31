@@ -5,9 +5,10 @@ import { and, eq } from "drizzle-orm";
 import type { DB } from "../db";
 import { channels, studioCards, studioImages } from "../../shared/schema";
 import { channelSlug } from "../../shared/channelKeys";
-import { studioContentSchema, type StudioContent, type StudioExportCheck } from "../../shared/studio";
+import { studioContentSchema, studioPageCount, type StudioContent, type StudioExportCheck } from "../../shared/studio";
 import { HttpError } from "../routes/util";
-import { loadFonts, wrapText } from "./card";
+import { CardOverflowError, loadFonts, wrapText, type CardModel } from "./card";
+import { checkCollectionTitle, layoutCollectionBody, renderCollectionBody, renderCollectionCover } from "./cardCollection";
 import { zipFiles } from "./zip";
 
 type Fit = { lines: string[]; size: number; lineHeight: number; fits: boolean };
@@ -30,22 +31,35 @@ function contentLayout(content: StudioContent) {
   };
 }
 export function checkStudioExport(content: StudioContent): StudioExportCheck {
-  const result: StudioExportCheck = { errors: [], warnings: [], pageCount: content.format === "카드뉴스" ? 6 : 1 };
+  const result: StudioExportCheck = { errors: [], warnings: [], pageCount: studioPageCount(content) };
   if (content.format !== "웹툰" && content.format !== "카드뉴스") {
     result.errors.push({ field: "format", message: "이 형식은 기획용입니다. 웹툰 또는 카드뉴스를 선택하면 이미지로 내보낼 수 있습니다." });
     return result;
   }
   const layout = contentLayout(content);
+  if (content.format === "카드뉴스" && content.exportDesign.startsWith("set:")) {
+    try { checkCollectionTitle(content.title, content.exportDesign.slice(4)); }
+    catch (e) { if (!(e instanceof CardOverflowError)) throw e; layout.title.fits = false; }
+  }
   if (!layout.title.fits) result.errors.push({ field: "title", message: "제목이 출력 영역을 넘습니다. 제목을 줄여 주세요." });
   if (!layout.source.fits) result.errors.push({ field: "sourceLabel", message: "출처 표기가 길어 출력 영역을 넘습니다. 기관·매체명과 날짜 위주로 줄여 주세요." });
   content.panels.forEach((panel, index) => {
     if (!panel.imageId && !panel.dialogue.trim()) result.errors.push({ field: `panels.${index}.dialogue`, message: `${index + 1}번째 본문에 글이나 그림을 추가하세요.` });
-    if (!layout.panels[index].fits) result.errors.push({ field: `panels.${index}.dialogue`, message: `${index + 1}번째 본문이 출력 영역을 넘습니다. 글을 줄이거나 그림을 빼고 글 중심으로 구성해 주세요.` });
+    let fits = layout.panels[index].fits;
+    if (content.format === "카드뉴스" && content.exportDesign.startsWith("set:")) {
+      try { layoutCollectionBody(collectionModel(content, index + 1, "미리보기", "#285f6a"), content.exportDesign.slice(4), { present: !!panel.imageId }); fits = true; }
+      catch (e) { if (!(e instanceof CardOverflowError)) throw e; fits = false; }
+    }
+    if (!fits) result.errors.push({ field: `panels.${index}.dialogue`, message: `${index + 1}번째 본문이 출력 영역을 넘습니다. 글을 줄이거나 그림을 빼고 글 중심으로 구성해 주세요.` });
   });
   if (!content.sourceLabel) result.warnings.push("출처가 비어 있습니다. 사실·입시 정보를 담았다면 기관·매체명과 확인 날짜를 적어 주세요.");
   const unsupported = [...new Set(Array.from([content.title, content.sourceLabel, ...content.panels.map(p => p.dialogue)].join("")))].filter(c => c.trim() && loadFonts().regular.charToGlyph(c).index === 0);
   if (unsupported.length) result.errors.push({ field: "text", message: `출력 글꼴이 지원하지 않는 문자가 있습니다: ${unsupported.slice(0, 8).join(" ")}. 해당 기호를 글자로 바꿔 주세요.` });
   return result;
+}
+function collectionModel(content: StudioContent, index: number, brand: string, accent: string): CardModel {
+  return { accent, brandLine: brand, badge: `${String(index + 1).padStart(2, "0")} / 05`, title: index === 0 ? content.title : `핵심 이야기 ${String(index).padStart(2, "0")}`,
+    blocks: index === 0 ? [] : [{ field: `panels.${index - 1}.dialogue`, text: content.panels[index - 1].dialogue, maxLines: 30 }], footer: content.sourceLabel || brand };
 }
 function textPaths(font: Font, block: Fit, x: number, y: number, color: string) {
   return block.lines.map((line, index) => `<path d="${font.getPath(line, x, y + index * block.lineHeight, block.size).toPathData(2)}" fill="${color}"/>`).join("");
@@ -84,6 +98,16 @@ export function createStudioRenderer(content: StudioContent, version: number, br
   const page = async (index: number): Promise<Buffer> => {
     const comic = content.format === "웹툰";
     if (!Number.isInteger(index) || index < 0 || index >= check.pageCount) throw new HttpError(400, "내보낼 페이지를 확인하세요.");
+    if (!comic && content.exportDesign.startsWith("set:")) {
+      const id = content.exportDesign.slice(4);
+      const model = collectionModel(content, index, brand, accent);
+      const artId = content.panels[index === 0 ? 0 : index - 1].imageId;
+      const art = artId ? images.get(artId) : undefined;
+      if (artId && !art) throw new HttpError(400, "이 콘텐츠의 그림을 찾을 수 없습니다.");
+      // Real content only: sample art is confined to the template browser.
+      const rendered = index === 0 ? await renderCollectionCover(model, check.pageCount, art ?? null, "", id) : await renderCollectionBody(model, id, art);
+      return sharp(rendered).png().toBuffer();
+    }
     const darkCover = content.exportDesign === "spotlight" && !comic && (index === 0 || index === 5);
     const bg = darkCover ? accent : content.exportDesign === "editorial" ? "#faf8f3" : "#ffffff";
     const ink = darkCover ? (lightText(accent) ? "#ffffff" : "#15242c") : "#15242c";
@@ -137,3 +161,4 @@ export async function exportStudioZip(db: DB, id: number, version?: number) {
   files.push({ name: "caption.txt", bytes: Buffer.from(output.content.caption, "utf8") });
   return { bytes: zipFiles(files), version: output.version };
 }
+

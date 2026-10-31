@@ -12,6 +12,9 @@ import { kickInlineStudio } from "../worker/studio";
 import { checkStudioExport, exportStudioZip, renderStudioOutput } from "../services/studioExport";
 import { importStudioPanelImage } from "../services/studioImageImport";
 import { STUDIO_IMAGE_MAX_BYTES, STUDIO_IMAGE_TYPES } from "../../shared/studioImageImport";
+import sharp from "sharp";
+import { cardDesign } from "../../shared/cardDesigns";
+import { renderCollectionPreview } from "../services/cardDesignSamples";
 
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -28,6 +31,22 @@ studioRoutes.post("/studio/cards", ah(async (req, res) => {
 }));
 studioRoutes.post("/studio/export-check", ah(async (req, res) => {
   res.json(checkStudioExport(parse(studioContentSchema, req.body)));
+}));
+const designPreviewCache = new Map<string, Buffer>();
+studioRoutes.get("/studio/design-preview", ah(async (req, res) => {
+  const key = String(req.query.key ?? "");
+  if (!key.startsWith("set:") || !cardDesign(key.slice(4))) throw new HttpError(404, "디자인을 찾을 수 없습니다.");
+  const page = parse(z.coerce.number().int().min(0).max(4).default(0), req.query.page);
+  const small = req.query.size === "sm";
+  const cacheKey = `${key}|${page}|${small}`;
+  let bytes = designPreviewCache.get(cacheKey);
+  if (!bytes) {
+    const image = await renderCollectionPreview(key.slice(4), page);
+    bytes = small ? await sharp(image).resize(360, 450).jpeg({ quality: 85 }).toBuffer() : image;
+    if (designPreviewCache.size >= 120) designPreviewCache.clear();
+    designPreviewCache.set(cacheKey, bytes);
+  }
+  res.type("image/jpeg").set("Cache-Control", "private, max-age=300").send(bytes);
 }));
 studioRoutes.get("/studio/cards/:id", ah(async (req, res) => {
   const db = getDb();
