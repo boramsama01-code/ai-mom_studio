@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { loadFonts, wrapText, layoutCard, renderCardJpeg, type CardModel } from "../server/services/card";
 const title = "AI가 코딩을 더 잘한다면, 그것만으로 인간보다 모든 면에서 똑똑하다고 판단해도 될까?";
-const sentence = "제공된 자료에서 확인한 사실과 아직 검증하지 않은 주장을 구분해야 합니다. ";
+const sentence = "원문과 근거를 확인합니다. ";
 function background(lines: number) {
   let text = "";
   while (wrapText(loadFonts().regular, text, 34, 912).length < lines) text += sentence;
@@ -23,7 +23,7 @@ describe("whole-card title and body fitting", () => {
     expect((await sharp(output.jpeg).metadata()).width).toBe(1080);
     expect(JSON.stringify(input)).toBe(before);
   });
-  it.each(["classic", "header", "magazine", "minimal"] as const)("%s shares available space with a ten-line background", () => {
+  it.each(["classic", "header", "magazine", "minimal"] as const)("%s shares available space with a ten-line background", layout => {
     const input = model(10), before = JSON.stringify(input);
     expect(wrapText(loadFonts().regular, input.blocks[0].text, 34, 912)).toHaveLength(10);
     expect(layoutCard(input, { layout })).toContain('<svg');
