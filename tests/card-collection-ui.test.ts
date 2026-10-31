@@ -11,7 +11,7 @@ describe("paired design browser", () => {
   it("browses categories and body pages without changing the selection until Apply", async () => {
     host = document.createElement("div"); document.body.append(host); root = createRoot(host);
     const onChange = vi.fn();
-    await act(async () => root.render(createElement(TemplatePicker, { cid: "studio", value: "set:r01", onChange, items: CARD_DESIGNS.map(d => ({ key: `set:${d.id}`, name: d.name, description: d.description, family: d.family, setId: d.id, pageCount: 5, kind: "builtin" })) })));
+    await act(async () => root.render(createElement(TemplatePicker, { cid: "studio", value: "set:r01", onChange, items: CARD_DESIGNS.map(d => ({ key: `set:${d.id}`, name: d.name, description: d.description, family: d.family, setId: d.id, pageCount: 5, kind: "builtin" as const })) })));
     expect(host.querySelectorAll(".collection-grid .tpl")).toHaveLength(10);
     const button = (text: string) => [...host.querySelectorAll("button")].find(b => b.textContent?.includes(text))!;
     await act(async () => button("뉴스·속보").click());
