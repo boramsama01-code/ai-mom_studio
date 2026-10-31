@@ -13,17 +13,17 @@ patch('server/services/newsSearch.ts', 'export const PUBLIC_NEWS_FEEDS = [', 'ex
 patch('server/services/newsSearch.ts', 'rank(a) - rank(b) || (b.published.iso || "").localeCompare(a.published.iso || "")', 'rank(a) - rank(b) || Number(a.provider === "google_news_rss") - Number(b.provider === "google_news_rss") || (b.published.iso || "").localeCompare(a.published.iso || "")');
 patch('server/worker/discovery.ts', 'import { normalizeUrl } from "../services/url";', 'import { normalizeUrl } from "../services/url";\nimport { samePublisherUrl } from "../services/publisherLookup";');
 patch('server/worker/discovery.ts', 'const [existing] = await db.select({ id: sourceDocuments.id }).from(sourceDocuments).where(and(', 'const [existing] = await db.select().from(sourceDocuments).where(and(');
-patch('server/worker/discovery.ts', '    if (existing) return existing;', `    if (existing) {
-      // A duplicate from the publisher feed can repair the fetch address of an old Google item.
-      // Keep its identity, content and error until a real body fetch succeeds.
-      const direct = it.provider === "rss_direct" && it.publisherUrl
-        ? samePublisherUrl(identityUrl, it.publisherUrl) : null;
-      if (direct && existing.kind === "google_news_rss" && !existing.fetchedText &&
-          typeof existing.meta.publisherUrl === "string" && samePublisherUrl(direct, existing.meta.publisherUrl)) {
-        await db.update(sourceDocuments).set({ meta: sql\\`\\${sourceDocuments.meta} || \\${JSON.stringify({ fetchUrl: direct, directSource: "publisher_rss_exact" })}::jsonb\\`, updatedAt: new Date() })
-          .where(and(eq(sourceDocuments.id, existing.id), sql\\`\\${sourceDocuments.fetchedText} IS NULL\\`));
-      }
-      return { id: existing.id };
-    }`);
+patch('server/worker/discovery.ts', '    if (existing) return existing;', [
+'    if (existing) {',
+'      // Upgrade a known duplicate address; never replace its identity or fetched body.',
+'      const direct = it.provider === "rss_direct" && it.publisherUrl ? samePublisherUrl(identityUrl, it.publisherUrl) : null;',
+'      if (direct && existing.kind === "google_news_rss" && !existing.fetchedText &&',
+'          typeof existing.meta.publisherUrl === "string" && samePublisherUrl(direct, existing.meta.publisherUrl)) {',
+'        await db.update(sourceDocuments).set({ meta: sql`${sourceDocuments.meta} || ${JSON.stringify({ fetchUrl: direct, directSource: "publisher_rss_exact" })}::jsonb`, updatedAt: new Date() })',
+'          .where(and(eq(sourceDocuments.id, existing.id), sql`${sourceDocuments.fetchedText} IS NULL`));',
+'      }',
+'      return { id: existing.id };',
+'    }',
+].join('\n'));
 patch('server/app.ts', 'sourceResolver: "google-news-redirect-v2"', 'sourceResolver: "publisher-direct-v3"');
 console.log('Publisher-first policy applied; Google RSS discovery retained, Google article/RPC decoding not used by application collection or refetch.');
