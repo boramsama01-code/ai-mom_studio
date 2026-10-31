@@ -205,13 +205,13 @@ input:focus,select:focus,textarea:focus { border-color:#6095f1; box-shadow:0 0 0
 .service-canva { background:#e8f5f8; color:#268397; }
 .connection-help { background:#f3f7fe; }
 .login-page { display:grid; grid-template-columns:1.05fr 1fr; gap:90px; align-items:center; max-width:1020px; padding:60px 32px; margin:min(10vh,90px) auto; }
-.login-intro .studio-eyebrow { letter-spacing:.13em; font-size:11px; color:#6e8fc1; }
-.login-intro h1 { font-size:44px; line-height:1.4; letter-spacing:-.05em; font-weight:750; margin:25px 0 20px; }
-.login-intro p { color:#8190a3; font-size:15px; line-height:1.9; }
-.login-workflow { display:flex; gap:22px; color:#8a98aa; font-size:11px; margin-top:36px; }
+.login-intro h1 { font-size:36px; line-height:1.4; letter-spacing:-.04em; font-weight:750; margin:32px 0 12px; }
+.login-intro p { color:var(--muted); font-size:15px; line-height:1.9; }
+.login-workflow { display:flex; flex-wrap:wrap; gap:10px 18px; color:var(--muted); font-size:12px; margin-top:28px; }
+.login-workflow span + span::before { content:"/"; margin-right:18px; color:#b5bfcc; }
 .login-panel { padding:36px; border-radius:24px; box-shadow:0 16px 48px #1e3a5f05; gap:26px; }
-.login-brand-logo { width:100px; height:100px; object-fit:contain; margin:0 0 20px; }
-.login-brand-title { font-size:23px; color:#324158; margin-bottom:8px; }
+.login-intro .login-brand-logo { display:block; width:224px; max-width:100%; height:auto; object-fit:contain; margin:0; mix-blend-mode:multiply; }
+.login-brand-title { font-size:23px; color:#324158; margin:0; text-align:left; }
 .login-panel p { font-size:13px; }
 .login-panel form { gap:19px; }
 .login-panel .btn.primary { min-height:48px; margin-top:6px; }
@@ -258,7 +258,13 @@ input:focus,select:focus,textarea:focus { border-color:#6095f1; box-shadow:0 0 0
  .studio-home-footer > span { padding:0 12px; line-height:1.7; }
  input,select,textarea,.studio-editor-layout input,.studio-editor-layout select,.studio-editor-layout textarea,.studio-comic-panel textarea,.studio-home-filters input,.studio-home-filters select { font-size:16px; }
  .btn.sm { min-height:42px; } .collection-date-filter .field { max-width:none; flex:1; min-width:140px; }
- .login-page { display:block; max-width:480px; margin:20px auto; } .login-intro { display:none; } .login-panel { padding:28px; }
+ .login-page { display:block; max-width:480px; margin:0 auto; padding:30px 22px; }
+ .login-intro { display:block; margin-bottom:26px; }
+ .login-intro .login-brand-logo { width:180px; }
+ .login-intro h1 { font-size:24px; margin:20px 0 8px; }
+ .login-intro p { font-size:13px; margin:0; }
+ .login-workflow { display:none; }
+ .login-panel { padding:26px; gap:24px; }
  .modal { padding:22px; } .connection-services { padding-bottom:10px; }
 }
 @media (max-width:480px) {

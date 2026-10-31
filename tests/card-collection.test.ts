@@ -28,12 +28,24 @@ describe("5 editorial layouts with 30 complete color sets", () => {
     expect(collectionUsesArt("n04-cobalt")).toBe(false);
     expect(collectionUsesArt("n01-yellow")).toBe(true);
   });
+  it("keeps the R05 photograph visible at both the top and bottom edges", async () => {
+    const { plan } = collectionSample("r05");
+    const covers = [];
+    for (const background of ["#FF0000", "#0000FF"]) {
+      const art = await sharp({ create: { width: 50, height: 50, channels: 3, background } }).png().toBuffer();
+      covers.push(await renderCollectionCover(plan.base, 5, art, "", "r05"));
+    }
+    for (const top of [20, 1320]) {
+      const pixels = await Promise.all(covers.map(cover => sharp(cover).extract({ left: 20, top, width: 1, height: 1 }).raw().toBuffer()));
+      expect(Math.abs(pixels[0][0] - pixels[1][0]) + Math.abs(pixels[0][2] - pixels[1][2])).toBeGreaterThan(6);
+    }
+  });
   it("maintains readable text on every palette surface", () => {
     const luminance = (hex: string) => hex.slice(1).match(/../g)!.map(c => parseInt(c, 16) / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4).reduce((sum, c, i) => sum + c * [.2126, .7152, .0722][i], 0);
     const contrast = (a: string, b: string) => (Math.max(luminance(a), luminance(b)) + .05) / (Math.min(luminance(a), luminance(b)) + .05);
     for (const d of CARD_COLOR_VARIANTS) {
       expect(contrast(d.ink, d.bg), `${d.id}: body`).toBeGreaterThanOrEqual(4.5);
-      expect(contrast(d.ink, d.soft), `${d.id}: panel`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(d.onSoft ?? d.ink, d.soft), `${d.id}: panel`).toBeGreaterThanOrEqual(4.5);
       expect(contrast(d.onAccent, d.accent), `${d.id}: accent`).toBeGreaterThanOrEqual(4.5);
     }
   });

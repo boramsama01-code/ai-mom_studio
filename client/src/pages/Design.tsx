@@ -9,7 +9,7 @@ import { useToast } from "../toast";
 import { Badge, Empty, ErrorBox, GuardedLink, Loading } from "../ui";
 import { CARD_FIELD_KEYS } from "@shared/cardFields";
 
-export type Tpl = { key: string; name: string; description: string; kind: "builtin" | "custom"; family?: "recruitment" | "news"; setId?: string; pageCount?: number; colors?: { key: string; name: string; bg: string; ink: string; accent: string }[]; id?: number; layout?: string; textTone?: string; overlay?: number; allChannels?: boolean };
+export type Tpl = { key: string; name: string; description: string; kind: "builtin" | "custom"; family?: "recruitment" | "news"; setId?: string; pageCount?: number; colors?: { key: string; name: string; bg: string; ink: string; accent: string; secondary?: string }[]; id?: number; layout?: string; textTone?: string; overlay?: number; allChannels?: boolean };
 const includesKey = (template: Tpl, key: string) => template.key === key || !!template.colors?.some(color => color.key === key);
 
 export function useTemplates(cid: number | "all") {
@@ -54,7 +54,7 @@ export function TemplatePicker({ cid, value, onChange, items, version, disabled 
             <div className="row between"><strong className="small">컬러</strong><span className="small muted" aria-live="polite">{activeColor?.name}</span></div>
             <div className="collection-colors" role="group" aria-label="디자인 컬러">
               {active.colors.map(color => <button key={color.key} type="button" className="collection-color" aria-pressed={activeKey === color.key} onClick={() => setPreview(color.key)}>
-                <span className="collection-color-chip" style={{ background: color.bg, color: color.ink }} aria-hidden="true"><span>Aa</span><i style={{ background: color.accent }} /></span><span>{color.name}</span>
+                <span className="collection-color-chip" style={{ background: color.bg, color: color.ink }} aria-hidden="true"><span>Aa</span><i style={{ background: color.secondary ? `linear-gradient(90deg, ${color.accent} 50%, ${color.secondary} 50%)` : color.accent }} /></span><span>{color.name}</span>
               </button>)}
             </div>
             <p className="small muted">선택한 컬러가 표지와 본문 전체에 적용됩니다.</p>

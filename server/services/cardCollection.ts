@@ -107,8 +107,10 @@ export async function renderCollectionCover(model: CardModel, count: number, art
       headline(); await photo(92, 682, 604, 382, 4);
       text("배우고\n탐구하고\n발견하기", 742, 713, 230, 280, { size: 41, weight: "semibold" }); cue(92, 1101); break;
     case "r05":
-      await photo(0, 155, W, 710); rect(0, 155, W, 710, d.bg, 0, 'opacity=".15"'); c.header(model.brandLine, page);
-      pill(tag, 80, 190); rect(0, 825, W, 350, d.bg);
+      await photo(0, 0, W, H);
+      els.push(`<defs><linearGradient id="orbit-shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${d.bg}" stop-opacity=".65"/><stop offset=".23" stop-color="${d.bg}" stop-opacity=".10"/><stop offset=".47" stop-color="${d.bg}" stop-opacity=".18"/><stop offset=".64" stop-color="${d.bg}" stop-opacity=".86"/><stop offset="1" stop-color="${d.bg}" stop-opacity=".97"/></linearGradient></defs>`);
+      rect(0, 0, W, H, "url(#orbit-shade)"); c.header(model.brandLine, page);
+      pill(tag, 80, 166);
       headline(); cue(80, 1120, d.accent); break;
     case "r06":
       c.header(model.brandLine, page); pill(tag, 80, 166);
@@ -152,7 +154,8 @@ export async function renderCollectionCover(model: CardModel, count: number, art
       pill("NEWS DISPATCH", 80, 733); headline(); break;
     case "n04":
       c.header(model.brandLine, page); text("WHY IT", 80, 166, 920, 160, { size: 126, weight: "bold" });
-      text("MATTERS", 80, 299, 920, 160, { size: 126, weight: "bold" });
+      if (d.onSoft) rect(66, 292, 782, 157, d.soft);
+      text("MATTERS", 80, 299, 920, 160, { size: 126, weight: "bold", color: d.onSoft ?? d.ink });
       line(80, 494, 920, d.ink, 5); headline();
       rect(80, 1046, 920, 110, d.accent, 2); cue(114, 1076, d.onAccent); break;
     case "n05":
@@ -233,7 +236,7 @@ export function layoutCollectionBody(model: CardModel, id: string, picture?: { d
     const y = split ? top : e.y;
     const boxWidth = split ? 440 : right - x;
     const emphasis = d.body === "spotlight" && i === 0;
-    const ink = emphasis ? d.onAccent : d.ink;
+    const ink = emphasis ? d.onAccent : boxed ? d.onSoft ?? d.ink : d.ink;
     if (boxed) rect(left, y, boxWidth, e.h, emphasis ? d.accent : d.soft, d.body === "split" ? 4 : 16);
     if (timeline) {
       if (i < entries!.length - 1) rect(105, y + 35, 2, e.h + 42, d.accent);
@@ -245,7 +248,7 @@ export function layoutCollectionBody(model: CardModel, id: string, picture?: { d
       line(80, y + e.h + 21, 920, d.soft, 2);
     }
     const labelY = y + (boxed ? 25 : 0);
-    if (e.block.label && !ledger) text(e.block.label, left + inset, labelY, width, 37, { size: 26, min: 22, weight: "semibold", color: emphasis ? d.onAccent : d.ink, field: e.block.field });
+    if (e.block.label && !ledger) text(e.block.label, left + inset, labelY, width, 37, { size: 26, min: 22, weight: "semibold", color: ink, field: e.block.field });
     const bodyY = labelY + (e.block.label && !ledger ? 46 : 0);
     e.lines.forEach((s, j) => text(s, left + inset, bodyY + j * e.size * 1.42, width, e.size * 1.45, { size: e.size, color: ink, field: e.block.field }));
     if (d.body === "notes" || d.body === "plain" || d.body === "index") line(left, y + e.h + 21, right - left, d.soft, 2);

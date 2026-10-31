@@ -4,7 +4,7 @@ export type CardDesign = {
   bg: string; ink: string; accent: string; soft: string; onAccent: string;
   body: "plain" | "panels" | "timeline" | "notes" | "ledger" | "split" | "framed" | "bands" | "spotlight" | "index";
   art: "lab" | "rocket" | "city" | "globe";
-  layoutId?: string; colorName?: string; overlay?: string;
+  layoutId?: string; colorName?: string; overlay?: string; onSoft?: string;
 };
 /** Retained only to render previously saved work without changing its design. */
 export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
@@ -12,7 +12,7 @@ export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
   { id: "r02", name: "오픈콜", family: "recruitment", description: "큰 글자와 코발트 블루의 선명한 공고", bg: "#2447E8", ink: "#FFFFFF", accent: "#E4FF83", soft: "#3557EF", onAccent: "#173224", body: "bands", art: "rocket" },
   { id: "r03", name: "보딩패스", family: "recruitment", description: "티켓에서 시작해 일정표로 이어지는 구성", bg: "#F2EDE3", ink: "#252D36", accent: "#BA3F2C", soft: "#E9DFD1", onAccent: "#FFFFFF", body: "ledger", art: "rocket" },
   { id: "r04", name: "랩 노트", family: "recruitment", description: "모눈과 번호로 정리하는 탐구·교육 모집", bg: "#EDF2E8", ink: "#233D2F", accent: "#316246", soft: "#DCE6D5", onAccent: "#FFFFFF", body: "notes", art: "lab" },
-  { id: "r05", name: "넥스트 오빗", family: "recruitment", description: "우주 이미지와 짙은 배경의 미래형 포스터", bg: "#101F31", ink: "#F0F4F5", accent: "#B6F4D5", soft: "#1B3046", onAccent: "#102A23", body: "panels", art: "globe" },
+  { id: "r05", name: "넥스트 오빗", family: "recruitment", description: "화면을 채운 사진 위로 제목이 놓이는 모집 포스터", bg: "#101F31", ink: "#F0F4F5", accent: "#B6F4D5", soft: "#1B3046", onAccent: "#102A23", body: "panels", art: "globe" },
   { id: "r06", name: "페이퍼 플레이", family: "recruitment", description: "종이 질감의 그림과 편안한 안내 카드", bg: "#F7EFD9", ink: "#303F70", accent: "#A13B2C", soft: "#EDE0BF", onAccent: "#FFFFFF", body: "spotlight", art: "rocket" },
   { id: "r07", name: "아카데미 초대장", family: "recruitment", description: "정갈한 프레임과 중앙 정렬의 공식 초대", bg: "#F8F2E9", ink: "#562733", accent: "#7D3545", soft: "#EEE2DA", onAccent: "#FFFFFF", body: "framed", art: "lab" },
   { id: "r08", name: "라임 인덱스", family: "recruitment", description: "라임색 정보 블록으로 읽는 프로그램 안내", bg: "#DBF57C", ink: "#1F2922", accent: "#29382B", soft: "#C8E368", onAccent: "#EDFFB5", body: "split", art: "rocket" },
@@ -21,7 +21,7 @@ export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
   { id: "n01", name: "레드 플래시", family: "news", description: "사진 위 큰 헤드라인과 빨간 속보 띠", bg: "#171C23", ink: "#FFFFFF", accent: "#DE342D", soft: "#282E38", onAccent: "#FFFFFF", body: "bands", art: "city" },
   { id: "n02", name: "데일리 페이퍼", family: "news", description: "신문의 제호·구분선·정보 위계를 담은 브리핑", bg: "#F5F0E5", ink: "#252B2F", accent: "#942C2C", soft: "#EAE3D5", onAccent: "#FFFFFF", body: "ledger", art: "city" },
   { id: "n03", name: "포토 디스패치", family: "news", description: "사진과 헤드라인을 분리한 현장형 뉴스", bg: "#F8FAFB", ink: "#1D2D3C", accent: "#236386", soft: "#E8EEF2", onAccent: "#FFFFFF", body: "plain", art: "city" },
-  { id: "n04", name: "와이 브리프", family: "news", description: "질문에서 출발해 맥락을 설명하는 뉴스", bg: "#F7E768", ink: "#262A23", accent: "#303A2B", soft: "#EDDC58", onAccent: "#FFF5AC", body: "spotlight", art: "globe" },
+  { id: "n04", name: "와이 브리프", family: "news", description: "세 가지 색과 큰 글자로 핵심을 짚는 뉴스", bg: "#F7E768", ink: "#263D69", accent: "#263D69", soft: "#F09A7D", onAccent: "#FFF8CD", onSoft: "#263D69", body: "spotlight", art: "globe" },
   { id: "n05", name: "시그널 데스크", family: "news", description: "짙은 남색과 청록의 또렷한 업데이트", bg: "#102A3C", ink: "#ECF5F7", accent: "#83E5E3", soft: "#1C3A4D", onAccent: "#12303C", body: "panels", art: "globe" },
   { id: "n06", name: "뉴스 타임라인", family: "news", description: "사건의 순서와 확인할 내용을 차례로 정리", bg: "#F0F5FC", ink: "#17385C", accent: "#2459A8", soft: "#DDE8F8", onAccent: "#FFFFFF", body: "timeline", art: "city" },
   { id: "n07", name: "한 문장 브리핑", family: "news", description: "핵심 문장을 크게 보여 주는 해설형 카드", bg: "#194C49", ink: "#F8F3E6", accent: "#F0D3A0", soft: "#275D58", onAccent: "#1D423D", body: "framed", art: "globe" },
@@ -30,8 +30,8 @@ export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
   { id: "n10", name: "미니멀 업데이트", family: "news", description: "작은 업데이트 표시와 큰 제목에 집중", bg: "#FAF8F3", ink: "#22262B", accent: "#AA342B", soft: "#EEEBE3", onAccent: "#FFFFFF", body: "notes", art: "city" },
 ];
 export const CARD_DESIGNS = PERSISTED_CARD_DESIGNS.filter(d => ["r01", "r05", "n01", "n03", "n04"].includes(d.id));
-type Palette = Pick<CardDesign, "bg" | "ink" | "accent" | "soft" | "onAccent" | "overlay"> & { suffix: string; name: string };
-const palette = (suffix: string, name: string, bg: string, ink: string, accent: string, soft: string, onAccent: string, overlay?: string): Palette => ({ suffix, name, bg, ink, accent, soft, onAccent, ...(overlay ? { overlay } : {}) });
+type Palette = Pick<CardDesign, "bg" | "ink" | "accent" | "soft" | "onAccent" | "overlay" | "onSoft"> & { suffix: string; name: string };
+const palette = (suffix: string, name: string, bg: string, ink: string, accent: string, soft: string, onAccent: string, overlay?: string, onSoft?: string): Palette => ({ suffix, name, bg, ink, accent, soft, onAccent, onSoft, ...(overlay ? { overlay } : {}) });
 const ORIGINAL_NAMES: Record<string, string> = { r01: "아이보리", r05: "미드나이트", n01: "시그널 레드", n03: "페이퍼", n04: "레몬" };
 const PALETTES: Record<string, Palette[]> = {
   r01: [
@@ -63,10 +63,10 @@ const PALETTES: Record<string, Palette[]> = {
     palette("dark", "슬레이트", "#182531", "#F3F6F8", "#A8D1F2", "#2A3A47", "#1A3448"),
   ],
   n04: [
-    palette("lime", "라임", "#DFF782", "#24331C", "#30472B", "#CCE56A", "#F0FFCE"),
-    palette("ice", "아이스 블루", "#DCEFFB", "#203C53", "#254E6F", "#C5E2F4", "#EDF8FF"),
-    palette("peach", "피치", "#FFD9C5", "#4A3026", "#73432F", "#F4C5AC", "#FFF4E8"),
-    palette("cobalt", "코발트", "#2146B9", "#FFFFFF", "#DAEAFF", "#2B51C5", "#17366C"),
+    palette("lime", "라임", "#DFF782", "#4C293F", "#4C293F", "#98CDB7", "#EAF8C4", undefined, "#4C293F"),
+    palette("ice", "아이스 블루", "#DCEFFB", "#143F40", "#143F40", "#F1A27E", "#ECF8F5", undefined, "#143F40"),
+    palette("peach", "피치", "#FFD9C5", "#244A9B", "#244A9B", "#C6DE82", "#FFF3E8", undefined, "#244A9B"),
+    palette("cobalt", "코발트", "#2146B9", "#FFFFFF", "#F1C580", "#93C9CC", "#17366C", undefined, "#17366C"),
     palette("charcoal", "차콜", "#252A2B", "#F7F5EB", "#F7E768", "#373E3E", "#292E23"),
   ],
 };
@@ -79,5 +79,5 @@ export const CARD_COLOR_VARIANTS = CARD_DESIGNS.flatMap(d => cardDesignVariants(
 export const cardDesign = (id: string) => CARD_COLOR_VARIANTS.find(d => d.id === id) ?? PERSISTED_CARD_DESIGNS.find(d => d.id === id);
 export const collectionUsesArt = (id: string) => !["r02", "r07", "n04", "n07", "n08", "n10"].includes(cardDesign(id)?.layoutId ?? id);
 export const cardDesignOptions = () => CARD_DESIGNS.map(d => ({ key: `set:${d.id}`, name: d.name, description: d.description, kind: "builtin" as const, family: d.family, setId: d.id, pageCount: 5,
-  colors: cardDesignVariants(d.id).map(v => ({ key: `set:${v.id}`, name: v.colorName!, bg: v.bg, ink: v.ink, accent: v.accent })),
+  colors: cardDesignVariants(d.id).map(v => ({ key: `set:${v.id}`, name: v.colorName!, bg: v.bg, ink: v.ink, accent: v.accent, ...(v.onSoft ? { secondary: v.soft } : {}) })),
 }));
