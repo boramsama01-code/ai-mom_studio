@@ -466,6 +466,7 @@ export const studioCards = pgTable("studio_cards", {
   sourceItemId: integer("source_item_id").references(() => contentItems.id).unique(),
   externalId: text("external_id").unique(),
   importedMeta: jsonb("imported_meta").$type<Record<string, unknown>>(),
+  trashedAt: timestamp("trashed_at", { withTimezone: true }),
   createdAt: createdAt(), updatedAt: updatedAt(),
 });
 export const studioRevisions = pgTable("studio_revisions", {

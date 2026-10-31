@@ -1,12 +1,12 @@
 import { Router, raw } from "express";
-import { desc, eq } from "drizzle-orm";
+import { count, desc, eq, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
 import { actorOf } from "../auth";
 import { jobs, studioCards, studioImages, studioRevisions } from "../../shared/schema";
 import { studioContentSchema, studioCreateSchema, studioGenerationSchema, studioPatchSchema } from "../../shared/studio";
 import { ah, HttpError, intParam, parse } from "./util";
-import { createStudioCard, importStudioBoard, loadStudioNotes, queueStudioGeneration, saveStudioCard, saveStudioNotes, studioCardDto, studioCardsWithOutput, studioDetail, studioImportSchema, studioJobDto } from "../services/studio";
+import { setStudioTrash, createStudioCard, importStudioBoard, loadStudioNotes, queueStudioGeneration, saveStudioCard, saveStudioNotes, studioCardDto, studioCardsWithOutput, studioDetail, studioImportSchema, studioJobDto } from "../services/studio";
 import { studioAiStatus } from "../services/studioAi";
 import { kickInlineStudio } from "../worker/studio";
 import { checkStudioExport, exportStudioZip, renderStudioOutput } from "../services/studioExport";
@@ -15,10 +15,12 @@ import { STUDIO_IMAGE_MAX_BYTES, STUDIO_IMAGE_TYPES } from "../../shared/studioI
 
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
-studioRoutes.get("/studio/cards", ah(async (_req, res) => {
+studioRoutes.get("/studio/cards", ah(async (req, res) => {
   const db = getDb();
-  const cards = await db.select().from(studioCards).orderBy(desc(studioCards.updatedAt));
-  res.json({ cards: await studioCardsWithOutput(db, cards), ...await loadStudioNotes(db), ai: studioAiStatus() });
+  const trash = parse(z.enum(["0", "1"]).default("0"), req.query.trash) === "1";
+  const cards = await db.select().from(studioCards).where(trash ? isNotNull(studioCards.trashedAt) : isNull(studioCards.trashedAt)).orderBy(desc(studioCards.updatedAt));
+  const [total] = await db.select({ count: count() }).from(studioCards).where(isNotNull(studioCards.trashedAt));
+  res.json({ trashCount: total.count, cards: await studioCardsWithOutput(db, cards), ...await loadStudioNotes(db), ai: studioAiStatus() });
 }));
 studioRoutes.post("/studio/cards", ah(async (req, res) => {
   const { sourceItemId, ...content } = parse(studioCreateSchema, req.body);
@@ -52,6 +54,12 @@ studioRoutes.patch("/studio/cards/:id", ah(async (req, res) => {
   const { version, ...patch } = parse(studioPatchSchema, req.body);
   res.json(await saveStudioCard(getDb(), intParam(req.params.id), version, patch, actorOf(req)));
 }));
+for (const action of ["trash", "untrash"] as const) {
+  studioRoutes.post(`/studio/cards/:id/${action}`, ah(async (req, res) => {
+    const { version } = parse(z.object({ version: z.number().int().positive() }).strict(), req.body);
+    res.json(await setStudioTrash(getDb(), intParam(req.params.id), version, action === "trash", actorOf(req)));
+  }));
+}
 studioRoutes.post("/studio/cards/:id/panels/:panelIndex/image", raw({ type: STUDIO_IMAGE_TYPES, limit: STUDIO_IMAGE_MAX_BYTES }), ah(async (req, res) => {
   const id = intParam(req.params.id);
   const panelIndex = parse(z.coerce.number().int().min(0).max(3), req.params.panelIndex);

@@ -24,7 +24,13 @@ beforeEach(() => {
     { title: "감자 작업", channel: "fryday", stage: "making" }, { title: "보관 작업", channel: "archived", stage: "idea" },
   ].map((c, i) => ({ ...studioContentSchema.parse(c), id: i + 1, version: 1, sourceItemId: null, createdAt: "2026-10-26T00:00:00Z", updatedAt: `2026-10-26T0${i}:00:00Z` }));
   mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: object }) => {
-    if (path === "/studio/cards") return { cards, notes: "", notesVersion: 1, ai: { defaultProvider: "openai", text: { openai: false, anthropic: false }, image: false } };
+    if (path === "/studio/cards" || path === "/studio/cards?trash=1") return { cards: cards.filter(c => !!c.trashedAt === path.includes("trash=1")), trashCount: cards.filter(c => c.trashedAt).length, notes: "", notesVersion: 1, ai: { defaultProvider: "openai", text: { openai: false, anthropic: false }, image: false } };
+    const trashMatch = path.match(/^\/studio\/cards\/(\d+)\/(trash|untrash)$/);
+    if (trashMatch) {
+      const i = cards.findIndex(c => c.id === Number(trashMatch[1]));
+      cards[i] = { ...cards[i], version: cards[i].version + 1, trashedAt: trashMatch[2] === "trash" ? "2026-11-01T00:00:00Z" : null };
+      return { card: cards[i], cancelledJobs: 0, cancelledDeliveries: 0, alreadyProcessing: 0 };
+    }
     if (path === "/studio/cards/1") {
       if (options?.method === "PATCH") { cards[0] = { ...cards[0], ...options.body, version: cards[0].version + 1 }; return cards[0]; }
       return { card: cards[0], revisions: [], jobs: [] };
@@ -45,6 +51,38 @@ async function input(element: HTMLTextAreaElement | HTMLInputElement, value: str
 }
 
 describe("홈과 단계별 제작 화면", () => {
+  it("갤러리에서 버리고 휴지통에서 원래 단계로 복원한다", async () => {
+    await render(createElement(StudioPage));
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="진행 작업 휴지통으로 이동"]')!.click()); await settle();
+    expect(host.querySelector(".studio-content-grid")?.textContent).not.toContain("진행 작업");
+    expect(mocks.toast).toHaveBeenCalledWith("ok", expect.stringContaining("휴지통"), expect.objectContaining({ label: "실행 취소" }));
+    await click("휴지통");
+    expect(host.querySelector(".studio-trash-list")?.textContent).toContain("진행 작업");
+    await click("복원");
+    expect(host.querySelector(".studio-trash-view")?.textContent).toContain("휴지통이 비어 있어요");
+    await click("내 콘텐츠");
+    expect(host.querySelector(".studio-content-grid")?.textContent).toContain("진행 작업");
+    expect(cards[0].stage).toBe("writing");
+  });
+  it("휴지통 이동 알림에서 실행 취소하면 보드에 즉시 돌아온다", async () => {
+    await render(createElement(StudioPage));
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="진행 작업 휴지통으로 이동"]')!.click()); await settle();
+    const undo = mocks.toast.mock.calls.find(c => c[2]?.label === "실행 취소")![2];
+    await act(async () => undo.onClick()); await settle();
+    expect(host.querySelector(".studio-content-grid")?.textContent).toContain("진행 작업");
+    expect(cards[0].trashedAt).toBeNull();
+  });
+  it("편집 중 입력을 저장해 버리고 휴지통 콘텐츠의 직접 주소는 읽기 전용으로 연다", async () => {
+    await render(createElement(StudioPage, { cardId: 1 }));
+    await input(host.querySelector("#studio-title") as HTMLInputElement, "마지막으로 입력한 제목");
+    await click("휴지통");
+    expect(cards[0].title).toBe("마지막으로 입력한 제목"); expect(cards[0].trashedAt).toBeTruthy();
+    expect(mocks.navigate).toHaveBeenCalledWith("/");
+    expect(host.querySelector(".studio-trashed-detail")?.textContent).toContain("휴지통에 있는 콘텐츠예요");
+    expect(host.querySelector("#studio-title")).toBeNull();
+    await click("복원");
+    expect((host.querySelector("#studio-title") as HTMLInputElement).value).toBe("마지막으로 입력한 제목");
+  });
   it("진행 작업만 먼저 보여주고 완료·보관·채널 필터와 보드 전환을 제공한다", async () => {
     await render(createElement(StudioPage));
     expect(host.querySelectorAll(".studio-content-card")).toHaveLength(2);

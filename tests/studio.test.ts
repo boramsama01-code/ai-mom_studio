@@ -33,6 +33,58 @@ async function setup() {
   return { ...auth, headers, card: created.body };
 }
 describe("통합 제작 보드", () => {
+  it("휴지통은 보드에서 숨기고 이미지·원고·기록을 유지하며 같은 단계로 복원한다", async () => {
+    const { agent, headers, card } = await setup();
+    const saved = await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: 1, stage: "making", script: "복원할 원고", caption: "복원할 캡션" });
+    const png = await sharp({ create: { width: 8, height: 8, channels: 3, background: "white" } }).png().toBuffer();
+    const image = await agent.post(`/api/studio/cards/${card.id}/panels/0/image?version=2`).set(headers).type("image/png").send(png);
+    const before = (await agent.get(`/api/studio/cards/${card.id}`)).body;
+    const endpoint = `/api/studio/cards/${card.id}/trash`;
+    expect((await request(app).post(endpoint).send({ version: 3 })).status).toBe(401);
+    expect((await agent.post(endpoint).send({ version: 3 })).status).toBe(403);
+    expect((await agent.post(endpoint).set(headers).send({ version: 2 })).status).toBe(409);
+    const moved = await agent.post(endpoint).set(headers).send({ version: 3 });
+    expect(moved.status).toBe(200); expect(moved.body.card).toMatchObject({ version: 4, trashedAt: expect.any(String), script: saved.body.script, panels: image.body.panels });
+    expect((await agent.get("/api/studio/cards")).body.cards.some((c: any) => c.id === card.id)).toBe(false);
+    const trash = (await agent.get("/api/studio/cards?trash=1")).body;
+    expect(trash.cards.some((c: any) => c.id === card.id)).toBe(true); expect(trash.trashCount).toBeGreaterThan(0);
+    expect((await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: 4, title: "덮어쓰기" })).status).toBe(409);
+    expect((await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send({ version: 4, kind: "text", textTarget: "fill", requestId: crypto.randomUUID() })).status).toBe(409);
+    expect((await agent.post(`/api/studio/cards/${card.id}/panels/0/image?version=4`).set(headers).type("image/png").send(png)).status).toBe(409);
+    expect((await agent.post(`/api/studio/cards/${card.id}/restore`).set(headers).send({ version: 4, revisionId: before.revisions[0].id })).status).toBe(409);
+    const restored = await agent.post(`/api/studio/cards/${card.id}/untrash`).set(headers).send({ version: 4 });
+    expect(restored.status).toBe(200); expect(restored.body.card).toMatchObject({ version: 5, trashedAt: null, stage: "making", script: "복원할 원고", caption: "복원할 캡션", panels: image.body.panels });
+    expect((await agent.get(`/api/studio/cards/${card.id}`)).body.revisions).toEqual(before.revisions);
+    expect((await agent.get(`/api/studio/images/${image.body.panels[0].imageId}`)).status).toBe(200);
+    expect((await agent.get("/api/studio/cards")).body.cards.some((c: any) => c.id === card.id)).toBe(true);
+    expect((await agent.post(`/api/studio/cards/${card.id}/trash`).set(headers).send({ version: 4 })).status).toBe(409);
+  });
+  it("대기 중 생성 요청을 취소하고 복원해도 자동 실행하지 않는다", async () => {
+    const { agent, headers, card } = await setup();
+    const queued = await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send({ version: 1, kind: "text", textTarget: "fill", requestId: crypto.randomUUID() });
+    const moved = await agent.post(`/api/studio/cards/${card.id}/trash`).set(headers).send({ version: 1 });
+    expect(moved.body.cancelledJobs).toBe(1);
+    await agent.post(`/api/studio/cards/${card.id}/untrash`).set(headers).send({ version: 2 });
+    expect((await agent.get(`/api/studio/jobs/${queued.body.job.id}`)).body.status).toBe("cancelled");
+    expect(await claimJob(getDb(), "trash-queued", ["studio_generate"])).toBeNull();
+    expect(mockText).not.toHaveBeenCalled();
+  });
+  it("생성 중 버렸다 복원해도 늦게 도착한 결과는 원고나 기록에 반영하지 않는다", async () => {
+    const { agent, headers, card } = await setup();
+    mockText.mockImplementation(async () => {
+      const moved = await agent.post(`/api/studio/cards/${card.id}/trash`).set(headers).send({ version: 1 });
+      expect(moved.body.cancelledJobs).toBe(1);
+      expect((await agent.post(`/api/studio/cards/${card.id}/untrash`).set(headers).send({ version: 2 })).status).toBe(200);
+      return generated();
+    });
+    await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send({ version: 1, kind: "text", textTarget: "fill", requestId: crypto.randomUUID() });
+    const job = await claimJob(getDb(), "trash-running", ["studio_generate"]);
+    expect(await processStudioJob(getDb(), job!, "trash-running")).toBe(false);
+    expect(mockText).toHaveBeenCalledOnce();
+    const detail = (await agent.get(`/api/studio/cards/${card.id}`)).body;
+    expect(detail.card).toMatchObject({ title: card.title, version: 3, script: "", trashedAt: null });
+    expect(detail.revisions).toHaveLength(1); expect(detail.jobs[0].status).toBe("cancelled");
+  });
   it("붙여넣은 이미지를 원고와 함께 보존하고 새로고침·내보내기·기록 복원을 지원한다", async () => {
     const { agent, headers, card } = await setup();
     const panels = card.panels.map((p: object, i: number) => ({ ...p, scene: `직접 쓴 장면 ${i}`, dialogue: `직접 쓴 대사 ${i}` }));
@@ -276,7 +328,7 @@ describe("통합 제작 보드", () => {
     expect((await request(app).get(`/api/studio/cards/${card.id}/export.zip`)).status).toBe(401);
     const panels = card.panels.map((p: object) => ({ ...p, dialogue: "한글 본문을 직접 작성합니다." }));
     const input = { ...card, format: "카드뉴스", panels, exportDesign: "spotlight", sourceLabel: "직접 작성" };
-    delete input.id; delete input.version; delete input.sourceItemId; delete input.createdAt; delete input.updatedAt;
+    delete input.id; delete input.version; delete input.sourceItemId; delete input.createdAt; delete input.updatedAt; delete input.trashedAt;
     expect((await agent.post("/api/studio/export-check").send(input)).status).toBe(403);
     const check = await agent.post("/api/studio/export-check").set(headers).send(input);
     expect(check.body).toMatchObject({ errors: [], pageCount: 6 });
@@ -306,3 +358,4 @@ describe("통합 제작 보드", () => {
     expect(second.body.id).toBe(first.body.id);
   });
 });
+

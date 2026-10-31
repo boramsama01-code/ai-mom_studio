@@ -36,10 +36,11 @@ import { audit } from "../audit";
 import { resolveStyle } from "../services/templates";
 import { cardApprovalHash, loadCardPages, planCarousel, renderCarouselCover, renderCarouselPages } from "../services/cardCarousel";
 import { generateStudioImage } from "../services/studioAi";
-import { createStudioCard } from "../services/studio";
+import { assertStudioActive, createStudioCard } from "../services/studio";
 import { studioContentSchema } from "../../shared/studio";
 import { studioKey } from "../../shared/channelKeys";
 import type { CardCarousel } from "../../shared/carousel";
+import { HttpError } from "../routes/util";
 
 export async function currentRevision(db: DB, itemId: number) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
@@ -73,6 +74,8 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   const cr = await currentRevision(db, itemId);
   if (!cr) return { ok: false as const, code: "not_found", error: "항목 없음" };
   const { item, rev } = cr;
+  const [existingBoard] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, itemId));
+  if (existingBoard) assertStudioActive(existingBoard);
   if (!rev) return { ok: false as const, code: "no_revision", error: "초안이 없습니다. 먼저 추출·작성하세요." };
   const parsed = payloadSchemaFor(item.kind).safeParse(rev.payload);
   if (!parsed.success) return { ok: false as const, code: "invalid_payload", error: "초안 형식이 올바르지 않습니다. 편집 화면에서 필수 항목을 채우세요." };
@@ -89,6 +92,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   try { style = await resolveStyle(db, key, ch.id); }
   catch (e) { return { ok: false as const, code: "template", error: (e as Error).message }; }
   let output;
+  let newCoverArt: { bytes: Buffer; model: string } | null = null;
   let cover: CardCarousel["cover"] = { kind: "typography", credit: style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오" };
   try {
     const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
@@ -103,7 +107,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
       } else {
         const generated = await generateStudioImage({ purpose: "cover", prompt: JSON.stringify({ title, topic: payload.topic, summary: payload.summary ?? payload.one_line_summary ?? payload.background, channel: ch.name }) });
         art = generated.bytes;
-        await db.insert(mediaAssets).values({ channelId: ch.id, contentItemId: item.id, revisionId: rev.id, kind: "cover_art", source: "ai", templateKey: generated.model, mime: "image/png", width: 1024, height: 1024, bytes: art, sha256: sha256(art) }).onConflictDoNothing();
+        newCoverArt = { bytes: art, model: generated.model };
         cover = { kind: "ai", credit: "표지: AI 생성 · OpenAI", model: generated.model };
       }
     }
@@ -115,6 +119,11 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   }
   const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
   if (fresh.currentRevisionId !== rev.id) return { ok: false as const, code: "conflict", error: "생성 중 원고가 변경됐습니다. 최신 원고를 확인한 뒤 다시 만들어 주세요." };
+  const [freshBoard] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id)).for("update");
+  if (freshBoard) assertStudioActive(freshBoard);
+  if (freshBoard && (!existingBoard || freshBoard.version !== existingBoard.version)) throw new HttpError(409, "생성 중 보드의 작업 상태가 변경되어 결과를 반영하지 않았습니다. 최신 작업에서 다시 생성하세요.");
+  // Acquire the source/card locks before inserting assets (and their foreign-key locks).
+  if (newCoverArt) await db.insert(mediaAssets).values({ channelId: ch.id, contentItemId: item.id, revisionId: rev.id, kind: "cover_art", source: "ai", templateKey: newCoverArt.model, mime: "image/png", width: 1024, height: 1024, bytes: newCoverArt.bytes, sha256: sha256(newCoverArt.bytes) }).onConflictDoNothing();
   const pages: CardCarousel["pages"] = [];
   for (const [index, page] of output.entries()) {
     const hash = sha256(page.bytes);
@@ -156,6 +165,9 @@ export async function approveItem(
   const dests = await db.select().from(destinations).where(and(eq(destinations.channelId, item.channelId), eq(destinations.enabled, true)));
 
   const approval = await db.transaction(async (tx) => {
+    await tx.select({ id: contentItems.id }).from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+    const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
+    if (board) assertStudioActive(board);
     // 기존 활성 승인은 새 승인으로 대체
     const prev = await tx.select({ id: approvals.id }).from(approvals).where(and(eq(approvals.contentItemId, item.id), eq(approvals.status, "active")));
     if (prev.length) {
@@ -268,6 +280,8 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
     return "skipped" as const;
   };
   // 게시 직전 재검사
+  const [board] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
+  if (board?.trashedAt) return block("휴지통에 있는 콘텐츠 — 게시 중단");
   if (!ch?.active) return block("보관된 채널 — 게시 중단");
   if (ap.status !== "active") return block("승인이 더 이상 유효하지 않음");
   if (item.currentRevisionId !== ap.revisionId) return block("승인 이후 콘텐츠가 수정됨 — 재승인 필요");

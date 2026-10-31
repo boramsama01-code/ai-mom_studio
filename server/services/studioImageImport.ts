@@ -5,7 +5,7 @@ import { studioCards, studioImages, studioRevisions } from "../../shared/schema"
 import { STUDIO_IMAGE_MAX_BYTES } from "../../shared/studioImageImport";
 import { studioContentSchema } from "../../shared/studio";
 import { conflict, HttpError } from "../routes/util";
-import { studioCardDto } from "./studio";
+import { assertStudioActive, studioCardDto } from "./studio";
 import { audit } from "../audit";
 
 /** Decode and re-encode raster bytes, stripping metadata and never fetching a pasted URL. */
@@ -27,6 +27,7 @@ export async function importStudioPanelImage(db: DB, cardId: number, panelIndex:
   return db.transaction(async tx => {
     const [current] = await tx.select().from(studioCards).where(eq(studioCards.id, cardId)).for("update");
     if (!current) throw new HttpError(404, "콘텐츠를 찾을 수 없습니다.");
+    assertStudioActive(current);
     if (current.version !== version) conflict(studioCardDto(current));
     const [image] = await tx.insert(studioImages).values({ cardId, panelIndex, bytes: png, mimeType: "image/png", model: "manual-import" }).returning({ id: studioImages.id });
     const content = studioContentSchema.parse({ ...current.content, panels: current.content.panels.map((p, i) => i === panelIndex ? { ...p, imageId: image.id } : p) });
@@ -36,3 +37,4 @@ export async function importStudioPanelImage(db: DB, cardId: number, panelIndex:
     return studioCardDto(saved);
   });
 }
+
