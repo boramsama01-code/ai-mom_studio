@@ -5,7 +5,7 @@
  * SVG를 resvg로 래스터화한 뒤 sharp로 RGB JPEG을 만든다.
  * - 브라우저(Chromium) 없이 Render 무료 서버에서도 같은 결과가 나온다.
  * - 폰트 파일이 없으면 영문 기본 폰트로 대체하지 않고 생성 실패로 처리한다.
- * - 폭 기준 줄바꿈, 최대 줄 수 초과 시 "편집 필요"(CardOverflowError)로 돌려보낸다.
+ * - 제목·본문 높이를 먼저 측정하고 여백·글자 크기를 자동 조절한다. 원고를 자르지 않는다.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -13,6 +13,7 @@ import opentype from "opentype.js";
 import { Resvg } from "@resvg/resvg-js";
 import sharp from "sharp";
 import { TOKENS } from "../../shared/tokens";
+import { fitCardBody } from "./cardBodyFit";
 
 export const CARD_W = 1080;
 export const CARD_H = 1350;
@@ -149,37 +150,20 @@ function drawTitle(c: Ctx, title: string, y: number, size: number, color: string
 }
 
 function drawBlocks(c: Ctx, model: CardModel, y: number, footerTop: number, opts: { emphasisBox?: boolean; labelColor?: string } = {}): number {
-  for (const b of model.blocks) {
-    if (!b.text.trim()) continue;
-    const size = b.emphasis ? 40 : 34;
-    const font: keyof Fonts = b.emphasis ? "semibold" : "regular";
-    const lh = size * 1.5;
-    const lines = wrapText(c.fonts[font], b.text, size, c.w - (b.emphasis && opts.emphasisBox ? 56 : 0));
-    if (lines.length > b.maxLines) throw new CardOverflowError(b.field, `${lines.length}줄(최대 ${b.maxLines}줄)`);
-    if (b.emphasis && opts.emphasisBox) {
-      const boxH = 52 + 34 + lines.length * lh;
-      c.els.push(`<rect x="${c.x}" y="${y - 40}" width="${c.w}" height="${boxH}" rx="18" fill="${c.accent}" fill-opacity="0.09"/>`);
-      if (b.label) c.els.push(pathFor(c.fonts.semibold, b.label, c.x + 28, y, 26, c.accent));
-      let yy = y + 56;
-      for (const l of lines) {
-        c.els.push(pathFor(c.fonts[font], l, c.x + 28, yy + size * 0.35, size, c.text));
-        yy += lh;
-      }
-      y += boxH + 24;
-    } else {
-      if (b.label) {
-        c.els.push(pathFor(c.fonts.semibold, b.label, c.x, y, 26, opts.labelColor ?? c.muted));
-        y += 52;
-      }
-      for (const l of lines) {
-        c.els.push(pathFor(c.fonts[font], l, c.x, y + size * 0.35, size, c.text));
-        y += lh;
-      }
-      y += 48 - lh * 0.35;
-    }
-    if (y > footerTop - 10) throw new CardOverflowError(b.field, "본문이 카드 아래 영역을 넘음");
+  const fit = fitCardBody(model.blocks, {
+    width: c.w, startY: y, footerTop, emphasisBox: opts.emphasisBox,
+    wrap: (text, size, width, emphasis) => wrapText(c.fonts[emphasis ? "semibold" : "regular"], text, size, width),
+  });
+  if (!fit.ok) throw new CardOverflowError(fit.field, fit.detail);
+  // Draw only a complete successful plan. Text and output geometry share this single plan.
+  for (const entry of fit.blocks) {
+    const { block, lines, size, lineHeight, inset, labelY, textY, box } = entry;
+    const font = block.emphasis ? c.fonts.semibold : c.fonts.regular;
+    if (box) c.els.push('<rect x="' + c.x + '" y="' + box.top + '" width="' + c.w + '" height="' + box.height + '" rx="18" fill="' + c.accent + '" fill-opacity="0.09"/>');
+    if (block.label && labelY !== null) c.els.push(pathFor(c.fonts.semibold, block.label, c.x + inset, labelY, 26, box ? c.accent : opts.labelColor ?? c.muted));
+    lines.forEach((line, index) => c.els.push(pathFor(font, line, c.x + inset, textY + index * lineHeight, size, c.text)));
   }
-  return y;
+  return fit.endY;
 }
 
 function drawFooter(c: Ctx, footer: string, footerTop: number, borderColor: string, borderOpacity: number) {
@@ -195,7 +179,21 @@ function drawBadge(c: Ctx, text: string, x: number, y: number, fg: string, bg: s
   c.els.push(pathFor(c.fonts.semibold, text, x + 20, y - 3, 28, fg));
 }
 
+/** Try the original title first, then bounded smaller titles; never clip or change the text. */
 export function layoutCard(model: CardModel, style: CardStyle = { layout: "classic" }): string {
+  const initialSize = style.layout === "magazine" ? 74 : style.layout === "minimal" ? 58 : style.layout === "header" && !style.background ? 62 : 60;
+  let lastError: CardOverflowError | null = null;
+  for (let size = initialSize; size >= 46; size -= 2) {
+    try { return layoutCardAtSize(model, style, size); }
+    catch (e) {
+      if (!(e instanceof CardOverflowError) || (e.field !== "title" && !model.blocks.some(b => b.field === e.field))) throw e;
+      lastError = e;
+    }
+  }
+  throw lastError ?? new CardOverflowError("title", "제목을 배치할 수 없습니다.");
+}
+
+function layoutCardAtSize(model: CardModel, style: CardStyle, titleSize: number): string {
   const fonts = loadFonts();
   const els: string[] = [];
   const hasBg = !!style.background;
@@ -210,9 +208,9 @@ export function layoutCard(model: CardModel, style: CardStyle = { layout: "class
   const layout = style.layout;
   if (layout === "header" && !hasBg) {
     // 위쪽 색 블록 안에 브랜드·분류·제목(흰 글씨)
-    const titleLines = wrapText(fonts.bold, model.title, 62, INNER_W);
+    const titleLines = wrapText(fonts.bold, model.title, titleSize, INNER_W);
     if (titleLines.length > 3) throw new CardOverflowError("title", `제목이 ${titleLines.length}줄(최대 3줄)`);
-    const headerH = PAD + 30 + 60 + (model.badge ? 60 : 0) + titleLines.length * 62 * 1.28 + 64;
+    const headerH = PAD + 30 + 60 + (model.badge ? 60 : 0) + titleLines.length * titleSize * 1.28 + 64;
     els.push(`<rect width="${CARD_W}" height="${headerH}" fill="${model.accent}"/>`);
     let y = PAD + 30;
     drawBrand(c, model.brandLine, y, "#FFFFFF");
@@ -221,7 +219,7 @@ export function layoutCard(model: CardModel, style: CardStyle = { layout: "class
       drawBadge(c, model.badge, PAD, y, "#FFFFFF", "#FFFFFF", 0.18);
       y += 60;
     }
-    drawTitle(c, model.title, y, 62, "#FFFFFF");
+    drawTitle(c, model.title, y, titleSize, "#FFFFFF");
     y = headerH + 80;
     drawBlocks(c, model, y, footerTop, { labelColor: model.accent });
     drawFooter(c, model.footer, footerTop, TOKENS.border, 1);
@@ -236,7 +234,7 @@ export function layoutCard(model: CardModel, style: CardStyle = { layout: "class
       els.push(pathFor(fonts.semibold, model.badge, CARD_W - PAD - bw, y, 28, P.muted));
     }
     y += 40;
-    y = drawTitle(c, model.title, y, 74, P.text, "bold", 3);
+    y = drawTitle(c, model.title, y, titleSize, P.text, "bold", 3);
     y += 70;
     drawBlocks(c, model, y, footerTop, { emphasisBox: true });
     drawFooter(c, model.footer, footerTop, P.border, P.borderOpacity);
@@ -248,7 +246,7 @@ export function layoutCard(model: CardModel, style: CardStyle = { layout: "class
       els.push(pathFor(fonts.semibold, model.badge, PAD, y, 28, hasBg ? P.text : model.accent));
     }
     y += 20;
-    y = drawTitle(c, model.title, y, 58, P.text, "semibold", 3);
+    y = drawTitle(c, model.title, y, titleSize, P.text, "semibold", 3);
     y += 40;
     els.push(`<rect x="${PAD}" y="${y}" width="96" height="6" rx="3" fill="${hasBg ? P.text : model.accent}"/>`);
     y += 90;
@@ -264,7 +262,7 @@ export function layoutCard(model: CardModel, style: CardStyle = { layout: "class
       drawBadge(c, model.badge, PAD, y, hasBg ? P.text : model.accent, hasBg ? P.text : model.accent, hasBg ? 0.16 : 0.12);
       y += 60;
     }
-    y = drawTitle(c, model.title, y, 60, P.text);
+    y = drawTitle(c, model.title, y, titleSize, P.text);
     y += 36;
     els.push(`<rect x="${PAD}" y="${y}" width="${INNER_W}" height="2" fill="${P.border}" fill-opacity="${P.borderOpacity}"/>`);
     y += 56;
