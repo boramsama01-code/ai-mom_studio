@@ -1,0 +1,39 @@
+name: Verify deployed adaptive card renderer
+on:
+  push:
+    branches: [verify/card-fit-20261031]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Check the running renderer without authentication or writes
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          const expected = 'adaptive-body-v1';
+          const attempts = []; let verified = false;
+          for (let attempt = 1; attempt <= 24; attempt++) {
+            const row = { checkedAt: new Date().toISOString(), attempt };
+            try {
+              const r = await fetch('https://ai-mom-studio.onrender.com/api/health?card-check=' + Date.now(), { signal: AbortSignal.timeout(10000), headers: { 'cache-control': 'no-cache' } });
+              const data = await r.json();
+              row.status = r.status; row.cardRenderer = data.cardRenderer ?? null;
+              verified = r.ok && data.ok === true && data.cardRenderer === expected;
+              row.verified = verified;
+            } catch (e) { row.error = e.message; }
+            attempts.push(row); console.log(JSON.stringify(row));
+            writeFileSync('card-fit-deployment.json', JSON.stringify({ expected, mergedCommit: '0ea25635f14ca0592f0009d0dc5bdf04f9a19c82', verified, scope: 'Public backend health only; no authenticated UI test, production writes, AI calls or posting.', attempts }, null, 2));
+            if (verified) break;
+            if (attempt < 24) await new Promise(r => setTimeout(r, 10000));
+          }
+          if (!verified) process.exitCode = 1;
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: card-fit-deployment
+          path: card-fit-deployment.json
+          retention-days: 3
