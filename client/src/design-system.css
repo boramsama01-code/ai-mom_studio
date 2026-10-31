@@ -290,7 +290,8 @@ input:focus,select:focus,textarea:focus { border-color:#6095f1; box-shadow:0 0 0
 .studio-trash-note svg { flex-shrink:0; margin-top:2px; }
 .studio-trash-note p { margin:0; font-size:13px; line-height:1.8; }
 .studio-trash-note span { color:#718099; }
-.studio-trash-view > .studio-home-search { max-width:440px; margin-bottom:20px; }
+.studio-trash-view > .studio-home-search { display:block; max-width:440px; margin-bottom:20px; }
+.studio-trash-view > .studio-home-search input { padding-left:40px; height:44px; font-size:13px; }
 .studio-trash-list { background:#fff; border:1px solid #e6e9ed; border-radius:16px; overflow:hidden; }
 .studio-trash-row { display:flex; align-items:center; gap:18px; padding:20px; }
 .studio-trash-row + .studio-trash-row { border-top:1px solid #edf0f4; }

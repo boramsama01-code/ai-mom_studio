@@ -44,7 +44,7 @@ export function StudioPage({ cardId }: { cardId?: number }) {
   const guard = useDirtyGuard();
   if (cardId !== undefined) return Number.isSafeInteger(cardId) && cardId > 0 ? <StudioDetail key={cardId} id={cardId} /> : <div className="notice err">작업 주소를 확인해 주세요. <GuardedLink href="/">보드로</GuardedLink></div>;
   return <div className="studio">
-    <header className="studio-home-top"><span className="studio-eyebrow">MY STUDIO <span className="studio-today">{new Date().toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", weekday: "long" })}</span></span><button className="btn sm ghost" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본 ↗" : "← 내 콘텐츠"}</button></header>
+    <header className="studio-home-top"><span className="studio-eyebrow">MY STUDIO <span className="studio-today">{new Date().toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", weekday: "long" })}</span></span>{view !== "trash" && <button className="btn sm ghost" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본 ↗" : "← 내 콘텐츠"}</button>}</header>
     {view === "trash" ? <StudioTrashView onBack={() => setView("board")} /> : view === "board" ? <StudioBoard onTrash={() => guard.confirmLeave(() => setView("trash"))} /> : <CharacterArchive />}
   </div>;
 }
