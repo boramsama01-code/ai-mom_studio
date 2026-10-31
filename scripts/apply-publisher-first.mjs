@@ -26,4 +26,6 @@ patch('server/worker/discovery.ts', '    if (existing) return existing;', [
 '    }',
 ].join('\n'));
 patch('server/app.ts', 'sourceResolver: "google-news-redirect-v2"', 'sourceResolver: "publisher-direct-v3"');
+patch('tests/collection.test.ts', 'const { runCollect } = await import("../server/worker/collect");', 'const { runCollect } = await import("../server/worker/collect");\nconst { PUBLIC_NEWS_FEEDS } = await import("../server/services/newsSearch");');
+patch('tests/collection.test.ts', 'rssFeedOk: 6, googleQueries: 1', 'rssFeedOk: PUBLIC_NEWS_FEEDS.length, googleQueries: 1');
 console.log('Publisher-first policy applied; Google RSS discovery retained, Google article/RPC decoding not used by application collection or refetch.');
