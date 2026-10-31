@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { studioOutputDescription, studioPageCount, type StudioCard, type StudioContent, type StudioExportCheck } from "@shared/studio";
-import { CARD_DESIGNS } from "@shared/cardDesigns";
+import { cardDesignOptions } from "@shared/cardDesigns";
 import { TemplatePicker } from "./Design";
 import { api, apiBlob } from "../api";
 import { ErrorBox } from "../ui";
@@ -48,7 +48,7 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
   const [preview, setPreview] = useState<{ version: number; format: string } | null>(null);
   const [page, setPage] = useState(0);
   const [previewError, setPreviewError] = useState(false);
-  const [showCollection, setShowCollection] = useState(form.exportDesign.startsWith("set:"));
+  const [showCollection, setShowCollection] = useState(true);
   const toast = useToast();
   const pendingCheck = JSON.stringify(form) !== JSON.stringify(checkedInput);
   useEffect(() => { const timer = window.setTimeout(() => setCheckedInput(form), 450); return () => window.clearTimeout(timer); }, [form]);
@@ -63,12 +63,12 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
   const focusField = (field: string) => { onFieldFocus?.(field); window.requestAnimationFrame(() => document.getElementById(`studio-${field}`)?.focus()); };
   return <section className="panel stack studio-export" aria-labelledby="studio-export-heading">
     <div><h2 id="studio-export-heading">최종 이미지</h2><p className="small muted">{studioOutputDescription(form.format, form.exportDesign)}</p></div>
-    <div className="studio-export-designs" role="group" aria-label="출력 디자인">
+    {form.format !== "카드뉴스" && <div className="studio-export-designs" role="group" aria-label="출력 디자인">
       {designs.map(design => <button key={design.id} type="button" className={`studio-design-option design-${design.id}`} aria-pressed={form.exportDesign === design.id} disabled={busy || prepare.isPending} onClick={() => change("exportDesign", design.id)}><span className="studio-design-swatch" aria-hidden="true"><i /><i /><i /></span><strong>{design.name}</strong><small>{design.detail}</small></button>)}
-    </div>
+    </div>}
     {form.format === "카드뉴스" && <div className="stack">
-      <button type="button" className="btn" aria-expanded={showCollection} onClick={() => setShowCollection(v => !v)}>{showCollection ? "디자인 컬렉션 접기" : "새 디자인 20세트 둘러보기"}</button>
-      {showCollection && <TemplatePicker cid="studio" value={form.exportDesign} disabled={busy || prepare.isPending} onChange={key => change("exportDesign", key as StudioContent["exportDesign"])} items={CARD_DESIGNS.map(d => ({ key: `set:${d.id}`, name: d.name, description: d.description, family: d.family, setId: d.id, pageCount: 5, kind: "builtin" as const }))} />}
+      <button type="button" className="btn" aria-expanded={showCollection} onClick={() => setShowCollection(v => !v)}>{showCollection ? "디자인 컬렉션 접기" : "디자인 5종 · 컬러 30가지 둘러보기"}</button>
+      {showCollection && <TemplatePicker cid="studio" value={form.exportDesign} disabled={busy || prepare.isPending} onChange={key => change("exportDesign", key as StudioContent["exportDesign"])} items={cardDesignOptions()} />}
       {form.exportDesign.startsWith("set:") && <p className="small muted">사진형 표지는 첫 번째 본문의 이미지를 함께 사용합니다. 각 본문에 넣은 그림도 유지됩니다.</p>}
     </div>}
     <label className="field">출처 표기<input id="studio-sourceLabel" disabled={busy || prepare.isPending} maxLength={180} value={form.sourceLabel} onChange={event => change("sourceLabel", event.target.value)} placeholder="예: ○○대학교 입학처 · 2026.10.23 확인" /><span className="hint">이미지 하단에 표시됩니다.</span></label>

@@ -36,13 +36,12 @@ async function makeItem(agent: import("supertest").Agent, H: Record<string, stri
 }
 
 describe("카드 템플릿", () => {
-  it("기본 4종 목록·미리보기, 기본값 변경, 템플릿별 카드 생성", async () => {
+  it("선택한 5종·컬러 30가지 목록, 새 컬러 생성과 이전 디자인 호환", async () => {
     const { agent, csrf } = await login(app);
     const H = { "x-csrf-token": csrf };
     const list = await agent.get("/api/channels/1/templates");
-    expect(list.body.items.filter((t: { key: string }) => t.key.startsWith("builtin:")).map((t: { key: string }) => t.key)).toEqual(["builtin:classic", "builtin:header", "builtin:magazine", "builtin:minimal"]);
-    expect(list.body.items.filter((t: { family: string }) => t.family === "recruitment")).toHaveLength(10);
-    expect(list.body.items.filter((t: { family: string }) => t.family === "news")).toHaveLength(10);
+    expect(list.body.items.map((t: { key: string }) => t.key)).toEqual(["set:r01", "set:r05", "set:n01", "set:n03", "set:n04"]);
+    for (const item of list.body.items) expect(item.colors).toHaveLength(6);
     expect(list.body.current).toBe("builtin:classic");
     const pv = await agent.get("/api/channels/1/templates/preview?key=builtin:header&size=sm");
     expect(pv.status).toBe(200);
@@ -61,6 +60,13 @@ describe("카드 템플릿", () => {
     expect(collection.status).toBe(200);
     expect(collection.body.templateKey).toBe("set:r03");
     expect(collection.body.carousel.pages).toHaveLength(5);
+    expect((await agent.put("/api/channels/1/design").set(H).send({ cardTemplate: "set:r01-blue" })).status).toBe(200);
+    const colored = await agent.post(`/api/channels/1/items/${id}/card`).set(H).send({ coverMode: "typography" });
+    expect(colored.status).toBe(200);
+    expect(colored.body.templateKey).toBe("set:r01-blue");
+    expect(colored.body.carousel.pages).toHaveLength(5);
+    const colorPreview = await agent.get("/api/channels/1/templates/preview?key=set:r01-blue&page=4&size=sm");
+    expect(colorPreview.status).toBe(200);
     const bodyPreview = await agent.get("/api/channels/1/templates/preview?key=set:r03&page=4&size=sm");
     expect(bodyPreview.status).toBe(200);
     expect((await sharp(bodyPreview.body).metadata()).width).toBe(360);

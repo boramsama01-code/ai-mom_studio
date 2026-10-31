@@ -1,12 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { CARD_DESIGNS } from '../shared/cardDesigns';
+import { CARD_DESIGNS, CARD_COLOR_VARIANTS } from '../shared/cardDesigns';
 import { collectionSample, collectionSampleArt } from '../server/services/cardDesignSamples';
 import { renderCarouselPages } from '../server/services/cardCarousel';
 const output = path.resolve(process.argv[2] ?? '../card-design-collection');
 await fs.mkdir(output, { recursive: true });
 const index = [];
-for (const d of CARD_DESIGNS) {
+for (const d of process.argv.includes('--colors') ? CARD_COLOR_VARIANTS : CARD_DESIGNS) {
   const { plan, style } = collectionSample(d.id);
   const pages = await renderCarouselPages(plan, style, collectionSampleArt(d.id), '이미지: AI 생성 · 연출 이미지');
   if (pages.length !== 5) throw new Error(`${d.id}: Expected 5 pages, got ${pages.length}`);

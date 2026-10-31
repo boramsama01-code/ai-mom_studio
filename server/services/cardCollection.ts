@@ -56,7 +56,7 @@ const COVER_TITLES: Record<string, { x: number; y: number; w: number; h: number;
   n09: { x:80,y:335,w:920,h:363,size:101 }, n10: { x:80,y:409,w:920,h:450,size:116 },
 };
 function drawHeadline(c: ReturnType<typeof canvas>, title: string, d: CardDesign) {
-  const s = COVER_TITLES[d.id];
+  const s = COVER_TITLES[d.layoutId ?? d.id];
   return c.text(title, s.x, s.y, s.w, s.h, { size: s.size, min: 54, weight: 'bold', color: s.inverse ? d.onAccent : d.ink, align: s.center ? 'center' : 'left' });
 }
 export function checkCollectionTitle(title: string, id: string) { const d = getDesign(id); drawHeadline(canvas(d), title, d); }
@@ -84,7 +84,7 @@ export async function renderCollectionCover(model: CardModel, count: number, art
   // A badge describes the source. We never invent a deadline, quote, statistic or a breaking-news claim.
   const tag = model.badge || (d.family === "recruitment" ? "모집 안내" : "뉴스 브리핑");
   const page = `01 / ${String(count).padStart(2, "0")}`;
-  switch (id) {
+  switch (d.layoutId ?? id) {
     case "r01":
       c.header(model.brandLine, page); line(80, 127, 920, d.ink);
       pill(tag, 80, 169); headline();
@@ -139,8 +139,8 @@ export async function renderCollectionCover(model: CardModel, count: number, art
       headline(); await photo(660, 812, 340, 305, 0);
       text("새로운 배움은\n작은 시작에서.", 80, 901, 510, 155, { size: 43, weight: "semibold" }); break;
     case "n01":
-      await photo(0, 0, W, 1170); rect(0, 0, W, 1170, "#070E19", 0, 'opacity=".65"');
-      c.header(model.brandLine, page); rect(80, 164, 440, 70, d.accent); text("NEWS / BRIEF", 106, 178, 390, 48, { size: 34, weight: "bold", color: "#FFFFFF" });
+      await photo(0, 0, W, 1170); rect(0, 0, W, 1170, d.overlay ?? "#070E19", 0, 'opacity=".65"');
+      c.header(model.brandLine, page); rect(80, 164, 440, 70, d.accent); text("NEWS / BRIEF", 106, 178, 390, 48, { size: 34, weight: "bold", color: d.onAccent });
       headline(); cue(80, 1100, "#FFFFFF"); break;
     case "n02":
       c.header(model.brandLine, page); text("THE DAILY BRIEF", 80, 142, 920, 126, { size: 94, min: 80, weight: "bold", align: "center" });
