@@ -1,0 +1,42 @@
+name: Diagnose public publisher paths
+on:
+  push:
+    branches: [fix/publisher-first-20261031]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Read public homepages only
+        run: |
+          cat > scripts/inspect-publishers.tmp.ts <<'TS'
+          import { safeFetch } from '../server/services/safeFetch';
+          import { load } from 'cheerio';
+          import { writeFileSync } from 'node:fs';
+          const report=[];
+          for(const url of ['https://www.pcgoodnews.co.kr/','https://gyeongnampost.com/']){
+            try{
+              const r=await safeFetch(url,{timeoutMs:12000});const html=r.body.toString('utf8');const $=load(html);
+              report.push({url,status:r.status,finalUrl:r.finalUrl,title:$('title').text(),
+                feeds:$('link[rel="alternate"],a[href*="rss"],a[href*="RSS"]').toArray().map(e=>({href:$(e).attr('href'),type:$(e).attr('type'),text:$(e).text().slice(0,80)})),
+                forms:$('form').toArray().map(e=>({action:$(e).attr('action'),method:$(e).attr('method'),inputs:$(e).find('input').toArray().map(i=>({name:$(i).attr('name'),type:$(i).attr('type'),value:$(i).attr('value')}))})),
+                matches:$('a[href]').toArray().filter(e=>/청소년역사기행|사천 청소년 꿈/.test($(e).text())).map(e=>({href:$(e).attr('href'),text:$(e).text().slice(0,300)})),
+                searches:$('a[href]').toArray().filter(e=>/search/i.test($(e).attr('href')||'')).map(e=>({href:$(e).attr('href'),text:$(e).text().slice(0,50)})).slice(0,10)});
+            }catch(e){report.push({url,error:(e as Error).message});}
+          }
+          writeFileSync('publisher-paths.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+          TS
+          ./node_modules/.bin/tsx scripts/inspect-publishers.tmp.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: publisher-paths
+          path: publisher-paths.json
+          retention-days: 3
