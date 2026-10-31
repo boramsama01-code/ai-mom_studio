@@ -44,7 +44,7 @@ jobs:
         run: ./node_modules/.bin/tsx scripts/check-publisher-recovery.ts
       - name: Commit verified application integration
         run: |
-          git add server/services/safeFetch.ts server/services/newsSearch.ts server/routes/items.ts server/worker/collect.ts server/worker/discovery.ts server/app.ts
+          git add server/services/safeFetch.ts server/services/newsSearch.ts server/routes/items.ts server/worker/collect.ts server/worker/discovery.ts server/app.ts tests/collection.test.ts
           if ! git diff --cached --quiet; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
