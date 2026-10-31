@@ -18,6 +18,7 @@ import type { Approval, ContentItem, ContentRevision, Delivery, SourceDocument }
 import { SourceTextEditor } from "../SourceTextEditor";
 import { ChatGptLaunch } from "../ChatGptLaunch";
 import { itemChatGptPrompt } from "@shared/chatgptLink";
+import { collectionUsesArt } from "@shared/cardDesigns";
 
 type Detail = {
   imageAiAvailable?: boolean;
@@ -444,7 +445,6 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [coverChoice, setCoverChoice] = useState<"ai" | "typography" | null>(null);
-  const coverMode = coverChoice ?? (d.imageAiAvailable ? "ai" : "typography");
   const revCards = d.cards.filter((c) => c.revisionId === d.current?.id);
   const [pickedCard, setPickedCard] = useState<number | null>(null);
   const currentCard = revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
@@ -452,6 +452,9 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
   const [when, setWhen] = useState(() => toLocalInput(new Date(Date.now() + 3600_000)));
   const tpls = useTemplates(cid);
   const [tpl, setTpl] = useState<string | null>(null);
+  const templateKey = tpl ?? tpls.data?.current ?? "builtin:classic";
+  const typographyOnly = templateKey.startsWith("set:") && !collectionUsesArt(templateKey.slice(4));
+  const coverMode = typographyOnly ? "typography" : coverChoice ?? (d.imageAiAvailable ? "ai" : "typography");
   const [showTpl, setShowTpl] = useState(false);
   const canva = useQuery({ queryKey: ["canva-status"], queryFn: () => api<{ connected: boolean }>("/canva/status") });
   const { channels } = useChannel();
@@ -517,8 +520,8 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
       ) : (
         <>
           <p className="small muted">표지와 본문을 기본 5장으로 구성합니다. 긴 원고는 최대 10장까지 나누며, 완성된 이미지는 제작 보드에 자동 저장됩니다.</p>
-          <label className="field">표지 이미지<select value={coverMode} disabled={render.isPending} onChange={e => setCoverChoice(e.target.value as "ai" | "typography")}><option value="ai" disabled={!d.imageAiAvailable}>주제에 맞는 AI 일러스트</option><option value="typography">글자 중심 · 선택한 배경 템플릿</option></select><span className="hint">{coverMode === "ai" ? "OpenAI 이미지 API 비용이 발생합니다. 같은 원고로 다시 만들면 저장된 표지를 재사용합니다." : "이미지 생성 비용 없이 만듭니다."}</span></label>
-          {!d.imageAiAvailable && <p className="notice small">AI 표지를 사용하려면 <GuardedLink href="/connections?service=openai">OpenAI 이미지 연결</GuardedLink>을 설정해 주세요.</p>}
+          <label className="field">표지 이미지<select value={coverMode} disabled={render.isPending || typographyOnly} onChange={e => setCoverChoice(e.target.value as "ai" | "typography")}><option value="ai" disabled={!d.imageAiAvailable}>주제에 맞는 AI 일러스트</option><option value="typography">글자 중심 · 선택한 배경 템플릿</option></select><span className="hint">{typographyOnly ? "이 디자인은 타이포그래피 전용입니다. 이미지 생성 비용 없이 만듭니다." : coverMode === "ai" ? "OpenAI 이미지 API 비용이 발생합니다. 같은 원고로 다시 만들면 저장된 표지를 재사용합니다." : "이미지 생성 비용 없이 만듭니다."}</span></label>
+          {!d.imageAiAvailable && !typographyOnly && <p className="notice small">AI 표지를 사용하려면 <GuardedLink href="/connections?service=openai">OpenAI 이미지 연결</GuardedLink>을 설정해 주세요.</p>}
           <div className="row">
             <button className="btn primary" onClick={() => render.mutate()} disabled={render.isPending}>
               {render.isPending ? "카드뉴스 만드는 중…" : revCards.length ? "카드뉴스 다시 만들기" : "카드뉴스 만들기"}

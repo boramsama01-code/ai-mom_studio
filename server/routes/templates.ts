@@ -56,8 +56,9 @@ templateRoutes.get(
   ah(async (req, res) => {
     const ch = await loadChannel(req.params.cid);
     const key = String(req.query.key ?? "");
+    const page = parse(z.coerce.number().int().min(0).max(4).default(0), req.query.page);
     try {
-      const jpg = await renderPreview(getDb(), key, ch);
+      const jpg = await renderPreview(getDb(), key, ch, page);
       const thumb = req.query.size === "sm" ? await sharp(jpg).resize(360, 450).jpeg({ quality: 82 }).toBuffer() : jpg;
       res.setHeader("content-type", "image/jpeg");
       res.setHeader("cache-control", "private, max-age=300");
@@ -344,4 +345,5 @@ templateRoutes.post(
     res.json({ assetId: asset.id, aspectWarning: Math.abs(ratio - CARD_W / CARD_H) > 0.02 ? "Canva 디자인 비율이 4:5가 아니어서 여백을 넣어 맞췄습니다. 1080×1350 크기로 디자인하면 여백이 생기지 않습니다." : null });
   }),
 );
+
 

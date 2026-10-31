@@ -8,6 +8,7 @@ import { formatScheduleLines } from "../../shared/format";
 import { CardOverflowError, layoutCard, loadFonts, renderCardJpeg, wrapText, type CardModel, type CardStyle } from "./card";
 import { sha256 } from "./text";
 import { HttpError } from "../routes/util";
+import { layoutCollectionBody, renderCollectionBody, renderCollectionCover } from "./cardCollection";
 
 type Block = CardModel["blocks"][number];
 type Section = { title: string; blocks: Block[] };
@@ -45,7 +46,8 @@ export function planCarousel(input: ModelInput, style: CardStyle) {
     try {
       // Bound the expensive font layout before drawing paths for an obviously overfull page.
       if (blocks.reduce((sum, b) => sum + b.text.length, 0) > 700) throw new CardOverflowError("본문", "다음 페이지에 이어서 배치");
-      layoutCard(model, style); pages.push(model);
+      if (style.collection) layoutCollectionBody(model, style.collection); else layoutCard(model, style);
+      pages.push(model);
     }
     catch (e) {
       if (!(e instanceof CardOverflowError) || depth > 12 || e.field === "title" || e.field === "footer" || e.field === "brandLine") throw e;
@@ -73,6 +75,7 @@ export function planCarousel(input: ModelInput, style: CardStyle) {
 }
 
 export async function renderCarouselCover(model: CardModel, count: number, art: Buffer | null, credit: string, style: CardStyle): Promise<Buffer> {
+  if (style.collection) return renderCollectionCover(model, count, art ?? style.background ?? null, credit, style.collection);
   const f = loadFonts();
   const color = /^#[a-f0-9]{6}$/i.test(model.accent) ? model.accent : "#2563eb";
   const svg: string[] = [];
@@ -103,7 +106,7 @@ export async function renderCarouselCover(model: CardModel, count: number, art: 
 export async function renderCarouselPages(plan: ReturnType<typeof planCarousel>, style: CardStyle, art: Buffer | null, credit: string) {
   const output = [{ title: plan.base.title, bytes: await renderCarouselCover(plan.base, plan.count, art, credit, style) }];
   // Sequential rendering keeps the free instance's peak memory bounded.
-  for (const model of plan.pages) output.push({ title: model.title, bytes: (await renderCardJpeg(model, style)).jpeg });
+  for (const model of plan.pages) output.push({ title: model.title, bytes: style.collection ? await renderCollectionBody(model, style.collection) : (await renderCardJpeg(model, style)).jpeg });
   // Bind the cover's identity to every body page, even when only a body template changes.
   // A standard JPEG comment preserves pixels while preventing a saved manifest being overwritten.
   const comment = Buffer.from(`cardnews-v1:${sha256(output.slice(1).map(p => sha256(p.bytes)).join(":"))}`);
