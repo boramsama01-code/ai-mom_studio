@@ -1,42 +1,69 @@
-name: Diagnose public publisher paths
+name: Verify publisher-first recovery
 on:
   push:
     branches: [fix/publisher-first-20261031]
 permissions:
   contents: read
+concurrency:
+  group: publisher-first-verification
+  cancel-in-progress: true
 jobs:
-  inspect:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
+    permissions:
+      contents: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aimom_test
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/aimom_test
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: fix/publisher-first-20261031
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
+      - name: Apply guarded application integration
+        run: node scripts/apply-publisher-first.mjs
       - run: npm ci
-      - name: Read public homepages only
+      - run: npm run typecheck
+      - run: npm test -- --reporter=default --reporter=json --outputFile=publisher-tests.json
+      - run: npm run build
+      - name: Verify actual failing sources without Google requests (read only)
+        env:
+          APP_DATABASE_URL: ${{ secrets.APP_DATABASE_URL }}
+          REPAIR_SOURCES: "false"
+        run: ./node_modules/.bin/tsx scripts/check-publisher-recovery.ts
+      - name: Commit verified application integration
         run: |
-          cat > scripts/inspect-publishers.tmp.ts <<'TS'
-          import { safeFetch } from '../server/services/safeFetch';
-          import { load } from 'cheerio';
-          import { writeFileSync } from 'node:fs';
-          const report=[];
-          for(const url of ['https://www.pcgoodnews.co.kr/','https://gyeongnampost.com/']){
-            try{
-              const r=await safeFetch(url,{timeoutMs:12000});const html=r.body.toString('utf8');const $=load(html);
-              report.push({url,status:r.status,finalUrl:r.finalUrl,title:$('title').text(),
-                feeds:$('link[rel="alternate"],a[href*="rss"],a[href*="RSS"]').toArray().map(e=>({href:$(e).attr('href'),type:$(e).attr('type'),text:$(e).text().slice(0,80)})),
-                forms:$('form').toArray().map(e=>({action:$(e).attr('action'),method:$(e).attr('method'),inputs:$(e).find('input').toArray().map(i=>({name:$(i).attr('name'),type:$(i).attr('type'),value:$(i).attr('value')}))})),
-                matches:$('a[href]').toArray().filter(e=>/청소년역사기행|사천 청소년 꿈/.test($(e).text())).map(e=>({href:$(e).attr('href'),text:$(e).text().slice(0,300)})),
-                searches:$('a[href]').toArray().filter(e=>/search/i.test($(e).attr('href')||'')).map(e=>({href:$(e).attr('href'),text:$(e).text().slice(0,50)})).slice(0,10)});
-            }catch(e){report.push({url,error:(e as Error).message});}
-          }
-          writeFileSync('publisher-paths.json',JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
-          TS
-          ./node_modules/.bin/tsx scripts/inspect-publishers.tmp.ts
+          git add server/services/safeFetch.ts server/services/newsSearch.ts server/routes/items.ts server/worker/collect.ts server/worker/discovery.ts server/app.ts
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'Use publisher-first source fetch in application; keep independent direct URLs'
+            git push origin HEAD:fix/publisher-first-20261031
+          fi
+      - name: Verification summary
+        if: always()
+        run: |
+          node --input-type=module <<'JS'
+          import {existsSync,readFileSync} from 'node:fs';
+          if(existsSync('publisher-tests.json')){const r=JSON.parse(readFileSync('publisher-tests.json','utf8')); console.log(`::notice::${r.numPassedTests}/${r.numTotalTests} passed; ${r.numFailedTests} failed`);for(const f of r.testResults??[]) for(const t of f.assertionResults??[]) if(t.status==='failed')console.log(`::error::${t.fullName}: ${(t.failureMessages??[]).join(' ').replace(/\n/g,'%0A').slice(0,1600)}`);}
+          JS
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: publisher-paths
-          path: publisher-paths.json
+          name: publisher-first-verification
+          path: |
+            publisher-tests.json
+            publisher-recovery.json
+          if-no-files-found: ignore
           retention-days: 3
