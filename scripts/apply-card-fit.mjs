@@ -20,7 +20,7 @@ source = source.slice(0, start) + `function drawBlocks(c: Ctx, model: CardModel,
   for (const entry of fit.blocks) {
     const { block, lines, size, lineHeight, inset, labelY, textY, box } = entry;
     const font = block.emphasis ? c.fonts.semibold : c.fonts.regular;
-    if (box) c.els.push(\\`<rect x="\\${c.x}" y="\\${box.top}" width="\\${c.w}" height="\\${box.height}" rx="18" fill="\\${c.accent}" fill-opacity="0.09"/>\\`);
+    if (box) c.els.push('<rect x="' + c.x + '" y="' + box.top + '" width="' + c.w + '" height="' + box.height + '" rx="18" fill="' + c.accent + '" fill-opacity="0.09"/>');
     if (block.label && labelY !== null) c.els.push(pathFor(c.fonts.semibold, block.label, c.x + inset, labelY, 26, box ? c.accent : opts.labelColor ?? c.muted));
     lines.forEach((line, index) => c.els.push(pathFor(font, line, c.x + inset, textY + index * lineHeight, size, c.text)));
   }
