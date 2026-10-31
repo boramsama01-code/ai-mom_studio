@@ -25,14 +25,16 @@ async function call(method: string, body: FormData | Record<string, unknown>, to
     // 요청이 전달된 뒤 응답만 유실됐을 수 있음
     return { ok: false, kind: "unknown", error: "응답을 받지 못함(게시 여부 불명)" };
   }
-  let json: { ok?: boolean; result?: { message_id?: number; chat?: { username?: string } }; description?: string; parameters?: { retry_after?: number } } = {};
+  type Message = { message_id?: number; chat?: { username?: string } };
+  let json: { ok?: boolean; result?: Message | Message[]; description?: string; parameters?: { retry_after?: number } } = {};
   try {
     json = await res.json();
   } catch {
     return { ok: false, kind: res.ok ? "unknown" : "transient", error: `응답 해석 실패(HTTP ${res.status})` };
   }
-  if (res.ok && json.ok && json.result?.message_id) {
-    return { ok: true, messageId: json.result.message_id, chatUsername: json.result.chat?.username };
+  const message = Array.isArray(json.result) ? json.result[0] : json.result;
+  if (res.ok && json.ok && message?.message_id) {
+    return { ok: true, messageId: message.message_id, chatUsername: message.chat?.username };
   }
   const desc = (json.description || `HTTP ${res.status}`).slice(0, 300);
   if (res.status === 401) return { ok: false, kind: "auth", error: `봇 인증 실패: ${desc}` };
@@ -55,6 +57,16 @@ export async function sendPhotoToChannel(chatId: string, jpeg: Buffer, caption: 
   return call("sendPhoto", fd);
 }
 
+export async function sendAlbumToChannel(chatId: string, pages: Buffer[], caption: string): Promise<TgResult> {
+  if (pages.length < 2 || pages.length > 10) return { ok: false, kind: "terminal", error: "앨범은 2~10장이어야 합니다." };
+  const fd = new FormData();
+  fd.set("chat_id", chatId);
+  fd.set("media", JSON.stringify(pages.map((_, i) => ({ type: "photo", media: `attach://page${i}`, ...(i === 0 ? { caption } : {}) }))));
+  pages.forEach((bytes, i) => fd.set(`page${i}`, new Blob([new Uint8Array(bytes)], { type: "image/jpeg" }), `page-${i + 1}.jpg`));
+  return call("sendMediaGroup", fd);
+}
+
 export function telegramPostUrl(chatUsername: string | undefined, messageId: number): string | null {
   return chatUsername ? `https://t.me/${chatUsername}/${messageId}` : null;
 }
+

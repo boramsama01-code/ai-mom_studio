@@ -98,3 +98,26 @@ describe("홈과 단계별 제작 화면", () => {
     expect(mocks.api.mock.calls.some(([path]) => /publish|generate|deliver/.test(String(path)))).toBe(false);
   });
 });
+
+
+describe("수집 카드뉴스 보드 연결", () => {
+  function generated() {
+    cards[0] = { ...cards[0], format: "카드뉴스", sourceItemId: 20, sourceOutput: { assetId: 51, channelId: 2, itemId: 20, revisionId: 5, stale: false, pages: Array.from({ length: 5 }, (_, i) => ({ id: 51 + i, title: `페이지 ${i + 1}` })), coverCredit: "표지: AI 생성 · OpenAI" } };
+  }
+  it("갤러리에 실제 표지와 전체 페이지 수를 표시한다", async () => {
+    generated(); await render(createElement(StudioPage));
+    expect(host.querySelector('img[src="/api/channels/2/media/51"]')).not.toBeNull();
+    expect(host.textContent).toContain("카드뉴스 · 5장"); expect(host.textContent).toContain("5장 ZIP 저장");
+  });
+  it("전체 페이지를 순서대로 보여 주고 원고 채널로 바로 이동한다", async () => {
+    generated(); await render(createElement(StudioPage, { cardId: 1 }));
+    expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/2/media/51");
+    await click("다음 →"); expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/2/media/52");
+    await act(async () => host.querySelector<HTMLButtonElement>('.card-carousel-thumbs button:last-child')!.click());
+    expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/2/media/55");
+    expect(button("다음 →").disabled).toBe(true);
+    await act(async () => [...host.querySelectorAll<HTMLAnchorElement>("a")].find(a => a.textContent === "원고·카드 수정 →")!.click());
+    expect(mocks.navigate).toHaveBeenCalledWith("/items/2/20");
+    await click("보드 제목·메모 편집"); expect(host.querySelector("#studio-title")).not.toBeNull();
+  });
+});

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
-import { channels, appSettings, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
+import { channels, appSettings, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
 import { channelSlug } from "../../shared/channelKeys";
 import { studioContentSchema, type StudioGeneration, type StudioContent, type StudioCard, type StudioJob, type StudioRevision } from "../../shared/studio";
 import { conflict, HttpError, parse } from "../routes/util";
@@ -12,6 +12,22 @@ import { renderStudioOutput } from "./studioExport";
 import { getSetting } from "../seed";
 
 export const studioCardDto = (row: typeof studioCards.$inferSelect): StudioCard => ({ ...studioContentSchema.parse(row.content), id: row.id, version: row.version, sourceItemId: row.sourceItemId, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() });
+/** Attach immutable source output without copying rendered pages into the four-panel editor. */
+export async function studioCardsWithOutput(db: DB, rows: Array<typeof studioCards.$inferSelect>): Promise<StudioCard[]> {
+  const itemIds = rows.flatMap(row => row.sourceItemId ? [row.sourceItemId] : []);
+  if (!itemIds.length) return rows.map(studioCardDto);
+  const outputs = await db.select({ id: mediaAssets.id, channelId: mediaAssets.channelId, itemId: mediaAssets.contentItemId, revisionId: mediaAssets.revisionId, carousel: mediaAssets.carousel, currentRevisionId: contentItems.currentRevisionId })
+    .from(mediaAssets).innerJoin(contentItems, eq(contentItems.id, mediaAssets.contentItemId))
+    .where(and(inArray(mediaAssets.contentItemId, itemIds), eq(mediaAssets.kind, "card"))).orderBy(desc(mediaAssets.id));
+  return rows.map(row => {
+    const dto = studioCardDto(row);
+    const own = outputs.filter(o => o.itemId === row.sourceItemId);
+    const output = own.find(o => o.id === row.importedMeta?.generatedAssetId) ?? own[0];
+    if (output) dto.sourceOutput = { assetId: output.id, channelId: output.channelId, itemId: output.itemId, revisionId: output.revisionId, stale: output.revisionId !== output.currentRevisionId,
+      pages: output.carousel?.pages.map(p => ({ id: p.id, title: p.title })) ?? [{ id: output.id, title: row.content.title }], coverCredit: output.carousel?.cover.credit ?? "" };
+    return dto;
+  });
+}
 export const studioRevisionDto = (r: typeof studioRevisions.$inferSelect): StudioRevision => ({ ...r, createdAt: r.createdAt.toISOString() });
 export const studioJobDto = (j: typeof jobs.$inferSelect): StudioJob => ({ id: j.id, status: j.status, lastError: j.lastError, result: j.result, createdAt: j.createdAt.toISOString(), finishedAt: j.finishedAt?.toISOString() ?? null });
 
@@ -91,7 +107,7 @@ export async function studioDetail(db: DB, cardId: number) {
     db.select().from(studioRevisions).where(eq(studioRevisions.cardId, cardId)).orderBy(desc(studioRevisions.id)).limit(60),
     db.select().from(jobs).where(and(eq(jobs.type, "studio_generate"), sql`${jobs.payload}->>'cardId' = ${String(cardId)}`)).orderBy(desc(jobs.id)).limit(20),
   ]);
-  return { card: studioCardDto(card), revisions: revisions.map(studioRevisionDto), jobs: cardJobs.map(studioJobDto) };
+  return { card: (await studioCardsWithOutput(db, [card]))[0], revisions: revisions.map(studioRevisionDto), jobs: cardJobs.map(studioJobDto) };
 }
 export async function queueStudioGeneration(db: DB, cardId: number, input: StudioGeneration, actor: string) {
   if (await getSetting(db, "global_stop", false)) throw new HttpError(409, "전역 정지 상태입니다. 정지를 해제한 뒤 생성하세요.");
@@ -165,3 +181,4 @@ export async function exportStudioComic(db: DB, cardId: number) {
   if (output.content.format !== "웹툰") throw new HttpError(400, "웹툰 형식을 선택한 뒤 PNG로 내려받으세요.");
   return { bytes: await output.page(0), version: output.version };
 }
+

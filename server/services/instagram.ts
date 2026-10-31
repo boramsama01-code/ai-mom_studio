@@ -50,6 +50,21 @@ export async function createContainer(userId: string, token: string, imageUrl: s
   return { ok: true as const, containerId: String(r.json.id) };
 }
 
+export async function createCarouselContainer(userId: string, token: string, imageUrls: string[], caption: string) {
+  if (imageUrls.length < 2 || imageUrls.length > 10) return { ok: false as const, lost: false, err: { kind: "terminal", error: "카드뉴스는 2~10장이어야 합니다." } as IgError };
+  const children: string[] = [];
+  for (const image_url of imageUrls) {
+    const child = await igFetch(`${userId}/media`, "POST", { image_url, is_carousel_item: "true" }, token);
+    if (!child.ok) return child;
+    if (!child.json.id) return { ok: false as const, lost: false, err: { kind: "transient", error: "하위 이미지 컨테이너 ID를 받지 못했습니다." } as IgError };
+    children.push(String(child.json.id));
+  }
+  const parent = await igFetch(`${userId}/media`, "POST", { media_type: "CAROUSEL", children: children.join(","), caption }, token);
+  if (!parent.ok) return parent;
+  if (!parent.json.id) return { ok: false as const, lost: false, err: { kind: "transient", error: "카드뉴스 컨테이너 ID를 받지 못했습니다." } as IgError };
+  return { ok: true as const, containerId: String(parent.json.id) };
+}
+
 export async function containerStatus(containerId: string, token: string) {
   const r = await igFetch(containerId, "GET", { fields: "status_code,status" }, token);
   if (!r.ok) return r;
@@ -90,3 +105,4 @@ export async function waitForContainer(containerId: string, token: string, budge
     wait = Math.min(wait * 2, 20_000);
   }
 }
+

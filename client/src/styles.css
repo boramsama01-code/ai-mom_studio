@@ -417,3 +417,28 @@ fieldset legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
   .collection-metrics > div:last-child { grid-column: 1 / -1; }
   .collection-summary > .row { align-items: flex-start; gap: 12px; }
 }
+
+/* Source-to-card workflow: controls follow the content they act on. */
+.next-action-bottom { margin-top: 16px; padding: 20px; }
+.card-carousel { display: grid; gap: 16px; min-width: 0; }
+.card-carousel-stage { display: grid; place-items: center; padding: 24px; border: 1px solid var(--border); border-radius: 20px; background: #f0f3f8; }
+.card-carousel-stage > img { width: min(100%, 390px); height: auto; aspect-ratio: 4/5; object-fit: contain; border-radius: 7px; box-shadow: 0 10px 28px #152d4b15; }
+.card-carousel-controls { font-size: 13px; gap: 10px; }
+.card-carousel-controls > span { text-align: center; flex: 1; }
+.card-carousel-thumbs { display: flex; gap: 9px; overflow-x: auto; padding: 3px 3px 10px; }
+.card-carousel-thumbs button { flex: 0 0 64px; background: white; border: 2px solid transparent; border-radius: 9px; padding: 4px; color: var(--muted); cursor: pointer; }
+.card-carousel-thumbs button[aria-pressed=true] { border-color: var(--accent); color: var(--text); }
+.card-carousel-thumbs img { display: block; width: 100%; aspect-ratio: 4/5; object-fit: cover; border: 1px solid var(--border); border-radius: 4px; }
+.card-carousel-thumbs span { display: block; margin-top: 5px; font-size: 11px; }
+.source-output-detail { max-width: 1000px; margin: 0 auto; }
+.source-output-detail > .card-carousel { padding: 24px; background: white; border: 1px solid var(--border); border-radius: 22px; }
+.source-output-stage { max-width: 200px; }
+.source-output-panel { margin-bottom: 20px; }
+.studio-task-preview { width: 100%; max-height: 150px; object-fit: cover; object-position: top; border-radius: 10px; margin: 10px 0; }
+@media (max-width: 700px) {
+  .card-carousel-stage { padding: 12px; border-radius: 14px; }
+  .source-output-detail > .card-carousel { padding: 14px; }
+  .next-action-bottom { align-items: stretch; }
+  .next-action-bottom .btn { width: 100%; }
+  .card-carousel-controls > span .muted { display: none; }
+}

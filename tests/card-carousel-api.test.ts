@@ -1,0 +1,78 @@
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import sharp from "sharp";
+import { execFileSync } from "node:child_process";
+import { eq } from "drizzle-orm";
+import { login, resetDb, setTestEnv } from "./helpers";
+setTestEnv();
+const makeImage = vi.fn();
+vi.mock("../server/services/studioAi", async original => ({ ...await original<object>(), generateStudioImage: (...args: unknown[]) => makeImage(...args) }));
+const { createApp } = await import("../server/app");
+const { getDb, closeDb } = await import("../server/db");
+const { mediaAssets, studioCards } = await import("../shared/schema");
+const { loadCardPages } = await import("../server/services/cardCarousel");
+let app: ReturnType<typeof createApp>;
+const payload = { topic: "빛", age_band: "중학생", key_question: "하늘은 왜 파랄까요?", background: ["빛에는 여러 색이 있습니다.", "공기가 빛을 산란합니다.", "색마다 정도가 다릅니다."], scientific_basis: "짧은 파장이 더 많이 산란합니다.", misconceptions: [], discussion_questions: ["노을은 왜 다를까요?", "달에서도 같을까요?", "무엇을 관찰할까요?"], parent_hints: ["하늘을 관찰해요."], safe_activity: null, sources: [], evidence: [] };
+beforeAll(async () => { await resetDb(); app = createApp(); });
+afterAll(async () => { delete process.env.OPENAI_API_KEY; await closeDb(); });
+async function setup() {
+  const { agent, csrf } = await login(app); const H = { "x-csrf-token": csrf };
+  const created = await agent.post("/api/channels/2/items").set(H).send({ title: "여러 장 검증" }); const id = created.body.id;
+  const d = (await agent.get(`/api/channels/2/items/${id}`)).body;
+  await agent.patch(`/api/channels/2/items/${id}`).set(H).send({ version: d.item.version, payload });
+  return { agent, H, id, endpoint: `/api/channels/2/items/${id}` };
+}
+describe("source cards automatically reach the board", () => {
+  it("persists five ordered images, previews and downloads them, and never duplicates or overwrites board work", async () => {
+    const { agent, H, id, endpoint } = await setup();
+    const before = (await agent.get(endpoint)).body;
+    const generated = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography" });
+    expect(generated.status, JSON.stringify(generated.body)).toBe(200);
+    const { carousel, studioCardId } = generated.body;
+    expect(carousel.pages).toHaveLength(5);
+    const detail = (await agent.get(endpoint)).body;
+    expect(detail.cards).toHaveLength(1); expect(detail.current).toEqual(before.current); expect(detail.approvals).toHaveLength(0);
+    const board = (await agent.get("/api/studio/cards")).body.cards.find((c: any) => c.id === studioCardId);
+    expect(board.stage).toBe("review"); expect(board.sourceOutput.pages).toHaveLength(5); expect(board.sourceOutput.assetId).toBe(generated.body.id);
+    for (const page of carousel.pages) expect((await agent.get(`/api/channels/2/media/${page.id}`)).status).toBe(200);
+    const zip = await agent.get(`/api/channels/2/media/${generated.body.id}/deck.zip`).buffer(true).parse((res, done) => {
+      const chunks: Buffer[] = []; res.on("data", (chunk: Buffer) => chunks.push(chunk)); res.on("end", () => done(null, Buffer.concat(chunks))); res.on("error", done);
+    });
+    expect(zip.status).toBe(200); expect(zip.headers["content-type"]).toContain("application/zip");
+    const archive = JSON.parse(execFileSync("python3", ["-c", "import io,json,sys,zipfile; z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())); print(json.dumps({'names':z.namelist(),'bad':z.testzip()}))"], { input: zip.body }).toString());
+    expect(archive.bad).toBeNull(); expect(archive.names).toEqual(["page-01.jpg", "page-02.jpg", "page-03.jpg", "page-04.jpg", "page-05.jpg", "caption.txt", "credits.txt"]);
+    await agent.patch(`/api/studio/cards/${studioCardId}`).set(H).send({ version: board.version, title: "직접 정한 제목", memo: "직접 쓴 메모", stage: "making" });
+    const second = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography", templateKey: "builtin:minimal" });
+    expect(second.status).toBe(200); expect(second.body.id).not.toBe(generated.body.id);
+    const rows = await getDb().select().from(studioCards).where(eq(studioCards.sourceItemId, id));
+    expect(rows).toHaveLength(1); expect(rows[0].content).toMatchObject({ title: "직접 정한 제목", memo: "직접 쓴 메모", stage: "making" });
+    const source = (await agent.get(`/api/studio/cards/${studioCardId}`)).body.card.sourceOutput;
+    expect(source.assetId).toBe(second.body.id);
+    const fresh = (await agent.get(endpoint)).body;
+    await agent.patch(endpoint).set(H).send({ version: fresh.item.version, payload: { ...payload, scientific_basis: "수정한 과학적 근거" } });
+    expect((await agent.get(`/api/studio/cards/${studioCardId}`)).body.card.sourceOutput.stale).toBe(true);
+    expect((await agent.get(`/api/channels/1/media/${generated.body.id}/deck.zip`)).status).toBe(404);
+  });
+  it("uses one AI illustration for the cover, reuses it on repeat, and preserves attribution", async () => {
+    const { agent, H, endpoint } = await setup();
+    process.env.OPENAI_API_KEY = "test-key";
+    makeImage.mockResolvedValue({ bytes: await sharp({ create: { width: 128, height: 128, channels: 3, background: "#6688aa" } }).png().toBuffer(), model: "test-image", provider: "openai" });
+    const a = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "ai" });
+    expect(a.status, JSON.stringify(a.body)).toBe(200); expect(a.body.carousel.cover).toMatchObject({ kind: "ai", credit: expect.stringContaining("AI 생성") });
+    const b = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "ai" });
+    expect(b.status).toBe(200); expect(b.body.id).toBe(a.body.id); expect(makeImage).toHaveBeenCalledOnce(); expect(makeImage.mock.calls[0][0].purpose).toBe("cover");
+    const [cover] = await getDb().select().from(mediaAssets).where(eq(mediaAssets.id, a.body.id));
+    await getDb().update(mediaAssets).set({ bytes: Buffer.from("tampered body") }).where(eq(mediaAssets.id, a.body.carousel.pages[2].id));
+    await expect(loadCardPages(getDb(), cover)).rejects.toThrow("저장본과 다릅니다");
+    expect((await agent.get(`/api/channels/2/media/${a.body.id}/deck.zip`)).status).toBe(409);
+    delete process.env.OPENAI_API_KEY;
+  });
+  it("fails clearly without an image connection or on provider failure, without adding an incomplete board card", async () => {
+    const { agent, H, id, endpoint } = await setup();
+    expect((await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "ai" })).body.code).toBe("ai_not_configured");
+    process.env.OPENAI_API_KEY = "test-key"; makeImage.mockRejectedValueOnce(new Error("image provider failed"));
+    const response = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "ai" });
+    expect(response.status).toBe(500); expect(response.body.error).toContain("image provider failed");
+    expect(await getDb().select().from(studioCards).where(eq(studioCards.sourceItemId, id))).toHaveLength(0);
+    delete process.env.OPENAI_API_KEY;
+  });
+});
