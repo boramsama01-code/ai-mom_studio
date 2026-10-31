@@ -312,3 +312,22 @@ input:focus,select:focus,textarea:focus { border-color:#6095f1; box-shadow:0 0 0
  .studio-content-meta,.studio-content-channel { font-size:11px; }
 }
 @media (max-width:900px) { .sidebar { visibility:hidden; } .sidebar.open { visibility:visible; } }
+.palette-head { position:relative; }
+.palette-head .palette-input { padding-right:58px; }
+.palette-close { position:absolute; top:10px; right:10px; }
+@media (max-width:480px) {
+ .main { padding-top:18px; }
+ .studio-home-top { margin-bottom:12px; }
+ .studio-resume { padding:18px 20px; }
+ .studio-resume h2 { margin:10px 0 13px; font-size:18px; }
+ .studio-at-a-glance { padding:12px 20px 0; }
+ .studio-at-a-glance .overview-label { font-size:10px; }
+ .overview-numbers { padding:9px 0 12px; }
+ .overview-numbers > div { flex-direction:row; align-items:baseline; gap:6px; }
+ .overview-numbers > div + div { padding-left:12px; }
+ .overview-numbers strong { font-size:23px; }
+ .overview-numbers span { font-size:10px; }
+ .overview-source { padding:8px 0; min-height:36px; font-size:11px; }
+ .studio-overview { margin-bottom:20px; }
+ .studio-workspace-head { gap:8px; padding-bottom:10px; }
+}
