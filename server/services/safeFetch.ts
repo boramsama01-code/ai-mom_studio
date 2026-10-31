@@ -30,6 +30,8 @@ export type SafeFetchOptions = {
   maxBytes?: number; timeoutMs?: number; maxRedirects?: number; accept?: string;
   /** Only accepted for GOOGLE_NEWS_RPC_URL; cookies/auth headers are not supported. */
   googleNewsForm?: string;
+  /** Optional exact host boundary, rechecked before every redirected request. */
+  allowedHosts?: string[];
 };
 export class FetchFailure extends Error {
   constructor(message: string, public kind: "blocked" | "redirect" | "http" | "timeout" | "too_large" | "network" | "too_many_redirects", public status?: number, public redirectUrl?: string) {
@@ -81,6 +83,8 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
   let current = url;
   const deadline = Date.now() + timeoutMs;
   for (let hop = 0; hop <= maxRedirects; hop++) {
+    if (opts.allowedHosts && !opts.allowedHosts.includes(new URL(current).hostname.toLowerCase()))
+      throw new FetchFailure("허용한 언론사 외부로 이동하여 요청을 중단했습니다.", "blocked");
     try { await assertPublicHttpUrl(current); }
     catch (e) { throw new FetchFailure(e instanceof BlockedUrlError ? e.message : "URL 검사 실패", "blocked"); }
     const remaining = deadline - Date.now();
