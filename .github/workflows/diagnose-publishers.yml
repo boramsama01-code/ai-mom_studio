@@ -1,28 +1,16 @@
-name: Verify publisher-first recovery
+name: Recover verified publisher sources
 on:
   push:
     branches: [fix/publisher-first-20261031]
 permissions:
   contents: read
 concurrency:
-  group: publisher-first-verification
-  cancel-in-progress: true
+  group: publisher-source-recovery
+  cancel-in-progress: false
 jobs:
-  verify:
+  recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
-    permissions:
-      contents: write
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: aimom_test
-        ports: ["5432:5432"]
-        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/aimom_test
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,39 +19,16 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - name: Apply guarded application integration
-        run: node scripts/apply-publisher-first.mjs
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test -- --reporter=default --reporter=json --outputFile=publisher-tests.json
-      - run: npm run build
-      - name: Verify actual failing sources without Google requests (read only)
+      - name: Recover exactly source 3410 and 3429 after identity and title checks
         env:
           APP_DATABASE_URL: ${{ secrets.APP_DATABASE_URL }}
-          REPAIR_SOURCES: "false"
+          REPAIR_SOURCES: "true"
         run: ./node_modules/.bin/tsx scripts/check-publisher-recovery.ts
-      - name: Commit verified application integration
-        run: |
-          git add server/services/safeFetch.ts server/services/newsSearch.ts server/routes/items.ts server/worker/collect.ts server/worker/discovery.ts server/app.ts tests/collection.test.ts
-          if ! git diff --cached --quiet; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'Use publisher-first source fetch in application; keep independent direct URLs'
-            git push origin HEAD:fix/publisher-first-20261031
-          fi
-      - name: Verification summary
-        if: always()
-        run: |
-          node --input-type=module <<'JS'
-          import {existsSync,readFileSync} from 'node:fs';
-          if(existsSync('publisher-tests.json')){const r=JSON.parse(readFileSync('publisher-tests.json','utf8')); console.log(`::notice::${r.numPassedTests}/${r.numTotalTests} passed; ${r.numFailedTests} failed`);for(const f of r.testResults??[]) for(const t of f.assertionResults??[]) if(t.status==='failed')console.log(`::error::${t.fullName}: ${(t.failureMessages??[]).join(' ').replace(/\n/g,'%0A').slice(0,1600)}`);}
-          JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: publisher-first-verification
-          path: |
-            publisher-tests.json
-            publisher-recovery.json
-          if-no-files-found: ignore
+          name: publisher-source-recovery
+          path: publisher-recovery.json
+          if-no-files-found: error
           retention-days: 3
