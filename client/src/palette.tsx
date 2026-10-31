@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { api, qs } from "./api";
 import { useChannel, useDirtyGuard } from "./state";
+import { useFocusScope } from "./useFocusScope";
 import type { ListRow } from "./pages/Inbox";
 
 type Cmd = { id: string; label: string; hint?: string; group: string; run: () => void };
@@ -17,6 +18,8 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  useFocusScope(dialog, open, onClose);
   const go = (href: string) => guard.confirmLeave(() => navigate(href));
 
   const search = useQuery({
@@ -65,10 +68,11 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
   let lastGroup = "";
   return (
     <div className="modal-backdrop palette-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="palette" role="dialog" aria-modal="true" aria-label="명령 팔레트">
+      <div ref={dialog} className="palette" role="dialog" aria-modal="true" aria-label="명령 팔레트">
         <input
           ref={input}
           className="palette-input"
+          aria-label="페이지 또는 자료 검색"
           placeholder="이동할 곳, 동작, 항목 제목을 입력하세요"
           value={q}
           onChange={(e) => {
@@ -120,4 +124,5 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
     </div>
   );
 }
+
 

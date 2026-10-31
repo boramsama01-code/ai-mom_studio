@@ -67,8 +67,8 @@ export function ChannelProvider({ children }: { children: ReactNode }) {
   );
   const current = selected === "all" ? null : channels.find((c) => c.id === selected) ?? null;
   useEffect(() => {
-    document.documentElement.style.setProperty("--accent", current?.accentColor ?? "#172334");
-    document.documentElement.style.setProperty("--accent-weak", hexA(current?.accentColor ?? "#172334", 0.1));
+    document.documentElement.style.setProperty("--channel-accent", current?.accentColor ?? "#2563eb");
+    document.documentElement.style.setProperty("--channel-tint", hexA(current?.accentColor ?? "#2563eb", 0.1));
   }, [current]);
   const value = useMemo(() => ({ channels, allChannels, selected, current, select }), [channels, allChannels, selected, current, select]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -142,4 +142,5 @@ export function useDirtyGuard() {
   if (!g) throw new Error("DirtyGuardProvider 필요");
   return g;
 }
+
 

@@ -1,4 +1,4 @@
-.studio { --accent: #25394b; --accent-weak: #e9eff2; }
+.studio { --accent: #2563eb; --accent-weak: #edf4ff; }
 .studio [hidden] { display:none !important; }
 .studio button, .studio input, .studio textarea, .studio select { font-family: inherit; }
 .studio-heading { align-items: center; margin-bottom: 25px; }
@@ -352,3 +352,4 @@
  .studio-design-swatch { height:84px; padding:16px 8px; }
  .studio-form-grid { grid-template-columns:minmax(0,1fr); }
 }
+
