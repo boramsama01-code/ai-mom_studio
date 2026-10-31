@@ -1,13 +1,13 @@
 /**
- * 카드 템플릿 — 기본 레이아웃 4종 + 내가 올린 배경 이미지 템플릿
- * 키 형식: "builtin:<layout>" | "custom:<id>"
+ * 카드 템플릿 — 선택한 레이아웃 5종 × 컬러 6가지 + 내가 올린 배경
+ * 이전 키는 기존 작업을 다시 출력할 수 있도록 유지한다.
  */
 import { and, eq, isNull, or } from "drizzle-orm";
 import type { DB } from "../db";
 import { cardTemplates, type Channel } from "../../shared/schema";
 import { BUILTIN_LAYOUTS, renderCardJpeg, type CardLayout, type CardStyle } from "./card";
 import { buildCardModel } from "./cardModel";
-import { CARD_DESIGNS, cardDesign } from "../../shared/cardDesigns";
+import { cardDesignOptions, cardDesign } from "../../shared/cardDesigns";
 import { renderCollectionPreview } from "./cardDesignSamples";
 
 export class TemplateNotFound extends Error {}
@@ -41,8 +41,7 @@ export async function listTemplates(db: DB, channelId: number) {
     .from(cardTemplates)
     .where(and(isNull(cardTemplates.deletedAt), or(isNull(cardTemplates.channelId), eq(cardTemplates.channelId, channelId))));
   return [
-    ...CARD_DESIGNS.map(d => ({ key: `set:${d.id}`, name: d.name, description: d.description, kind: "builtin" as const, family: d.family, setId: d.id, pageCount: 5 })),
-    ...BUILTIN_LAYOUTS.map((b) => ({ key: `builtin:${b.key}`, name: b.name, description: b.description, kind: "builtin" as const })),
+    ...cardDesignOptions(),
     ...customs.map((c) => ({ key: `custom:${c.id}`, name: c.name, description: `내 배경 · ${c.textTone === "light" ? "밝은 글자" : "어두운 글자"}${c.overlay ? ` · 막 ${c.overlay}%` : ""}`, kind: "custom" as const, id: c.id, layout: c.layout, textTone: c.textTone, overlay: c.overlay, allChannels: c.channelId === null })),
   ];
 }

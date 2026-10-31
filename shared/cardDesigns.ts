@@ -4,8 +4,10 @@ export type CardDesign = {
   bg: string; ink: string; accent: string; soft: string; onAccent: string;
   body: "plain" | "panels" | "timeline" | "notes" | "ledger" | "split" | "framed" | "bands" | "spotlight" | "index";
   art: "lab" | "rocket" | "city" | "globe";
+  layoutId?: string; colorName?: string; overlay?: string;
 };
-export const CARD_DESIGNS: CardDesign[] = [
+/** Retained only to render previously saved work without changing its design. */
+export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
   { id: "r01", name: "캠퍼스 에디토리얼", family: "recruitment", description: "사진과 여백으로 여는 차분한 모집 안내", bg: "#F4F1E9", ink: "#163B35", accent: "#176752", soft: "#E3E9DC", onAccent: "#FFFFFF", body: "plain", art: "lab" },
   { id: "r02", name: "오픈콜", family: "recruitment", description: "큰 글자와 코발트 블루의 선명한 공고", bg: "#2447E8", ink: "#FFFFFF", accent: "#E4FF83", soft: "#3557EF", onAccent: "#173224", body: "bands", art: "rocket" },
   { id: "r03", name: "보딩패스", family: "recruitment", description: "티켓에서 시작해 일정표로 이어지는 구성", bg: "#F2EDE3", ink: "#252D36", accent: "#BA3F2C", soft: "#E9DFD1", onAccent: "#FFFFFF", body: "ledger", art: "rocket" },
@@ -27,5 +29,55 @@ export const CARD_DESIGNS: CardDesign[] = [
   { id: "n09", name: "두 가지 시선", family: "news", description: "분할 화면으로 관점과 질문을 나란히 배치", bg: "#F5E8E3", ink: "#253749", accent: "#2C5275", soft: "#E5D2C9", onAccent: "#FFFFFF", body: "split", art: "city" },
   { id: "n10", name: "미니멀 업데이트", family: "news", description: "작은 업데이트 표시와 큰 제목에 집중", bg: "#FAF8F3", ink: "#22262B", accent: "#AA342B", soft: "#EEEBE3", onAccent: "#FFFFFF", body: "notes", art: "city" },
 ];
-export const cardDesign = (id: string) => CARD_DESIGNS.find(d => d.id === id);
-export const collectionUsesArt = (id: string) => !["r02", "r07", "n04", "n07", "n08", "n10"].includes(id);
+export const CARD_DESIGNS = PERSISTED_CARD_DESIGNS.filter(d => ["r01", "r05", "n01", "n03", "n04"].includes(d.id));
+type Palette = Pick<CardDesign, "bg" | "ink" | "accent" | "soft" | "onAccent" | "overlay"> & { suffix: string; name: string };
+const palette = (suffix: string, name: string, bg: string, ink: string, accent: string, soft: string, onAccent: string, overlay?: string): Palette => ({ suffix, name, bg, ink, accent, soft, onAccent, ...(overlay ? { overlay } : {}) });
+const ORIGINAL_NAMES: Record<string, string> = { r01: "아이보리", r05: "미드나이트", n01: "시그널 레드", n03: "페이퍼", n04: "레몬" };
+const PALETTES: Record<string, Palette[]> = {
+  r01: [
+    palette("blue", "페이퍼 블루", "#F0F5FC", "#203853", "#2457A6", "#DDE8F6", "#FFFFFF"),
+    palette("sage", "세이지", "#EEF3E8", "#243D31", "#396448", "#DDE7D3", "#FFFFFF"),
+    palette("butter", "버터", "#FFF5D8", "#4B3922", "#7B531E", "#F1E4B8", "#FFFFFF"),
+    palette("rose", "로즈 클레이", "#FAEEEA", "#56352F", "#993F35", "#EFDBD4", "#FFFFFF"),
+    palette("mono", "쿨 화이트", "#F9FAFB", "#202B36", "#394B60", "#E9EDF1", "#FFFFFF"),
+  ],
+  r05: [
+    palette("blue", "딥 블루", "#081B3A", "#F2F6FF", "#A8CBFF", "#16345B", "#152B45"),
+    palette("amber", "앰버", "#211C17", "#FFF8EB", "#F5C775", "#392E22", "#3B2912"),
+    palette("forest", "포레스트", "#102E29", "#F1F9F0", "#C5EB7B", "#214239", "#233511"),
+    palette("wine", "버건디", "#321E28", "#FFF0F1", "#FFB9A6", "#48303D", "#3C2128"),
+    palette("cyan", "딥 시안", "#102D35", "#EEFAF8", "#83E6E1", "#2A4348", "#183740"),
+  ],
+  n01: [
+    palette("blue", "일렉트릭 블루", "#101D32", "#FFFFFF", "#2264DC", "#1D304F", "#FFFFFF", "#071B3A"),
+    palette("yellow", "시그널 옐로", "#252218", "#FFFFFF", "#FFD96A", "#3B3523", "#202817", "#181609"),
+    palette("green", "에메랄드", "#122A22", "#FFFFFF", "#16745C", "#244037", "#FFFFFF", "#05241C"),
+    palette("orange", "선셋 오렌지", "#2B211B", "#FFFFFF", "#FF9C5C", "#413125", "#322016", "#2C1307"),
+    palette("ice", "아이스 시안", "#122731", "#FFFFFF", "#8EDDEA", "#243E4B", "#112C39", "#061F2A"),
+  ],
+  n03: [
+    palette("sky", "스카이", "#EDF4FE", "#15395B", "#245AA3", "#DCE8F8", "#FFFFFF"),
+    palette("mint", "민트", "#EDF6F1", "#28443A", "#246A54", "#DBEBE3", "#FFFFFF"),
+    palette("sand", "샌드", "#F5EFE5", "#443B2E", "#8A5A2B", "#E7DDCD", "#FFFFFF"),
+    palette("coral", "코랄", "#FCF0EC", "#56352D", "#9D4936", "#F0DED7", "#FFFFFF"),
+    palette("dark", "슬레이트", "#182531", "#F3F6F8", "#A8D1F2", "#2A3A47", "#1A3448"),
+  ],
+  n04: [
+    palette("lime", "라임", "#DFF782", "#24331C", "#30472B", "#CCE56A", "#F0FFCE"),
+    palette("ice", "아이스 블루", "#DCEFFB", "#203C53", "#254E6F", "#C5E2F4", "#EDF8FF"),
+    palette("peach", "피치", "#FFD9C5", "#4A3026", "#73432F", "#F4C5AC", "#FFF4E8"),
+    palette("cobalt", "코발트", "#2146B9", "#FFFFFF", "#DAEAFF", "#2B51C5", "#17366C"),
+    palette("charcoal", "차콜", "#252A2B", "#F7F5EB", "#F7E768", "#373E3E", "#292E23"),
+  ],
+};
+export function cardDesignVariants(layoutId: string): CardDesign[] {
+  const base = CARD_DESIGNS.find(d => d.id === layoutId);
+  if (!base) return [];
+  return [{ ...base, layoutId, colorName: ORIGINAL_NAMES[layoutId] }, ...(PALETTES[layoutId] ?? []).map(({ suffix, name, ...colors }) => ({ ...base, ...colors, id: `${layoutId}-${suffix}`, layoutId, colorName: name }))];
+}
+export const CARD_COLOR_VARIANTS = CARD_DESIGNS.flatMap(d => cardDesignVariants(d.id));
+export const cardDesign = (id: string) => CARD_COLOR_VARIANTS.find(d => d.id === id) ?? PERSISTED_CARD_DESIGNS.find(d => d.id === id);
+export const collectionUsesArt = (id: string) => !["r02", "r07", "n04", "n07", "n08", "n10"].includes(cardDesign(id)?.layoutId ?? id);
+export const cardDesignOptions = () => CARD_DESIGNS.map(d => ({ key: `set:${d.id}`, name: d.name, description: d.description, kind: "builtin" as const, family: d.family, setId: d.id, pageCount: 5,
+  colors: cardDesignVariants(d.id).map(v => ({ key: `set:${v.id}`, name: v.colorName!, bg: v.bg, ink: v.ink, accent: v.accent })),
+}));
