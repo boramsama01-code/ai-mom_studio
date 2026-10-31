@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
+import { execFileSync } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { login, resetDb, setTestEnv } from "./helpers";
 setTestEnv();
@@ -33,9 +34,12 @@ describe("source cards automatically reach the board", () => {
     const board = (await agent.get("/api/studio/cards")).body.cards.find((c: any) => c.id === studioCardId);
     expect(board.stage).toBe("review"); expect(board.sourceOutput.pages).toHaveLength(5); expect(board.sourceOutput.assetId).toBe(generated.body.id);
     for (const page of carousel.pages) expect((await agent.get(`/api/channels/2/media/${page.id}`)).status).toBe(200);
-    const zip = await agent.get(`/api/channels/2/media/${generated.body.id}/deck.zip`);
+    const zip = await agent.get(`/api/channels/2/media/${generated.body.id}/deck.zip`).buffer(true).parse((res, done) => {
+      const chunks: Buffer[] = []; res.on("data", (chunk: Buffer) => chunks.push(chunk)); res.on("end", () => done(null, Buffer.concat(chunks))); res.on("error", done);
+    });
     expect(zip.status).toBe(200); expect(zip.headers["content-type"]).toContain("application/zip");
-    expect(zip.body.toString("latin1")).toContain("page-05.jpg");
+    const archive = JSON.parse(execFileSync("python3", ["-c", "import io,json,sys,zipfile; z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())); print(json.dumps({'names':z.namelist(),'bad':z.testzip()}))"], { input: zip.body }).toString());
+    expect(archive.bad).toBeNull(); expect(archive.names).toEqual(["page-01.jpg", "page-02.jpg", "page-03.jpg", "page-04.jpg", "page-05.jpg", "caption.txt", "credits.txt"]);
     await agent.patch(`/api/studio/cards/${studioCardId}`).set(H).send({ version: board.version, title: "직접 정한 제목", memo: "직접 쓴 메모", stage: "making" });
     const second = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography", templateKey: "builtin:minimal" });
     expect(second.status).toBe(200); expect(second.body.id).not.toBe(generated.body.id);

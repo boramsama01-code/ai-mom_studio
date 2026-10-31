@@ -157,10 +157,11 @@ export function StudioImport() {
 }
 
 function StudioDetail({ id }: { id: number }) {
+  const [editBoard, setEditBoard] = useState(false);
   const q = useQuery({ queryKey: ["studio", "card", id], queryFn: () => api<Detail>(`/studio/cards/${id}`), refetchInterval: (query) => query.state.data?.jobs.some(activeJob) ? 3000 : false });
   if (q.isLoading) return <Loading lines={5} />;
   if (!q.data) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
-  if (q.data.card.sourceOutput && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <SourceStudioCard card={q.data.card} />;
+  if (!editBoard && q.data.card.sourceOutput && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard card={q.data.card} /><div className="source-output-detail"><button className="btn ghost sm" onClick={() => setEditBoard(true)}>보드 제목·메모 편집</button></div></>;
   // A background polling failure must not unmount the editor and discard unsaved work.
   return <>{q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}<StudioEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} /></>;
 }
