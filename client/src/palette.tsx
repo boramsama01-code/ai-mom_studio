@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { api, qs } from "./api";
 import { useChannel, useDirtyGuard } from "./state";
+import { useFocusScope } from "./useFocusScope";
+import { Icon } from "./icons";
 import type { ListRow } from "./pages/Inbox";
 
 type Cmd = { id: string; label: string; hint?: string; group: string; run: () => void };
@@ -17,6 +19,8 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
   const [q, setQ] = useState("");
   const [idx, setIdx] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  useFocusScope(dialog, open, onClose);
   const go = (href: string) => guard.confirmLeave(() => navigate(href));
 
   const search = useQuery({
@@ -65,10 +69,11 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
   let lastGroup = "";
   return (
     <div className="modal-backdrop palette-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="palette" role="dialog" aria-modal="true" aria-label="명령 팔레트">
-        <input
+      <div ref={dialog} className="palette" role="dialog" aria-modal="true" aria-label="명령 팔레트">
+        <div className="palette-head"><input
           ref={input}
           className="palette-input"
+          aria-label="페이지 또는 자료 검색"
           placeholder="이동할 곳, 동작, 항목 제목을 입력하세요"
           value={q}
           onChange={(e) => {
@@ -90,6 +95,7 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
           role="combobox"
           aria-expanded
         />
+        <button type="button" className="btn ghost icon palette-close" aria-label="검색창 닫기" onClick={onClose}><Icon name="close" size={18} /></button></div>
         <ul className="palette-list" id="palette-list" role="listbox">
           {cmds.map((c, i) => {
             const header = c.group !== lastGroup ? ((lastGroup = c.group), <li key={`g${c.group}`} className="palette-group">{c.group}</li>) : null;
@@ -120,4 +126,5 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
     </div>
   );
 }
+
 

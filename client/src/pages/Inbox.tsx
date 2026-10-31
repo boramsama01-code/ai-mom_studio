@@ -54,6 +54,8 @@ export function InboxPage() {
     setF((o) => ({ ...o, [k]: v }));
     setPage(1);
   };
+  const resetFilters = () => { setQInput(""); setFollowToday(false); setF({ q: "", review: "", schedule: "", evidence: "", category: "", noticeIntent: "all", view: "inbox", collectedOn: "" }); setPage(1); };
+  const yesterday = kstDay(new Date(Date.now() - 86400_000));
   const isNotice = current ? current.contentType === "notice" : true;
 
   return (
@@ -61,7 +63,7 @@ export function InboxPage() {
       <div className="page-head">
         <div>
           <h1>수집함</h1>
-          <p className="muted small">검색·공식 출처에서 모은 자료입니다. 제목을 눌러 원문·근거를 확인하고 편집하세요.</p>
+          <p className="muted small">좋은 콘텐츠의 시작. 모아 둔 자료를 살펴보고 다음 이야기를 골라보세요.</p>
         </div>
       </div>
       <CollectionPanel date={f.collectedOn || undefined} />
@@ -73,13 +75,13 @@ export function InboxPage() {
       </section>}
       <div className="row collection-date-filter" role="group" aria-label="수집 날짜">
         <button className={`btn sm ${f.collectedOn === today ? "primary" : ""}`} onClick={() => { setFollowToday(true); set("collectedOn", today); }}>오늘</button>
-        <button className="btn sm" onClick={() => { setFollowToday(false); set("collectedOn", kstDay(new Date(Date.now() - 86400_000))); }}>어제</button>
+        <button className={`btn sm ${f.collectedOn === yesterday ? "primary" : ""}`} aria-pressed={f.collectedOn === yesterday} onClick={() => { setFollowToday(false); set("collectedOn", yesterday); }}>어제</button>
         <button className={`btn sm ${!f.collectedOn ? "primary" : ""}`} onClick={() => { setFollowToday(false); set("collectedOn", ""); }}>전체 기간</button>
         <label className="field"><span className="sr-only">수집일 선택</span><input type="date" aria-label="수집일 선택" value={f.collectedOn} onChange={e => { setFollowToday(false); set("collectedOn", e.target.value); }} /></label>
-        <span className="small muted">{query.data?.total ?? 0}건{f.review ? " · 검토 상태 필터 적용 중" : ""}</span>
+        <span className="small muted">{query.data?.total ?? "—"}건{f.review ? " · 검토 상태 필터 적용 중" : ""}</span>
       </div>
       <form
-        className="panel stack"
+        className="panel stack inbox-search-panel"
         style={{ marginBottom: 16 }}
         role="search"
         onSubmit={(e) => {
@@ -92,9 +94,10 @@ export function InboxPage() {
             <span className="sr-only">검색</span>
             <input placeholder="제목 검색" value={qInput} onChange={(e) => setQInput(e.target.value)} />
           </label>
-          <button className="btn">검색</button>
+          <button className="btn primary">검색</button>
+          <button type="button" className="btn ghost" onClick={resetFilters}>필터 초기화</button>
         </div>
-        <details className="filters" open={typeof window !== "undefined" && window.innerWidth > 900}>
+        <details className="filters" open={!!(f.review || f.evidence || f.schedule || f.category || f.view !== "inbox")}>
           <summary className="btn sm" style={{ width: "fit-content" }}>필터{[f.review, f.evidence, f.schedule, f.category].filter(Boolean).length ? ` (${[f.review, f.evidence, f.schedule, f.category].filter(Boolean).length}개 적용)` : ""}{f.view !== "inbox" ? " · 보기 변경됨" : ""}</summary>
         <div className="grid grid-3" style={{ marginTop: 12 }}>
           <label className="field">
@@ -158,6 +161,7 @@ export function InboxPage() {
         <Empty>
           {noticeChannel && f.noticeIntent !== "all" ? `선택한 기간에 ‘${NOTICE_INTENT_LABEL[f.noticeIntent as NoticeIntent] ?? "공고"}’ 자료가 없습니다. ‘확인 필요’ 또는 ‘전체 자료’도 확인하세요. ` : f.collectedOn ? `${f.collectedOn}에 새로 수집된 자료가 없습니다. ` : "조건에 맞는 자료가 없습니다. "}
           {f.view === "inbox" && !f.q && !f.review && !f.evidence ? "검색 설정에서 키워드를 켜고 수집을 요청하거나, 시험 검색 결과를 저장해 보세요." : "필터를 바꿔 보세요."}
+          <div className="empty-actions"><button className="btn" onClick={resetFilters}>전체 자료 보기</button></div>
         </Empty>
       ) : (
         <div className="stack" aria-busy={query.isFetching}>
@@ -220,6 +224,7 @@ function TriageList({ rows, cid }: { rows: ListRow[]; cid: number }) {
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const [focus, setFocus] = useState(0);
   const refs = useRef<Array<HTMLLIElement | null>>([]);
+  const keyboardScroll = useRef(false);
   useEffect(() => setPicked(new Set()), [rows]);
   const bulk = useMutation({
     mutationFn: (a: { ids: number[]; action: string }) => api<{ updated: number }>(`/channels/${cid}/items/bulk`, { method: "POST", body: a }),
@@ -237,10 +242,10 @@ function TriageList({ rows, cid }: { rows: ListRow[]; cid: number }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || e.metaKey || e.ctrlKey || e.altKey || document.querySelector(".modal-backdrop")) return;
+      if (t.closest("input, textarea, select, button, a, summary, [contenteditable=true], [role=dialog]") || e.metaKey || e.ctrlKey || e.altKey || document.querySelector(".modal-backdrop, dialog[open]")) return;
       const row = rows[focus];
-      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setFocus((f) => Math.min(f + 1, rows.length - 1)); }
-      else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); setFocus((f) => Math.max(f - 1, 0)); }
+      if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); keyboardScroll.current = true; setFocus((f) => Math.min(f + 1, rows.length - 1)); }
+      else if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); keyboardScroll.current = true; setFocus((f) => Math.max(f - 1, 0)); }
       else if (e.key === "Enter" && row) guard.confirmLeave(() => navigate(`/items/${cid}/${row.item.id}`));
       else if (e.key === "x" && row) toggle(row.item.id);
       else if (e.key === "e" && row) act(row.item.excluded ? "unexclude" : "exclude", [row.item.id]);
@@ -249,7 +254,7 @@ function TriageList({ rows, cid }: { rows: ListRow[]; cid: number }) {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   });
-  useEffect(() => refs.current[focus]?.scrollIntoView({ block: "nearest" }), [focus]);
+  useEffect(() => { if (keyboardScroll.current) { refs.current[focus]?.scrollIntoView({ block: "nearest" }); keyboardScroll.current = false; } }, [focus]);
 
   const all = rows.length > 0 && rows.every((r) => picked.has(r.item.id));
   return (
@@ -291,4 +296,5 @@ function TriageList({ rows, cid }: { rows: ListRow[]; cid: number }) {
     </div>
   );
 }
+
 

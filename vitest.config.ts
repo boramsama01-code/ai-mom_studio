@@ -6,9 +6,10 @@ export default defineConfig({
     alias: { "@shared": path.resolve(import.meta.dirname, "shared") },
   },
   test: {
-    include: ["tests/**/*.test.ts"],
+    include: ["tests/**/*.test.{ts,tsx}"],
     fileParallelism: false,
     testTimeout: 30000,
     hookTimeout: 30000,
   },
 });
+

@@ -29,12 +29,13 @@ export function LoginPage({ me }: { me: Me }) {
     await qc.invalidateQueries({ queryKey: ["me"] });
   };
   return (
-    <main className="main" style={{ maxWidth: 440, margin: "10vh auto" }}>
-      <div className="panel stack">
+    <main className="login-page" data-design="studio-20261031">
+      <div className="login-intro"><span className="studio-eyebrow">SPACE PENGUIN STUDIO</span><h1>작은 생각이<br />콘텐츠가 되는 곳.</h1><p>발견하고, 만들고, 세상에 전하세요.<br />우주펭귄상회의 이야기가 시작됩니다.</p><div className="login-workflow"><span>01 발견</span><span>02 제작</span><span>03 발행</span></div></div>
+      <div className="panel stack login-panel">
         <div>
           <img className="login-brand-logo" src="/branding/space-penguin-company.svg?v=20261018-2" alt="우주펭귄상회 · space penguin company" />
-          <h1 className="login-brand-title">우주펭귄상회 스튜디오</h1>
-          <p className="muted">운영자 로그인</p>
+          <h2 className="login-brand-title">반가워요, 다시 만나서</h2>
+          <p className="muted">로그인하고 하던 작업을 이어가세요.</p>
         </div>
         {!me.authConfigured && (
           <div className="notice warn">
@@ -68,4 +69,5 @@ export function LoginPage({ me }: { me: Me }) {
     </main>
   );
 }
+
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
 import { useLocation } from "wouter";
 import {
   EVIDENCE_LABEL,
@@ -11,6 +11,8 @@ import {
 } from "@shared/domain";
 import { useDirtyGuard } from "./state";
 import { ApiError } from "./api";
+import { useFocusScope } from "./useFocusScope";
+import { Icon } from "./icons";
 
 export function Badge({ kind = "", children, title }: { kind?: "" | "ok" | "warn" | "err" | "sample"; children: ReactNode; title?: string }) {
   return (
@@ -92,21 +94,13 @@ export function GuardedLink({ href, children, className, ariaCurrent, onClick }:
 
 export function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
-  const prev = useRef<Element | null>(null);
-  useEffect(() => {
-    prev.current = document.activeElement;
-    ref.current?.querySelector<HTMLElement>("button, input, textarea, select, a")?.focus();
-    const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", h);
-    return () => {
-      window.removeEventListener("keydown", h);
-      (prev.current as HTMLElement | null)?.focus?.();
-    };
-  }, [onClose]);
+  const titleId = useId();
+  useFocusScope(ref, true, onClose);
+
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" ref={ref}>
-        <h2 id="modal-title">{title}</h2>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={ref}>
+        <div className="modal-heading"><h2 id={titleId}>{title}</h2><button type="button" className="btn ghost icon" aria-label="닫기" onClick={onClose}><Icon name="close" /></button></div>
         {children}
       </div>
     </div>
@@ -159,3 +153,4 @@ export function Pager({ page, pageSize, total, onPage }: { page: number; pageSiz
     </nav>
   );
 }
+
