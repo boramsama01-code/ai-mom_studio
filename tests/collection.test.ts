@@ -57,6 +57,17 @@ describe("실제 수집 설정·브리핑", () => {
     expect(a.body.channel.budget.llmCallsPerRun).toBe(0);
     const b = await agent.post("/api/channels/1/collection-profile").set("x-csrf-token", csrf).send({ version: a.body.channel.version });
     expect(b.body.added).toBe(0);
+    const beforeProfile = (await agent.get("/api/collection/overview?channelId=1")).body.channels[0].profile;
+    const activeRule = beforeProfile.rules.find((r: any) => r.state === "active");
+    const [removed] = await db.select().from(searchRules).where(and(eq(searchRules.channelId, 1), eq(searchRules.query, activeRule.query), eq(searchRules.endpoint, activeRule.endpoint))).limit(1);
+    await db.update(searchRules).set({ deletedAt: new Date() }).where(eq(searchRules.id, removed.id));
+    const c = await agent.post("/api/channels/1/collection-profile").set("x-csrf-token", csrf).send({ version: b.body.channel.version });
+    expect(c.body.added).toBe(0);
+    const profile = (await agent.get("/api/collection/overview?channelId=1")).body.channels[0].profile;
+    expect(profile).toMatchObject({ missing: 0, paused: beforeProfile.paused, removed: beforeProfile.removed + 1 });
+    expect(profile.active + profile.paused + profile.removed).toBe(profile.count);
+    expect(profile.rules.find((r: any) => r.query === paused.query && r.endpoint === paused.endpoint).state).toBe("paused");
+    expect(profile.rules.find((r: any) => r.query === removed.query && r.endpoint === removed.endpoint).state).toBe("removed");
     const [unchanged] = await db.select().from(searchRules).where(eq(searchRules.id, paused.id));
     expect(unchanged).toMatchObject({ enabled: false, memo: "운영자 메모" });
     expect((await agent.post("/api/channels/1/collection-profile").set("x-csrf-token", csrf).send({ version: ch.version })).status).toBe(409);
@@ -124,3 +135,4 @@ describe("실제 수집 설정·브리핑", () => {
     }
   });
 });
+

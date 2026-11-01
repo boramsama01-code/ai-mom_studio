@@ -115,4 +115,36 @@ describe("완성 이미지 → 제작보드 → 인스타그램", () => {
     const check = await agent.post(`/api/studio/instagram/${ch.id}/check`).set(headers).send({ destinationId: (await getDb().select().from(destinations).where(eq(destinations.label, "@spacepenguin.co")))[0].id });
     expect(check.body).toMatchObject({ ok: true, username: "spacepenguin.co" });
   });
+  it("shows the four intended accounts without exposing credentials and rejects cross-brand connections", async () => {
+    const { agent, headers, ch } = await setup(0);
+    expect((await request(app).get("/api/studio/instagram/accounts")).status).toBe(401);
+    const accounts = await agent.get("/api/studio/instagram/accounts");
+    expect(accounts.status).toBe(200);
+    expect(accounts.body.accounts.map((a: any) => a.expectedUsername).sort()).toEqual(["allligodang.official", "fryday.official.kr", "highscoop.official", "spacepenguin.co"]);
+    expect(JSON.stringify(accounts.body)).not.toContain("test-only-token");
+    expect(JSON.stringify(accounts.body)).not.toContain("secretRefs");
+    mocks.identity.mockResolvedValue({ ok: true, userId: "12345", username: "highscoop.official" });
+    const token = "this-is-a-test-only-credential";
+    const result = await agent.post(`/api/studio/instagram/${ch.id}/connect`).set(headers).send({ token, username: "spacepenguin.co", dailyLimit: 3 });
+    expect(result.status).toBe(400);
+    expect(JSON.stringify(result.body)).toContain("highscoop.official");
+    expect(JSON.stringify(result.body)).not.toContain(token);
+  });
+  it("blocks a different brand's token before uploading images or creating a publication", async () => {
+    const { agent, headers, card, dest, ch } = await setup(1);
+    const preview = (await agent.post(`/api/studio/cards/${card.id}/publication/prepare`).set(headers).send({ version: card.version })).body;
+    const approval = await agent.post(`/api/studio/cards/${card.id}/publication/approve`).set(headers).send({ version: card.version, assetId: preview.assetId, destinationId: dest.id, scheduledAt: new Date().toISOString() });
+    expect(approval.status).toBe(201);
+    mocks.identity.mockResolvedValue({ ok: true, userId: "12345", username: "highscoop.official" });
+    const check = await agent.post(`/api/studio/instagram/${ch.id}/check`).set(headers).send({ destinationId: dest.id });
+    expect(check.status).toBe(409);
+    await publishDue(getDb());
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.carousel).not.toHaveBeenCalled();
+    expect(mocks.publish).not.toHaveBeenCalled();
+    const status = (await agent.get(`/api/studio/cards/${card.id}/publication`)).body;
+    expect(status.deliveries[0]).toMatchObject({ status: "cancelled" });
+    expect(status.deliveries[0].lastError).toContain("spacepenguin.co");
+  });
 });
+

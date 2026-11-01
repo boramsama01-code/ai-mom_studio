@@ -1,3 +1,4 @@
+import { expectedInstagramUsername, instagramAccountMismatch } from "../../shared/channelInstagram";
 import { cardAltTextState } from "../services/cardAccessibility";
 import { itemPrimarySource } from "../services/itemSources";
 /**
@@ -302,6 +303,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
   catch { return block("카드뉴스 파일이 승인본과 다름"); }
   if (cardApprovalHash(cardPages) !== ap.cardSha256) return block("카드 파일이 승인본과 다름");
   if (!dest?.enabled) return block("목적지 비활성");
+  if (dest.channelId !== ch.id || item.channelId !== ch.id || asset.channelId !== ch.id) return block("콘텐츠 채널과 게시 계정의 채널이 다릅니다.");
   if (item.kind === "notice" && computeScheduleStatus((rev.payload as any).schedules, now) === "closed") return block("접수 마감 — 게시 중단");
   if (!d.externalContainerId) {
     const [{ c }] = (await db.execute(sql`
@@ -340,6 +342,13 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
 
   if (dest.platform === "instagram") {
     const token = sec.values.accessToken, userId = sec.values.userId;
+    if (expectedInstagramUsername(ch.slug)) {
+      const identity = await ig.accountIdentity(token);
+      if (!identity.ok) { await finish(db, d, { status: "failed", errorKind: "auth", lastError: identity.error }); return "failed"; }
+      if (identity.userId !== userId) return block("저장된 게시 계정과 토큰의 계정이 다릅니다.");
+      const mismatch = instagramAccountMismatch(ch.slug, identity.username);
+      if (mismatch) return block(mismatch);
+    }
     let containerId = d.externalContainerId;
     if (!containerId) {
       const urls: string[] = [];
@@ -408,3 +417,4 @@ export async function retryDelivery(db: DB, deliveryId: number, actor: string, c
   await audit(db, { actor, action: "retry_delivery", entity: "delivery", entityId: d.id, channelId: d.channelId, detail: { from: d.status, confirmNotPosted } });
   return { ok: true as const };
 }
+

@@ -418,3 +418,39 @@ input:focus,select:focus,textarea:focus { border-color:#6095f1; box-shadow:0 0 0
 
 .collection-compact-metrics{padding:6px 0}.collection-compact-metrics>div{flex-direction:row}.collection-compact-metrics>div+div{padding-left:18px}.collection-compact .collection-compact-next{flex-direction:column;gap:3px}.collection-compact .collection-compact-next strong{margin-top:0}.workflow-tabs + .item-workspace{padding-bottom:24px}
 @media(max-width:680px){.collection-compact-metrics{grid-template-columns:1fr 1fr}.collection-compact-metrics .collection-compact-next{grid-column:1/-1;border-left:0;padding-left:0;flex-direction:row}.collection-compact-metrics>div{flex-direction:column}}
+
+/* Keep native iOS date controls and checkboxes inside their own layout tracks. */
+input[type="checkbox"],input[type="radio"] { flex:0 0 20px; width:20px; min-width:20px; max-width:20px; height:20px; min-height:20px; padding:0; margin:0; box-shadow:none; }
+label.check { min-width:0; }
+.collection-summary-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:18px; min-width:0; }
+.collection-toolbar { display:grid; grid-template-columns:auto minmax(150px,190px) auto auto; align-items:center; gap:8px; min-width:0; max-width:100%; }
+.collection-toolbar .field { min-width:0; max-width:100%; }
+.collection-toolbar input[type="date"],.collection-date-filter input[type="date"] { box-sizing:border-box; display:block; width:100%; min-width:0; max-width:100%; -webkit-appearance:none; appearance:none; }
+.collection-toolbar input::-webkit-date-and-time-value { min-width:0; text-align:center; }
+.collection-toolbar .btn { min-width:0; white-space:normal; }
+.collection-preset-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.collection-preset-terms { list-style:none; padding:0; margin:16px 0 0; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:8px 16px; }
+.collection-preset-terms li { display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:8px 0; border-bottom:1px solid var(--border); min-width:0; }
+.collection-preset-terms li span { min-width:0; overflow-wrap:anywhere; }
+.collection-preset-terms small { flex:none; color:var(--muted); }
+.alt-text-editor .page-dots { flex-wrap:wrap; }
+@media(max-width:700px) {
+ .collection-summary-head { display:block; }
+ .collection-toolbar { width:100%; margin-top:16px; grid-template-columns:minmax(64px,1fr) minmax(0,2fr); }
+ .collection-today { grid-column:1; grid-row:1; }
+ .collection-date { grid-column:2; grid-row:1; }
+ .collection-refresh { grid-column:1; grid-row:2; }
+ .collection-run { grid-column:2; grid-row:2; }
+ .collection-toolbar .btn,.collection-toolbar input { width:100%; min-height:44px; }
+ .collection-preset-actions { display:grid; grid-template-columns:minmax(0,1fr); }
+ .collection-summary>.row.between { align-items:flex-start; }
+ .collection-summary>.row.between>.muted { flex-basis:100%; }
+ .collection-compact-head { flex-wrap:wrap; }
+}
+.instagram-account-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:16px; }
+.instagram-account { min-width:0; padding:20px; border:1px solid var(--border); border-radius:14px; overflow-wrap:anywhere; }
+.studio-instagram-connect { min-width:0; overflow-wrap:anywhere; }
+.instagram-account>a,.studio-account-route a { overflow-wrap:anywhere; }
+.instagram-account p { margin:0; }
+.finished-ai .row>.field { min-width:0; flex:1 1 180px; }
+@media(max-width:700px) { .settings-tabs { flex-wrap:wrap; } .instagram-account { padding:16px; } .finished-ai .row>.btn { flex:1 1 200px; } }
