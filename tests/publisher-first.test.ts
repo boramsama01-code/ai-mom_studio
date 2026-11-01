@@ -25,6 +25,30 @@ describe("publisher-first article navigation",()=>{
    const fetcher=transport({[home]:form,[search.href]:link,[article]:html});
    expect((await fetchPublisherArticle(wrapper,fetcher,context)).ok).toBe(true);expect(fetcher).toHaveBeenCalledTimes(3);
  });
+ it("supports an advertised Korean newspaper search form without guessing an endpoint",async()=>{
+   const advertised='<form method="get" action="/news/articleList.html"><input type="hidden" name="sc_area" value="A"><input name="sc_word" type="text"></form>';
+   const search=new URL('/news/articleList.html',home);search.searchParams.set('sc_area','A');search.searchParams.set('sc_word',title);
+   expect(publisherSearchLink(advertised,home,title)).toBe(search.href);
+   expect(publisherSearchLink(advertised.replace('method="get"','method="post"'),home,title)).toBeNull();
+   const fetcher=transport({[home]:advertised,[search.href]:link,[article]:html});
+   expect(await fetchPublisherArticle(wrapper,fetcher,context)).toMatchObject({ok:true,text:body});
+ });
+ it.each([404,410,200])("continues to advertised public search when the RSS is missing or not XML (HTTP %i)",async status=>{
+   const search=new URL('/search',home);search.searchParams.set('q',title);
+   const fetcher=transport({[home]:form+'<link rel="alternate" type="application/rss+xml" href="/rss.xml">',[search.href]:link,[article]:html});
+   const normal=fetcher.getMockImplementation()!;
+   fetcher.mockImplementation(async(url,opts)=>{
+     if(url===home+'rss.xml') { if(status!==200) throw new FetchFailure(`HTTP ${status}`,'http',status); return res(url,'<html>RSS 서비스를 종료했습니다.</html>'); }
+     return normal(url,opts);
+   });
+   expect(await fetchPublisherArticle(wrapper,fetcher,context)).toMatchObject({ok:true,text:body});
+   expect(fetcher.mock.calls.map(c=>c[0])).toEqual([home,home+'rss.xml',search.href,article]);
+ });
+ it.each([403,429])("stops if the feed itself denies access (HTTP %i)",async status=>{
+   const fetcher=transport({[home]:form+'<link rel="alternate" type="application/rss+xml" href="/rss.xml">'}),normal=fetcher.getMockImplementation()!;
+   fetcher.mockImplementation(async(url,opts)=>{if(url===home+'rss.xml')throw new FetchFailure(`HTTP ${status}`,'http',status);return normal(url,opts);});
+   expect(await fetchPublisherArticle(wrapper,fetcher,context)).toMatchObject({ok:false,status:'blocked'});expect(fetcher).toHaveBeenCalledTimes(2);
+ });
  it("uses an advertised publisher RSS as an index, never as the article body",async()=>{
    const fetcher=transport({[home]:'<link rel="alternate" type="application/rss+xml" href="/rss.xml">',[home+'rss.xml']:rss,[article]:html});
    expect(await fetchPublisherArticle(wrapper,fetcher,context)).toMatchObject({ok:true,text:body});

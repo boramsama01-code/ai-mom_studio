@@ -51,15 +51,19 @@ export function publisherSearchLink(html: string, base: string, title: string): 
   $("form").slice(0, 20).each((_, el) => {
     const form = $(el), method = (form.attr("method") || "get").toLowerCase();
     const action = samePublisherUrl(form.attr("action") || "", base);
-    if (method !== "get" || !action || !/(?:^|[/_.-])search(?:[/_.-]|$)/i.test(new URL(action).pathname)) return;
+    if (method !== "get" || !action) return;
     const inputs = form.find("input").toArray();
     if (inputs.some(e => ["password", "file"].includes($(e).attr("type") || ""))) return;
-    const field = inputs.find(e => /^(q|query|search|keyword|search_word|searchword|searchtext)$/i.test($(e).attr("name") || "") && ["text", "search", ""].includes($(e).attr("type") || ""));
+    const field = inputs.find(e => /^(q|query|search|keyword|search_word|searchword|searchtext|sc_word)$/i.test($(e).attr("name") || "") && ["text", "search", ""].includes($(e).attr("type") || ""));
     if (!field) return;
+    const searchable = /(?:^|[/_.-])search(?:[/_.-]|$)/i.test(new URL(action).pathname)
+      || form.attr("role") === "search"
+      || ($(field).attr("name") === "sc_word" && /\/articleList\.html$/i.test(new URL(action).pathname));
+    if (!searchable) return;
     const u = new URL(action);
     for (const e of inputs) {
       const n = $(e), name = n.attr("name") || "";
-      if (n.attr("type") === "hidden" && /^(mode|type|section|search_field|search_type|code)$/i.test(name)) u.searchParams.set(name, (n.attr("value") || "").slice(0, 100));
+      if (n.attr("type") === "hidden" && /^(mode|type|section|search_field|search_type|code|sc_area|sc_section_code|sc_order_by|view_type)$/i.test(name)) u.searchParams.set(name, (n.attr("value") || "").slice(0, 100));
     }
     u.searchParams.set($(field).attr("name")!, title.slice(0, 200)); urls.add(u.href);
   });
@@ -67,7 +71,7 @@ export function publisherSearchLink(html: string, base: string, title: string): 
 }
 export function pageHasHeadline(html: string, title: string): boolean {
   const $ = load(html), key = headlineKey(title);
-  return $("h1,h2,[itemprop='headline'],meta[property='og:title']").toArray().some(el => headlineKey($(el).attr("content") || $(el).text()) === key);
+  return $("h1,h2,[itemprop='headline'],meta[property='og:title'],meta[name='twitter:title']").toArray().some(el => headlineKey($(el).attr("content") || $(el).text()) === key);
 }
 
 /** Signature matches fetchAndExtract so both collection and manual refetch share this policy. */
@@ -106,11 +110,19 @@ export async function fetchPublisherArticle(url: string, fetchImpl: typeof safeF
     if (candidates.length > 1) return { ok: false, status: "unsupported", error: "같은 제목의 원문 주소가 여러 개여서 임의로 선택하지 않았습니다." };
     if (!candidates.length) {
       const known = PUBLIC_NEWS_FEEDS.find(f => hostKey(new URL(f.site).hostname) === hostKey(home.hostname));
-      const feeds = [...new Set([...(known ? [known.url] : []), ...publisherFeedLinks(html, homepage.finalUrl)])].slice(0, 1);
+      const feeds = [...new Set([...(known ? [known.url] : []), ...publisherFeedLinks(html, homepage.finalUrl)])].slice(0, 2);
       for (const feed of feeds) {
-        const response = await read(feed);
-        const items = parseNewsRss(response.body.toString("utf8"), { name: "publisher", url: feed, site: home.href }, new Date());
-        candidates = [...new Set(items.filter(i => headlineKey(i.title) === headlineKey(title)).map(i => samePublisherUrl(i.originallink || i.link, home.href)).filter((u): u is string => !!u))];
+        try {
+          const response = await read(feed);
+          const items = parseNewsRss(response.body.toString("utf8"), { name: "publisher", url: feed, site: home.href }, new Date());
+          candidates = [...new Set(items.filter(i => headlineKey(i.title) === headlineKey(title)).map(i => samePublisherUrl(i.originallink || i.link, home.href)).filter((u): u is string => !!u))];
+          if (candidates.length) break;
+        } catch (e) {
+          // A missing/broken feed is not a publisher access denial. Still try its
+          // advertised public GET search. Restrictions and exhausted budgets stop.
+          if (e instanceof FetchFailure && (e.kind !== "http" || ![404, 410].includes(e.status || 0))) throw e;
+          if (!(e instanceof FetchFailure) && (!(e instanceof Error) || e.message !== "RSS/Atom 형식의 응답이 아닙니다")) throw e;
+        }
       }
       if (candidates.length > 1) return { ok: false, status: "unsupported", error: "같은 제목의 RSS 원문이 여러 개여서 임의로 선택하지 않았습니다." };
       if (!candidates.length) {

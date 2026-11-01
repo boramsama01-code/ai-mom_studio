@@ -305,6 +305,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
       {testConnection.data && <p role="status" className={testConnection.data.ok ? "notice ok" : "notice warn"}>{testConnection.data.message}</p>}
       {testConnection.error && <ErrorBox error={testConnection.error} />}
     </div></details>}
+    {latestJob?.status === "succeeded" && latestJob.result?.applied === true && Array.isArray(latestJob.result.changedFields) && latestJob.result.changedFields.length > 0 && <p className="notice ok small" role="status">작성 완료: {latestJob.result.changedFields.filter((f): f is string => typeof f === "string").join(" · ")}</p>}
     {tab === "content" ? <div className="studio-editor-layout studio-guided-editor">
       <nav className="studio-editor-steps" aria-label="제작 순서">{([['story','01','이야기'],['images','02','그림'],['finish','03','완성']] as const).map(([id, number, label]) => <button key={id} aria-current={editorStep === id ? "step" : undefined} onClick={() => setEditorStep(id)}><span>{number}</span><strong>{label}</strong></button>)}</nav>
       <section className="panel stack" id="studio-story" hidden={editorStep !== "story"}>

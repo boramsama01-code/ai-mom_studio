@@ -16,6 +16,15 @@ export function studioInstruction(input: Pick<StudioGeneration, "kind" | "textTa
 }
 
 type TextDraft = Pick<StudioContent, "title" | "script" | "caption"> & { panels: Array<{ scene: string; dialogue: string }> };
+export function studioChangedTextFields(before: StudioContent, after: StudioContent): string[] {
+  const fields = ([['title', '제목'], ['script', '전체 원고'], ['caption', '게시용 캡션']] as const)
+    .filter(([key]) => before[key] !== after[key]).map(([, label]) => String(label));
+  after.panels.forEach((p, i) => {
+    if (p.scene !== before.panels[i].scene) fields.push(`${i + 1}컷 장면`);
+    if (p.dialogue !== before.panels[i].dialogue) fields.push(`${i + 1}컷 대사`);
+  });
+  return fields;
+}
 /** Enforce preservation in code, not just in the model's instructions. */
 export function applyStudioText(content: StudioContent, generated: TextDraft, target: "rewrite" | "fill"): StudioContent {
   const fill = target === "fill";

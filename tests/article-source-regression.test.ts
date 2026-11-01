@@ -26,6 +26,12 @@ describe("article extraction regressions", () => {
     const html = `<nav>${"다른 기사 ".repeat(80)}</nav><div id="article-view-content-div"><p>${body}</p></div>`;
     expect(extractHtml(html, original).text).toBe(body.trim());
   });
+  it("extracts Donga's public news_view section even when its body uses divs and line breaks", () => {
+    const html = `<main id="contents"><header>사이트 메뉴</header><section class="news_view"><div>${body}</div><br><div>두 번째 본문 문단입니다.</div></section><section class="related"><a href="/other">다른 기사</a></section></main>`;
+    const r = extractHtml(html, "https://www.donga.com/news/Economy/article/all/20261101/134946000/2");
+    expect(r.text).toContain(body.trim()); expect(r.text).toContain("두 번째 본문 문단입니다.");
+    expect(r.text).not.toContain("사이트 메뉴"); expect(r.text).not.toContain("다른 기사");
+  });
   it("does not mistake a long menu for the article", () => {
     expect(extractHtml(`<body>${Array.from({ length: 60 }, () => '<a href="/">메뉴와 관련 기사</a>').join("")}</body>`, original).text).toBe("");
   });
