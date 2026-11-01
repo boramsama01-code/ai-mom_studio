@@ -1,4 +1,4 @@
-import { expectedInstagramUsername, instagramAccountMismatch } from "../../shared/channelInstagram";
+import { CHANNEL_INSTAGRAM, instagramAccountMismatch } from "../../shared/channelInstagram";
 import { and, eq } from "drizzle-orm";
 import type { DB } from "../db";
 import { appSettings, channels, destinations } from "../../shared/schema";
@@ -64,7 +64,7 @@ export async function instagramAccounts(db: DB) {
   const chs = await db.select().from(channels).where(eq(channels.active, true));
   const rows = await db.select().from(destinations).where(eq(destinations.platform, "instagram"));
   return { accounts: chs.flatMap(ch => {
-    const expectedUsername = expectedInstagramUsername(ch.slug);
+    const expectedUsername = CHANNEL_INSTAGRAM[ch.slug];
     if (!expectedUsername) return [];
     return [{ channelId: ch.id, channelName: ch.name, expectedUsername, destinations: rows.filter(d => d.channelId === ch.id).map(d => {
       const sec = resolveSecrets(d.platform, ch.slug, d.secretRefs);
