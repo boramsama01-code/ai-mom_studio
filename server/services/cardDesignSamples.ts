@@ -52,7 +52,6 @@ export function collectionSample(id: string, channelName?: string) {
 export function collectionSampleArt(id: string) {
   const d = cardDesign(id);
   if (!d) throw new Error("알 수 없는 카드 세트");
-  if (d.art === "fries") return null;
   return fs.readFileSync(path.resolve(process.cwd(), `assets/card-art/${d.art}.jpg`));
 }
 export async function renderCollectionPreview(id: string, page = 0, channelName?: string) {

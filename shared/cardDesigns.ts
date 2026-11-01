@@ -8,7 +8,6 @@ export type CardDesign = {
 };
 /** Retained only to render previously saved work without changing its design. */
 export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
-  { id: "f01", name: "Fryday · 크리스프", family: "food", description: "전체 배경 이미지와 큰 제목, 네 장의 지식·비교 카드", bg: "#2C201B", ink: "#FFF5E0", accent: "#F9CB45", soft: "#453329", onAccent: "#2C201B", body: "panels", art: "fries" },
   { id: "r01", name: "캠퍼스 에디토리얼", family: "recruitment", description: "사진과 여백으로 여는 차분한 모집 안내", bg: "#F4F1E9", ink: "#163B35", accent: "#176752", soft: "#E3E9DC", onAccent: "#FFFFFF", body: "plain", art: "lab" },
   { id: "r02", name: "오픈콜", family: "recruitment", description: "큰 글자와 코발트 블루의 선명한 공고", bg: "#2447E8", ink: "#FFFFFF", accent: "#E4FF83", soft: "#3557EF", onAccent: "#173224", body: "bands", art: "rocket" },
   { id: "r03", name: "보딩패스", family: "recruitment", description: "티켓에서 시작해 일정표로 이어지는 구성", bg: "#F2EDE3", ink: "#252D36", accent: "#BA3F2C", soft: "#E9DFD1", onAccent: "#FFFFFF", body: "ledger", art: "rocket" },
@@ -22,13 +21,14 @@ export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
   { id: "n01", name: "레드 플래시", family: "news", description: "사진 위 큰 헤드라인과 빨간 속보 띠", bg: "#171C23", ink: "#FFFFFF", accent: "#DE342D", soft: "#282E38", onAccent: "#FFFFFF", body: "bands", art: "city" },
   { id: "n02", name: "데일리 페이퍼", family: "news", description: "신문의 제호·구분선·정보 위계를 담은 브리핑", bg: "#F5F0E5", ink: "#252B2F", accent: "#942C2C", soft: "#EAE3D5", onAccent: "#FFFFFF", body: "ledger", art: "city" },
   { id: "n03", name: "포토 디스패치", family: "news", description: "사진과 헤드라인을 분리한 현장형 뉴스", bg: "#F8FAFB", ink: "#1D2D3C", accent: "#236386", soft: "#E8EEF2", onAccent: "#FFFFFF", body: "plain", art: "city" },
-  { id: "n04", name: "와이 브리프", family: "news", description: "세 가지 색과 큰 글자로 핵심을 짚는 뉴스", bg: "#F7E768", ink: "#263D69", accent: "#263D69", soft: "#F09A7D", onAccent: "#FFF8CD", onSoft: "#263D69", body: "spotlight", art: "globe" },
+  { id: "n04", name: "알리고당 브리프", family: "news", description: "세 가지 색과 큰 글자로 핵심을 짚는 뉴스", bg: "#F7E768", ink: "#263D69", accent: "#263D69", soft: "#F09A7D", onAccent: "#FFF8CD", onSoft: "#263D69", body: "spotlight", art: "globe" },
   { id: "n05", name: "시그널 데스크", family: "news", description: "짙은 남색과 청록의 또렷한 업데이트", bg: "#102A3C", ink: "#ECF5F7", accent: "#83E5E3", soft: "#1C3A4D", onAccent: "#12303C", body: "panels", art: "globe" },
   { id: "n06", name: "뉴스 타임라인", family: "news", description: "사건의 순서와 확인할 내용을 차례로 정리", bg: "#F0F5FC", ink: "#17385C", accent: "#2459A8", soft: "#DDE8F8", onAccent: "#FFFFFF", body: "timeline", art: "city" },
   { id: "n07", name: "한 문장 브리핑", family: "news", description: "핵심 문장을 크게 보여 주는 해설형 카드", bg: "#194C49", ink: "#F8F3E6", accent: "#F0D3A0", soft: "#275D58", onAccent: "#1D423D", body: "framed", art: "globe" },
   { id: "n08", name: "팩트 인덱스", family: "news", description: "확인된 정보와 미확인 내용을 구분하는 구성", bg: "#E8EFFC", ink: "#172F66", accent: "#224EB0", soft: "#D6E1F5", onAccent: "#FFFFFF", body: "index", art: "globe" },
   { id: "n09", name: "두 가지 시선", family: "news", description: "분할 화면으로 관점과 질문을 나란히 배치", bg: "#F5E8E3", ink: "#253749", accent: "#2C5275", soft: "#E5D2C9", onAccent: "#FFFFFF", body: "split", art: "city" },
   { id: "n10", name: "미니멀 업데이트", family: "news", description: "작은 업데이트 표시와 큰 제목에 집중", bg: "#FAF8F3", ink: "#22262B", accent: "#AA342B", soft: "#EEEBE3", onAccent: "#FFFFFF", body: "notes", art: "city" },
+  { id: "f01", name: "Fryday · 크리스프", family: "food", description: "전체 배경 이미지와 큰 제목, 네 장의 지식·비교 카드", bg: "#2C201B", ink: "#FFF5E0", accent: "#F9CB45", soft: "#453329", onAccent: "#2C201B", body: "panels", art: "fries" },
 ];
 export const CARD_DESIGNS = PERSISTED_CARD_DESIGNS.filter(d => ["r01", "r05", "n01", "n03", "n04", "f01"].includes(d.id));
 type Palette = Pick<CardDesign, "bg" | "ink" | "accent" | "soft" | "onAccent" | "overlay" | "onSoft"> & { suffix: string; name: string };

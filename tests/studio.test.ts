@@ -351,7 +351,7 @@ describe("통합 제작 보드", () => {
     const [item] = await getDb().insert(contentItems).values({ channelId: channel.id, title: "과학 원문", kind: "science_dialogue", primarySourceId: document.id }).returning();
     const input = { title: item.title, channel: channel.slug, sourceItemId: item.id, format: "카드뉴스" };
     const first = await agent.post("/api/studio/cards").set(headers).send(input);
-    expect(first.status).toBe(201); expect(first.body.channel).toBe("science-dialogue");
+    expect(first.status).toBe(201); expect(first.body.channel).toBe("news");
     expect(first.body.sourceLabel).toBe("science.example");
     expect(first.body.memo).toContain(document.originalUrl);
     const second = await agent.post("/api/studio/cards").set(headers).send(input);

@@ -317,10 +317,10 @@ itemRoutes.post(
   "/channels/:cid/items/:id/fetch",
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
-    if (!item.primarySourceId) throw new HttpError(400, "연결된 원문이 없습니다.");
     const db = getDb();
-    if ((await itemPrimarySource(db, item))?.kind === "manual_text") throw new HttpError(409, "직접 저장한 본문을 사용 중입니다. 본문 붙여넣기에서 수정해 주세요.");
-    const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId));
+    const doc = await itemPrimarySource(db, item);
+    if (!doc) throw new HttpError(400, "연결된 원문이 없습니다.");
+    if (doc.kind === "manual_text") throw new HttpError(409, "직접 저장한 본문을 사용 중입니다. 본문 붙여넣기에서 수정해 주세요.");
     const r = await fetchAndExtract(sourceFetchUrl(doc), undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined });
     const now = new Date();
     if (!r.ok) {

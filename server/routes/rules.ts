@@ -207,7 +207,7 @@ ruleRoutes.post(
     const ch = await loadChannel(req.params.cid);
     const id = intParam(req.params.id);
     const db = getDb();
-    const body = parse(z.object({ version: zVersion.optional() }), req.body);
+    const body = parse(z.object({ version: zVersion.optional() }), req.body ?? {});
     const updated = await db
       .update(searchRules)
       .set({ deletedAt: new Date(), enabled: false, version: sql`${searchRules.version} + 1`, updatedAt: new Date() })
@@ -226,7 +226,7 @@ ruleRoutes.post(
     const ch = await loadChannel(req.params.cid);
     const id = intParam(req.params.id);
     const db = getDb();
-    const body = parse(z.object({ version: zVersion.optional() }), req.body);
+    const body = parse(z.object({ version: zVersion.optional() }), req.body ?? {});
     try {
       const updated = await db
         .update(searchRules)

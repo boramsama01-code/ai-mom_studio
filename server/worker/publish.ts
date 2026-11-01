@@ -1,3 +1,4 @@
+import { itemPrimarySource } from "../services/itemSources";
 /**
  * 카드 생성 · 최종 승인 · 목적지별 전송
  *
@@ -51,10 +52,9 @@ export async function currentRevision(db: DB, itemId: number) {
   return { item, rev };
 }
 
-export async function sourceOrgFor(db: DB, item: { primarySourceId: number | null }, payload: Record<string, any>) {
+export async function sourceOrgFor(db: DB, item: { id?: number; primarySourceId: number | null }, payload: Record<string, any>) {
   if (payload.organization) return String(payload.organization);
-  if (!item.primarySourceId) return null;
-  const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId));
+  const doc = item.id ? await itemPrimarySource(db, { id:item.id, primarySourceId:item.primarySourceId }) : item.primarySourceId ? (await db.select().from(sourceDocuments).where(eq(sourceDocuments.id,item.primarySourceId)))[0] : null;
   if (!doc) return null;
   try {
     return new URL(doc.originalUrl).hostname.replace(/^www\./, "");
