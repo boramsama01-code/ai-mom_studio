@@ -9,7 +9,10 @@ it("sends ordered inline images to the selected Gemini provider without calling 
  mocks.gemini.mockResolvedValue({candidates:[{finishReason:"STOP",content:{parts:[{text:JSON.stringify({altTexts:["첫 장","둘째 장"]})}]}}]});
  expect(await describeCardImages({...input,provider:"gemini"})).toEqual({altTexts:["첫 장","둘째 장"]});
  const body=mocks.gemini.mock.calls[0][0];expect(body.contents[0].parts.filter((p:any)=>p.inlineData).map((p:any)=>p.inlineData.data)).toEqual(input.images.map(b=>b.toString("base64")));
- expect(body.generationConfig.responseJsonSchema.required).toEqual(["altTexts"]);expect(mocks.openai).not.toHaveBeenCalled();
+ expect(body.generationConfig.responseJsonSchema.required).toEqual(["altTexts"]);
+ expect(body.generationConfig.responseJsonSchema.properties.altTexts.items.maxLength).toBe(125);
+ expect(body.systemInstruction.parts[0].text).toContain("1~2문장");
+ expect(mocks.openai).not.toHaveBeenCalled();
 });
 it("fails incomplete Gemini output without falling back or altering content",async()=>{
  mocks.gemini.mockResolvedValue({candidates:[{finishReason:"MAX_TOKENS"}]});
