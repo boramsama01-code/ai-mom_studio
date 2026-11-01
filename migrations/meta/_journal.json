@@ -71,6 +71,13 @@
       "when": 1793491200003,
       "tag": "0009_studio_brand_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793491200004,
+      "tag": "0010_operator_passwords",
+      "breakpoints": true
     }
   ]
 }

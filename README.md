@@ -25,7 +25,7 @@
 
 현재 운영 주소는 [spacepenguin.onrender.com](https://spacepenguin.onrender.com)입니다. Render의 `spacepenguin` 무료 웹 서비스가 이 저장소의 `main`을 배포합니다. 기존 Neon 데이터베이스와 로그인 설정은 `spacepenguin-studio-config` 환경 그룹으로 연결하고, 서비스의 `APP_BASE_URL`은 새 주소를 사용합니다. 기존 `APP_DATABASE_URL`, `APP_SESSION_SECRET`, `APP_SECRETS_KEY`는 유지해야 저장된 키를 계속 읽을 수 있습니다. Render 환경변수에 이미 있는 API 키가 화면에서 저장한 값보다 우선합니다.
 
-운영자 아이디는 `spacepenguin`입니다. 비밀번호 해시는 유지합니다. 로그인 쿠키 이름이 바뀌어 기존 세션은 다시 로그인해야 합니다. 현재 명칭과 이전 데이터 호환 범위는 [BRANDING.md](BRANDING.md)를 참고하세요.
+운영자 아이디는 `spacepenguin`입니다. **설정 → 계정·비밀번호**에서 현재 비밀번호를 확인하고 직접 새 비밀번호를 저장할 수 있습니다. 잊어버린 경우 소유자가 발급한 일회용 `/password-setup#reset=...` 링크에서 새 비밀번호를 정합니다. 저장 후 모든 기기에서 다시 로그인하며, 이전 비밀번호·기존 전용 접속 링크·이미 발급된 설정 링크는 사용할 수 없습니다. 현재 명칭과 이전 데이터 호환 범위는 [BRANDING.md](BRANDING.md)를 참고하세요.
 
 기존 `ai-mom-studio.onrender.com` 서비스는 이전 링크 호환을 위해 보존합니다. 이 서비스에만 `APP_CANONICAL_REDIRECT_URL=https://spacepenguin.onrender.com`을 설정하면 브라우저 주소를 새 서비스로 연결하고 API·OAuth 콜백은 유지합니다. 루트 `render.yaml`은 기존 서비스의 Blueprint이므로 새 운영 서비스 이름으로 바꿔 동기화하지 마세요. 새 서비스는 Render 설정에서 관리하며, GitHub Actions의 `APP_BASE_URL` 저장소 변수와 수집·처리 워크플로 기본 주소도 `https://spacepenguin.onrender.com`을 사용합니다.
 

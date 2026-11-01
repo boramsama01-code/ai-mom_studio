@@ -436,6 +436,23 @@ export const storedSecrets = pgTable("stored_secrets", {
 });
 
 /* ───────────── 로그인 시도 제한 ───────────── */
+export const operatorCredentials = pgTable("operator_credentials", {
+  username: text("username").primaryKey(),
+  passwordHash: text("password_hash"), // null uses the existing Render bootstrap hash
+  version: integer("version").notNull().default(0),
+  blockedPrivateLinkHash: text("blocked_private_link_hash"),
+  updatedAt: updatedAt(),
+});
+
+export const operatorPasswordResets = pgTable("operator_password_resets", {
+  tokenHash: text("token_hash").primaryKey(), // never store the original link/token
+  username: text("username").notNull(),
+  credentialVersion: integer("credential_version").notNull(),
+  expiresAt: ts("expires_at").notNull(),
+  usedAt: ts("used_at"),
+  createdAt: createdAt(),
+});
+
 export const loginAttempts = pgTable("login_attempts", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   username: text("username").notNull(),

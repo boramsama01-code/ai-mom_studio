@@ -13,6 +13,7 @@ import { DirtyModal, ErrorBox, GuardedLink, Loading } from "./ui";
 import { ToastProvider, useToast } from "./toast";
 import { CommandPalette } from "./palette";
 import { LoginPage } from "./pages/Login";
+import { AccountPage, PasswordSetupPage } from "./pages/Password";
 const TodayPage = lazy(() => import("./pages/Today").then(m => ({ default: m.TodayPage })));
 const InboxPage = lazy(() => import("./pages/Inbox").then(m => ({ default: m.InboxPage })));
 const ItemDetailPage = lazy(() => import("./pages/ItemDetail").then(m => ({ default: m.ItemDetailPage })));
@@ -50,6 +51,7 @@ const NAV: Array<{ group: string; items: Array<{ href: string; label: string; ic
       { href: "/design", label: "수집 카드 디자인", icon: "design" },
       { href: "/connections", label: "API 키 관리", icon: "link" },
       { href: "/settings", label: "채널 설정", icon: "channels" },
+      { href: "/account", label: "계정·비밀번호", icon: "lock" },
       { href: "/runs", label: "실행 기록", icon: "clock" },
     ],
   },
@@ -218,6 +220,7 @@ function Shell() {
           <Route path="/publish" component={PublishPage} />
           <Route path="/settings" component={ChannelSettingsPage} />
           <Route path="/connections" component={ConnectionsPage} />
+          <Route path="/account" component={AccountPage} />
           <Route path="/runs" component={RunsPage} />
           <Route>
             <Redirect to="/" />
@@ -233,6 +236,12 @@ function Shell() {
 }
 
 function Root() {
+  const [loc] = useLocation();
+  if (loc === "/password-setup") return <PasswordSetupPage />;
+  return <AuthenticatedRoot />;
+}
+
+function AuthenticatedRoot() {
   const me = useMe();
   if (me.isLoading)
     return (

@@ -18,6 +18,9 @@ import { env } from "./env";
 import { getDb, getPool } from "./db";
 import { loginAttempts } from "../shared/schema";
 import { audit } from "./audit";
+import { z } from "zod";
+import { ah, parse } from "./routes/util";
+import { checkPasswordReset, operatorCredential, setOperatorPassword } from "./services/operatorPassword";
 
 declare module "express-session" {
   interface SessionData {
@@ -25,6 +28,7 @@ declare module "express-session" {
     csrf?: string;
     demo?: boolean;
     privateLinkHash?: string;
+    credentialVersion?: number;
   }
 }
 
@@ -51,15 +55,18 @@ export function installSession(app: Express) {
       cookie: { httpOnly: true, sameSite: "lax", secure: env.isProduction, maxAge: 12 * 60 * 60 * 1000 },
     }),
   );
-  // Rotating/removing the link also revokes sessions created by that link.
-  app.use((req, _res, next) => {
-    if (req.session?.privateLinkHash && req.session.privateLinkHash !== env.privateLinkHash) {
+  // Password versions are checked against shared DB state on both Render services.
+  app.use(ah(async (req, _res, next) => {
+    if (!req.path.startsWith("/api") || !req.session?.user || req.session.demo) return next();
+    const credential = await operatorCredential(getDb());
+    if ((req.session.credentialVersion ?? 0) !== credential.version || (req.session.privateLinkHash && (req.session.privateLinkHash !== env.privateLinkHash || req.session.privateLinkHash === credential.blockedPrivateLinkHash))) {
       delete req.session.user;
       delete req.session.csrf;
       delete req.session.privateLinkHash;
+      delete req.session.credentialVersion;
     }
     next();
-  });
+  }));
   return true;
 }
 
@@ -106,6 +113,8 @@ export function installAuthRoutes(app: Express) {
   }), async (req, res) => {
     if (!authConfigured() || !env.privateLinkHash) return res.status(404).json({ error: "사용할 수 없는 전용 링크입니다." });
     if (!originOk(req)) return res.status(403).json({ error: "허용되지 않은 출처의 요청입니다." });
+    const credential = await operatorCredential(getDb());
+    if (credential.blockedPrivateLinkHash === env.privateLinkHash) return res.status(404).json({ error: "사용할 수 없는 전용 링크입니다." });
     const token = typeof req.body?.token === "string" ? req.body.token : "";
     if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return res.status(401).json({ error: "전용 링크가 올바르지 않거나 만료되었습니다." });
     const hash = crypto.createHash("sha256").update(token).digest("hex");
@@ -114,6 +123,7 @@ export function installAuthRoutes(app: Express) {
     req.session.user = env.adminUsername;
     req.session.csrf = crypto.randomBytes(24).toString("hex");
     req.session.privateLinkHash = hash;
+    req.session.credentialVersion = credential.version;
     req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000;
     await new Promise<void>((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
     await audit(getDb(), { actor: env.adminUsername, action: "login_private_link", entity: "session" });
@@ -136,26 +146,58 @@ export function installAuthRoutes(app: Express) {
     const password = String(req.body?.password ?? "").slice(0, 200);
     const ip = req.ip || "unknown";
     const db = getDb();
-    const since = new Date(Date.now() - 15 * 60_000);
+    const credential = await operatorCredential(db);
+    // A successful password reset also releases failures for the superseded password.
+    const since = new Date(Math.max(Date.now() - 15 * 60_000, credential.changedAt?.getTime() ?? 0));
     const [{ n }] = (await db
       .select({ n: sql<number>`count(*)::int` })
       .from(loginAttempts)
       .where(and(eq(loginAttempts.success, false), gt(loginAttempts.createdAt, since), sql`(${loginAttempts.username} = ${username} or ${loginAttempts.ip} = ${ip})`))) as Array<{ n: number }>;
     if (n >= 5) return res.status(429).json({ error: "로그인 실패가 많아 잠시 차단되었습니다. 15분 후 다시 시도하세요." });
     const userOk = timingSafeEq(username, env.adminUsername);
-    const pwOk = await bcrypt.compare(password, env.adminPasswordHash);
+    const pwOk = await bcrypt.compare(password, credential.passwordHash);
     await db.insert(loginAttempts).values({ username, ip, success: userOk && pwOk });
     if (!(userOk && pwOk)) return res.status(401).json({ error: "아이디 또는 비밀번호가 올바르지 않습니다." });
     req.session.regenerate((err) => {
       if (err) return res.status(500).json({ error: "세션 생성 실패" });
       req.session.user = env.adminUsername;
       req.session.csrf = crypto.randomBytes(24).toString("hex");
+      req.session.credentialVersion = credential.version;
       req.session.save(async () => {
         await audit(db, { actor: username, action: "login", entity: "session" });
         res.json({ user: req.session.user, csrf: req.session.csrf });
       });
     });
   });
+
+  const resetInput = z.object({ token: z.string().max(100) }).strict();
+  const newPassword = z.string().max(200);
+  const resetLimit = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "요청이 많습니다. 잠시 후 다시 시도해 주세요." } });
+  const changeLimit = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: "draft-7", legacyHeaders: false, message: { error: "변경 시도가 많습니다. 잠시 후 다시 시도해 주세요." } });
+  const resetAllowed = (req: Request, res: Response, next: NextFunction) => {
+    if (!authConfigured()) return res.status(503).json({ error: "로그인 설정을 확인해 주세요." });
+    if (!originOk(req)) return res.status(403).json({ error: "허용되지 않은 출처의 요청입니다." });
+    next();
+  };
+  app.post("/api/auth/password-reset/check", resetLimit, resetAllowed, ah(async (req, res) => {
+    const { token } = parse(resetInput, req.body);
+    res.json(await checkPasswordReset(getDb(), token));
+  }));
+  app.post("/api/auth/password-reset", resetLimit, resetAllowed, ah(async (req, res) => {
+    const input = parse(resetInput.extend({ password: newPassword }), req.body);
+    await setOperatorPassword(getDb(), input);
+    req.session?.destroy(() => {});
+    res.clearCookie("spacepenguin.sid");
+    res.json({ ok: true });
+  }));
+  app.post("/api/auth/password", changeLimit, requireOperator, ah(async (req, res) => {
+    if (req.session.demo || !authConfigured()) return res.status(403).json({ error: "운영자 로그인 후 변경해 주세요." });
+    const input = parse(z.object({ currentPassword: z.string().min(1).max(200), password: newPassword }).strict(), req.body);
+    await setOperatorPassword(getDb(), { ...input, expectedVersion: req.session.credentialVersion ?? 0 });
+    req.session.destroy(() => {});
+    res.clearCookie("spacepenguin.sid");
+    res.json({ ok: true });
+  }));
 
   // 개발 환경 + DEMO_MODE=true 전용 샘플 모드(운영 환경에서는 절대 동작하지 않음)
   app.post("/api/auth/demo", (req, res) => {
