@@ -1,0 +1,118 @@
+import crypto from "node:crypto";
+import sharp from "sharp";
+import request from "supertest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { login, resetDb, setTestEnv } from "./helpers";
+setTestEnv();
+const mocks = vi.hoisted(() => ({ upload: vi.fn(), carousel: vi.fn(), publish: vi.fn(), identity: vi.fn(), quota: vi.fn() }));
+vi.mock("../server/services/cloudinary", () => ({ uploadCard: mocks.upload, ensureCloudinary: () => ({ api: { ping: async () => ({ ok: true }) } }) }));
+vi.mock("../server/services/instagram", () => ({ accountIdentity: mocks.identity, publishingLimit: mocks.quota, createCarouselContainer: mocks.carousel, createContainer: mocks.carousel, waitForContainer: async () => ({ state: "FINISHED" }), publishContainer: mocks.publish, mediaPermalink: async () => "https://www.instagram.com/p/test/" }));
+const { createApp } = await import("../server/app");
+const { getDb, closeDb } = await import("../server/db");
+const { channels, destinations, deliveries, storedSecrets, approvals, studioCards } = await import("../shared/schema");
+const { eq } = await import("drizzle-orm");
+const { publishDue } = await import("../server/worker/publish");
+const { __setOriginalEnvForTest } = await import("../server/secretStore");
+let app: ReturnType<typeof createApp>;
+beforeAll(async () => { await resetDb(); app = createApp(); });
+afterAll(closeDb);
+beforeEach(() => {
+  process.env.DRY_RUN = "false"; process.env.AUTO_PUBLISH = "true"; process.env.INLINE_WORKER = "false";
+  process.env.CLOUDINARY_CLOUD_NAME = "test"; process.env.CLOUDINARY_API_KEY = "test"; process.env.CLOUDINARY_API_SECRET = "test"; process.env.INSTAGRAM_API_VERSION = "v26.0";
+  process.env.IG_PENGUIN_ACCESS_TOKEN = "test-only-token"; process.env.IG_PENGUIN_USER_ID = "12345";
+  mocks.upload.mockReset().mockImplementation(async (_bytes, key) => ({ publicId: key, url: `https://example.com/${key}.jpg` }));
+  mocks.carousel.mockReset().mockResolvedValue({ ok: true, containerId: "parent" });
+  mocks.publish.mockReset().mockResolvedValue({ ok: true, mediaId: "posted" });
+  mocks.identity.mockReset().mockResolvedValue({ ok: true, userId: "12345", username: "spacepenguin.co" });
+  mocks.quota.mockReset().mockResolvedValue({ ok: true, used: 0, total: 100 });
+});
+
+async function setup(count = 5) {
+  const auth = await login(app), headers = { "x-csrf-token": auth.csrf };
+  const [ch] = await getDb().select().from(channels).where(eq(channels.slug, "penguin"));
+  await getDb().update(channels).set({ budget: { ...ch.budget, dailyPublishLimit: 25 } }).where(eq(channels.id, ch.id));
+  const [dest] = await getDb().insert(destinations).values({ channelId: ch.id, label: "@spacepenguin.co", platform: "instagram", enabled: true, secretRefs: { accessToken: "IG_PENGUIN_ACCESS_TOKEN", userId: "IG_PENGUIN_USER_ID" } }).onConflictDoUpdate({ target: [destinations.channelId, destinations.platform, destinations.label], set: { enabled: true } }).returning();
+  let card = (await auth.agent.post("/api/studio/cards").set(headers).send({ title: "가족 소개", channel: "penguin", format: "카드뉴스", caption: "가족을 소개합니다.", finishedDeck: { pages: [] } })).body;
+  for (let i = 0; i < count; i++) {
+    const bytes = await sharp({ create: { width: 60, height: 120, channels: 3, background: i % 2 ? "#112233" : "#ccaa44" } }).png().toBuffer();
+    const r = await auth.agent.post(`/api/studio/cards/${card.id}/finished-images?version=${card.version}&name=${i + 1}.png&uploadId=${crypto.randomUUID()}`).set(headers).type("image/png").send(bytes);
+    expect(r.status).toBe(201); card = r.body;
+  }
+  return { ...auth, headers, card, ch, dest };
+}
+describe("완성 이미지 → 제작보드 → 인스타그램", () => {
+  it("uploads seven pages without four-panel conversion, preserves order/alt text and rejects foreign image IDs", async () => {
+    const { agent, headers, card } = await setup(7);
+    const check = await agent.post("/api/studio/export-check").set(headers).send({ ...card, id: undefined, version: undefined, sourceItemId: undefined, createdAt: undefined, updatedAt: undefined, trashedAt: undefined });
+    expect(check.body).toMatchObject({ pageCount: 7, errors: [] });
+    const pages = card.finishedDeck.pages.slice().reverse().map((p: any, i: number) => ({ ...p, altText: `${i + 1}번째 설명` }));
+    const saved = await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: card.version, finishedDeck: { pages } });
+    expect(saved.status).toBe(200); expect(saved.body.finishedDeck.pages).toEqual(pages);
+    const other = await setup(1);
+    expect((await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: saved.body.version, finishedDeck: other.card.finishedDeck })).status).toBe(400);
+    const png = await agent.get(`/api/studio/cards/${card.id}/export.png?version=${saved.body.version}&page=0`);
+    expect(png.status).toBe(200); expect(await sharp(png.body).metadata()).toMatchObject({ width: 1080, height: 1350 });
+    const corner = await sharp(png.body).extract({ left: 0, top: 0, width: 1, height: 1 }).removeAlpha().raw().toBuffer();
+    expect([...corner]).toEqual([255, 255, 255]);
+  });
+  it("requires operator + CSRF, rejects stale uploads, and retries the same upload ID without duplicate pages", async () => {
+    const { agent, headers, card } = await setup(0);
+    const png = await sharp({ create: { width: 5, height: 5, channels: 3, background: "yellow" } }).png().toBuffer();
+    const path = `/api/studio/cards/${card.id}/finished-images?version=1&name=test.png&uploadId=${crypto.randomUUID()}`;
+    expect((await request(app).post(path).type("image/png").send(png)).status).toBe(401);
+    expect((await agent.post(path).type("image/png").send(png)).status).toBe(403);
+    expect((await agent.post(path).set(headers).type("image/png").send(png)).body.version).toBe(2);
+    const duplicate = await agent.post(path).set(headers).type("image/png").send(png);
+    expect(duplicate.body.finishedDeck.pages).toHaveLength(1); expect(duplicate.body.version).toBe(2);
+    expect((await agent.post(path.replace(/uploadId=.*/, `uploadId=${crypto.randomUUID()}`)).set(headers).type("image/png").send(png)).status).toBe(409);
+  });
+  it("freezes the preview once, sends the same bytes and caption, and guards duplicate final approvals", async () => {
+    const { agent, headers, card, dest, ch } = await setup(5);
+    await getDb().insert(destinations).values({ channelId: ch.id, label: "not-selected", platform: "telegram_channel", enabled: true, secretRefs: { chatId: "TG_PENGUIN_CHAT_ID" } });
+    const prepare = () => agent.post(`/api/studio/cards/${card.id}/publication/prepare`).set(headers).send({ version: card.version });
+    const a = await prepare(), b = await prepare(); expect(a.status).toBe(200); expect(b.body.assetId).toBe(a.body.assetId); expect(a.body.pages).toHaveLength(5);
+    const bytes = await Promise.all(a.body.pages.map(async (p: any) => (await agent.get(`/api/channels/${ch.id}/media/${p.id}`)).body));
+    const input = { version: card.version, assetId: a.body.assetId, destinationId: dest.id, scheduledAt: new Date().toISOString() };
+    const path = `/api/studio/cards/${card.id}/publication/approve`;
+    expect((await agent.post(path).set(headers).send(input)).status).toBe(201);
+    expect((await agent.post(path).set(headers).send(input)).status).toBe(409);
+    const published = await publishDue(getDb()); expect(published.succeeded).toBeGreaterThanOrEqual(1);
+    expect(mocks.upload.mock.calls.map(call => call[0])).toEqual(bytes);
+    expect(mocks.carousel).toHaveBeenCalledWith("12345", "test-only-token", expect.any(Array), card.caption, expect.arrayContaining([expect.any(String)]));
+    const status = (await agent.get(`/api/studio/cards/${card.id}/publication`)).body;
+    expect(status.deliveries).toHaveLength(1); expect(status.deliveries[0]).toMatchObject({ status: "succeeded", externalUrl: "https://www.instagram.com/p/test/" });
+  });
+  it("cancels a queued approval on edit and rejects its stale preview", async () => {
+    const { agent, headers, card, dest } = await setup(1);
+    const preview = (await agent.post(`/api/studio/cards/${card.id}/publication/prepare`).set(headers).send({ version: card.version })).body;
+    const body = { version: card.version, assetId: preview.assetId, destinationId: dest.id, scheduledAt: new Date(Date.now() + 3600000).toISOString() };
+    expect((await agent.post(`/api/studio/cards/${card.id}/publication/approve`).set(headers).send(body)).status).toBe(201);
+    expect((await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: card.version, caption: "수정한 캡션" })).status).toBe(200);
+    const status = (await agent.get(`/api/studio/cards/${card.id}/publication`)).body; expect(status.deliveries[0].status).toBe("cancelled");
+    expect((await agent.post(`/api/studio/cards/${card.id}/publication/approve`).set(headers).send(body)).status).toBe(409);
+    const newer = (await agent.post(`/api/studio/cards/${card.id}/publication/prepare`).set(headers).send({ version: card.version + 1 })).body;
+    expect(newer.caption).toBe("수정한 캡션"); expect(newer.assetId).not.toBe(preview.assetId);
+  });
+  it("never queues an approval when the account, publication mode, or daily limit is unavailable", async () => {
+    const { agent, headers, card, dest } = await setup(1);
+    const p = (await agent.post(`/api/studio/cards/${card.id}/publication/prepare`).set(headers).send({ version: card.version })).body;
+    process.env.AUTO_PUBLISH = "false";
+    expect((await agent.get(`/api/studio/cards/${card.id}/publication`)).body.ready).toBe(false);
+    expect((await agent.post(`/api/studio/cards/${card.id}/publication/approve`).set(headers).send({ version: card.version, assetId: p.assetId, destinationId: dest.id, scheduledAt: new Date().toISOString() })).status).toBe(409);
+    expect((await getDb().select().from(approvals).where(eq(approvals.contentItemId, p.itemId)))).toHaveLength(0);
+  });
+  it("does not store a mismatched account; a verified connection saves encrypted credentials and enables its destination", async () => {
+    const { agent, headers, ch } = await setup(0);
+    __setOriginalEnvForTest([]);
+    const token = "this-is-a-test-only-credential";
+    const endpoint = `/api/studio/instagram/${ch.id}/connect`;
+    const wrong = await agent.post(endpoint).set(headers).send({ token, username: "someone.else", dailyLimit: 3 });
+    expect(wrong.status).toBe(400); expect(JSON.stringify(wrong.body)).not.toContain(token);
+    const result = await agent.post(endpoint).set(headers).send({ token, username: "spacepenguin.co", dailyLimit: 3 });
+    expect(result.status).toBe(200); expect(JSON.stringify(result.body)).not.toContain(token);
+    const [secret] = await getDb().select().from(storedSecrets).where(eq(storedSecrets.key, "IG_PENGUIN_ACCESS_TOKEN"));
+    expect(secret.ciphertext).not.toContain(token);
+    const check = await agent.post(`/api/studio/instagram/${ch.id}/check`).set(headers).send({ destinationId: (await getDb().select().from(destinations).where(eq(destinations.label, "@spacepenguin.co")))[0].id });
+    expect(check.body).toMatchObject({ ok: true, username: "spacepenguin.co" });
+  });
+});

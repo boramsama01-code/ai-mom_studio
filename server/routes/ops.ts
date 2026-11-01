@@ -31,7 +31,8 @@ opsRoutes.get(
       integrations: integrationStatus(),
       worker: lastWorker ?? null,
       // 하루 두 번(12시간 간격) 수집 + GitHub 예약 지연 여유 2시간
-      workerConnected: !!lastWorker && Date.now() - new Date(lastWorker.startedAt).getTime() < 14 * 3600_000,
+      inlinePublishing: env.inlineWorker && env.autoPublish && !env.dryRun && !env.canonicalRedirectUrl,
+      workerConnected: (env.inlineWorker && env.autoPublish && !env.dryRun && !env.canonicalRedirectUrl) || !!lastWorker && Date.now() - new Date(lastWorker.startedAt).getTime() < 14 * 3600_000,
       queuedJobs: queued,
       globalStop: gs ? gs.value === true : false,
     });

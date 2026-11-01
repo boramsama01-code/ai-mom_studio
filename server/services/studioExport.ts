@@ -34,6 +34,7 @@ function contentLayout(content: StudioContent) {
   };
 }
 export function checkStudioExport(content: StudioContent): StudioExportCheck {
+  if (content.finishedDeck) return { pageCount: content.finishedDeck.pages.length, errors: content.finishedDeck.pages.length ? [] : [{ field: "finishedDeck", message: "완성 이미지를 한 장 이상 올려 주세요." }], warnings: [] };
   if (content.experience) return checkExperienceExport(content);
   const result: StudioExportCheck = { errors: [], warnings: [], pageCount: studioPageCount(content) };
   if (content.format !== "웹툰" && content.format !== "카드뉴스") {
@@ -84,6 +85,18 @@ export async function renderStudioOutput(db: DB, cardId: number, requestedVersio
   const accent = /^#[a-f\d]{6}$/i.test(channel?.accentColor ?? "") ? channel!.accentColor : "#285f6a";
   const brand = cardBrandName(channel?.name ?? "우주펭귄상회");
   const images = new Map<number, Buffer>();
+  if (content.finishedDeck) {
+    for (const p of content.finishedDeck.pages) {
+      const [image] = await db.select().from(studioImages).where(and(eq(studioImages.id, p.imageId), eq(studioImages.cardId, cardId)));
+      if (!image) throw new HttpError(400, "이 콘텐츠의 완성 이미지를 찾을 수 없습니다.");
+      images.set(p.imageId, image.bytes);
+    }
+    return { version: row.version, content, pageCount: content.finishedDeck.pages.length, page: async (index: number) => {
+      const p = content.finishedDeck!.pages[index];
+      if (!Number.isInteger(index) || !p) throw new HttpError(400, "페이지를 확인하세요.");
+      return sharp(images.get(p.imageId)!).rotate().resize(1080, 1350, { fit: "contain", background: "#ffffff" }).flatten({ background: "#ffffff" }).png().toBuffer();
+    } };
+  }
   if (content.experience) {
     const ids=[...new Set([content.experience.coverId,...content.experience.pages.map(p=>p.mediaId)].filter((id):id is number=>!!id))];
     for(const id of ids){const [media]=await db.select({preview:studioMedia.preview}).from(studioMedia).where(and(eq(studioMedia.id,id),eq(studioMedia.cardId,cardId)));

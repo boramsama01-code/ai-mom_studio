@@ -9,6 +9,16 @@ import { env } from "../env";
 
 const HOST = "https://graph.instagram.com";
 
+/** Read the account identity from the token, never accept a user-entered account ID. */
+export async function accountIdentity(token: string) {
+  const result = await igFetch("me", "GET", { fields: "user_id,username" }, token);
+  if (!result.ok) return { ok: false as const, error: result.err.kind === "token_expired" ? "토큰이 만료됐습니다. Instagram Login 토큰을 다시 발급해 주세요." : "인스타그램 계정 인증에 실패했습니다. 토큰과 권한을 확인하세요." };
+  const userId = String(result.json.user_id ?? "");
+  const username = String(result.json.username ?? "");
+  if (!/^\d+$/.test(userId) || !/^[a-zA-Z0-9._]{1,30}$/.test(username)) return { ok: false as const, error: "계정 정보를 확인할 수 없습니다. Instagram Login 방식의 토큰이 필요합니다." };
+  return { ok: true as const, userId, username };
+}
+
 export type IgError = { kind: "not_configured" | "auth" | "token_expired" | "rate_limit" | "limit_reached" | "terminal" | "transient" | "unknown"; error: string };
 
 function classify(status: number, body: { error?: { code?: number; error_subcode?: number; message?: string; type?: string } }): IgError {

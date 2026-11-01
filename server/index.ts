@@ -1,3 +1,4 @@
+import { startInlinePublish } from "./worker/inlinePublish";
 import { createApp } from "./app";
 import { env } from "./env";
 import { describeDbError, getDb } from "./db";
@@ -22,6 +23,7 @@ async function main() {
       const s = await loadStoredSecrets(getDb());
       if (s.loaded) console.log(`화면에서 입력한 연결 키 ${s.loaded}개를 불러왔습니다.`);
       kickInlineStudio(getDb());
+      startInlinePublish(getDb());
     } catch (e) {
       console.error("DB 준비 실패:", describeDbError(e));
       if (env.isProduction) process.exit(1);
