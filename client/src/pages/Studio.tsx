@@ -1,3 +1,4 @@
+import { StudioZipImport } from "./StudioZipImport";
 import { FinishedDeckEditor } from "./FinishedDeckEditor";
 import { ExperienceEditor } from "./ExperienceEditor";
 import { emptyExperience, experienceImageUrl } from "@shared/experience";
@@ -59,6 +60,7 @@ function StudioBoard({ onTrash }: { onTrash: () => void }) {
   const [filter, setFilter] = useState<Channel | "all">("all");
   const [search, setSearch] = useState("");
   const [entry] = useState(() => new URLSearchParams(window.location.search));
+  const [importingZip, setImportingZip] = useState(false);
   const [creating, setCreating] = useState(() => entry.get("start") === "experience");
   const [newMode, setNewMode] = useState<"choose"|"experience"|"finished">(() => entry.get("start") === "experience" ? "experience" : "choose");
   const [archived, setArchived] = useState(false);
@@ -82,7 +84,7 @@ function StudioBoard({ onTrash }: { onTrash: () => void }) {
   const openHighscoop = () => guard.confirmLeave(() => { const channel = legacyChannels.find(c => studioKey(c.slug) === filter); if (channel) select(channel.id); navigate("/inbox"); });
   function newCard(stage: Stage = "idea", mode: "choose"|"experience"|"finished" = "choose") { if (archived || !visibleChannels.length) return; setNewStage(stage); setNewMode(mode); setCreating(true); }
   return <>
-    <header className="studio-home-heading"><div><h1>내 콘텐츠</h1><p>모은 자료와 직접 찍은 순간을 콘텐츠로 완성하세요.</p></div><div className="studio-home-actions"><button className="btn ghost" onClick={onTrash}><Icon name="trash" size={17} />휴지통{q.data?.trashCount ? <span className="studio-trash-count">{q.data.trashCount}</span> : null}</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("making","finished")}>완성 이미지 가져오기</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("idea","experience")}>사진·영상 후기</button><button className="btn primary studio-create" disabled={archived || !visibleChannels.length} onClick={() => newCard()}><Icon name="plus" size={18} />새 콘텐츠 만들기</button></div></header>
+    <header className="studio-home-heading"><div><h1>내 콘텐츠</h1><p>모은 자료와 직접 찍은 순간을 콘텐츠로 완성하세요.</p></div><div className="studio-home-actions"><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => setImportingZip(true)}>카드뉴스 ZIP 가져오기</button><button className="btn ghost" onClick={onTrash}><Icon name="trash" size={17} />휴지통{q.data?.trashCount ? <span className="studio-trash-count">{q.data.trashCount}</span> : null}</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("making","finished")}>완성 이미지 가져오기</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("idea","experience")}>사진·영상 후기</button><button className="btn primary studio-create" disabled={archived || !visibleChannels.length} onClick={() => newCard()}><Icon name="plus" size={18} />새 콘텐츠 만들기</button></div></header>
     <div className="studio-overview">
       <section className="studio-resume" aria-label="최근 작업 이어하기">
         <div className="studio-resume-label"><span className="resume-indicator" />{latest ? "이어서 만들어 볼까요?" : "다음 이야기를 기다리는 중"}</div>
@@ -99,13 +101,13 @@ function StudioBoard({ onTrash }: { onTrash: () => void }) {
     {q.isLoading ? <Loading lines={3} /> : q.error ? <ErrorBox error={q.error} retry={() => q.refetch()} /> : layout === "list" ? <>
       {filtered.length ? <div className="studio-content-grid">{filtered.map(c => {
         const channel = channels.find(ch => ch.id === c.channel);
-        const thumbnail = c.panels.find(p => p.imageId)?.imageId;
+        const thumbnail = c.finishedDeck?.pages[0]?.imageId ?? c.panels.find(p => p.imageId)?.imageId;
         const experienceThumbnail = c.experience?.coverId ? experienceImageUrl(c.experience.coverId) : null;
         const sourceThumbnail = experienceThumbnail ?? (c.sourceOutput ? `/api/channels/${c.sourceOutput.channelId}/media/${c.sourceOutput.assetId}` : null);
         return <article key={c.id} className="studio-content-card" style={{ "--channel-accent": channel?.accent ?? "#285f6a" } as CSSProperties}>
           <GuardedLink href={`/studio/${c.id}`} className="studio-content-open">
             <div className={`studio-content-art ${sourceThumbnail || thumbnail || c.imagePath ? "has-image" : ""}`}>{sourceThumbnail ? <img src={sourceThumbnail} alt="" loading="lazy" /> : thumbnail ? <img src={imageUrl(thumbnail)} alt="" loading="lazy" /> : c.imagePath ? <img src={c.imagePath} alt="" loading="lazy" /> : <><span className={`studio-format-art ${c.format === "웹툰" ? "comic" : "slides"}`} aria-hidden="true"><i /><i /><i /><i /></span><span className="studio-art-label">{c.format} · {stages.find(s => s.id === c.stage)?.label}</span></>}</div>
-            <div className="studio-content-copy"><span className="studio-content-channel"><i aria-hidden="true" />{channelName(c.channel)}</span><h2>{c.title}</h2><span className="studio-content-meta">{c.experience ? `참여·방문 후기 · ${c.experience.pages.length ? `${c.experience.pages.length+1}장` : "자료 정리 중"}` : c.format}{c.sourceOutput && ` · ${c.sourceOutput.pages.length}장${c.sourceOutput.stale ? " · 재생성 필요" : ""}`}{c.dueDate && <> · <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", "/")} 예정</time></>}</span><div className="studio-content-bottom"><span className={`studio-stage-pill stage-${c.stage}`}>{stages.find(s => s.id === c.stage)?.label}</span><span className="card-open-label">{c.sourceOutput ? "카드뉴스 보기" : c.stage === "done" ? "결과 확인" : "이어서 편집"} <Icon name="arrow" size={15} /></span></div></div>
+            <div className="studio-content-copy"><span className="studio-content-channel"><i aria-hidden="true" />{channelName(c.channel)}</span><h2>{c.title}</h2><span className="studio-content-meta">{c.finishedDeck ? `완성 카드뉴스 · ${c.finishedDeck.pages.length}장` : c.experience ? `참여·방문 후기 · ${c.experience.pages.length ? `${c.experience.pages.length+1}장` : "자료 정리 중"}` : c.format}{c.sourceOutput && ` · ${c.sourceOutput.pages.length}장${c.sourceOutput.stale ? " · 재생성 필요" : ""}`}{c.dueDate && <> · <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", "/")} 예정</time></>}</span><div className="studio-content-bottom"><span className={`studio-stage-pill stage-${c.stage}`}>{stages.find(s => s.id === c.stage)?.label}</span><span className="card-open-label">{c.sourceOutput ? "카드뉴스 보기" : c.stage === "done" ? "결과 확인" : "이어서 편집"} <Icon name="arrow" size={15} /></span></div></div>
           </GuardedLink>
           <div className="studio-card-actions"><StudioTrashButton card={c} disabled={move.isPending} /></div>
           {(c.stage === "done" || c.sourceOutput) && <StudioQuickExport card={c} />}
@@ -115,6 +117,7 @@ function StudioBoard({ onTrash }: { onTrash: () => void }) {
     </section>
     <div className="studio-home-footer"><button className="btn sm ghost" onClick={openHighscoop}>수집한 자료에서 시작 ↗</button><GuardedLink className="btn sm ghost" href="/settings">채널 관리 ↗</GuardedLink><span>완성 이미지를 모아 인스타그램 발행까지 이어갈 수 있어요.</span></div>
     {q.data && <StudioNotes data={q.data} />}
+    {importingZip && <StudioZipImport channels={visibleChannels} initialChannel={filter !== "all" && visibleKeys.has(filter) ? filter : visibleKeys.has("penguin") ? "penguin" : visibleChannels[0]?.id ?? ""} onClose={() => setImportingZip(false)} />}
     {creating && <NewCard channel={entry.get("channel") && visibleKeys.has(entry.get("channel")!) ? entry.get("channel")! : filter === "all" || !visibleKeys.has(filter) ? visibleChannels[0]?.id : filter} stage={newStage} initialMode={newMode} onClose={() => { setCreating(false); if(entry.get("start")) navigate("/",{replace:true}); }} />}
   </>;
 }
@@ -394,3 +397,4 @@ function Snapshot({ title, card }: { title: string; card: CardInput }) {
 function CharacterArchive() {
   return <><section className="studio-character-archive">{characters.map((c) => <article className="panel" key={c.id}><div className="studio-character-art"><img src={`/studio-assets/${c.id}.png`} alt={`${c.name} 캐릭터 원본`} /></div><h2>{c.name}</h2><p className="small muted">{c.role}</p><p>{c.detail}</p><a className="btn sm" href={`/studio-assets/${c.id}.png`} download={`${c.name}.png`}>원본 다운로드</a></article>)}</section><section className="panel studio-canon"><h2>세계관·외형 기준</h2><p>남극성-09에서 온 네 가족. 둥근 우주 헬멧, 옆모습 중심, 뾰족한 검은 부리, 작은 흰 점 눈, 길쭉한 검정·흰색 몸과 일정한 굵기의 선을 유지합니다.</p><p className="small muted">Alligodang은 아이와 함께 뉴스·과학·세상 이야기를 나누는 채널입니다. ‘지구 통신실’은 세계관 속 장소입니다.</p></section></>;
 }
+
