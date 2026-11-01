@@ -58,8 +58,14 @@ function studioInputAltIssues(value: { altTexts?: string[]; finishedDeck?: Studi
 export const studioCreateSchema = studioContentSchema.extend({ sourceItemId: z.number().int().positive().optional() }).superRefine((value, ctx) => { for (const issue of studioInputAltIssues(value)) ctx.addIssue({code:"custom",...issue}); });
 // Zod 4 applies defaults inside optional fields; unwrap them so a stage-only PATCH cannot erase content.
 export const studioPatchSchema = z.object({
-  finishedDeck: studioContentSchema.shape.finishedDeck.unwrap().optional(),
-  experience: studioContentSchema.shape.experience.unwrap().optional(),
+  finishedDeck: studioContentSchema.shape.finishedDeck.unwrap().refine(
+    value => !value || value.pages.every(page => !altTextError(page.altText, true)),
+    "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.",
+  ).optional(),
+  experience: studioContentSchema.shape.experience.unwrap().refine(
+    value => !value || !altTextError(value.coverAltText, true) && value.pages.every(page => !altTextError(page.altText, true)),
+    "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.",
+  ).optional(),
   title: studioContentSchema.shape.title.optional(),
   channel: studioContentSchema.shape.channel.unwrap().optional(),
   format: studioContentSchema.shape.format.unwrap().optional(),
@@ -68,14 +74,17 @@ export const studioPatchSchema = z.object({
   memo: studioContentSchema.shape.memo.unwrap().optional(),
   script: studioContentSchema.shape.script.unwrap().optional(),
   caption: studioContentSchema.shape.caption.unwrap().optional(),
-  altTexts: studioContentSchema.shape.altTexts.unwrap().optional(),
+  altTexts: studioContentSchema.shape.altTexts.unwrap().refine(
+    values => values.every(value => !altTextError(value, true)),
+    "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.",
+  ).optional(),
   exportDesign: studioContentSchema.shape.exportDesign.unwrap().optional(),
   sourceLabel: studioContentSchema.shape.sourceLabel.unwrap().optional(),
   panels: studioContentSchema.shape.panels.unwrap().optional(),
   characters: studioContentSchema.shape.characters.unwrap().optional(),
   imagePath: studioContentSchema.shape.imagePath.unwrap().optional(),
   version: z.number().int().positive(),
-}).strict().superRefine((value, ctx) => { for (const issue of studioInputAltIssues(value)) ctx.addIssue({code:"custom",...issue}); });
+}).strict();
 export const studioGenerationSchema = z.object({
   version: z.number().int().positive(), kind: z.enum(["text", "image"]),
   provider: z.enum(aiProviders).default("openai"),
