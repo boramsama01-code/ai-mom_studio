@@ -2,12 +2,13 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { PasswordForm } from "../client/src/pages/Password";
+import { PasswordForm, PasswordSetupPage } from "../client/src/pages/Password";
+import { forgetPasswordResetToken } from "../client/src/passwordReset";
 const api = vi.hoisted(() => vi.fn());
 vi.mock("../client/src/api", () => ({api,setCsrf:vi.fn()}));
 Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});
 let root: Root, host: HTMLDivElement;
-afterEach(async () => { if(root) await act(async()=>root.unmount()); document.body.innerHTML=""; api.mockReset(); });
+afterEach(async () => { if(root) await act(async()=>root.unmount()); document.body.innerHTML=""; api.mockReset(); forgetPasswordResetToken(); window.history.replaceState(null,"","/"); });
 async function setup(resetToken?: string) {
   host=document.createElement("div");document.body.append(host);root=createRoot(host);
   await act(async()=>root.render(<PasswordForm username="spacepenguin" resetToken={resetToken}/>));
@@ -33,4 +34,17 @@ it("uses the current password for account changes and leaves failed edits availa
   expect(host.querySelector('[role="alert"]')?.textContent).toContain("현재 비밀번호");
   expect(host.querySelector('button[type="submit"]') || host.querySelector("button")).not.toBeNull();
   expect((host.querySelector("button") as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("opens the setup form when a recovery link is reopened in the same tab without a page reload", async()=>{
+  host=document.createElement("div");document.body.append(host);root=createRoot(host);
+  window.history.replaceState(null,"","/password-setup");
+  await act(async()=>root.render(<PasswordSetupPage/>));
+  expect(host.textContent).toContain("전용 설정 링크가 필요합니다");
+  const token="a".repeat(43);
+  api.mockResolvedValueOnce({username:"spacepenguin"});
+  await act(async()=>{window.history.replaceState(null,"",`/password-setup#reset=${token}`);window.dispatchEvent(new HashChangeEvent("hashchange"));});
+  expect(api).toHaveBeenCalledWith("/auth/password-reset/check",{method:"POST",body:{token}});
+  expect(host.querySelectorAll('input[autocomplete="new-password"]')).toHaveLength(2);
+  expect(window.location.hash).toBe("");
 });
