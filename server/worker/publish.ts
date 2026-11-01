@@ -1,5 +1,6 @@
 import { expectedInstagramUsername, instagramAccountMismatch } from "../../shared/channelInstagram";
 import { cardAltTextState } from "../services/cardAccessibility";
+import { altTextError } from "../../shared/altText";
 import { itemPrimarySource } from "../services/itemSources";
 /**
  * 카드 생성 · 최종 승인 · 목적지별 전송
@@ -158,6 +159,9 @@ export async function approveItem(
   const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, a.mediaAssetId));
   if (!asset || asset.kind !== "card" || asset.revisionId !== rev.id) return { ok: false as const, error: "현재 버전으로 만든 카드가 아닙니다. 카드를 다시 생성하세요." };
   if(a.altTextVersion!==undefined && a.altTextVersion!==cardAltTextState(asset,item.title).version)throw new HttpError(409,"대체텍스트가 변경됐습니다. 최신 설명을 확인하고 다시 승인해 주세요.");
+  const altValues = cardAltTextState(asset, item.title).values;
+  const invalidPage = altValues.findIndex(value => !!altTextError(value));
+  if (invalidPage >= 0) return { ok: false as const, error: `${invalidPage + 1}페이지: ${altTextError(altValues[invalidPage])} 수정한 뒤 다시 승인해 주세요.` };
   let approvedHash: string;
   try { approvedHash = cardApprovalHash(await loadCardPages(db, asset)); }
   catch (e) { return { ok: false as const, error: (e as Error).message }; }
@@ -341,6 +345,8 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
   }
 
   if (dest.platform === "instagram") {
+    const invalidAltPage = ap.captions.altTexts?.findIndex(value => !!altTextError(value)) ?? -1;
+    if (invalidAltPage >= 0) return block(`${invalidAltPage + 1}페이지 대체텍스트가 125자·2문장 기준을 초과해 게시를 중단했습니다. 다시 검토·승인해 주세요.`);
     const token = sec.values.accessToken, userId = sec.values.userId;
     if (expectedInstagramUsername(ch.slug)) {
       const identity = await ig.accountIdentity(token);
