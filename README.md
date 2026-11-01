@@ -23,7 +23,9 @@
 
 ## 기존 Render 서비스 업데이트
 
-기존 `ai-mom-studio` 서비스에서 이 저장소의 `main`을 배포합니다. 새 Render 서비스나 데이터베이스를 만들 필요가 없습니다. 기존 `APP_DATABASE_URL`, `APP_SESSION_SECRET`, `APP_SECRETS_KEY`는 유지해야 저장된 키를 계속 읽을 수 있습니다. Render 환경변수에 이미 있는 API 키가 화면에서 저장한 값보다 우선합니다.
+현재 운영 주소는 [spacepenguin.onrender.com](https://spacepenguin.onrender.com)입니다. Render의 `spacepenguin` 무료 웹 서비스가 이 저장소의 `main`을 배포합니다. 기존 Neon 데이터베이스와 로그인 설정은 `spacepenguin-studio-config` 환경 그룹으로 연결하고, 서비스의 `APP_BASE_URL`은 새 주소를 사용합니다. 기존 `APP_DATABASE_URL`, `APP_SESSION_SECRET`, `APP_SECRETS_KEY`는 유지해야 저장된 키를 계속 읽을 수 있습니다. Render 환경변수에 이미 있는 API 키가 화면에서 저장한 값보다 우선합니다.
+
+기존 `ai-mom-studio.onrender.com` 서비스는 이전 링크 호환을 위해 보존합니다. 루트 `render.yaml`은 이 기존 서비스의 Blueprint이므로 새 운영 서비스 이름으로 바꿔 동기화하지 마세요. 새 서비스는 Render 설정에서 관리하며, GitHub Actions의 `APP_BASE_URL` 저장소 변수와 수집·처리 워크플로 기본 주소도 `https://spacepenguin.onrender.com`을 사용합니다.
 
 시작 시 추가 테이블 마이그레이션과 한 번만 실행되는 초기 보드 이전을 수행합니다. 확인한 Sites 자료는 수정되지 않은 기본 기획 7개·메모·참고 공고 7개였습니다. 기획은 초안으로, 과거 참고 공고는 샘플로 보존하며 별도 소유자 정보나 API 키를 복사하지 않습니다. 이 작업은 기존 수집 자료·게시 승인·사용자 설정을 덮어쓰지 않습니다.
 

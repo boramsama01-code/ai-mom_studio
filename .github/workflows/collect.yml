@@ -32,7 +32,7 @@ jobs:
       APP_SESSION_SECRET: ${{ secrets.APP_SESSION_SECRET }}
       APP_SECRETS_KEY: ${{ secrets.APP_SECRETS_KEY }}
       # 아래 키들은 선택: 화면에서 입력했다면 비워 둬도 됩니다(여기 값이 있으면 이 값이 우선)
-      APP_BASE_URL: ${{ vars.APP_BASE_URL || 'https://ai-mom-studio.onrender.com' }}
+      APP_BASE_URL: ${{ vars.APP_BASE_URL || 'https://spacepenguin.onrender.com' }}
       NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
       NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
       AI_PROVIDER: ${{ vars.AI_PROVIDER }}
