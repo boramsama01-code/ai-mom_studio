@@ -75,11 +75,12 @@ export function createApp() {
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, ...err.extra });
-    if ((err as { type?: string }).type === "entity.too.large") return res.status(413).json({ error: "요청 용량이 너무 큽니다. 사진은 12MB, 후기 영상은 25MB 이하로 선택해 주세요." });
+    if ((err as { type?: string }).type === "entity.too.large") return res.status(413).json({ error: "요청 용량이 너무 큽니다. ZIP은 100MB, 사진은 12MB, 후기 영상은 25MB 이하로 선택해 주세요." });
     if ((err as { type?: string }).type === "entity.parse.failed") return res.status(400).json({ error: "요청 형식(JSON)이 올바르지 않습니다." });
     console.error("[서버 오류]", (err as Error)?.stack || err);
     res.status(500).json({ error: "서버 오류가 발생했습니다. 잠시 후 다시 시도하세요." });
   });
   return app;
 }
+
 

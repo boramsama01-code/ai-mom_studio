@@ -21,9 +21,11 @@ import { STUDIO_IMAGE_MAX_BYTES, STUDIO_IMAGE_TYPES } from "../../shared/studioI
 import sharp from "sharp";
 import { cardDesign } from "../../shared/cardDesigns";
 import { renderCollectionPreview } from "../services/cardDesignSamples";
+import { zipImportRoutes } from "./zipImport";
 
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
+studioRoutes.use(zipImportRoutes);
 studioRoutes.get("/studio/cards", ah(async (req, res) => {
   const db = getDb();
   const trash = parse(z.enum(["0", "1"]).default("0"), req.query.trash) === "1";
@@ -178,3 +180,4 @@ studioRoutes.post("/studio/instagram/:cid/check", ah(async (req, res) => {
   const { destinationId } = parse(z.object({ destinationId: z.number().int().positive() }).strict(), req.body);
   res.json(await checkInstagramConnection(getDb(), intParam(req.params.cid), destinationId));
 }));
+

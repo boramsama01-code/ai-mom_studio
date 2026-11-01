@@ -7,11 +7,13 @@ import { ErrorBox, GuardedLink } from "../ui";
 import { useDirtyGuard } from "../state";
 import { StudioQuickExport } from "./StudioExport";
 import { StudioPublish } from "./StudioPublish";
+import { FinishedDeckAi } from "./FinishedDeckAi";
 import "../studioPublish.css";
 
 export function FinishedDeckEditor({ data }: { data: StudioCardDetail }) {
   const [base, setBase] = useState(data.card), [form, setForm] = useState(data.card);
   const [progress, setProgress] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
   const qc = useQueryClient(), guard = useDirtyGuard();
   const file = useRef<HTMLInputElement>(null);
   const dirty = JSON.stringify(form) !== JSON.stringify(base);
@@ -38,7 +40,7 @@ export function FinishedDeckEditor({ data }: { data: StudioCardDetail }) {
   }, onError: async () => {
     try { const current = await api<StudioCardDetail>(`/studio/cards/${base.id}`); adopt(current.card); } catch { /* Keep the last confirmed upload when offline. */ }
   }, onSettled: () => { setProgress(""); qc.invalidateQueries({ queryKey: ["studio"] }); } });
-  const busy = saving.isPending || uploading.isPending;
+  const busy = saving.isPending || uploading.isPending || aiBusy;
   useEffect(() => { guard.setDirty(`finished-${base.id}`, dirty || uploading.isPending, async () => { if (uploading.isPending) return false; try { await save(); return true; } catch { return false; } }); return () => guard.setDirty(`finished-${base.id}`, false); }, [dirty, uploading.isPending, form, base]);
   const move = (index: number, direction: number) => { const next = [...pages]; [next[index], next[index + direction]] = [next[index + direction], next[index]]; setForm(f => ({ ...f, finishedDeck: { pages: next } })); };
   return <div className="finished-deck-editor stack">
@@ -56,7 +58,9 @@ export function FinishedDeckEditor({ data }: { data: StudioCardDetail }) {
       <label className="field">게시할 캡션<textarea rows={7} value={form.caption} disabled={busy} onChange={e => setForm(f => ({ ...f, caption: e.target.value }))} /><span className="hint">{[...form.caption].length} / 2,200자</span></label>
       <div className="row"><button className="btn" disabled={busy || !dirty || !form.title.trim()} onClick={() => saving.mutate()}>{saving.isPending ? "저장 중…" : dirty ? "변경 내용 저장" : "저장됨"}</button>{!dirty && pages.length > 0 && <StudioQuickExport card={base} />}</div>
       {saving.error && <ErrorBox error={saving.error} />}
+      {pages.length > 0 && <FinishedDeckAi card={base} disabled={dirty || saving.isPending || uploading.isPending} onBusy={setAiBusy} onApply={proposal => setForm(f => ({ ...f, caption: proposal.caption, finishedDeck: { pages: f.finishedDeck!.pages.map((p, i) => ({ ...p, altText: proposal.altTexts[i] })) } }))} />}
     </section>
     <StudioPublish base={base} dirty={dirty} busy={busy} save={save} />
   </div>;
 }
+
