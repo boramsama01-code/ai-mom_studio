@@ -21,6 +21,7 @@ import { itemChatGptPrompt } from "@shared/chatgptLink";
 import { readIdea } from "@shared/ideaBank";
 import { IdeaDetail } from "./IdeaDetail";
 import { collectionUsesArt } from "@shared/cardDesigns";
+import { sourceRecovery } from "@shared/sourceRecovery";
 
 type Detail = {
   imageAiAvailable?: boolean;
@@ -114,6 +115,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
     },
   });
   const p = d.primary;
+  const recovery = p ? sourceRecovery(p) : null;
   const sourceUrl = p && typeof p.meta.finalUrl === "string" && /^https?:\/\//.test(p.meta.finalUrl) ? p.meta.finalUrl : p?.originalUrl;
   const evidence: Array<{ field: string; source_id: number; quote: string }> = d.current?.payload?.evidence ?? [];
   const pastedQuotes = p?.kind === "manual_text" && Array.isArray(p.meta.quotes) ? p.meta.quotes.filter((q): q is string => typeof q === "string") : [];
@@ -144,7 +146,10 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
                 {refetch.isPending ? "확보 중…" : "원문 다시 확보"}
               </button>}
             </div>
-            {p.fetchError && <div className="notice warn small">{p.fetchError}</div>}
+            {recovery && p.fetchStatus !== "ok" && <div className="notice warn small" data-testid="source-recovery">
+              <strong>{recovery.label}</strong><p>{recovery.reason}</p><p>{recovery.nextStep}</p>
+              <div className="row">{recovery.links.map(link => <a key={link.url} className="btn sm" href={link.url} target="_blank" rel="noopener noreferrer">{link.label} ↗</a>)}</div>
+            </div>}
             {refetch.error && !p.fetchError && p.kind !== "manual_text" && <ErrorBox error={refetch.error} />}
             {refetch.data?.changed && <div className="notice warn small">원문 내용이 이전과 달라졌습니다. 다시 검토하세요.</div>}
             {p.attachments.length > 0 && (

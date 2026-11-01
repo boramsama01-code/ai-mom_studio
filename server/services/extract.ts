@@ -57,7 +57,7 @@ export function extractHtml(html: string, baseUrl: string): { title: string; tex
   $("script,style,noscript,iframe,svg,header,footer,nav,form,aside,button").remove();
   $("br").replaceWith("\n");
   $("p,div,section,li,h1,h2,h3,h4,tr").append("\n");
-  const selectors = ["#dic_area", "#newsct_article", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",
+  const selectors = ["#dic_area", "#newsct_article", "#harmonyContainer", "#articletxt", "#cont_newstext", "#news_body_id", "#CmAdContent", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",
     "#article-view-content-div", "#articleBodyContents", "#articleBody", "#newsEndContents", ".article-body", ".article_body", ".article_view", ".article_txt", ".article-text", ".news_body", "article",
     "[class*='board_view']", "[class*='bbs_view']", "[class*='view_cont']", "[class*='viewCont']"];
   let text = "";

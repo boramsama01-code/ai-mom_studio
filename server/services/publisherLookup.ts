@@ -67,7 +67,7 @@ export function publisherSearchLink(html: string, base: string, title: string): 
 }
 export function pageHasHeadline(html: string, title: string): boolean {
   const $ = load(html), key = headlineKey(title);
-  return $("h1,h2,[itemprop='headline'],meta[property='og:title']").toArray().some(el => headlineKey($(el).attr("content") || $(el).text()) === key);
+  return $("h1,h2,[itemprop='headline'],meta[property='og:title'],meta[name='twitter:title']").toArray().some(el => headlineKey($(el).attr("content") || $(el).text()) === key);
 }
 
 /** Signature matches fetchAndExtract so both collection and manual refetch share this policy. */
@@ -106,11 +106,19 @@ export async function fetchPublisherArticle(url: string, fetchImpl: typeof safeF
     if (candidates.length > 1) return { ok: false, status: "unsupported", error: "같은 제목의 원문 주소가 여러 개여서 임의로 선택하지 않았습니다." };
     if (!candidates.length) {
       const known = PUBLIC_NEWS_FEEDS.find(f => hostKey(new URL(f.site).hostname) === hostKey(home.hostname));
-      const feeds = [...new Set([...(known ? [known.url] : []), ...publisherFeedLinks(html, homepage.finalUrl)])].slice(0, 1);
+      const feeds = [...new Set([...(known ? [known.url] : []), ...publisherFeedLinks(html, homepage.finalUrl)])].slice(0, 2);
       for (const feed of feeds) {
-        const response = await read(feed);
-        const items = parseNewsRss(response.body.toString("utf8"), { name: "publisher", url: feed, site: home.href }, new Date());
-        candidates = [...new Set(items.filter(i => headlineKey(i.title) === headlineKey(title)).map(i => samePublisherUrl(i.originallink || i.link, home.href)).filter((u): u is string => !!u))];
+        try {
+          const response = await read(feed);
+          const items = parseNewsRss(response.body.toString("utf8"), { name: "publisher", url: feed, site: home.href }, new Date());
+          candidates = [...new Set(items.filter(i => headlineKey(i.title) === headlineKey(title)).map(i => samePublisherUrl(i.originallink || i.link, home.href)).filter((u): u is string => !!u))];
+          if (candidates.length) break;
+        } catch (e) {
+          // A missing/broken feed is not a publisher access denial. Still try its
+          // advertised public GET search. Restrictions and exhausted budgets stop.
+          if (e instanceof FetchFailure && (e.kind !== "http" || ![404, 410].includes(e.status || 0))) throw e;
+          if (!(e instanceof FetchFailure) && (!(e instanceof Error) || e.message !== "RSS/Atom 형식의 응답이 아닙니다")) throw e;
+        }
       }
       if (candidates.length > 1) return { ok: false, status: "unsupported", error: "같은 제목의 RSS 원문이 여러 개여서 임의로 선택하지 않았습니다." };
       if (!candidates.length) {

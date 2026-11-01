@@ -9,7 +9,7 @@ import type { DB } from "../db";
 import { jobs, studioCards, studioImages, studioRevisions, type Job } from "../../shared/schema";
 import { studioContentSchema, studioGenerationSchema, type StudioContent } from "../../shared/studio";
 import { generateStudioCaption, generateStudioImage, generateStudioText } from "../services/studioAi";
-import { applyStudioText, studioImageContext, studioInstruction } from "../../shared/studioWorkflow";
+import { applyStudioText, studioChangedTextFields, studioImageContext, studioInstruction } from "../../shared/studioWorkflow";
 import { assertStudioActive, loadStudioCard, validateStudioChannel } from "../services/studio";
 import { claimJob, completeJob, failJob, heartbeat, recoverExpired } from "./queue";
 import { loadStoredSecrets } from "../secretStore";
@@ -98,7 +98,7 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
       const updated = await tx.update(studioCards).set({ content, version: payload.version + 1, updatedAt: new Date() }).where(and(eq(studioCards.id, card.id), eq(studioCards.version, payload.version))).returning();
       const applied = updated.length > 0;
       const [revision] = await tx.insert(studioRevisions).values({ cardId: card.id, version: payload.version + 1, snapshot: content, instruction, provider, model, applied }).returning({ id: studioRevisions.id });
-      return { cardId: card.id, revisionId: revision.id, applied, kind: payload.kind, textTarget: payload.textTarget, panelIndex: payload.panelIndex ?? null, message: applied ? "생성 결과를 저장했습니다." : "생성 중 직접 수정한 내용은 유지했습니다. 기록에서 생성 결과를 확인하고 적용하세요." };
+      return { cardId: card.id, revisionId: revision.id, applied, kind: payload.kind, textTarget: payload.textTarget, changedFields: payload.kind === "text" ? studioChangedTextFields(payload.snapshot, content) : [], panelIndex: payload.panelIndex ?? null, message: applied ? "생성 결과를 저장했습니다." : "생성 중 직접 수정한 내용은 유지했습니다. 기록에서 생성 결과를 확인하고 적용하세요." };
     });
     await completeJob(db, job.id, workerId, result);
     return true;
