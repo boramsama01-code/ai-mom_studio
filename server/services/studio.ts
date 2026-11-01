@@ -1,3 +1,4 @@
+import { validateExperienceMedia } from "./experienceMedia";
 import { readIdea } from "../../shared/ideaBank";
 import { itemPrimarySource } from "./itemSources";
 import crypto from "node:crypto";
@@ -102,6 +103,7 @@ export async function validateStudioChannel(db: DB, key: string) {
 }
 export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number) {
   await validateStudioChannel(db, content.channel);
+  if (content.experience && (content.experience.media.length || content.experience.coverId || content.experience.pages.some(p=>p.mediaId))) throw new HttpError(400, "새 작업을 만든 뒤 사진·영상을 올려 주세요.");
   if (content.panels.some(p => p.imageId)) throw new HttpError(400, "새 콘텐츠에는 기존 이미지 ID를 넣을 수 없습니다.");
   return db.transaction(async tx => {
     if (sourceItemId) {
@@ -140,6 +142,7 @@ export async function saveStudioCard(db: DB, cardId: number, version: number, pa
     const content = parse(studioContentSchema, { ...current.content, ...patch });
     if (patch.channel && patch.channel !== current.content.channel) await validateStudioChannel(tx as unknown as DB, content.channel);
     await validateStudioImages(tx as unknown as DB, cardId, content);
+    await validateExperienceMedia(tx as unknown as DB, cardId, content.experience);
     const [row] = await tx.update(studioCards).set({ content, version: version + 1, updatedAt: new Date() }).where(and(eq(studioCards.id, cardId), eq(studioCards.version, version))).returning();
     if (!row) conflict(studioCardDto(current));
     await tx.insert(studioRevisions).values({ cardId, version: row.version, snapshot: content, instruction });
@@ -171,6 +174,12 @@ export async function queueStudioGeneration(db: DB, cardId: number, input: Studi
       return { job: studioJobDto(job), duplicate: true };
     }
     if (card.version !== input.version) conflict(studioCardDto(card));
+    if (input.textTarget === "experience") {
+      const e=card.content.experience;
+      if (!e || !e.media.length) throw new HttpError(400,"후기에 사용할 사진·영상을 먼저 선택해 주세요.");
+      if (!e.notes.trim()) throw new HttpError(400,"직접 경험한 내용을 한 줄 이상 적어 주세요.");
+      await validateExperienceMedia(tx as unknown as DB,cardId,e);
+    }
     if (input.kind === "image" && !input.instruction && !card.content.panels[input.panelIndex!].scene.trim() && !card.content.panels[input.panelIndex!].dialogue.trim()) {
       throw new HttpError(400, "이 컷의 장면이나 대사를 먼저 작성해 주세요. 빈칸 초안 채우기도 사용할 수 있습니다.");
     }

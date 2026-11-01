@@ -1,3 +1,4 @@
+import { experienceSchema, type Experience } from "./experience";
 import { CHANNEL_BRANDS } from "./branding";
 import { normalizeStudioChannel } from "./channelKeys";
 import { z } from "zod";
@@ -7,7 +8,7 @@ import { PERSISTED_CARD_DESIGNS, CARD_COLOR_VARIANTS } from "./cardDesigns";
 export const studioChannels = ["penguin", "highscoop", "fryday", "news"] as const;
 export const studioFormats = ["웹툰", "카드뉴스", "릴스", "브랜드", "기타"] as const;
 export const studioExportDesigns = ["editorial", "spotlight", "minimal", ...Array.from(new Set([...PERSISTED_CARD_DESIGNS, ...CARD_COLOR_VARIANTS].map(d => `set:${d.id}` as const)))] as const;
-export const studioPageCount = (content: { format: string; exportDesign: string }) => content.format === "카드뉴스" ? content.exportDesign.startsWith("set:") ? 5 : 6 : 1;
+export const studioPageCount = (content: { format: string; exportDesign: string; experience?: Experience | null }) => content.experience ? content.experience.pages.length + 1 : content.format === "카드뉴스" ? content.exportDesign.startsWith("set:") ? 5 : 6 : 1;
 export const studioOutputFormats = ["웹툰", "카드뉴스"] as const;
 export const studioOutputDescription = (format: string, design = "editorial") => format === "웹툰" ? "네컷 이미지 1장 · 1080 × 1350 PNG" : format === "카드뉴스" ? design.startsWith("set:") ? "표지 + 본문 4장 · 1080 × 1350 PNG 5장 (ZIP)" : "표지 + 본문 4장 + 마무리 · 1080 × 1350 PNG 6장 (ZIP)" : "기획용 형식 · 이미지·영상 내보내기 미지원";
 export const studioStages = ["idea", "writing", "making", "review", "done"] as const;
@@ -23,6 +24,7 @@ export type StudioProvider = AiProvider;
 const date = z.string().refine(v => v === "" || (/^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(new Date(`${v}T00:00:00Z`).getTime()) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v), "올바른 날짜를 입력하세요.");
 export const studioPanelSchema = z.object({ scene: z.string().max(4000), dialogue: z.string().max(3000), imageId: z.number().int().positive().nullable().default(null) }).strict();
 export const studioContentSchema = z.object({
+  experience: experienceSchema.nullable().default(null),
   title: z.string().trim().min(1).max(160),
   channel: z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/).transform(normalizeStudioChannel).default("penguin"),
   format: z.enum(studioFormats).default("웹툰"),
@@ -38,6 +40,7 @@ export const studioContentSchema = z.object({
 export const studioCreateSchema = studioContentSchema.extend({ sourceItemId: z.number().int().positive().optional() });
 // Zod 4 applies defaults inside optional fields; unwrap them so a stage-only PATCH cannot erase content.
 export const studioPatchSchema = z.object({
+  experience: studioContentSchema.shape.experience.unwrap().optional(),
   title: studioContentSchema.shape.title.optional(),
   channel: studioContentSchema.shape.channel.unwrap().optional(),
   format: studioContentSchema.shape.format.unwrap().optional(),
@@ -57,9 +60,10 @@ export const studioGenerationSchema = z.object({
   version: z.number().int().positive(), kind: z.enum(["text", "image"]),
   provider: z.enum(aiProviders).default("openai"),
   instruction: z.string().trim().max(8000).default(""), panelIndex: z.number().int().min(0).max(3).optional(),
-  textTarget: z.enum(["rewrite", "fill", "caption"]).default("rewrite"),
+  textTarget: z.enum(["rewrite", "fill", "caption", "experience"]).default("rewrite"),
   requestId: z.string().uuid(),
 }).strict().superRefine((v, ctx) => {
+  if (v.textTarget === "experience" && (v.kind !== "text" || v.provider !== "openai")) ctx.addIssue({ code: "custom", path: ["provider"], message: "사진·영상 후기는 GPT로 작성합니다." });
   if (v.kind === "image" && v.panelIndex === undefined) ctx.addIssue({ code: "custom", path: ["panelIndex"], message: "다시 그릴 컷을 선택하세요." });
   if (v.kind === "image" && v.provider !== "openai") ctx.addIssue({ code: "custom", path: ["provider"], message: "그림 생성은 OpenAI를 사용합니다." });
   if (v.kind === "text" && v.textTarget === "rewrite" && !v.instruction) ctx.addIssue({ code: "custom", path: ["instruction"], message: "전체 원고를 바꿀 내용을 입력하세요." });

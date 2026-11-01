@@ -62,12 +62,12 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
   const stalePreview = dirty || preview?.version !== base.version || preview?.format !== form.format;
   const focusField = (field: string) => { onFieldFocus?.(field); window.requestAnimationFrame(() => document.getElementById(`studio-${field}`)?.focus()); };
   return <section className="panel stack studio-export" aria-labelledby="studio-export-heading">
-    <div><h2 id="studio-export-heading">최종 이미지</h2><p className="small muted">{studioOutputDescription(form.format, form.exportDesign)}</p></div>
-    {form.format !== "카드뉴스" && <div className="studio-export-designs" role="group" aria-label="출력 디자인">
+    <div><h2 id="studio-export-heading">최종 이미지</h2><p className="small muted">{form.experience ? `후기 카드 ${studioPageCount(form)}장 · 1080 × 1350 PNG + 선택한 영상 원본 + 캡션` : studioOutputDescription(form.format, form.exportDesign)}</p></div>
+    {!form.experience && form.format !== "카드뉴스" && <div className="studio-export-designs" role="group" aria-label="출력 디자인">
       {designs.map(design => <button key={design.id} type="button" className={`studio-design-option design-${design.id}`} aria-pressed={form.exportDesign === design.id} disabled={busy || prepare.isPending} onClick={() => change("exportDesign", design.id)}><span className="studio-design-swatch" aria-hidden="true"><i /><i /><i /></span><strong>{design.name}</strong><small>{design.detail}</small></button>)}
     </div>}
-    {form.format === "카드뉴스" && <div className="stack">
-      <button type="button" className="btn" aria-expanded={showCollection} onClick={() => setShowCollection(v => !v)}>{showCollection ? "디자인 컬렉션 접기" : "디자인 5종 · 컬러 30가지 둘러보기"}</button>
+    {!form.experience && form.format === "카드뉴스" && <div className="stack">
+      <button type="button" className="btn" aria-expanded={showCollection} onClick={() => setShowCollection(v => !v)}>{showCollection ? "디자인 컬렉션 접기" : "카드 디자인·컬러 둘러보기"}</button>
       {showCollection && <TemplatePicker cid="studio" studioChannel={form.channel} value={form.exportDesign} disabled={busy || prepare.isPending} onChange={key => change("exportDesign", key as StudioContent["exportDesign"])} items={cardDesignOptions()} />}
       {form.exportDesign.startsWith("set:") && <p className="small muted">사진형 표지는 첫 번째 본문의 이미지를 함께 사용합니다. 각 본문에 넣은 그림도 유지됩니다.</p>}
     </div>}
@@ -82,7 +82,7 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
     </div>
     {preview && <div className="studio-export-preview">
       {stalePreview ? <p className="notice">편집 내용이 바뀌었습니다. 저장하고 미리보기를 갱신하세요.</p> : <>
-        {preview.format === "카드뉴스" && <div className="studio-preview-pages" role="group" aria-label="미리보기 페이지">{["표지", "1", "2", "3", "4", "마무리"].slice(0, studioPageCount(form)).map((label, index) => <button className="btn sm" key={index} aria-pressed={page === index} onClick={() => { setPage(index); setPreviewError(false); }}>{label}</button>)}</div>}
+        {preview.format === "카드뉴스" && <div className="studio-preview-pages" role="group" aria-label="미리보기 페이지">{(form.experience ? ["표지", ...form.experience.pages.map((_,i)=>String(i+2))] : ["표지", "1", "2", "3", "4", "마무리"].slice(0, studioPageCount(form))).map((label, index) => <button className="btn sm" key={index} aria-pressed={page === index} onClick={() => { setPage(index); setPreviewError(false); }}>{label}</button>)}</div>}
         {previewError ? <p className="notice err" role="alert">미리보기를 불러오지 못했습니다. 최신 버전인지 확인하고 다시 눌러 주세요.</p> : <img key={`${preview.version}-${page}`} src={`/api/studio/cards/${base.id}/export.png?version=${preview.version}&page=${page}&preview=1`} alt={`${base.title} ${page + 1}페이지 출력 미리보기`} onError={() => setPreviewError(true)} />}
       </>}
     </div>}

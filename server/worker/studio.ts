@@ -1,3 +1,4 @@
+import { generateExperience } from "../services/experienceAi";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -53,7 +54,10 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
         content: { title: content.title, channel: content.channel, format: content.format, brief: content.memo, script: content.script, caption: content.caption, panels: content.panels.map(p => ({ scene: p.scene, dialogue: p.dialogue })) },
         referenceText: characterGuide,
       };
-      if (payload.textTarget === "caption") {
+      if (payload.textTarget === "experience") {
+        const generated=await generateExperience(db,card.id,content,payload.instruction);
+        content=generated.content; model=generated.model; provider="openai";
+      } else if (payload.textTarget === "caption") {
         const generated = await generateStudioCaption(options);
         model = generated.model; provider = generated.provider;
         content = studioContentSchema.parse({ ...content, caption: generated.caption });

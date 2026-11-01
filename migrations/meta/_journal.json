@@ -78,6 +78,13 @@
       "when": 1793491200004,
       "tag": "0010_operator_passwords",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793491200005,
+      "tag": "0011_experience_media",
+      "breakpoints": true
     }
   ]
 }
