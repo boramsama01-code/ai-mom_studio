@@ -1,6 +1,36 @@
 import type { StudioContent } from "./studio";
-export const ALT_TEXT_LIMIT=1000;
-export const conciseAlt=(parts:Array<string|undefined|null>)=>parts.filter(Boolean).join("\n").trim().slice(0,ALT_TEXT_LIMIT);
+export const ALT_TEXT_LIMIT = 125;
+export const ALT_TEXT_MAX_SENTENCES = 2;
+
+/** Count visible Unicode characters, including spaces, instead of UTF-16 units. */
+export const altTextLength = (value: string) => Array.from(value).length;
+
+/** Sentence-boundary check for Korean/English terminal punctuation. */
+export function altTextSentenceCount(value: string): number {
+ const normalized = value.trim().replace(/\s+/gu, " ");
+ if (!normalized) return 0;
+ const stops = [...normalized.matchAll(/[.!?。！？]+(?=\s|$)/gu)].length;
+ return stops + (/[.!?。！？]$/u.test(normalized) ? 0 : 1);
+}
+/** Use allowEmpty only while editing drafts. Existing long descriptions remain readable but need revision before export/publishing. */
+export function altTextError(value: string, allowEmpty = false): string | null {
+ if (!value.trim()) return allowEmpty ? null : "대체텍스트를 입력해 주세요.";
+ if (altTextLength(value) > ALT_TEXT_LIMIT) return `대체텍스트는 공백 포함 최대 ${ALT_TEXT_LIMIT}자까지 입력할 수 있습니다.`;
+ if (altTextSentenceCount(value) > ALT_TEXT_MAX_SENTENCES) return "대체텍스트는 1~2문장으로 작성해 주세요.";
+ return null;
+}
+/** Make safe, brief defaults from existing written information, without inventing unseen visual details. */
+export function conciseAlt(parts: Array<string | undefined | null>): string {
+ const text = parts.filter((part): part is string => typeof part === "string")
+  .map(part => part.replace(/\s+/gu, " ").trim()).filter(Boolean).join(" ");
+ const stops = [...text.matchAll(/[.!?。！？]+(?=\s|$)/gu)];
+ const selected = stops.length > 1 ? text.slice(0, (stops[1].index ?? 0) + stops[1][0].length) : text;
+ if (altTextLength(selected) <= ALT_TEXT_LIMIT) return selected;
+ let short = Array.from(selected).slice(0, ALT_TEXT_LIMIT - 1).join("").trimEnd();
+ const boundary = short.lastIndexOf(" ");
+ if (boundary > Math.floor(short.length * 0.6)) short = short.slice(0, boundary).trimEnd();
+ return short.replace(/[.!?。！？,;:，、\s]+$/gu, "") + "…";
+}
 /** Always derived from displayed text and supplied scene notes; never invent visual details. */
 export function studioAltTexts(c:StudioContent):string[]{
  if(c.finishedDeck)return c.finishedDeck.pages.map((p,i)=>p.altText||conciseAlt([c.title,`${i+1} / ${c.finishedDeck!.pages.length}페이지`]));
