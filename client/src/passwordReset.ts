@@ -8,5 +8,9 @@ export function takePasswordResetToken(location: Pick<Location, "hash" | "pathna
 }
 
 let resetToken = typeof window === "undefined" ? null : takePasswordResetToken(window.location, window.history);
-export const passwordResetToken = () => resetToken;
+export const passwordResetToken = () => {
+  // Reopening the link in the same tab can change only its fragment, without a reload.
+  if (typeof window !== "undefined" && new URLSearchParams(window.location.hash.slice(1)).has("reset")) resetToken = takePasswordResetToken(window.location, window.history);
+  return resetToken;
+};
 export const forgetPasswordResetToken = () => { resetToken = null; };

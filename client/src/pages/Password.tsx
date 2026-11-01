@@ -42,10 +42,18 @@ export function PasswordForm({ username, resetToken }: { username: string; reset
 }
 
 export function PasswordSetupPage() {
-  const [token] = useState(passwordResetToken);
+  const [token, setToken] = useState(passwordResetToken);
   const [account, setAccount] = useState<{ username: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const reopen = () => {
+      const next = passwordResetToken();
+      if (next !== token) { setAccount(null); setError(null); setToken(next); }
+    };
+    window.addEventListener("hashchange", reopen);
+    return () => window.removeEventListener("hashchange", reopen);
+  }, [token]);
   useEffect(() => {
     if (!token) return;
     let active = true;
