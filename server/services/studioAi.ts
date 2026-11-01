@@ -65,7 +65,7 @@ Highscoop·Alligodang의 날짜, 전형, 수치, 사건은 제공된 자료에�
     maxAttempts: 1,
     maxTokens: 6500,
   });
-  if (!result.ok) throw new AiServiceError(result.kind === "parse" && opts.content.format === "웹툰" ? "생성 결과의 원고·캡션·네 컷 장면·대사 형식이 불완전해 적용하지 않았습니다. 기존 내용은 유지했습니다." : result.error, result.kind === "not_configured" ? "not_configured" : result.kind === "parse" ? "parse" : "api");
+  if (!result.ok) throw new AiServiceError(result.kind === "parse" && opts.content.format === "웹툰" ? `${result.error} 원고·캡션·네 컷 장면·대사가 모두 있는 완전한 초안이 필요합니다. 기존 내용은 유지했습니다.` : result.error, result.kind === "not_configured" ? "not_configured" : result.kind === "parse" ? "parse" : "api");
   return { ...result.data, provider, model: result.model, usage: result.usage };
 }
 
