@@ -76,7 +76,7 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
     <label className="field">출처 표기<input id="studio-sourceLabel" disabled={busy || prepare.isPending} maxLength={180} value={form.sourceLabel} onChange={event => change("sourceLabel", event.target.value)} placeholder="예: ○○대학교 입학처 · 2026.10.23 확인" /><span className="hint">이미지 하단에 표시됩니다.</span></label>
     {form.format === "카드뉴스" && <AltTextEditor values={studioAltTexts(form)} selected={page} onSelect={setPage} disabled={busy||prepare.isPending} change={(index,value)=>{
       if(form.experience){const e=form.experience;change("experience",index===0?{...e,coverAltText:value}:{...e,pages:e.pages.map((p,i)=>i===index-1?{...p,altText:value}:p)});}
-      else {const values=studioAltTexts(form);values[index]=value;change("altTexts",values);}
+      else {const values=[...form.altTexts];while(values.length<=index)values.push("");values[index]=value;change("altTexts",values);}
     }}/>}
     {form.format === "카드뉴스" && <p className="small muted">ZIP에 페이지별 대체텍스트(alt-text.txt)를 함께 담습니다.</p>}
     <div className="studio-export-status" aria-live="polite">
