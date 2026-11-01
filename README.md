@@ -25,7 +25,9 @@
 
 현재 운영 주소는 [spacepenguin.onrender.com](https://spacepenguin.onrender.com)입니다. Render의 `spacepenguin` 무료 웹 서비스가 이 저장소의 `main`을 배포합니다. 기존 Neon 데이터베이스와 로그인 설정은 `spacepenguin-studio-config` 환경 그룹으로 연결하고, 서비스의 `APP_BASE_URL`은 새 주소를 사용합니다. 기존 `APP_DATABASE_URL`, `APP_SESSION_SECRET`, `APP_SECRETS_KEY`는 유지해야 저장된 키를 계속 읽을 수 있습니다. Render 환경변수에 이미 있는 API 키가 화면에서 저장한 값보다 우선합니다.
 
-기존 `ai-mom-studio.onrender.com` 서비스는 이전 링크 호환을 위해 보존합니다. 루트 `render.yaml`은 이 기존 서비스의 Blueprint이므로 새 운영 서비스 이름으로 바꿔 동기화하지 마세요. 새 서비스는 Render 설정에서 관리하며, GitHub Actions의 `APP_BASE_URL` 저장소 변수와 수집·처리 워크플로 기본 주소도 `https://spacepenguin.onrender.com`을 사용합니다.
+운영자 아이디는 `spacepenguin`입니다. 비밀번호 해시는 유지합니다. 로그인 쿠키 이름이 바뀌어 기존 세션은 다시 로그인해야 합니다. 현재 명칭과 이전 데이터 호환 범위는 [BRANDING.md](BRANDING.md)를 참고하세요.
+
+기존 `ai-mom-studio.onrender.com` 서비스는 이전 링크 호환을 위해 보존합니다. 이 서비스에만 `APP_CANONICAL_REDIRECT_URL=https://spacepenguin.onrender.com`을 설정하면 브라우저 주소를 새 서비스로 연결하고 API·OAuth 콜백은 유지합니다. 루트 `render.yaml`은 기존 서비스의 Blueprint이므로 새 운영 서비스 이름으로 바꿔 동기화하지 마세요. 새 서비스는 Render 설정에서 관리하며, GitHub Actions의 `APP_BASE_URL` 저장소 변수와 수집·처리 워크플로 기본 주소도 `https://spacepenguin.onrender.com`을 사용합니다.
 
 시작 시 추가 테이블 마이그레이션과 한 번만 실행되는 초기 보드 이전을 수행합니다. 확인한 Sites 자료는 수정되지 않은 기본 기획 7개·메모·참고 공고 7개였습니다. 기획은 초안으로, 과거 참고 공고는 샘플로 보존하며 별도 소유자 정보나 API 키를 복사하지 않습니다. 이 작업은 기존 수집 자료·게시 승인·사용자 설정을 덮어쓰지 않습니다.
 
@@ -81,8 +83,8 @@
 Node.js 22가 설치된 컴퓨터에서:
 
 ```bash
-git clone https://github.com/boramsama01-code/ai-mom_studio
-cd ai-mom_studio
+git clone https://github.com/boramsama01-code/ai-mom_studio spacepenguin-studio
+cd spacepenguin-studio
 npm ci
 npm run hash-password -- "12자 이상 비밀번호"
 ```
@@ -93,10 +95,10 @@ npm run hash-password -- "12자 이상 비밀번호"
 
 1. https://render.com 가입 → **New → Blueprint** → 이 GitHub 저장소 선택
    (저장소에 있는 `render.yaml`을 읽어 설정을 자동으로 채웁니다. Region은 Singapore로 되어 있습니다.)
-2. 값을 물어보는 항목은 3개뿐입니다(빈칸으로 둘 수 없음):
+2. 값을 물어보는 항목은 2개입니다(빈칸으로 둘 수 없음):
    - `APP_DATABASE_URL`: 1단계의 Neon 주소
-   - `ADMIN_USERNAME`: 원하는 운영자 아이디
    - `ADMIN_PASSWORD_HASH`: 2단계 결과
+   - 운영자 아이디는 `spacepenguin`입니다. 루트 Blueprint는 이전 주소 호환용입니다. 별도 운영 인스턴스를 만들 때는 고유한 서비스 이름을 사용하고 `APP_CANONICAL_REDIRECT_URL`을 비우세요.
    - 네이버·Claude·텔레그램 등 나머지 키는 배포 후 서비스의 **Environment** 화면에서 추가합니다(없으면 "미연결"로 표시).
    - 사이트 주소(`APP_BASE_URL`)는 Render가 자동으로 알려 주는 값을 쓰므로 넣지 않아도 됩니다. 나중에 개인 도메인을 쓰면 그때 넣으세요.
 3. 배포가 끝나면 주소로 접속 → 로그인.
@@ -141,7 +143,7 @@ npm run hash-password -- "12자 이상 비밀번호"
 1. https://www.ncloud.com 에 네이버 아이디로 로그인(처음이면 회원가입·약관 동의, 결제수단 등록을 요구할 수 있음. 검색 API는 현재 무료)
 2. 콘솔 → **Services → Application Services → NAVER API HUB**
 3. **Subscription**에서 검색 상품 **[서비스 이용 신청]**
-4. **Application** 메뉴에서 **[Application 등록]** → 이름(예: ai-mom) 입력, 검색 API 선택
+4. **Application** 메뉴에서 **[Application 등록]** → 이름(예: Space Penguin Studio) 입력, 검색 API 선택
 5. 등록된 Application의 **인증 정보**에서 Client ID와 Client Secret 확인 → 이 앱의 네이버 칸에 붙여 넣기
 - 계정 전체용 "API 인증키(Access Key)"가 아니라, Application에서 받은 값이어야 합니다.
 - 예전에 개발자센터에서 받은 키가 있다면 그것도 그대로 넣으면 됩니다(2027-06-30까지). 앱이 두 방식을 자동으로 구분합니다.
@@ -257,9 +259,9 @@ npm run typecheck && npm test && npm run build
 ```
 
 - `.env`는 자동으로 읽지 않습니다. 셸에서 `export` 하거나 `node --env-file=.env`를 쓰세요.
-- 테스트는 실제 PostgreSQL을 씁니다: `TEST_DATABASE_URL=postgres://.../aimom_test npm test` (그 DB는 테스트 때마다 비워집니다).
+- 테스트는 실제 PostgreSQL을 씁니다: `TEST_DATABASE_URL=postgres://.../spacepenguin_test npm test` (그 DB는 테스트 때마다 비워집니다).
 - 명령: `collect:once`(수집 1회) · `jobs:once`(대기 작업 처리) · `publish:once`(예약 게시 처리) — 모두 한 번 실행 후 종료합니다.
-- `scripts/ai_mom_prepare.sh inspect|prepare`: 프로젝트 파일 이름·의존성 목록만 점검하는 보조 도구(파일·DB를 바꾸지 않음).
+- `scripts/spacepenguin_prepare.sh inspect|prepare`: 프로젝트 파일 이름·의존성 목록만 점검하는 보조 도구(파일·DB를 바꾸지 않음).
 
 ### 기술 구성
 

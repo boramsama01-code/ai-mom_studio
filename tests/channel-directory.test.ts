@@ -32,7 +32,7 @@ describe("shared channel directory", () => {
     expect(list.find((c: { id: number }) => c.id === ch.id).name).toBe("수정된 채널");
     expect((await agent.get(`/api/studio/cards/${card.body.id}`)).body.card.channel).toBe(ch.slug);
     expect((await agent.post("/api/studio/cards").set(H).send({ title: "잘못된 채널", channel: "missing-channel" })).status).toBe(400);
-    for (const key of ["penguin", "highway", "fryday", "news"]) expect((await agent.post("/api/studio/cards").set(H).send({ title: key, channel: key })).status).toBe(201);
+    for (const key of ["penguin", "highscoop", "fryday", "news"]) expect((await agent.post("/api/studio/cards").set(H).send({ title: key, channel: key })).status).toBe(201);
   });
   it("persists order for all clients without rewriting channels, and appends new channels", async () => {
     const { agent, csrf } = await login(app); const H = { "x-csrf-token": csrf };
@@ -86,3 +86,4 @@ describe("shared channel directory", () => {
     expect((await agent.get(`/api/studio/cards/${card.body.id}`)).body.card.channel).toBe(ch.slug);
   });
 });
+

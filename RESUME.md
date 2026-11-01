@@ -1,6 +1,15 @@
 # 우주펭귄상회 작업 재개 체크포인트
 
-갱신: 2026-10-27 (KST). 긴 대화 전체 대신 이 문서와 GitHub·Render의 현재 상태부터 대조합니다.
+갱신: 2026-11-01. 긴 대화 전체 대신 이 문서와 GitHub·Render의 현재 상태부터 대조합니다.
+
+## 현재 운영 기준 · 명칭 정리
+
+- 주소 https://spacepenguin.onrender.com/ · 아이디 `spacepenguin` · 비밀번호 유지.
+- Render 운영 `srv-dbjep0ou01pc73f8rf80`(spacepenguin), 무료 플랜. Neon `flat-fog-21307904`의 프로젝트 이름도 spacepenguin.
+- 브랜드는 우주펭귄상회 / Fryday / Highscoop / Alligodang. 현재 보드 채널 키는 highscoop, DB 채널 ID·slug는 유지.
+- 이전 서비스는 브라우저 경로만 새 주소로 연결하며 API·OAuth 경로는 호환 유지. 세션 쿠키 변경으로 다시 로그인 필요.
+- GitHub 저장소 이름 변경은 별도 승인 대기. 실제 저장소 URL을 미리 바꾸지 말 것. 암호화 salt·이전 수입 자료 ID·과거 마이그레이션은 바꾸지 말 것. 상세는 [BRANDING.md](BRANDING.md).
+- 아래 날짜별 항목의 테스트 수·배포 ID·오류 관찰은 당시 기록이며 현재 운영 상태로 해석하지 않습니다.
 
 ## 2026-10-27 작업 · Gemini와 OpenAI 무료 토큰 연결
 
@@ -70,9 +79,9 @@
 ## 최신 작업 · 수집 복구와 인증 장애 확인
 
 - PR #15 병합·배포 완료: main `24cc8c05b3a2f59cb07c39de55bd0a00b0ae106e`, Render `dep-dbffdkk9v7es73ddc3q0` 2026-10-26 15:45:34 KST live. PR CI `40281380814`와 main CI `40281600634` 성공(26개 파일·191개 테스트, 타입 검사·빌드).
-- 운영 브라우저에서 추천 묶음 적용 완료: Highway 91(기존 11 보존), 과학 24, 시사 24, Fryday 22 = 활성 검색어 161개. 과학·시사 탐색 주제 각각 8개. 공식 게시판 직접 연결 0개, 창작용 2개 채널은 변경 없음.
+- 운영 브라우저에서 추천 묶음 적용 완료: Highscoop 91(기존 11 보존), 과학 24, 시사 24, Fryday 22 = 활성 검색어 161개. 과학·시사 탐색 주제 각각 8개. 공식 게시판 직접 연결 0개, 창작용 2개 채널은 변경 없음.
 - 한국 시간 05:13/07:13/19:13 예약, 날짜별 아침 수집 브리핑 `/today` 및 수집일 필터 배포. GitHub 예약은 지연 가능. 연결 검사 성공은 실제 수집 성공이 아님.
-- 16:03 KST 운영 UI에서 ‘대기 수집 재개’를 실행. 오래된 요청 #1/#2가 재개됐고 4개 채널 모두 실제 실행 후 실패로 종료됨. 신규 자료 0개. 원인: 네이버 검색 인증/권한 HTTP 401. `/connections?service=naver`의 화면 저장 Client ID는 `aimom`. 비밀키는 읽거나 출력하지 않음. 공식 API 주소·헤더는 구현과 일치. 실제 발급된 Client ID/Secret 또는 검색 권한 확인 필요. 같은 키로 반복 수집하지 말 것.
+- 16:03 KST 운영 UI에서 ‘대기 수집 재개’를 실행. 오래된 요청 #1/#2가 재개됐고 4개 채널 모두 실제 실행 후 실패로 종료됨. 신규 자료 0개. 원인: 네이버 검색 인증/권한 HTTP 401. `/connections?service=naver`의 당시 확인한 화면의 Client ID가 유효하지 않았음(브랜드나 로그인 아이디와 별개의 외부 API 자격증명). 비밀키는 읽거나 출력하지 않음. 공식 API 주소·헤더는 구현과 일치. 실제 발급된 Client ID/Secret 또는 검색 권한 확인 필요. 같은 키로 반복 수집하지 말 것.
 - 4개 채널 수집은 collectionOnly: 유료 AI·Telegram 알림·SNS 게시 실행 없음. GitHub 실제 수집 워크플로 재실행은 인증이 해결될 때까지 보류. 예약은 켜져 있으며 실패를 성공으로 숨기지 않음.
 - 브라우저 확인이 20초 뒤 `aborted by user`로 반환됐으나 실제 사용자 취소인지 단정할 수 없음. 이후 같은 브라우저가 정상 응답했고 서버 live 확인. ChatGPT 내부 중단 원인은 이 기록만으로 확정 불가. 자동검토 거부 기록은 이번 중단에는 없음.
 - 매일 아침 8시 전후(Asia/Seoul, flexible) ChatGPT 수집 상태 점검 등록 완료. GitHub 실행·단계·로그를 읽어 성공/실패·실제 신규 건수와 `/today` 링크 전달. 기존 월요일 소재 브리핑은 유지. 새 작업 ID `6adefbf857e881919d97d45e0aa79bf8`.
@@ -148,7 +157,7 @@
 ## 이전 기록 · 채널 관리와 설정 UX (2026-10-22)
 - PR #6 병합, 운영 커밋 `224909cab8a541d71fab93cb7d3e1fbe070abbc7`, Render `dep-dbcr7n61egvs73f1qjb0` 15:58 KST live.
 - 설정 첫 화면에 채널 목록·추가·수정 기능. 내 채널 / 서비스 연결 / 운영 설정으로 분리하고 비용·게시 계정 진단은 접어서 표시합니다.
-- Studio와 수집 화면은 같은 DB 채널명 사용. 기존 `highway`→`opportunities`, `news`→`current-dialogue` 식별자 연결 유지. 펭귄상회·Fryday를 기존 채널과 함께 관리하며, 기존 과학·시사 이름을 임의 변경하지 않았습니다.
+- Studio와 수집 화면은 같은 DB 채널명 사용. 제작 채널과 수집 채널의 식별자 연결 유지(현재 `highscoop`→`opportunities`, `news`→`current-dialogue`). 펭귄상회·Fryday를 기존 채널과 함께 관리하며, 기존 과학·시사 이름을 임의 변경하지 않았습니다.
 - 새 채널은 자동 수집·게시 예산 0, 화제 발굴 꺼짐으로 생성합니다. 기존 개인 전용 링크·인증·CSRF 유지.
 - CI `39736954934`, job `119684782414`: 18개 파일 / 127개 테스트, 타입 검사·빌드 모두 통과. 최초 CI의 시사 채널 alias 호환성 실패를 수정 후 재검증했습니다.
 - 운영 HTTP 검증: 채널 5개, 카드 7개, 새 JS `index-DdcPbute.js` 제공 확인. 카드 전체 데이터 해시가 배포 전후 동일. health 200, 비로그인 채널 API 401. 운영 업무 데이터 직접 변경과 유료 AI 실행은 하지 않았습니다.
@@ -177,16 +186,16 @@
 
 ## 대상
 - GitHub: `boramsama01-code/ai-mom_studio` (비공개)
-- 운영 주소: https://ai-mom-studio.onrender.com/
-- Render 서비스: `srv-dat0vbg473hc73e9l5r0`, 워크스페이스: `tea-d90sffurnols73f0jiog` (My Workspace)
+- 운영 주소: https://spacepenguin.onrender.com/
+- 현재 Render 서비스: `srv-dbjep0ou01pc73f8rf80`, 워크스페이스: `tea-d90sffurnols73f0jiog` (My Workspace)
 - 병합한 브랜치: `codex/studio-render-integration-20261022`
 - 통합 전 운영: 커밋 `6ecedb8c4a29b9b36c626a03b25cef7cc1dbbd6f`, 배포 `dep-dbacgtm1egvs73dhj5v0`.
 
 ## 구현·보존한 기능
-- 첫 화면에 5단계 Studio Board, 펭귄상회·Highway·Fryday·시사 4개 채널, 검색·메모·백업 가져오기.
+- 첫 화면에 5단계 Studio Board, 우주펭귄상회·Highscoop·Fryday·Alligodang 4개 브랜드, 검색·메모·백업 가져오기.
 - GPT/Claude 원고 생성·수정, 선택한 한 컷 생성, 네컷 PNG, 버전 비교·복원, 생성 중 직접 편집 보존.
 - 요청 UUID 중복 방지, 유료 호출 자동 재시도 금지, 전역 정지.
-- 기존 Highway 수집·제작과 기존 로그인·PostgreSQL 운영 데이터·암호화 키 유지. 추가 DB 마이그레이션만 적용.
+- 기존 Highscoop 수집·제작과 기존 로그인·PostgreSQL 운영 데이터·암호화 키 유지. 추가 DB 마이그레이션만 적용.
 - 기존 Sites 기본 기획 7개·메모, 참고 공고 7개를 중복 없이 이전. 참고 공고는 샘플·재검토 대상.
 - 기존 웹폰트 등 비변경 파일 보존과 변경 파일 73개의 원격 Git blob 해시 일치 확인.
 - 캐릭터 4개 원본과 웹툰 예시 원본 유지. 예시 PNG는 19개 조각을 빌드 시 바이트 그대로 복원하고 해시 검증.
@@ -208,3 +217,4 @@
 - 관련 없는 `nodeul_news` 프로젝트는 건드리지 않습니다.
 - 전체 코드·로그·이미지 Base64를 대화에 반복 출력하지 않습니다. 필요한 구간과 결과만 확인합니다.
 - `.git/studio-upload-state.json`에 파일별 해시와 CI·병합 진행 상태를 보관했습니다. 완료한 업로드나 유료 생성을 반복하지 않습니다.
+

@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
 import { channels, appSettings, approvals, deliveries, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
-import { channelSlug } from "../../shared/channelKeys";
+import { channelSlug, normalizeStudioChannel } from "../../shared/channelKeys";
 import { studioContentSchema, type StudioGeneration, type StudioContent, type StudioCard, type StudioJob, type StudioRevision } from "../../shared/studio";
 import { conflict, HttpError, parse } from "../routes/util";
 import { enqueueJob } from "../worker/queue";
@@ -28,7 +28,7 @@ export async function studioCardsWithOutput(db: DB, rows: Array<typeof studioCar
     return dto;
   });
 }
-export const studioRevisionDto = (r: typeof studioRevisions.$inferSelect): StudioRevision => ({ ...r, createdAt: r.createdAt.toISOString() });
+export const studioRevisionDto = (r: typeof studioRevisions.$inferSelect): StudioRevision => ({ ...r, snapshot: studioContentSchema.parse(r.snapshot), createdAt: r.createdAt.toISOString() });
 export const studioJobDto = (j: typeof jobs.$inferSelect): StudioJob => ({ id: j.id, status: j.status, lastError: j.lastError, result: j.result, createdAt: j.createdAt.toISOString(), finishedAt: j.finishedAt?.toISOString() ?? null });
 
 export async function loadStudioCard(db: DB, id: number, lock = false) {
@@ -95,7 +95,7 @@ export async function validateStudioImages(db: DB, cardId: number, content: Stud
 }
 export async function validateStudioChannel(db: DB, key: string) {
   const [ch] = await db.select({ id: channels.id, active: channels.active }).from(channels).where(eq(channels.slug, channelSlug(key)));
-  if (!ch) throw new HttpError(400, key === "highway" ? "Highscoop 기본 채널을 먼저 추가해 주세요." : "채널을 먼저 추가해 주세요.");
+  if (!ch) throw new HttpError(400, normalizeStudioChannel(key) === "highscoop" ? "Highscoop 기본 채널을 먼저 추가해 주세요." : "채널을 먼저 추가해 주세요.");
   if (!ch.active) throw new HttpError(409, "보관된 채널입니다. 채널을 복원한 뒤 새 작업을 시작하세요.");
 }
 export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number) {
@@ -187,7 +187,7 @@ export const studioImportSchema = z.object({
 }).strict();
 export async function importStudioBoard(db: DB, input: z.infer<typeof studioImportSchema>, actor: string) {
   // Validate every card before entering the transaction so a malformed backup imports nothing.
-  const rows = input.cards.map(c => ({ source: c, content: parse(studioContentSchema, { title: c.title, channel: c.channel, format: c.format, stage: c.stage, dueDate: c.dueDate, memo: c.memo, imagePath: c.imagePath ?? "", characters: c.channel === "highway" ? ["pempem"] : c.channel === "news" ? ["pengpeng"] : ["penguin"] }) }));
+  const rows = input.cards.map(c => ({ source: c, content: parse(studioContentSchema, { title: c.title, channel: c.channel, format: c.format, stage: c.stage, dueDate: c.dueDate, memo: c.memo, imagePath: c.imagePath ?? "", characters: normalizeStudioChannel(c.channel) === "highscoop" ? ["pempem"] : c.channel === "news" ? ["pengpeng"] : ["penguin"] }) }));
   for (const key of new Set(rows.map(r => r.content.channel))) await validateStudioChannel(db, key);
   return db.transaction(async tx => {
     let imported = 0;

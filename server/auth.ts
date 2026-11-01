@@ -43,7 +43,7 @@ export function installSession(app: Express) {
   app.use(
     session({
       store: new PgStore({ pool: getPool(), tableName: "user_sessions", createTableIfMissing: true }),
-      name: "aimom.sid",
+      name: "spacepenguin.sid",
       secret,
       resave: false,
       saveUninitialized: false,
@@ -171,7 +171,7 @@ export function installAuthRoutes(app: Express) {
 
   app.post("/api/auth/logout", (req, res) => {
     req.session?.destroy(() => {
-      res.clearCookie("aimom.sid");
+      res.clearCookie("spacepenguin.sid");
       res.json({ ok: true });
     });
   });
@@ -180,4 +180,5 @@ export function installAuthRoutes(app: Express) {
 export function actorOf(req: Request) {
   return req.session?.user ?? "unknown";
 }
+
 

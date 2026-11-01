@@ -14,7 +14,7 @@
       {
         "id": "seed-highway-intro",
         "title": "Highscoop · 첫 인사와 채널 소개",
-        "channel": "highway",
+        "channel": "highscoop",
         "format": "브랜드",
         "stage": "writing",
         "dueDate": "",
@@ -23,7 +23,7 @@
       {
         "id": "seed-highway-checklist",
         "title": "특목고 모집요강 · 확인할 항목",
-        "channel": "highway",
+        "channel": "highscoop",
         "format": "카드뉴스",
         "stage": "idea",
         "dueDate": "",

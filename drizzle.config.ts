@@ -5,6 +5,7 @@ export default defineConfig({
   out: "./migrations",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.APP_DATABASE_URL || process.env.DATABASE_URL || "postgres://localhost/aimom",
+    url: process.env.APP_DATABASE_URL || process.env.DATABASE_URL || "postgres://localhost/spacepenguin",
   },
 });
+

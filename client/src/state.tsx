@@ -32,7 +32,11 @@ const Ctx = createContext<ChannelCtx | null>(null);
 
 function readStored(): "all" | number | null {
   try {
-    const v = localStorage.getItem("aimom.channel");
+    const v = localStorage.getItem("spacepenguin.channel") ?? localStorage.getItem("aimom.channel");
+    if (v !== null) {
+      localStorage.setItem("spacepenguin.channel", v);
+      localStorage.removeItem("aimom.channel");
+    }
     if (v === "all") return "all";
     const n = Number(v);
     return Number.isInteger(n) && n > 0 ? n : null;
@@ -57,7 +61,7 @@ export function ChannelProvider({ children }: { children: ReactNode }) {
         qc.removeQueries({ predicate: (q) => q.queryKey[0] === "ch" });
         setSelected(v);
         try {
-          localStorage.setItem("aimom.channel", String(v));
+          localStorage.setItem("spacepenguin.channel", String(v));
         } catch {
           /* 저장 불가 환경 무시 */
         }

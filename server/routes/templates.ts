@@ -206,7 +206,7 @@ templateRoutes.get(
       lines.push(fields.map((f) => csvCell(f.value)).join(","));
     }
     res.setHeader("content-type", "text/csv; charset=utf-8");
-    res.setHeader("content-disposition", `attachment; filename="ai-mom-${ch.slug}-fields.csv"`);
+    res.setHeader("content-disposition", `attachment; filename="spacepenguin-${ch.slug}-fields.csv"`);
     res.send("﻿" + lines.join("\r\n") + "\r\n");
   }),
 );

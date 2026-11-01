@@ -26,8 +26,8 @@ export async function migrateSitesStarter(db: DB) {
     // Drizzle's nested transaction is a PostgreSQL savepoint: the marker and all
     // imported records still commit/roll back as one outer transaction.
     const imported = await importStudioBoard(tx as unknown as DB, board, "migration:sites");
-    const [highway] = await tx.select().from(channels).where(eq(channels.slug, "opportunities"));
-    if (!highway) throw new Error("Sites 이전 전 Highscoop 기본 채널을 생성해야 합니다.");
+    const [highscoop] = await tx.select().from(channels).where(eq(channels.slug, "opportunities"));
+    if (!highscoop) throw new Error("Sites 이전 전 Highscoop 기본 채널을 생성해야 합니다.");
     let sampleNotices = 0;
 
     for (const notice of starter.notices) {
@@ -54,7 +54,7 @@ export async function migrateSitesStarter(db: DB) {
         uncertainties: ["기존 Hub 초기 참고 자료입니다. 원문과 일정·대상을 다시 확인해야 합니다."],
       });
       const [item] = await tx.insert(contentItems).values({
-        channelId: highway.id, primarySourceId: source.id, title: notice.title, kind: "notice", origin: "manual",
+        channelId: highscoop.id, primarySourceId: source.id, title: notice.title, kind: "notice", origin: "manual",
         category: payload.category, relevance: "uncertain", evidenceStatus: "needs_review", scheduleStatus: "unknown",
         reviewStatus: "pending", publishStatus: "waiting", isSample: true, extracted: payload,
       }).onConflictDoNothing().returning();

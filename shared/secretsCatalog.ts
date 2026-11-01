@@ -43,7 +43,7 @@ export const SECRET_GROUPS: SecretGroup[] = [
     docs: "https://guide.ncloud-docs.com/docs/apihub-migration",
     testable: true,
     fields: [
-      { key: "NAVER_CLIENT_ID", label: "Client ID", secret: false, hint: "네이버의 Application 인증 정보에 표시된 발급 ID를 붙여 넣으세요. 직접 정한 앱 이름(예: aimom)은 인증 ID로 사용할 수 없습니다." },
+      { key: "NAVER_CLIENT_ID", label: "Client ID", secret: false, hint: "네이버의 Application 인증 정보에 표시된 발급 ID를 붙여 넣으세요. 직접 정한 앱 이름은 인증 ID로 사용할 수 없습니다." },
       { key: "NAVER_CLIENT_SECRET", label: "Client Secret", secret: true },
     ],
   },
@@ -118,4 +118,5 @@ export function isSecretKey(key: string): boolean {
   for (const g of SECRET_GROUPS) for (const f of g.fields) if (f.key === key) return f.secret;
   return destinationKeyIsSecret(key);
 }
+
 

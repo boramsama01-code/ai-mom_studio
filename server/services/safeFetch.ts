@@ -97,7 +97,7 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
         dispatcher: guardedAgent, redirect: "manual", signal: ctrl.signal,
         ...(isRpc ? { method: "POST", body: opts.googleNewsForm } : {}),
         headers: {
-          "user-agent": "ai-mom-studio/0.1 (+education notice monitor; contact via site operator)",
+          "user-agent": "spacepenguin-studio/0.1 (+education notice monitor; contact via site operator)",
           accept: opts.accept ?? "text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.5",
           "accept-language": "ko-KR,ko;q=0.9",
           ...(isRpc ? { "content-type": "application/x-www-form-urlencoded;charset=UTF-8", referer: "https://news.google.com/" } : {}),
@@ -144,3 +144,4 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
   }
   throw new FetchFailure("리디렉트가 너무 많음", "too_many_redirects");
 }
+

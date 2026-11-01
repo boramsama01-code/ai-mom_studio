@@ -1,9 +1,10 @@
 import { CHANNEL_BRANDS } from "./branding";
+import { normalizeStudioChannel } from "./channelKeys";
 import { z } from "zod";
 import { aiProviders, type AiProvider } from "./aiProviders";
 import { PERSISTED_CARD_DESIGNS, CARD_COLOR_VARIANTS } from "./cardDesigns";
 
-export const studioChannels = ["penguin", "highway", "fryday", "news"] as const;
+export const studioChannels = ["penguin", "highscoop", "fryday", "news"] as const;
 export const studioFormats = ["웹툰", "카드뉴스", "릴스", "브랜드", "기타"] as const;
 export const studioExportDesigns = ["editorial", "spotlight", "minimal", ...Array.from(new Set([...PERSISTED_CARD_DESIGNS, ...CARD_COLOR_VARIANTS].map(d => `set:${d.id}` as const)))] as const;
 export const studioPageCount = (content: { format: string; exportDesign: string }) => content.format === "카드뉴스" ? content.exportDesign.startsWith("set:") ? 5 : 6 : 1;
@@ -11,7 +12,7 @@ export const studioOutputFormats = ["웹툰", "카드뉴스"] as const;
 export const studioOutputDescription = (format: string, design = "editorial") => format === "웹툰" ? "네컷 이미지 1장 · 1080 × 1350 PNG" : format === "카드뉴스" ? design.startsWith("set:") ? "표지 + 본문 4장 · 1080 × 1350 PNG 5장 (ZIP)" : "표지 + 본문 4장 + 마무리 · 1080 × 1350 PNG 6장 (ZIP)" : "기획용 형식 · 이미지·영상 내보내기 미지원";
 export const studioStages = ["idea", "writing", "making", "review", "done"] as const;
 export const studioCharacters = ["pengpeng", "pempem", "penguin", "pengki"] as const;
-export const studioChannelLabels = { penguin: CHANNEL_BRANDS.penguin.name, highway: CHANNEL_BRANDS.highway.name, fryday: CHANNEL_BRANDS.fryday.name, news: CHANNEL_BRANDS.news.name };
+export const studioChannelLabels = { penguin: CHANNEL_BRANDS.penguin.name, highscoop: CHANNEL_BRANDS.highscoop.name, fryday: CHANNEL_BRANDS.fryday.name, news: CHANNEL_BRANDS.news.name };
 export const studioStageLabels = { idea: "아이디어", writing: "원고", making: "제작", review: "검토", done: "완료" };
 export type StudioChannel = string;
 export type StudioCharacter = typeof studioCharacters[number];
@@ -23,7 +24,7 @@ const date = z.string().refine(v => v === "" || (/^\d{4}-\d{2}-\d{2}$/.test(v) &
 export const studioPanelSchema = z.object({ scene: z.string().max(4000), dialogue: z.string().max(3000), imageId: z.number().int().positive().nullable().default(null) }).strict();
 export const studioContentSchema = z.object({
   title: z.string().trim().min(1).max(160),
-  channel: z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/).default("penguin"),
+  channel: z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/).transform(normalizeStudioChannel).default("penguin"),
   format: z.enum(studioFormats).default("웹툰"),
   stage: z.enum(studioStages).default("idea"),
   dueDate: date.default(""), memo: z.string().max(12000).default(""),

@@ -30,6 +30,8 @@ function masterMaterial(): string {
 }
 
 function derivedKey(): Buffer {
+  // Immutable encryption context: changing this historical value would make
+  // every previously saved API key unreadable. It is never a public brand label.
   return Buffer.from(crypto.hkdfSync("sha256", masterMaterial(), "ai-mom-studio", "stored-secrets-v1", 32));
 }
 
@@ -129,3 +131,4 @@ export function __setOriginalEnvForTest(keys: string[]) {
   fromStore.clear();
   unreadable.clear();
 }
+

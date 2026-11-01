@@ -195,9 +195,9 @@ describe("통합 제작 보드", () => {
   });
   it("단계만 변경해도 기존 채널·원고·대사·캡션이 유지됨", async () => {
     const { agent, headers, card } = await setup();
-    const edited = await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: 1, channel: "highway", memo: "입시 자료", script: "원고", caption: "캡션", panels: card.panels.map((p: object) => ({ ...p, scene: "장면", dialogue: "대사" })) });
+    const edited = await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: 1, channel: "highscoop", memo: "입시 자료", script: "원고", caption: "캡션", panels: card.panels.map((p: object) => ({ ...p, scene: "장면", dialogue: "대사" })) });
     const stageOnly = await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({ version: 2, stage: "review" });
-    expect(stageOnly.body).toMatchObject({ channel: "highway", memo: "입시 자료", script: "원고", caption: "캡션", panels: edited.body.panels, stage: "review" });
+    expect(stageOnly.body).toMatchObject({ channel: "highscoop", memo: "입시 자료", script: "원고", caption: "캡션", panels: edited.body.panels, stage: "review" });
   });
   it("전역 정지는 새 요청과 이미 대기 중인 유료 작업을 차단", async () => {
     const { agent, headers, card } = await setup();
@@ -298,7 +298,7 @@ describe("통합 제작 보드", () => {
   it("Sites 가져오기는 중복 없이 기존 편집을 유지하며 비밀값을 받지 않음", async () => {
     const { agent, csrf } = await login(app);
     const headers = { "x-csrf-token": csrf };
-    const source = { id: "legacy-one", title: "옛 보드", channel: "highway", format: "웹툰", stage: "idea", dueDate: "", memo: "메모", createdAt: "2026-10-10T00:00:00Z" };
+    const source = { id: "legacy-one", title: "옛 보드", channel: "highscoop", format: "웹툰", stage: "idea", dueDate: "", memo: "메모", createdAt: "2026-10-10T00:00:00Z" };
     const first = await agent.post("/api/studio/import").set(headers).send({ exportedAt: new Date().toISOString(), cards: [source] });
     expect(first.body.imported).toBe(1);
     const [imported] = await getDb().select().from(studioCards).where(eq(studioCards.externalId, "sites:legacy-one"));
