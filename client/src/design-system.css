@@ -448,7 +448,8 @@ label.check { min-width:0; }
  .collection-compact-head { flex-wrap:wrap; }
 }
 .instagram-account-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr)); gap:16px; }
-.instagram-account { min-width:0; padding:20px; border:1px solid var(--border); border-radius:14px; }
+.instagram-account { min-width:0; padding:20px; border:1px solid var(--border); border-radius:14px; overflow-wrap:anywhere; }
+.studio-instagram-connect { min-width:0; overflow-wrap:anywhere; }
 .instagram-account>a,.studio-account-route a { overflow-wrap:anywhere; }
 .instagram-account p { margin:0; }
 .finished-ai .row>.field { min-width:0; flex:1 1 180px; }
