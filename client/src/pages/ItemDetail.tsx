@@ -1,3 +1,4 @@
+import { CategorySelect } from "../CategorySelect";
 import { CardCarousel } from "../CardCarousel";
 import type { CardCarousel as CarouselData } from "@shared/carousel";
 import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
@@ -49,6 +50,11 @@ export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: num
   useEffect(() => { setTab("source"); }, [requestedCid, id]);
   useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, navigate]);
   const guard = useDirtyGuard();
+  const qc = useQueryClient();
+  const categorize = useMutation({
+    mutationFn: (subcategory: string) => api(`/channels/${cid}/items/${id}/subcategory`, { method: "PATCH", body: { version: q.data!.item.version, subcategory: subcategory || null } }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["ch"] }); qc.invalidateQueries({ queryKey: ["collection"] }); },
+  });
   const transfer = useMutation({
     mutationFn: () => {
       if (!sourceChannel?.active) throw new Error("사용 중인 채널을 확인해 주세요.");
@@ -84,6 +90,8 @@ export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: num
         </div>
         <button className="btn" disabled={transfer.isPending || !sourceChannel?.active} onClick={() => guard.confirmLeave(() => transfer.mutate())}>{transfer.isPending ? "가져오는 중…" : "제작 보드로 가져오기"}</button>
       </div>
+      <CategorySelect channel={sourceChannel?.slug ?? ""} value={d.item.subcategory ?? ""} onChange={v => guard.confirmLeave(() => categorize.mutate(v))} disabled={categorize.isPending} />
+      {categorize.error && <ErrorBox error={categorize.error} />}
       {transfer.error && <ErrorBox error={transfer.error} />}
       <DiscoveryNote info={d.item.discovery} />
       <div className="tabs workflow-tabs" role="tablist" aria-label="콘텐츠 제작 단계">
@@ -813,3 +821,4 @@ function Progress({ d, onGo, actionsOnly = false, forTab }: { d: Detail; onGo?: 
     </>
   );
 }
+

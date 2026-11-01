@@ -1,3 +1,4 @@
+import { validSubcategory } from "../../shared/channelCategories";
 /**
  * 검색 설정(키워드) — DB의 search_rules가 운영 원본
  * 추가/수정/일시정지/삭제(soft)/복구, 줄 단위 대량 추가(저장 전 미리보기), 시험 검색
@@ -46,6 +47,7 @@ ruleRoutes.get(
 );
 
 const ruleBase = {
+  subcategory: z.string().max(40).nullable().optional(),
   categoryHint: z.string().max(40).nullable().optional(),
   enabled: z.boolean().optional(),
   priority: z.number().int().min(0).max(10_000).optional(),
@@ -78,6 +80,7 @@ async function insertRules(channelId: number, items: Array<{ query: string; endp
         query: q,
         normalizedQuery: normalizeQuery(q),
         endpoint: it.endpoint,
+        subcategory: (it.subcategory as string | null | undefined) ?? null,
         categoryHint: (it.categoryHint as string | null | undefined) ?? null,
         enabled: (it.enabled as boolean | undefined) ?? true,
         priority: (it.priority as number | undefined) ?? 100,
@@ -101,6 +104,7 @@ ruleRoutes.post(
   ah(async (req, res) => {
     const ch = await loadChannel(req.params.cid);
     const body = parse(ruleCreate, req.body);
+    if (!validSubcategory(ch.slug, body.subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     const { endpoints, ...rest } = body;
     const r = await insertRules(ch.id, endpoints.map((e) => ({ ...rest, endpoint: e })), actorOf(req));
     if (!r.created.length) throw new HttpError(409, "같은 검색어가 이미 등록되어 있습니다.", { duplicates: r.duplicates });
@@ -174,6 +178,7 @@ ruleRoutes.patch(
     const ch = await loadChannel(req.params.cid);
     const id = intParam(req.params.id);
     const body = parse(rulePatch, req.body);
+    if (!validSubcategory(ch.slug, body.subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     const db = getDb();
     const [cur] = await db.select().from(searchRules).where(and(eq(searchRules.id, id), eq(searchRules.channelId, ch.id)));
     if (!cur) throw new HttpError(404, "검색어를 찾을 수 없습니다.");
@@ -362,5 +367,6 @@ ruleRoutes.put(
     res.json({ discovery: resolveDiscovery(ch.contentType, discovery) });
   }),
 );
+
 
 

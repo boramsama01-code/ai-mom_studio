@@ -1,3 +1,4 @@
+import { CategorySelect } from "../CategorySelect";
 import { studioKey } from "@shared/channelKeys";
 import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -39,6 +40,7 @@ export function InboxPage() {
     schedule: params.get("schedule") ?? "",
     evidence: params.get("evidence") ?? "",
     category: params.get("category") ?? "",
+    subcategory: params.get("subcategory") ?? "",
     noticeIntent: params.get("noticeIntent") ?? "candidate",
     view: (params.get("view") as "inbox" | "excluded" | "all") ?? "inbox",
     collectedOn: params.get("collectedOn") === "all" ? "" : params.get("collectedOn") ?? kstDay(),
@@ -48,7 +50,8 @@ export function InboxPage() {
   const [qInput, setQInput] = useState(f.q);
   const [mode, setMode] = useState<"ideas" | "scraps">("ideas");
   const ideas = isIdeaChannel(current) && mode === "ideas";
-  useEffect(() => { setPage(1); setMode("ideas"); }, [selected]);
+  const previousChannel = useRef(selected);
+  useEffect(() => { setPage(1); setMode("ideas"); if (previousChannel.current !== selected) { setF(old => ({ ...old, subcategory: "" })); previousChannel.current = selected; } }, [selected]);
   const noticeChannel = current?.contentType === "notice";
   const query = useQuery({
     queryKey: ["ch", selected, "items", f, page, ideas],
@@ -60,7 +63,7 @@ export function InboxPage() {
     setF((o) => ({ ...o, [k]: v }));
     setPage(1);
   };
-  const resetFilters = () => { setQInput(""); setFollowToday(false); setF({ q: "", review: "", schedule: "", evidence: "", category: "", noticeIntent: "all", view: "inbox", collectedOn: "" }); setPage(1); };
+  const resetFilters = () => { setQInput(""); setFollowToday(false); setF({ q: "", review: "", schedule: "", evidence: "", category: "", subcategory: "", noticeIntent: "all", view: "inbox", collectedOn: "" }); setPage(1); };
   const yesterday = kstDay(new Date(Date.now() - 86400_000));
   const isNotice = current ? current.contentType === "notice" : true;
 
@@ -74,8 +77,9 @@ export function InboxPage() {
         <div className="row">{current && <GuardedLink className="btn sm" href={`/?start=experience&channel=${studioKey(current.slug)}`}>직접 다녀온 후기 쓰기</GuardedLink>}<label className="field inbox-channel"><span className="sr-only">수집함 채널</span><select aria-label="수집함 채널" value={selected} onChange={e => select(e.target.value === "all" ? "all" : Number(e.target.value))}>{channels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="all">모든 채널</option></select></label></div>
       </div>
       {isIdeaChannel(current) && <div className="tabs inbox-modes" role="group" aria-label="수집함 자료 유형"><button aria-pressed={ideas} onClick={() => { setMode("ideas"); resetFilters(); }}>아이디어 100</button><button aria-pressed={!ideas} onClick={() => { setMode("scraps"); resetFilters(); }}>스크랩 자료</button></div>}
-      {!ideas && <CollectionPanel date={f.collectedOn || undefined} />}
-      {current && <InboxKeywords key={current.id} cid={current.id} kind={current.contentType} />}
+      {!ideas && <CollectionPanel date={f.collectedOn || undefined} subcategory={f.subcategory} />}
+      <CategorySelect channel={current?.slug ?? "all"} value={f.subcategory} onChange={v => set("subcategory", v)} filter />
+      {current && <InboxKeywords key={current.id} cid={current.id} kind={current.contentType} subcategory={f.subcategory} />}
       {noticeChannel && <section className="panel stack" aria-label="공고 선별" style={{ marginBottom: 16 }}>
         <div className="row" role="group" aria-label="공고 성격">
           {[...NOTICE_INTENTS, "all"].map(intent => <button key={intent} className={`btn sm ${f.noticeIntent === intent ? "primary" : ""}`} aria-pressed={f.noticeIntent === intent} onClick={() => set("noticeIntent", intent)}>{intent === "all" ? "전체 자료" : NOTICE_INTENT_LABEL[intent as NoticeIntent]}</button>)}
@@ -308,5 +312,6 @@ function TriageList({ rows, cid }: { rows: ListRow[]; cid: number }) {
     </div>
   );
 }
+
 
 

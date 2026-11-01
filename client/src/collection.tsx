@@ -15,7 +15,7 @@ export function useKstToday() {
   return today;
 }
 
-export function CollectionPanel({ date, detailed = false }: { date?: string; detailed?: boolean }) {
+export function CollectionPanel({ date, detailed = false, subcategory = "" }: { date?: string; detailed?: boolean; subcategory?: string }) {
   const workroom = isPrivateWorkroom();
   const { selected, select, current } = useChannel();
   const qc = useQueryClient(), toast = useToast();
@@ -27,7 +27,7 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
     refetchInterval: q => q.state.data?.channels.some(c => c.jobs.some(j => !j.stale)) ? 5000 : 60_000 });
   const finished = query.data?.channels.map(c => c.lastRun?.finishedAt ?? "").join("|");
   useEffect(() => { if (finished) qc.invalidateQueries({ queryKey: ["ch"] }); }, [finished, qc]);
-  const collect = useMutation({ mutationFn: (channelId: number | "all" = selected) => api<{ inline: boolean; requested: unknown[] }>("/collection/collect", { method: "POST", body: { channelId } }),
+  const collect = useMutation({ mutationFn: (channelId: number | "all" = selected) => api<{ inline: boolean; requested: unknown[] }>("/collection/collect", { method: "POST", body: { channelId, ...(subcategory && subcategory !== "미분류" && channelId !== "all" ? { subcategory } : {}) } }),
     onSuccess: r => { toast("ok", r.inline ? `${r.requested.length}개 채널의 수집을 시작했습니다. 결과는 자동으로 갱신됩니다.` : "요청을 등록했습니다. 다음 워커 실행을 기다립니다."); qc.invalidateQueries({ queryKey: ["collection"] }); }, onError: e => toast("err", (e as Error).message) });
   const auto = useMutation({ mutationFn: (enabled: boolean) => api("/settings/auto-collect", { method: "PUT", body: { enabled } }),
     onSuccess: async () => { await Promise.all([qc.invalidateQueries({ queryKey: ["collection"] }), qc.invalidateQueries({ queryKey: ["status"] })]); }, onError: e => toast("err", (e as Error).message) });
@@ -41,9 +41,10 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
   const queued = d.channels.some(c => c.jobs.length);
   const searchAuthFailed = d.sourceMode !== "public_rss" && d.channels.some(c => c.lastRun?.status === "failed" && c.lastRun.errors.some(e =>
     (e.scope === "discovery" || e.scope.startsWith("rule:")) && /인증\/권한 오류 \(HTTP (401|403)\)/.test(e.message)));
-  const showItems = (id: number) => { select(id); navigate(`/inbox?collectedOn=${day}`); };
+  const showItems = (id: number, subcategory = "") => { select(id); navigate(`/inbox?collectedOn=${day}${subcategory ? `&subcategory=${encodeURIComponent(subcategory)}` : ""}`); };
   if (!detailed) return <section className="panel collection-compact" aria-label="날짜별 수집 현황">
-    <div className="collection-compact-head"><div><span className="collection-kicker">COLLECTION</span><h2>{day === today ? "오늘의 수집" : `${day} 수집 결과`}</h2></div><div className="row"><button className="btn ghost icon" aria-label="수집 현황 새로고침" onClick={() => query.refetch()} disabled={query.isFetching}><Icon name="refresh" size={18} /></button><button className="btn primary" onClick={() => collect.mutate(selected)} disabled={collect.isPending || busy || d.globalStop || !(d.searchReady ?? d.naverReady)}>{collect.isPending ? "요청 중…" : busy ? "수집 중…" : queued ? "대기 수집 재개" : selected === "all" ? "전체 채널 지금 수집" : "지금 수집"}</button></div></div>
+    <div className="collection-compact-head"><div><span className="collection-kicker">COLLECTION</span><h2>{day === today ? "오늘의 수집" : `${day} 수집 결과`}</h2></div><div className="row"><button className="btn ghost icon" aria-label="수집 현황 새로고침" onClick={() => query.refetch()} disabled={query.isFetching}><Icon name="refresh" size={18} /></button><button className="btn primary" onClick={() => collect.mutate(selected)} disabled={subcategory === "미분류" || (!!subcategory && selected === "all") || collect.isPending || busy || d.globalStop || !(d.searchReady ?? d.naverReady)}>{collect.isPending ? "요청 중…" : busy ? "수집 중…" : subcategory ? `${subcategory} 수집` : queued ? "대기 수집 재개" : selected === "all" ? "전체 채널 지금 수집" : "지금 수집"}</button></div></div>
+    {subcategory && <p className="small muted">선택한 소분류의 활성 키워드만 수집합니다. 아래 현황 수치는 채널 전체 기준입니다.</p>}
     <div className="collection-compact-metrics"><div><span>새로 모은 자료</span><strong>{totals.newItems}<small>건</small></strong></div><div><span>검토를 기다리는 자료</span><strong>{totals.pending}<small>건</small></strong></div><div className="collection-compact-next"><span>다음 자동 수집</span><strong>{d.nextAt ? fmtDate(d.nextAt) : d.globalStop ? "전체 정지" : "자동 수집 꺼짐"}</strong></div></div>
     {d.globalStop && <p className="notice warn">전역 정지 중이므로 수집이 실행되지 않습니다.</p>}
     {!(d.searchReady ?? d.naverReady) && <p className="notice warn">검색 연결을 확인해 주세요. <GuardedLink href="/connections?service=naver">연결 설정</GuardedLink></p>}
@@ -78,9 +79,11 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
     <p className="small muted" style={{ margin: 0 }}>{d.lastScheduledAt ? `최근 실제 예약 수집: ${fmtDate(d.lastScheduledAt)}` : "실제 예약 수집 기록이 아직 없습니다. 연결 검사 성공과 자료 수집 완료는 별개입니다."}</p>
     {detailed ? <div className="collection-channels">{d.channels.map(c => <article key={c.id} className="collection-channel">
       <div className="row between"><h3>{c.name}</h3><strong>{c.newItems}건</strong></div>
+      <div className="row" aria-label={`${c.name} 소분류별 저장 자료`}>{c.categories?.map(category => <button key={category.label} className="btn sm" onClick={() => showItems(c.id, category.label)}>{category.label} · {category.newItems}건</button>)}</div>
+      <p className="small muted">소분류 수치는 선택한 날짜에 저장된 자료입니다. 중복·실행 상태는 채널 단위로 표시합니다.</p>
       <p className="small muted">검색어 {c.queries}개 · 화제 탐색 {c.discoveryQueries}개 · 연결된 공식 게시판 {c.boards}개</p>
       {!!((c.noticeCandidates ?? 0) + (c.noticeUncertain ?? 0) + (c.noticeReports ?? 0)) && <p className="small"><strong>모집·접수 후보 {c.noticeCandidates ?? 0}건</strong> · 확인 필요 {c.noticeUncertain ?? 0}건 · 사후·대상 외·마감 {c.noticeReports ?? 0}건</p>}
-      <div className="row small">{c.lastRun ? <><StatusBadge type="run" value={c.lastRun.status} /><span>{fmtDate(c.lastRun.startedAt)}</span><span>신규 {c.lastRun.counts.newItems ?? 0} · 중복 {c.lastRun.counts.duplicates ?? 0}</span></> : <span>아직 수집을 실행하지 않았습니다.</span>}</div>
+      <div className="row small">{c.lastRun ? <><span>최근 실행 · {c.lastRun.subcategory || "채널 전체"}</span><StatusBadge type="run" value={c.lastRun.status} /><span>{fmtDate(c.lastRun.startedAt)}</span><span>신규 {c.lastRun.counts.newItems ?? 0} · 중복 {c.lastRun.counts.duplicates ?? 0}</span></> : <span>아직 수집을 실행하지 않았습니다.</span>}</div>
       {c.lastRun && c.lastRun.counts.rssRequests !== undefined && <p className="small muted">공개 RSS {c.lastRun.counts.rssRequests}회 확인 · 언론사 피드 {c.lastRun.counts.rssFeedOk ?? 0}곳 응답 · Google 검색 {c.lastRun.counts.googleQueries ?? 0}회</p>}
       {!!c.lastRun?.counts.noticeReportsSkipped && <p className="small muted">사후 홍보·대상 외 모집 {c.lastRun.counts.noticeReportsSkipped}건은 신규 저장에서 제외했습니다.</p>}
       {!!c.lastRun?.errors.length && <details className="small"><summary>최근 실행에서 확인할 내용 {c.lastRun.errors.length}개</summary><ul>{c.lastRun.errors.map((e, i) => <li key={i}>{e.message}</li>)}</ul></details>}
@@ -100,4 +103,5 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
     <details className="small"><summary>무엇을 어떻게 수집하나요?</summary><p>뉴스 검색어로 Google 뉴스 RSS와 언론사 직접 RSS의 최근 7일 자료를 모읍니다. 한 경로가 실패해도 다른 경로는 계속 처리하고, URL 및 같은 언론사·제목·날짜의 중복을 제외합니다. 블로그 검색에는 선택적으로 네이버 키를 사용합니다. 과학·시사는 여러 언론의 보도를 주제별로 묶어 화제도 함께 찾습니다. 한도를 넘는 검색어는 다음 수집에서 먼저 처리합니다.</p><p>‘오늘’은 오늘 처음 저장한 날짜입니다. 원문의 게시일과 다를 수 있습니다. 일부 RSS가 중단되거나 결과 상한에 닿으면 부분 수집으로 표시합니다. 원문 확보 실패·출처 미확인은 자료별로 표시하며, 연결되지 않은 공식 게시판은 자동 수집하지 않습니다. 이 화면의 수집 버튼은 AI 생성·알림 전송·SNS 게시를 실행하지 않습니다.</p>{d.publicFeeds && <p>직접 RSS: {d.publicFeeds.join(" · ")}</p>}</details>
   </section>;
 }
+
 

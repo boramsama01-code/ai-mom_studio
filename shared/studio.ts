@@ -28,6 +28,7 @@ export const studioContentSchema = z.object({
   finishedDeck: z.object({ pages: z.array(z.object({ imageId: z.number().int().positive(), name: z.string().max(200), altText: z.string().max(1000).default(""), uploadId: z.string().uuid().optional() }).strict()).max(10).refine(pages => new Set(pages.map(p => p.imageId)).size === pages.length, "같은 이미지는 한 번만 넣어 주세요.") }).strict().nullable().default(null),
   altTexts: z.array(z.string().max(1000)).max(10).default([]),
   experience: experienceSchema.nullable().default(null),
+  subcategory: z.string().max(40).optional(),
   title: z.string().trim().min(1).max(160),
   channel: z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/).transform(normalizeStudioChannel).default("penguin"),
   format: z.enum(studioFormats).default("웹툰"),
@@ -66,6 +67,7 @@ export const studioPatchSchema = z.object({
     value => !value || !altTextError(value.coverAltText, true) && value.pages.every(page => !altTextError(page.altText, true)),
     "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.",
   ).optional(),
+  subcategory: studioContentSchema.shape.subcategory,
   title: studioContentSchema.shape.title.optional(),
   channel: studioContentSchema.shape.channel.unwrap().optional(),
   format: studioContentSchema.shape.format.unwrap().optional(),
@@ -110,3 +112,4 @@ export type StudioTrashResult = { card: StudioCard; cancelledJobs: number; cance
 export type StudioCardDetail = { card: StudioCard; revisions: StudioRevision[]; jobs: StudioJob[] };
 export type StudioExportCheck = { errors: Array<{ field: string; message: string }>; warnings: string[]; pageCount: number };
 export function emptyStudioCard(): StudioContent { return studioContentSchema.parse({ title: "새 콘텐츠" }); }
+

@@ -1,3 +1,4 @@
+import { validSubcategory } from "../../shared/channelCategories";
 import { studioCards } from "../../shared/schema";
 import { loadCardPages } from "../services/cardCarousel";
 import { zipFiles } from "../services/zip";
@@ -55,6 +56,7 @@ const listQuery = z.object({
   schedule: z.string().max(40).optional(),
   evidence: z.string().max(40).optional(),
   category: z.string().max(40).optional(),
+  subcategory: z.string().max(40).optional(),
   collectedOn: collectionDateSchema.optional(),
   noticeIntent: z.enum([...NOTICE_INTENTS, "all"]).optional(),
   view: z.enum(["inbox", "drafts", "excluded", "all"]).optional(),
@@ -83,6 +85,7 @@ itemRoutes.get(
     if (q.schedule) conds.push(inArray(contentItems.scheduleStatus, q.schedule.split(",")));
     if (q.evidence) conds.push(inArray(contentItems.evidenceStatus, q.evidence.split(",")));
     if (q.category) conds.push(eq(contentItems.category, q.category));
+    if (q.subcategory) conds.push(q.subcategory === "미분류" ? sql`coalesce(${contentItems.subcategory}, '') = ''` : eq(contentItems.subcategory, q.subcategory));
     const intent = noticeIntentSql();
     if (q.noticeIntent && q.noticeIntent !== "all") conds.push(sql`${intent} = ${q.noticeIntent}`);
     if (q.collectedOn && q.origin !== "idea") {
@@ -121,6 +124,19 @@ async function loadItem(cid: unknown, id: unknown) {
   if (!item) throw new HttpError(404, "항목을 찾을 수 없습니다.");
   return { ch, item };
 }
+
+itemRoutes.patch("/channels/:cid/items/:id/subcategory", ah(async (req, res) => {
+  const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  const body = parse(z.object({ version: zVersion, subcategory: z.string().max(40).nullable() }).strict(), req.body);
+  if (!validSubcategory(ch.slug, body.subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
+  const saved = await getDb().transaction(async tx => {
+    const [row] = await tx.update(contentItems).set({ subcategory: body.subcategory || null, version: sql`${contentItems.version} + 1`, updatedAt: new Date() }).where(and(eq(contentItems.id, item.id), eq(contentItems.channelId, ch.id), eq(contentItems.version, body.version))).returning();
+    if (!row) conflict(item);
+    await audit(tx, { actor: actorOf(req), action: "set_subcategory", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { subcategory: row.subcategory } });
+    return row;
+  });
+  res.json(saved);
+}));
 
 itemRoutes.get(
   "/channels/:cid/items/:id",
@@ -548,3 +564,4 @@ itemRoutes.post(
 
 import { altTextError, altTextFile } from "../../shared/altText";
 import { cardAltTextState } from "../services/cardAccessibility";
+

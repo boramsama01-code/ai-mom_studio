@@ -1,3 +1,4 @@
+import { CategorySelect } from "../CategorySelect";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { studioContentSchema, type StudioCard, type StudioContent, type StudioCardDetail, type StudioBoard } from "@shared/studio";
@@ -100,7 +101,8 @@ export function ExperienceEditor({data,refresh}:{data:StudioCardDetail;refresh:(
   </section>
   <section hidden={step!=="story"} className="experience-section">
    <div className="experience-section-head"><div><h2>사진에 담기지 않은 경험을 알려 주세요</h2><p>완성된 글이 아니어도 됩니다. 짧은 메모를 AI가 카드 문구와 캡션으로 정리합니다.</p></div></div>
-   <fieldset disabled={busy} className="experience-fields"><div className="grid grid-2"><label className="field">작업 제목<input value={form.title} maxLength={160} onChange={v=>change("title",v.target.value)}/></label><label className="field">올릴 채널<select value={form.channel} onChange={v=>change("channel",v.target.value)}>{channels.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label></div>
+   <CategorySelect channel={form.channel} value={form.subcategory ?? ""} onChange={v=>change("subcategory",v)} disabled={busy} />
+   <fieldset disabled={busy} className="experience-fields"><div className="grid grid-2"><label className="field">작업 제목<input value={form.title} maxLength={160} onChange={v=>change("title",v.target.value)}/></label><label className="field">올릴 채널<select value={form.channel} onChange={v=>put({...formRef.current,channel:v.target.value,subcategory:""})}>{channels.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label></div>
     <div className="grid grid-3"><label className="field">행사·방문 이름<input value={e.event} maxLength={160} onChange={v=>edit({event:v.target.value})} placeholder="예: 과학관 체험 프로그램"/></label><label className="field">장소<input value={e.place} maxLength={160} onChange={v=>edit({place:v.target.value})} placeholder="직접 다녀온 장소"/></label><label className="field">방문일<input type="date" value={e.date} onChange={v=>edit({date:v.target.value})}/></label></div>
     <label className="field">실제로 무엇을 했나요? <span className="hint">필수 · 사진만으로 알 수 없는 경험을 적어 주세요.</span><textarea rows={5} value={e.notes} maxLength={8000} onChange={v=>edit({notes:v.target.value})} placeholder="참여한 활동, 인상적이었던 장면, 아쉬웠던 점을 편하게 적어 주세요."/></label>
     <div className="grid grid-2"><label className="field">기억에 남는 반응·대화<textarea rows={3} value={e.takeaway} maxLength={2000} onChange={v=>edit({takeaway:v.target.value})} placeholder="아이와 실제로 나눈 말이나 내 생각 (선택)"/></label><label className="field">다음 사람에게 알려줄 팁<textarea rows={3} value={e.tips} maxLength={2000} onChange={v=>edit({tips:v.target.value})} placeholder="직접 확인한 준비물·동선·예약 경험 등 (선택)"/></label></div>
@@ -138,3 +140,4 @@ export function ExperienceEditor({data,refresh}:{data:StudioCardDetail;refresh:(
   <div className="experience-history"><button className="btn sm ghost" aria-expanded={history} onClick={()=>setHistory(v=>!v)}>버전 기록 {data.revisions.length}개</button>{history&&<div className="panel stack">{data.revisions.map(r=><div key={r.id} className="row between"><span>r{r.version} · {r.instruction||"저장"}{!r.applied?" · 미적용 후보":""}</span><button className="btn sm" disabled={busy||saving||restore.isPending} onClick={()=>restore.mutate(r.id)}>이 버전 적용</button></div>)}</div>}</div>
  </div>;
 }
+
