@@ -1,10 +1,11 @@
+import { checkExperienceExport, createExperienceRenderer } from "./experienceExport";
 import { cardBrandName } from "../../shared/branding";
 import sharp, { type OverlayOptions } from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import type { Font } from "opentype.js";
 import { and, eq } from "drizzle-orm";
 import type { DB } from "../db";
-import { channels, studioCards, studioImages } from "../../shared/schema";
+import { channels, studioCards, studioImages, studioMedia } from "../../shared/schema";
 import { channelSlug } from "../../shared/channelKeys";
 import { studioContentSchema, studioPageCount, type StudioContent, type StudioExportCheck } from "../../shared/studio";
 import { HttpError } from "../routes/util";
@@ -32,6 +33,7 @@ function contentLayout(content: StudioContent) {
   };
 }
 export function checkStudioExport(content: StudioContent): StudioExportCheck {
+  if (content.experience) return checkExperienceExport(content);
   const result: StudioExportCheck = { errors: [], warnings: [], pageCount: studioPageCount(content) };
   if (content.format !== "웹툰" && content.format !== "카드뉴스") {
     result.errors.push({ field: "format", message: "이 형식은 기획용입니다. 웹툰 또는 카드뉴스를 선택하면 이미지로 내보낼 수 있습니다." });
@@ -81,6 +83,14 @@ export async function renderStudioOutput(db: DB, cardId: number, requestedVersio
   const accent = /^#[a-f\d]{6}$/i.test(channel?.accentColor ?? "") ? channel!.accentColor : "#285f6a";
   const brand = cardBrandName(channel?.name ?? "우주펭귄상회");
   const images = new Map<number, Buffer>();
+  if (content.experience) {
+    const ids=[...new Set([content.experience.coverId,...content.experience.pages.map(p=>p.mediaId)].filter((id):id is number=>!!id))];
+    for(const id of ids){const [media]=await db.select({preview:studioMedia.preview}).from(studioMedia).where(and(eq(studioMedia.id,id),eq(studioMedia.cardId,cardId)));
+      if(!media)throw new HttpError(400,"이 작업에 속한 촬영 자료를 찾을 수 없습니다.");
+      if(media.preview)images.set(id,media.preview);
+    }
+    return createExperienceRenderer(content,row.version,brand,accent,images);
+  }
   for (const panel of content.panels) {
     if (!panel.imageId || images.has(panel.imageId)) continue;
     const [image] = await db.select().from(studioImages).where(and(eq(studioImages.id, panel.imageId), eq(studioImages.cardId, cardId)));
@@ -92,6 +102,7 @@ export async function renderStudioOutput(db: DB, cardId: number, requestedVersio
 
 /** Pure renderer shared by the API and visual checks; performs no network or AI calls. */
 export function createStudioRenderer(content: StudioContent, version: number, brand: string, accent: string, images = new Map<number, Buffer>()) {
+  if(content.experience)return createExperienceRenderer(content,version,brand,accent,images);
   const check = checkStudioExport(content);
   if (check.errors.length) throw new HttpError(400, check.errors[0].message, { errors: check.errors });
   const fonts = loadFonts();
@@ -160,6 +171,13 @@ export async function exportStudioZip(db: DB, id: number, version?: number) {
   const files: Array<{ name: string; bytes: Buffer }> = [];
   for (let index = 0; index < output.pageCount; index++) files.push({ name: `page-${String(index + 1).padStart(2, "0")}.png`, bytes: await output.page(index) });
   files.push({ name: "caption.txt", bytes: Buffer.from(output.content.caption, "utf8") });
+  if(output.content.experience){
+    const selected=output.content.experience.media.map(m=>m.id);
+    const media=await db.select().from(studioMedia).where(eq(studioMedia.cardId,id));
+    const videos=media.filter(m=>m.kind==="video"&&selected.includes(m.id));
+    for(const m of videos)files.push({name:`video-${m.id}.${m.mimeType==="video/webm"?"webm":m.mimeType==="video/quicktime"?"mov":"mp4"}`,bytes:m.bytes});
+    files.push({name:"README-media.txt",bytes:Buffer.from(`카드뉴스 PNG ${output.pageCount}장과 게시용 캡션입니다.\n영상은 대표 정지 장면을 카드에 사용했습니다. 선택한 영상 원본 ${videos.length}개는 video-로 시작하는 파일입니다. 자동 편집된 릴스가 아닙니다.\n외부 게시 전 본문과 사진·영상의 공개 범위를 확인해 주세요.\n출처: ${output.content.sourceLabel||"사용자가 올린 촬영 자료"}`,"utf8")});
+  }
   return { bytes: zipFiles(files), version: output.version };
 }
 

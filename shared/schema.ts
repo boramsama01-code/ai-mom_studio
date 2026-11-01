@@ -503,3 +503,10 @@ export const studioRequests = pgTable("studio_requests", {
 });
 
 
+
+export const studioMedia = pgTable("studio_media", {
+  id: serial("id").primaryKey(), cardId: integer("card_id").notNull().references(() => studioCards.id),
+  name: text("name").notNull(), kind: text("kind").notNull(), mimeType: text("mime_type").notNull(),
+  bytes: bytea("bytes").notNull(), preview: bytea("preview"), frameTime: integer("frame_time_ms"),
+  createdAt: createdAt(),
+}, t => [index("studio_media_card").on(t.cardId)]);

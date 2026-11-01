@@ -1,10 +1,11 @@
+import { listExperienceMedia, uploadExperienceMedia, saveVideoPreview, mediaRange } from "../services/experienceMedia";
 import { channelSlug } from "../../shared/channelKeys";
 import { Router, raw } from "express";
 import { count, desc, eq, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
 import { actorOf } from "../auth";
-import { channels, jobs, studioCards, studioImages, studioRevisions } from "../../shared/schema";
+import { channels, jobs, studioCards, studioImages, studioRevisions, studioMedia } from "../../shared/schema";
 import { studioContentSchema, studioCreateSchema, studioGenerationSchema, studioPatchSchema } from "../../shared/studio";
 import { ah, HttpError, intParam, parse } from "./util";
 import { setStudioTrash, createStudioCard, importStudioBoard, loadStudioNotes, queueStudioGeneration, saveStudioCard, saveStudioNotes, studioCardDto, studioCardsWithOutput, studioDetail, studioImportSchema, studioJobDto } from "../services/studio";
@@ -32,6 +33,31 @@ studioRoutes.post("/studio/cards", ah(async (req, res) => {
 }));
 studioRoutes.post("/studio/export-check", ah(async (req, res) => {
   res.json(checkStudioExport(parse(studioContentSchema, req.body)));
+}));
+studioRoutes.get("/studio/cards/:id/media", ah(async(req,res)=>{res.json(await listExperienceMedia(getDb(),intParam(req.params.id)));}));
+studioRoutes.post("/studio/cards/:id/media", raw({type:["image/*","video/*","application/octet-stream"],limit:"25mb"}), ah(async(req,res)=>{
+ const version=parse(z.coerce.number().int().positive(),req.query.version);
+ const name=parse(z.string().max(200).default("촬영 자료"),req.query.name);
+ res.status(201).json(await uploadExperienceMedia(getDb(),intParam(req.params.id),version,req.body,name,actorOf(req)));
+}));
+studioRoutes.post("/studio/cards/:id/media/:mediaId/preview",raw({type:["image/*","application/octet-stream"],limit:"12mb"}),ah(async(req,res)=>{
+ const version=parse(z.coerce.number().int().positive(),req.query.version);
+ const seconds=parse(z.coerce.number().min(0).max(86400).default(0),req.query.seconds);
+ res.json(await saveVideoPreview(getDb(),intParam(req.params.id),intParam(req.params.mediaId),version,req.body,seconds,actorOf(req)));
+}));
+for(const preview of [false,true]) studioRoutes.get(`/studio/media/:id${preview?"/preview":""}`,ah(async(req,res)=>{
+ const [media]=await getDb().select().from(studioMedia).where(eq(studioMedia.id,intParam(req.params.id)));
+ if(!media)throw new HttpError(404,"촬영 자료를 찾을 수 없습니다.");
+ const bytes=preview?media.preview:media.bytes;
+ if(!bytes)throw new HttpError(404,"영상 대표 장면을 먼저 추가해 주세요.");
+ res.set("Cache-Control","private, no-store").set("X-Content-Type-Options","nosniff").type(preview?"image/jpeg":media.mimeType);
+ if(req.query.download==="1")res.set("Content-Disposition",`attachment; filename="media-${media.id}.${preview||media.kind==="photo"?"jpg":media.mimeType==="video/webm"?"webm":media.mimeType==="video/quicktime"?"mov":"mp4"}"`);
+ if(!preview&&media.kind==="video"){
+  res.set("Accept-Ranges","bytes");
+  let range;try{range=mediaRange(req.get("range"),bytes.length);}catch(e){res.set("Content-Range",`bytes */${bytes.length}`);throw e;}
+  if(range){res.status(206).set("Content-Range",`bytes ${range.start}-${range.end}/${bytes.length}`).set("Content-Length",String(range.end-range.start+1)).send(bytes.subarray(range.start,range.end+1));return;}
+ }
+ res.set("Content-Length",String(bytes.length)).send(bytes);
 }));
 const designPreviewCache = new Map<string, Buffer>();
 studioRoutes.get("/studio/design-preview", ah(async (req, res) => {
@@ -64,7 +90,7 @@ studioRoutes.get("/studio/cards/:id/export.png", ah(async (req, res) => {
   const version = req.query.version === undefined ? undefined : parse(z.coerce.number().int().positive(), req.query.version);
   const exported = await renderStudioOutput(getDb(), id, version);
   if (exported.content.format === "카드뉴스" && req.query.page === undefined) throw new HttpError(400, "카드뉴스는 ZIP으로 내려받거나 미리보기 페이지를 선택하세요.");
-  const page = req.query.page === undefined ? 0 : parse(z.coerce.number().int().min(0).max(5), req.query.page);
+  const page = req.query.page === undefined ? 0 : parse(z.coerce.number().int().min(0).max(9), req.query.page);
   res.type("image/png").set("Content-Disposition", `${req.query.preview === "1" ? "inline" : "attachment"}; filename="studio-${id}-v${exported.version}.png"`).send(await exported.page(page));
 }));
 studioRoutes.get("/studio/cards/:id/export.zip", ah(async (req, res) => {

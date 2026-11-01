@@ -1,3 +1,4 @@
+import { studioKey } from "@shared/channelKeys";
 import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
@@ -70,7 +71,7 @@ export function InboxPage() {
           <h1>수집함</h1>
           <p className="muted small">{current?.contentType === "manual" ? "아이디어를 골라 원고·카드뉴스·웹툰으로 이어가세요." : "자료를 고르고, 원문을 확인한 뒤 콘텐츠로 만드세요."}</p>
         </div>
-        <label className="field inbox-channel"><span className="sr-only">수집함 채널</span><select aria-label="수집함 채널" value={selected} onChange={e => select(e.target.value === "all" ? "all" : Number(e.target.value))}>{channels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="all">모든 채널</option></select></label>
+        <div className="row">{current && <GuardedLink className="btn sm" href={`/?start=experience&channel=${studioKey(current.slug)}`}>직접 다녀온 후기 쓰기</GuardedLink>}<label className="field inbox-channel"><span className="sr-only">수집함 채널</span><select aria-label="수집함 채널" value={selected} onChange={e => select(e.target.value === "all" ? "all" : Number(e.target.value))}>{channels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="all">모든 채널</option></select></label></div>
       </div>
       {isIdeaChannel(current) && <div className="tabs inbox-modes" role="group" aria-label="수집함 자료 유형"><button aria-pressed={ideas} onClick={() => { setMode("ideas"); resetFilters(); }}>아이디어 100</button><button aria-pressed={!ideas} onClick={() => { setMode("scraps"); resetFilters(); }}>스크랩 자료</button></div>}
       {!ideas && <CollectionPanel date={f.collectedOn || undefined} />}
