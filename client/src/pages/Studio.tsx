@@ -1,3 +1,4 @@
+import { FinishedDeckEditor } from "./FinishedDeckEditor";
 import { ExperienceEditor } from "./ExperienceEditor";
 import { emptyExperience, experienceImageUrl } from "@shared/experience";
 import { StudioTrashButton, StudioTrashView, TrashedStudioDetail } from "./StudioTrash";
@@ -39,7 +40,7 @@ const characters: Array<{ id: Character; name: string; role: string; detail: str
 const imageUrl = (id: number) => `/api/studio/images/${id}`;
 const dateTime = (v: string) => new Date(v).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const activeJob = (j: Job) => ["queued", "running", "processing"].includes(j.status);
-const inputOf = (c: CardInput): CardInput => ({ altTexts:c.altTexts??[], experience: c.experience ?? null, title: c.title, channel: c.channel, format: c.format, stage: c.stage, dueDate: c.dueDate ?? "", memo: c.memo ?? "", script: c.script ?? "", caption: c.caption ?? "", exportDesign: c.exportDesign ?? "editorial", sourceLabel: c.sourceLabel ?? "", panels: c.panels ?? Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), characters: c.characters ?? [], imagePath: c.imagePath ?? "" });
+const inputOf = (c: CardInput): CardInput => ({ finishedDeck:c.finishedDeck??null, altTexts:c.altTexts??[], experience: c.experience ?? null, title: c.title, channel: c.channel, format: c.format, stage: c.stage, dueDate: c.dueDate ?? "", memo: c.memo ?? "", script: c.script ?? "", caption: c.caption ?? "", exportDesign: c.exportDesign ?? "editorial", sourceLabel: c.sourceLabel ?? "", panels: c.panels ?? Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), characters: c.characters ?? [], imagePath: c.imagePath ?? "" });
 
 export function StudioPage({ cardId }: { cardId?: number }) {
   const [view, setView] = useState<"board" | "characters" | "trash">("board");
@@ -59,7 +60,7 @@ function StudioBoard({ onTrash }: { onTrash: () => void }) {
   const [search, setSearch] = useState("");
   const [entry] = useState(() => new URLSearchParams(window.location.search));
   const [creating, setCreating] = useState(() => entry.get("start") === "experience");
-  const [newMode, setNewMode] = useState<"choose"|"experience">(() => entry.get("start") === "experience" ? "experience" : "choose");
+  const [newMode, setNewMode] = useState<"choose"|"experience"|"finished">(() => entry.get("start") === "experience" ? "experience" : "choose");
   const [archived, setArchived] = useState(false);
   const [newStage, setNewStage] = useState<Stage>("idea");
   const [layout, setLayout] = useState<"list" | "board">("list");
@@ -79,9 +80,9 @@ function StudioBoard({ onTrash }: { onTrash: () => void }) {
   const move = useMutation({ mutationFn: ({ card, stage }: { card: Card; stage: Stage }) => api(`/studio/cards/${card.id}`, { method: "PATCH", body: { version: card.version, stage } }), onSuccess: () => qc.invalidateQueries({ queryKey: ["studio"] }), onError: (e) => toast("err", e.message) });
   const { channels: legacyChannels, select } = useChannel();
   const openHighscoop = () => guard.confirmLeave(() => { const channel = legacyChannels.find(c => studioKey(c.slug) === filter); if (channel) select(channel.id); navigate("/inbox"); });
-  function newCard(stage: Stage = "idea", mode: "choose"|"experience" = "choose") { if (archived || !visibleChannels.length) return; setNewStage(stage); setNewMode(mode); setCreating(true); }
+  function newCard(stage: Stage = "idea", mode: "choose"|"experience"|"finished" = "choose") { if (archived || !visibleChannels.length) return; setNewStage(stage); setNewMode(mode); setCreating(true); }
   return <>
-    <header className="studio-home-heading"><div><h1>내 콘텐츠</h1><p>모은 자료와 직접 찍은 순간을 콘텐츠로 완성하세요.</p></div><div className="studio-home-actions"><button className="btn ghost" onClick={onTrash}><Icon name="trash" size={17} />휴지통{q.data?.trashCount ? <span className="studio-trash-count">{q.data.trashCount}</span> : null}</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("idea","experience")}>사진·영상 후기</button><button className="btn primary studio-create" disabled={archived || !visibleChannels.length} onClick={() => newCard()}><Icon name="plus" size={18} />새 콘텐츠 만들기</button></div></header>
+    <header className="studio-home-heading"><div><h1>내 콘텐츠</h1><p>모은 자료와 직접 찍은 순간을 콘텐츠로 완성하세요.</p></div><div className="studio-home-actions"><button className="btn ghost" onClick={onTrash}><Icon name="trash" size={17} />휴지통{q.data?.trashCount ? <span className="studio-trash-count">{q.data.trashCount}</span> : null}</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("making","finished")}>완성 이미지 가져오기</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("idea","experience")}>사진·영상 후기</button><button className="btn primary studio-create" disabled={archived || !visibleChannels.length} onClick={() => newCard()}><Icon name="plus" size={18} />새 콘텐츠 만들기</button></div></header>
     <div className="studio-overview">
       <section className="studio-resume" aria-label="최근 작업 이어하기">
         <div className="studio-resume-label"><span className="resume-indicator" />{latest ? "이어서 만들어 볼까요?" : "다음 이야기를 기다리는 중"}</div>
@@ -112,7 +113,7 @@ function StudioBoard({ onTrash }: { onTrash: () => void }) {
       })}</div> : <div className="studio-home-empty"><span aria-hidden="true">✧</span><h2>{search ? "검색한 작업이 없어요" : statusFilter === "done" ? "완료한 콘텐츠가 여기에 모여요" : "새 이야기를 시작해 보세요"}</h2><p>{search ? "검색어를 바꾸거나 필터를 초기화해 보세요." : statusFilter === "done" ? "제작을 마치면 이미지와 캡션을 바로 꺼낼 수 있습니다." : "제목 하나면 충분해요. 원고와 그림은 차근차근 채워갑니다."}</p>{(search || filter !== "all" || statusFilter !== "active" || archived) ? <button className="btn" onClick={resetFilters}>필터 초기화</button> : <button className="btn primary" disabled={!visibleChannels.length} onClick={() => newCard()}>첫 콘텐츠 만들기</button>}</div>}
     </> : <div className="studio-board">{stages.map((stage) => <section key={stage.id} className={`studio-column stage-${stage.id}`} aria-label={stage.label} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const card = filtered.find((c) => String(c.id) === e.dataTransfer.getData("text/studio-card")); if (!archived && card && card.stage !== stage.id && !move.isPending) move.mutate({ card, stage: stage.id }); }}><div className="studio-column-head"><h2>{stage.label}<span>{filtered.filter((c) => c.stage === stage.id).length}</span></h2><button className="studio-add" disabled={archived || !visibleChannels.length} aria-label={`${stage.label} 작업 추가`} onClick={() => newCard(stage.id)}>＋</button></div><div className="studio-task-list">{filtered.filter((c) => c.stage === stage.id).map((c) => <article key={c.id} className="studio-task" draggable={!move.isPending && !archived} onDragStart={(e) => e.dataTransfer.setData("text/studio-card", String(c.id))}><span className={`studio-channel-tag ${c.channel}`}>{channelName(c.channel)}</span><GuardedLink href={`/studio/${c.id}`} className="studio-task-open">{c.sourceOutput && <img className="studio-task-preview" src={`/api/channels/${c.sourceOutput.channelId}/media/${c.sourceOutput.assetId}`} alt={`${c.sourceOutput.pages.length}장 카드뉴스 표지`} loading="lazy" />}<h3>{c.title}</h3></GuardedLink><div className="studio-task-meta"><span>{c.format}</span>{c.dueDate && <time dateTime={c.dueDate}>{c.dueDate.slice(5).replace("-", ".")}</time>}</div><select aria-label={`${c.title} 제작 단계`} value={c.stage} disabled={move.isPending || archived} onChange={(e) => move.mutate({ card: c, stage: e.target.value as Stage })}>{stages.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select><div className="studio-card-actions"><StudioTrashButton card={c} disabled={move.isPending} /></div>{stage.id === "done" && <StudioQuickExport card={c} />}</article>)}{!filtered.some((c) => c.stage === stage.id) && <p className="studio-column-hint">작업 없음</p>}</div></section>)}</div>}
     </section>
-    <div className="studio-home-footer"><button className="btn sm ghost" onClick={openHighscoop}>수집한 자료에서 시작 ↗</button><GuardedLink className="btn sm ghost" href="/settings">채널 관리 ↗</GuardedLink><span>완료한 파일은 내려받아 SNS에 직접 게시할 수 있어요.</span></div>
+    <div className="studio-home-footer"><button className="btn sm ghost" onClick={openHighscoop}>수집한 자료에서 시작 ↗</button><GuardedLink className="btn sm ghost" href="/settings">채널 관리 ↗</GuardedLink><span>완성 이미지를 모아 인스타그램 발행까지 이어갈 수 있어요.</span></div>
     {q.data && <StudioNotes data={q.data} />}
     {creating && <NewCard channel={entry.get("channel") && visibleKeys.has(entry.get("channel")!) ? entry.get("channel")! : filter === "all" || !visibleKeys.has(filter) ? visibleChannels[0]?.id : filter} stage={newStage} initialMode={newMode} onClose={() => { setCreating(false); if(entry.get("start")) navigate("/",{replace:true}); }} />}
   </>;
@@ -124,20 +125,20 @@ function Dialog({ title, children, onClose }: { title: string; children: ReactNo
   return <dialog className="studio-dialog" ref={ref} aria-label={title} onCancel={(e) => { e.preventDefault(); onClose(); }}><div className="row between"><h2>{title}</h2><button type="button" className="btn ghost" aria-label="닫기" onClick={onClose}>✕</button></div>{children}</dialog>;
 }
 
-function NewCard({ channel, stage, initialMode, onClose }: { channel: Channel; stage: Stage; initialMode: "choose"|"experience"; onClose: () => void }) {
+function NewCard({ channel, stage, initialMode, onClose }: { channel: Channel; stage: Stage; initialMode: "choose"|"experience"|"finished"; onClose: () => void }) {
   const channels=useStudioChannels(); const {channels:sourceChannels,select}=useChannel();
-  const [mode,setMode]=useState<"choose"|"experience"|"free">(initialMode);
+  const [mode,setMode]=useState<"choose"|"experience"|"finished"|"free">(initialMode);
   const [title,setTitle]=useState("");const [ch,setCh]=useState(channel);
   const [format,setFormat]=useState<Format>(channel==="penguin"||/웹툰|webtoon/i.test(channels.find(c=>c.id===channel)?.name??"")?"웹툰":"카드뉴스");
   const guard=useDirtyGuard(),[,navigate]=useLocation(),qc=useQueryClient();
-  const create=useMutation({mutationFn:()=>api<Card>("/studio/cards",{method:"POST",body:{title:title.trim()||(mode==="experience"?"새 방문 후기":"새 콘텐츠"),channel:ch,format:mode==="experience"?"카드뉴스":format,stage,
+  const create=useMutation({mutationFn:()=>api<Card>("/studio/cards",{method:"POST",body:{title:title.trim()||(mode==="experience"?"새 방문 후기":"새 콘텐츠"),channel:ch,format:mode==="experience"||mode==="finished"?"카드뉴스":format,stage,finishedDeck:mode==="finished"?{pages:[]}:null,
     exportDesign:format==="카드뉴스"?ch==="highscoop"?"set:r01":ch==="fryday"?"set:f01":"set:n03":"editorial",experience:mode==="experience"?emptyExperience():null,
     characters:mode==="experience"?[]:ch==="highscoop"?["pempem"]:ch==="fryday"?["penguin"]:ch==="news"?["pengpeng"]:ch==="penguin"?["pengki"]:[]}}),
     onSuccess:d=>{qc.invalidateQueries({queryKey:["studio"]});onClose();guard.confirmLeave(()=>navigate(`/studio/${d.id}`));}});
-  return <Dialog title={mode==="experience"?"사진·영상으로 후기 만들기":mode==="free"?"자유 기획 시작":"어디서 시작할까요?"} onClose={()=>!create.isPending&&onClose()}>
-    {mode==="choose"?<div className="studio-start-options"><button onClick={()=>{const c=sourceChannels.find(c=>studioKey(c.slug)===ch)||sourceChannels.find(c=>c.contentType==="current_dialogue");if(c)select(c.id);onClose();guard.confirmLeave(()=>navigate("/inbox"));}}><span>01</span><strong>수집한 자료로 만들기</strong><p>기사·모집 공고를 고르고 원문부터 확인</p></button><button onClick={()=>setMode("experience")}><span>02</span><strong>직접 다녀온 후기</strong><p>내 사진·영상과 경험 메모로 카드·캡션 제작</p></button><button onClick={()=>setMode("free")}><span>03</span><strong>아이디어부터 자유롭게</strong><p>웹툰·카드뉴스의 원고와 그림을 직접 구성</p></button></div>:
+  return <Dialog title={mode==="finished"?"완성 이미지 가져오기":mode==="experience"?"사진·영상으로 후기 만들기":mode==="free"?"자유 기획 시작":"어디서 시작할까요?"} onClose={()=>!create.isPending&&onClose()}>
+    {mode==="choose"?<div className="studio-start-options"><button onClick={()=>setMode("finished")}><span>●</span><strong>완성 이미지 가져오기</strong><p>여러 장을 그대로 묶어 순서·캡션 확인 후 발행</p></button><button onClick={()=>{const c=sourceChannels.find(c=>studioKey(c.slug)===ch)||sourceChannels.find(c=>c.contentType==="current_dialogue");if(c)select(c.id);onClose();guard.confirmLeave(()=>navigate("/inbox"));}}><span>01</span><strong>수집한 자료로 만들기</strong><p>기사·모집 공고를 고르고 원문부터 확인</p></button><button onClick={()=>setMode("experience")}><span>02</span><strong>직접 다녀온 후기</strong><p>내 사진·영상과 경험 메모로 카드·캡션 제작</p></button><button onClick={()=>setMode("free")}><span>03</span><strong>아이디어부터 자유롭게</strong><p>웹툰·카드뉴스의 원고와 그림을 직접 구성</p></button></div>:
     <form className="stack" onSubmit={event=>{event.preventDefault();create.mutate();}}>
-     <p className="small muted">{mode==="experience"?"먼저 사진을 모으세요. 제목과 글은 나중에 다듬을 수 있습니다.":"아이디어와 원고를 적고 네 컷 또는 카드뉴스로 이어갑니다."}</p>
+     <p className="small muted">{mode==="experience"?"먼저 사진을 모으세요. 제목과 글은 나중에 다듬을 수 있습니다.":mode==="finished"?"이미지 한 묶음이 게시물 한 건입니다. 1~10장을 가져와 순서를 정하세요.":"아이디어와 원고를 적고 네 컷 또는 카드뉴스로 이어갑니다."}</p>
      <label className="field">채널<select value={ch} disabled={create.isPending} onChange={event=>setCh(event.target.value)}>{channels.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
      <label className="field">{mode==="experience"?"작업 제목 (나중에 입력 가능)":"제목"}<input autoFocus required={mode!=="experience"} disabled={create.isPending} value={title} maxLength={160} onChange={event=>setTitle(event.target.value)} placeholder={mode==="experience"?"예: 과학관에 다녀온 날":"어떤 이야기를 만들까요?"}/></label>
      {mode==="free"&&<label className="field">형식<select value={format} disabled={create.isPending} onChange={event=>setFormat(event.target.value as Format)}>{formats.map(f=><option key={f}>{f}</option>)}</select></label>}
@@ -178,6 +179,7 @@ function StudioDetail({ id }: { id: number }) {
   if (q.isLoading) return <Loading lines={5} />;
   if (!q.data) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   if (q.data.card.trashedAt) return <TrashedStudioDetail card={q.data.card} />;
+  if (q.data.card.finishedDeck) return <FinishedDeckEditor key={q.data.card.id} data={q.data} />;
   if (q.data.card.experience) return <ExperienceEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} />;
   if (!editBoard && q.data.card.sourceOutput && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard card={q.data.card} /><div className="source-output-detail"><button className="btn ghost sm" onClick={() => setEditBoard(true)}>보드 제목·메모 편집</button></div></>;
   // A background polling failure must not unmount the editor and discard unsaved work.

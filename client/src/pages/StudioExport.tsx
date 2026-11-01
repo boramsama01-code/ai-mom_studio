@@ -1,3 +1,5 @@
+import { StudioPublish } from "./StudioPublish";
+import "../studioPublish.css";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { studioOutputDescription, studioPageCount, type StudioCard, type StudioContent, type StudioExportCheck } from "@shared/studio";
@@ -10,9 +12,9 @@ import { studioAltTexts } from "@shared/altText";
 import { AltTextEditor } from "../AltTextEditor";
 
 async function downloadCard(card: StudioCard) {
-  const zip = !!card.sourceOutput || card.format === "카드뉴스";
+  const zip = !!card.finishedDeck || !!card.sourceOutput || card.format === "카드뉴스";
   const extension = zip ? "zip" : "png";
-  const blob = await apiBlob(card.sourceOutput ? `/channels/${card.sourceOutput.channelId}/media/${card.sourceOutput.assetId}/deck.zip` : `/studio/cards/${card.id}/export.${extension}?version=${card.version}`, zip ? "application/zip" : "image/png");
+  const blob = await apiBlob(card.sourceOutput && !card.finishedDeck ? `/channels/${card.sourceOutput.channelId}/media/${card.sourceOutput.assetId}/deck.zip` : `/studio/cards/${card.id}/export.${extension}?version=${card.version}`, zip ? "application/zip" : "image/png");
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -63,7 +65,7 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
   }, onSuccess: saved => { setPreview({ version: saved.version, format: saved.format }); setPage(0); setPreviewError(false); }, onError: error => toast("err", error.message) });
   const stalePreview = dirty || preview?.version !== base.version || preview?.format !== form.format;
   const focusField = (field: string) => { onFieldFocus?.(field); window.requestAnimationFrame(() => document.getElementById(`studio-${field}`)?.focus()); };
-  return <section className="panel stack studio-export" aria-labelledby="studio-export-heading">
+  return <><section className="panel stack studio-export" aria-labelledby="studio-export-heading">
     <div><h2 id="studio-export-heading">최종 이미지</h2><p className="small muted">{form.experience ? `후기 카드 ${studioPageCount(form)}장 · 1080 × 1350 PNG + 선택한 영상 원본 + 캡션` : studioOutputDescription(form.format, form.exportDesign)}</p></div>
     {!form.experience && form.format !== "카드뉴스" && <div className="studio-export-designs" role="group" aria-label="출력 디자인">
       {designs.map(design => <button key={design.id} type="button" className={`studio-design-option design-${design.id}`} aria-pressed={form.exportDesign === design.id} disabled={busy || prepare.isPending} onClick={() => change("exportDesign", design.id)}><span className="studio-design-swatch" aria-hidden="true"><i /><i /><i /></span><strong>{design.name}</strong><small>{design.detail}</small></button>)}
@@ -89,10 +91,10 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
     </div>
     {preview && <div className="studio-export-preview">
       {stalePreview ? <p className="notice">편집 내용이 바뀌었습니다. 저장하고 미리보기를 갱신하세요.</p> : <>
-        {preview.format === "카드뉴스" && <div className="studio-preview-pages" role="group" aria-label="미리보기 페이지">{(form.experience ? ["표지", ...form.experience.pages.map((_,i)=>String(i+2))] : ["표지", "1", "2", "3", "4", "마무리"].slice(0, studioPageCount(form))).map((label, index) => <button className="btn sm" key={index} aria-pressed={page === index} onClick={() => { setPage(index); setPreviewError(false); }}>{label}</button>)}</div>}
+        {preview.format === "카드뉴스" && <div className="studio-preview-pages page-dots" role="group" aria-label="미리보기 페이지">{(form.experience ? ["표지", ...form.experience.pages.map((_,i)=>String(i+2))] : ["표지", "1", "2", "3", "4", "마무리"].slice(0, studioPageCount(form))).map((label, index) => <button className={index<=page?"filled":""} key={index} aria-label={`${index+1}페이지`} aria-pressed={page === index} onClick={() => { setPage(index); setPreviewError(false); }}></button>)}</div>}
         {previewError ? <p className="notice err" role="alert">미리보기를 불러오지 못했습니다. 최신 버전인지 확인하고 다시 눌러 주세요.</p> : <img key={`${preview.version}-${page}`} src={`/api/studio/cards/${base.id}/export.png?version=${preview.version}&page=${page}&preview=1`} alt={`${base.title} ${page + 1}페이지 출력 미리보기`} onError={() => setPreviewError(true)} />}
       </>}
     </div>}
-    <p className="small studio-handoff">이미지를 내려받고 위 캡션을 복사해 SNS에 직접 게시하세요. ‘완료’는 제작 완료를 뜻합니다.</p>
-  </section>;
+    <p className="small studio-handoff">제작 완료 후 아래에서 게시 계정과 최종 이미지를 확인하고 발행하세요.</p>
+  </section>{(!base.sourceItemId || base.sourceOutput) && <StudioPublish base={base} dirty={dirty} busy={busy} save={save} />}</>;
 }

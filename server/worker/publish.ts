@@ -145,7 +145,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
 /* ───────────── 최종 승인 ───────────── */
 export async function approveItem(
   db: DB,
-  a: { itemId: number; revisionId: number; mediaAssetId: number; altTextVersion?:number; captions: { instagram: string; telegram: string }; scheduledAt: Date; actor: string; now?: Date },
+  a: { destinationIds?: number[]; itemId: number; revisionId: number; mediaAssetId: number; altTextVersion?:number; captions: { instagram: string; telegram: string }; scheduledAt: Date; actor: string; now?: Date },
 ) {
   const now = a.now ?? new Date();
   const cr = await currentRevision(db, a.itemId);
@@ -166,12 +166,14 @@ export async function approveItem(
   }
   const capErr = validateCaptions(a.captions);
   if (capErr.length) return { ok: false as const, error: capErr.join(" ") };
-  const dests = await db.select().from(destinations).where(and(eq(destinations.channelId, item.channelId), eq(destinations.enabled, true)));
+  const dests = await db.select().from(destinations).where(and(eq(destinations.channelId, item.channelId), eq(destinations.enabled, true), a.destinationIds ? inArray(destinations.id, a.destinationIds) : undefined));
 
+  if (a.destinationIds && dests.length !== a.destinationIds.length) return { ok: false as const, error: "게시 목적지가 변경됐습니다. 계정을 다시 확인하세요." };
   const approval = await db.transaction(async (tx) => {
-    await tx.select({ id: contentItems.id }).from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+    const [freshItem] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+    if (freshItem.currentRevisionId !== rev.id || freshItem.reviewStatus !== "reviewed" || freshItem.excluded) throw new HttpError(409, "승인 전에 콘텐츠가 변경됐습니다. 다시 확인하세요.");
     const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
-    if (board) assertStudioActive(board);
+    if (board) { assertStudioActive(board); if (board.importedMeta?.studioPublication && rev.payload.studioVersion !== board.version) throw new HttpError(409, "제작보드가 수정됐습니다. 미리보기를 다시 준비하세요."); }
     const [freshAsset]=await tx.select().from(mediaAssets).where(eq(mediaAssets.id,asset.id));
     if(JSON.stringify(cardAltTextState(freshAsset,item.title))!==JSON.stringify(cardAltTextState(asset,item.title)))throw new HttpError(409,"대체텍스트가 변경됐습니다. 최신 설명을 확인하고 다시 승인해 주세요.");
     // 기존 활성 승인은 새 승인으로 대체
@@ -254,8 +256,10 @@ export async function publishDue(db: DB, opts: { now?: Date; limit?: number; act
     .where(and(eq(deliveries.status, "processing"), sql`${deliveries.externalContainerId} is not null`, sql`${deliveries.externalId} is null`, sql`${deliveries.updatedAt} < now() - interval '2 minutes'`))
     .limit(5);
   for (const d of resumable) {
+    const [claimed] = await db.update(deliveries).set({ updatedAt: new Date() }).where(and(eq(deliveries.id, d.id), eq(deliveries.status, "processing"), eq(deliveries.updatedAt, d.updatedAt))).returning();
+    if (!claimed) continue;
     stats.processed++;
-    const res = await processDelivery(db, d, now);
+    const res = await processDelivery(db, claimed, now);
     stats[res]++;
   }
   return stats;
@@ -287,6 +291,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
   };
   // 게시 직전 재검사
   const [board] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
+  if (board?.importedMeta?.studioPublication && rev.payload.studioVersion !== board.version) return block("제작보드 수정 — 재승인 필요");
   if (board?.trashedAt) return block("휴지통에 있는 콘텐츠 — 게시 중단");
   if (!ch?.active) return block("보관된 채널 — 게시 중단");
   if (ap.status !== "active") return block("승인이 더 이상 유효하지 않음");

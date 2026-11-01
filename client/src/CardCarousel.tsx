@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiBlob } from "./api";
 import { ErrorBox } from "./ui";
+import "./studioPublish.css";
 import { AltTextEditor } from "./AltTextEditor";
 import { useDirtyGuard } from "./state";
 
@@ -30,8 +31,8 @@ export function CardCarousel({ channelId, assetId, pages, credit = "", onDirtyCh
     <div className="card-carousel-stage">
       {failed ? <div role="alert" className="notice err">이미지를 불러오지 못했습니다.<button className="btn sm" onClick={() => setFailed(false)}>다시 보기</button></div> : <img key={page.id} src={`/api/channels/${channelId}/media/${page.id}`} alt={values[index]||`${index + 1} / ${pages.length} · ${page.title}`} onError={() => setFailed(true)} />}
     </div>
-    <div className="row between card-carousel-controls"><button className="btn sm" aria-label="이전 페이지" disabled={index === 0} onClick={() => select(index - 1)}>← 이전</button><span aria-live="polite">{index + 1} / {pages.length} <span className="muted">· {index === 0 ? "표지" : page.title}</span></span><button className="btn sm" aria-label="다음 페이지" disabled={index >= pages.length - 1} onClick={() => select(index + 1)}>다음 →</button></div>
-    <div className="card-carousel-thumbs" role="group" aria-label="페이지 선택">{pages.map((p, i) => <button key={p.id} aria-label={`${i + 1}페이지 · ${p.title}`} aria-pressed={i === index} onClick={() => select(i)}><img src={`/api/channels/${channelId}/media/${p.id}`} loading="lazy" alt="" /><span>{i === 0 ? "표지" : String(i + 1).padStart(2, "0")}</span></button>)}</div>
+    <div className="row between card-carousel-controls"><button className="btn sm" aria-label="이전 페이지" disabled={index === 0} onClick={() => select(index - 1)}>← 이전</button><div className="page-dots" role="group" aria-label="페이지 선택">{pages.map((p, i) => <button key={p.id} className={i <= index ? "filled" : ""} aria-label={`${i + 1}페이지`} aria-current={i === index ? "step" : undefined} onClick={() => select(i)}>{i <= index ? "●" : "○"}</button>)}</div><button className="btn sm" aria-label="다음 페이지" disabled={index >= pages.length - 1} onClick={() => select(index + 1)}>다음 →</button></div>
+    <div className="card-carousel-thumbs" role="group" aria-label="페이지 선택">{pages.map((p, i) => <button key={p.id} aria-label={`${i + 1}페이지 · ${p.title}`} aria-pressed={i === index} onClick={() => select(i)}><img src={`/api/channels/${channelId}/media/${p.id}`} loading="lazy" alt="" /><span aria-hidden="true">{i <= index ? "●" : "○"}</span></button>)}</div>
     {credit && <p className="small muted">{credit}</p>}
     <AltTextEditor values={values} selected={index} onSelect={select} disabled={!alt.data||save.isPending} change={(i,value)=>setDraft(values.map((v,n)=>n===i?value:v))}/>
     {dirty&&<div className="row"><span className="small">대체텍스트를 저장한 뒤 다운로드·승인할 수 있습니다.</span><button className="btn sm primary" disabled={save.isPending||values.some(v=>!v.trim())} onClick={()=>save.mutate()}>{save.isPending?"저장 중…":"대체텍스트 저장"}</button></div>}

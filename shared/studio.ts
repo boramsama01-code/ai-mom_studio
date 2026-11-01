@@ -8,7 +8,7 @@ import { PERSISTED_CARD_DESIGNS, CARD_COLOR_VARIANTS } from "./cardDesigns";
 export const studioChannels = ["penguin", "highscoop", "fryday", "news"] as const;
 export const studioFormats = ["웹툰", "카드뉴스", "릴스", "브랜드", "기타"] as const;
 export const studioExportDesigns = ["editorial", "spotlight", "minimal", ...Array.from(new Set([...PERSISTED_CARD_DESIGNS, ...CARD_COLOR_VARIANTS].map(d => `set:${d.id}` as const)))] as const;
-export const studioPageCount = (content: { format: string; exportDesign: string; experience?: Experience | null }) => content.experience ? content.experience.pages.length + 1 : content.format === "카드뉴스" ? content.exportDesign.startsWith("set:") ? 5 : 6 : 1;
+export const studioPageCount = (content: { format: string; exportDesign: string; experience?: Experience | null; finishedDeck?: { pages: unknown[] } | null }) => content.finishedDeck ? content.finishedDeck.pages.length : content.experience ? content.experience.pages.length + 1 : content.format === "카드뉴스" ? content.exportDesign.startsWith("set:") ? 5 : 6 : 1;
 export const studioOutputFormats = ["웹툰", "카드뉴스"] as const;
 export const studioOutputDescription = (format: string, design = "editorial") => format === "웹툰" ? "네컷 이미지 1장 · 1080 × 1350 PNG" : format === "카드뉴스" ? design.startsWith("set:") ? "표지 + 본문 4장 · 1080 × 1350 PNG 5장 (ZIP)" : "표지 + 본문 4장 + 마무리 · 1080 × 1350 PNG 6장 (ZIP)" : "기획용 형식 · 이미지·영상 내보내기 미지원";
 export const studioStages = ["idea", "writing", "making", "review", "done"] as const;
@@ -24,6 +24,7 @@ export type StudioProvider = AiProvider;
 const date = z.string().refine(v => v === "" || (/^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(new Date(`${v}T00:00:00Z`).getTime()) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v), "올바른 날짜를 입력하세요.");
 export const studioPanelSchema = z.object({ scene: z.string().max(4000), dialogue: z.string().max(3000), imageId: z.number().int().positive().nullable().default(null) }).strict();
 export const studioContentSchema = z.object({
+  finishedDeck: z.object({ pages: z.array(z.object({ imageId: z.number().int().positive(), name: z.string().max(200), altText: z.string().max(1000).default(""), uploadId: z.string().uuid().optional() }).strict()).max(10).refine(pages => new Set(pages.map(p => p.imageId)).size === pages.length, "같은 이미지는 한 번만 넣어 주세요.") }).strict().nullable().default(null),
   altTexts: z.array(z.string().max(1000)).max(10).default([]),
   experience: experienceSchema.nullable().default(null),
   title: z.string().trim().min(1).max(160),
@@ -41,6 +42,7 @@ export const studioContentSchema = z.object({
 export const studioCreateSchema = studioContentSchema.extend({ sourceItemId: z.number().int().positive().optional() });
 // Zod 4 applies defaults inside optional fields; unwrap them so a stage-only PATCH cannot erase content.
 export const studioPatchSchema = z.object({
+  finishedDeck: studioContentSchema.shape.finishedDeck.unwrap().optional(),
   experience: studioContentSchema.shape.experience.unwrap().optional(),
   title: studioContentSchema.shape.title.optional(),
   channel: studioContentSchema.shape.channel.unwrap().optional(),

@@ -1,15 +1,14 @@
 # 작업 처리 워커 — 화면에서 등록한 수집 요청 처리 + 예약 시각이 지난 승인 건 전송
-# 처음에는 수동 실행만. 자동 실행은 아래 schedule 주석을 푸세요(정시 보장 없음).
+# 제작보드에서 최종 승인한 게시물만 처리합니다. 웹 즉시 처리 + 매시간 예약 복구(정시 보장 없음).
 # 비용 주의: 비공개 저장소 무료 한도는 월 2,000분이고 작업마다 1분 단위로 올림됩니다.
 #   15분 간격(*/15)은 하루 96회 → 월 약 2,900분 이상으로 무료 한도를 넘습니다.
 #   무료 한도 안에서는 1시간 간격(월 약 720~1,100분)을 권장합니다.
-# 기본값 DRY_RUN=true, AUTO_PUBLISH=false → 실제로 게시하지 않습니다.
+# 승인 없는 콘텐츠는 발행하지 않습니다. 계정별 연결과 하루 한도도 게시 직전에 검사합니다.
 name: process
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: "7 * * * *"      # 매시 7분(권장)
-  #   # - cron: "*/15 * * * *" # 15분 간격(무료 한도 초과 가능)
+  schedule:
+    - cron: "17 * * * *"
 permissions:
   contents: read
 concurrency:
@@ -51,10 +50,10 @@ jobs:
       IG_CURRENT_DIALOGUE_ACCESS_TOKEN: ${{ secrets.IG_CURRENT_DIALOGUE_ACCESS_TOKEN }}
       IG_CURRENT_DIALOGUE_USER_ID: ${{ secrets.IG_CURRENT_DIALOGUE_USER_ID }}
       TG_CURRENT_DIALOGUE_CHAT_ID: ${{ secrets.TG_CURRENT_DIALOGUE_CHAT_ID }}
-      DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+      DRY_RUN: "false"
       AUTO_GENERATE: ${{ vars.AUTO_GENERATE || 'false' }}
       COLLECT_REVIEW_NOTIFICATIONS: ${{ vars.COLLECT_REVIEW_NOTIFICATIONS || 'false' }}
-      AUTO_PUBLISH: ${{ vars.AUTO_PUBLISH || 'false' }}
+      AUTO_PUBLISH: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

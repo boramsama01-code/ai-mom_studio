@@ -1,3 +1,4 @@
+import { lockStudioPublication, invalidateStudioPublication } from "./studioPublicationState";
 import { validateExperienceMedia } from "./experienceMedia";
 import { readIdea } from "../../shared/ideaBank";
 import { itemPrimarySource } from "./itemSources";
@@ -26,7 +27,7 @@ export async function studioCardsWithOutput(db: DB, rows: Array<typeof studioCar
     const dto = studioCardDto(row);
     const own = outputs.filter(o => o.itemId === row.sourceItemId);
     const output = own.find(o => o.id === row.importedMeta?.generatedAssetId) ?? own[0];
-    if (output) dto.sourceOutput = { assetId: output.id, channelId: output.channelId, itemId: output.itemId, revisionId: output.revisionId, stale: output.revisionId !== output.currentRevisionId,
+    if (output) dto.sourceOutput = { assetId: output.id, channelId: output.channelId, itemId: output.itemId, revisionId: output.revisionId, stale: output.revisionId !== output.currentRevisionId || !!(row.importedMeta?.studioPublication && row.importedMeta?.publishedVersion !== row.version),
       pages: output.carousel?.pages.map(p => ({ id: p.id, title: p.title, altText:p.altText })) ?? [{ id: output.id, title: row.content.title }], coverCredit: output.carousel?.cover.credit ?? "" };
     return dto;
   });
@@ -90,8 +91,12 @@ export async function saveStudioNotes(db: DB, version: number, notes: string) {
     return { notes, notesVersion: version + 1 };
   });
 }
+function validateStudioMode(content: StudioContent) {
+  if (content.finishedDeck && (content.experience || content.format !== "카드뉴스")) throw new HttpError(400, "완성 이미지는 카드뉴스 형식으로 사용해 주세요.");
+}
 export async function validateStudioImages(db: DB, cardId: number, content: StudioContent) {
-  const ids = [...new Set(content.panels.flatMap(p => p.imageId ? [p.imageId] : []))];
+  validateStudioMode(content);
+  const ids = [...new Set([...content.panels.flatMap(p => p.imageId ? [p.imageId] : []), ...(content.finishedDeck?.pages.map(p => p.imageId) ?? [])])];
   if (!ids.length) return;
   const own = await db.select({ id: studioImages.id }).from(studioImages).where(and(eq(studioImages.cardId, cardId), inArray(studioImages.id, ids)));
   if (own.length !== ids.length) throw new HttpError(400, "이 콘텐츠에 속한 이미지만 사용할 수 있습니다.");
@@ -102,9 +107,10 @@ export async function validateStudioChannel(db: DB, key: string) {
   if (!ch.active) throw new HttpError(409, "보관된 채널입니다. 채널을 복원한 뒤 새 작업을 시작하세요.");
 }
 export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number) {
+  validateStudioMode(content);
   await validateStudioChannel(db, content.channel);
   if (content.experience && (content.experience.media.length || content.experience.coverId || content.experience.pages.some(p=>p.mediaId))) throw new HttpError(400, "새 작업을 만든 뒤 사진·영상을 올려 주세요.");
-  if (content.panels.some(p => p.imageId)) throw new HttpError(400, "새 콘텐츠에는 기존 이미지 ID를 넣을 수 없습니다.");
+  if (content.finishedDeck?.pages.length || content.panels.some(p => p.imageId)) throw new HttpError(400, "새 콘텐츠에는 기존 이미지 ID를 넣을 수 없습니다.");
   return db.transaction(async tx => {
     if (sourceItemId) {
       const [source] = await tx.select().from(contentItems).where(eq(contentItems.id, sourceItemId));
@@ -137,9 +143,12 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
 }
 export async function saveStudioCard(db: DB, cardId: number, version: number, patch: Partial<StudioContent>, actor: string, instruction = "직접 수정") {
   return db.transaction(async tx => {
-    const current = await loadStudioCard(tx as unknown as DB, cardId, true);
+    const current = await lockStudioPublication(tx as unknown as DB, cardId);
     assertStudioActive(current);
+    if (current.version !== version) conflict(studioCardDto(current));
+    await invalidateStudioPublication(tx as unknown as DB, current);
     const content = parse(studioContentSchema, { ...current.content, ...patch });
+    if (current.importedMeta?.studioPublication && patch.channel && patch.channel !== current.content.channel) throw new HttpError(409, "발행 준비한 콘텐츠의 채널은 바꿀 수 없습니다. 다른 채널용 작업을 새로 만들어 주세요.");
     if (patch.channel && patch.channel !== current.content.channel) await validateStudioChannel(tx as unknown as DB, content.channel);
     await validateStudioImages(tx as unknown as DB, cardId, content);
     await validateExperienceMedia(tx as unknown as DB, cardId, content.experience);

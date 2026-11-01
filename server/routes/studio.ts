@@ -1,3 +1,7 @@
+import { appendFinishedImage } from "../services/studioFinishedDeck";
+import { prepareStudioPublication, approveStudioPublication, studioPublishStatus } from "../services/studioPublish";
+import { checkInstagramConnection, connectInstagram } from "../services/instagramConnection";
+import { kickInlinePublish } from "../worker/inlinePublish";
 import { listExperienceMedia, uploadExperienceMedia, saveVideoPreview, mediaRange } from "../services/experienceMedia";
 import { channelSlug } from "../../shared/channelKeys";
 import { Router, raw } from "express";
@@ -149,3 +153,28 @@ studioRoutes.post("/studio/import", ah(async (req, res) => {
   res.json(await importStudioBoard(getDb(), parse(studioImportSchema, req.body), actorOf(req)));
 }));
 
+
+// Finished pages and publishing stay inside the operator session + CSRF boundary.
+studioRoutes.post("/studio/cards/:id/finished-images", raw({ type: [...STUDIO_IMAGE_TYPES, "application/octet-stream"], limit: STUDIO_IMAGE_MAX_BYTES }), ah(async (req, res) => {
+  const q = parse(z.object({ version: z.coerce.number().int().positive(), name: z.string().max(200), uploadId: z.string().uuid() }), req.query);
+  res.status(201).json(await appendFinishedImage(getDb(), intParam(req.params.id), q.version, q.name, q.uploadId, req.body, actorOf(req)));
+}));
+studioRoutes.get("/studio/cards/:id/publication", ah(async (req, res) => { res.json(await studioPublishStatus(getDb(), intParam(req.params.id))); }));
+studioRoutes.post("/studio/cards/:id/publication/prepare", ah(async (req, res) => {
+  const { version } = parse(z.object({ version: z.number().int().positive() }).strict(), req.body);
+  res.json(await prepareStudioPublication(getDb(), intParam(req.params.id), version, actorOf(req)));
+}));
+studioRoutes.post("/studio/cards/:id/publication/approve", ah(async (req, res) => {
+  const input = parse(z.object({ version: z.number().int().positive(), assetId: z.number().int().positive(), destinationId: z.number().int().positive(), scheduledAt: z.string().datetime({ offset: true }) }).strict(), req.body);
+  const result = await approveStudioPublication(getDb(), intParam(req.params.id), input, actorOf(req));
+  kickInlinePublish(getDb());
+  res.status(201).json(result);
+}));
+studioRoutes.post("/studio/instagram/:cid/connect", ah(async (req, res) => {
+  const input = parse(z.object({ token: z.string().trim().min(20).max(4000).regex(/^[^\r\n\s]+$/), username: z.string().trim().regex(/^@?[a-zA-Z0-9._]{1,30}$/), dailyLimit: z.number().int().min(1).max(25) }).strict(), req.body);
+  res.json(await connectInstagram(getDb(), intParam(req.params.cid), input, actorOf(req)));
+}));
+studioRoutes.post("/studio/instagram/:cid/check", ah(async (req, res) => {
+  const { destinationId } = parse(z.object({ destinationId: z.number().int().positive() }).strict(), req.body);
+  res.json(await checkInstagramConnection(getDb(), intParam(req.params.cid), destinationId));
+}));

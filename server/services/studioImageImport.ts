@@ -1,3 +1,4 @@
+import { lockStudioPublication, invalidateStudioPublication } from "./studioPublicationState";
 import sharp from "sharp";
 import { eq } from "drizzle-orm";
 import type { DB } from "../db";
@@ -25,10 +26,11 @@ export async function normalizeStudioImage(bytes: Buffer): Promise<Buffer> {
 export async function importStudioPanelImage(db: DB, cardId: number, panelIndex: number, version: number, bytes: Buffer, actor: string) {
   const png = await normalizeStudioImage(bytes);
   return db.transaction(async tx => {
-    const [current] = await tx.select().from(studioCards).where(eq(studioCards.id, cardId)).for("update");
+    const current = await lockStudioPublication(tx as unknown as DB, cardId);
     if (!current) throw new HttpError(404, "콘텐츠를 찾을 수 없습니다.");
     assertStudioActive(current);
     if (current.version !== version) conflict(studioCardDto(current));
+    await invalidateStudioPublication(tx as unknown as DB, current);
     const [image] = await tx.insert(studioImages).values({ cardId, panelIndex, bytes: png, mimeType: "image/png", model: "manual-import" }).returning({ id: studioImages.id });
     const content = studioContentSchema.parse({ ...current.content, panels: current.content.panels.map((p, i) => i === panelIndex ? { ...p, imageId: image.id } : p) });
     const [saved] = await tx.update(studioCards).set({ content, version: version + 1, updatedAt: new Date() }).where(eq(studioCards.id, cardId)).returning();
