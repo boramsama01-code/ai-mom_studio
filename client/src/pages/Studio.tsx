@@ -39,7 +39,7 @@ const characters: Array<{ id: Character; name: string; role: string; detail: str
 const imageUrl = (id: number) => `/api/studio/images/${id}`;
 const dateTime = (v: string) => new Date(v).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 const activeJob = (j: Job) => ["queued", "running", "processing"].includes(j.status);
-const inputOf = (c: CardInput): CardInput => ({ experience: c.experience ?? null, title: c.title, channel: c.channel, format: c.format, stage: c.stage, dueDate: c.dueDate ?? "", memo: c.memo ?? "", script: c.script ?? "", caption: c.caption ?? "", exportDesign: c.exportDesign ?? "editorial", sourceLabel: c.sourceLabel ?? "", panels: c.panels ?? Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), characters: c.characters ?? [], imagePath: c.imagePath ?? "" });
+const inputOf = (c: CardInput): CardInput => ({ altTexts:c.altTexts??[], experience: c.experience ?? null, title: c.title, channel: c.channel, format: c.format, stage: c.stage, dueDate: c.dueDate ?? "", memo: c.memo ?? "", script: c.script ?? "", caption: c.caption ?? "", exportDesign: c.exportDesign ?? "editorial", sourceLabel: c.sourceLabel ?? "", panels: c.panels ?? Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), characters: c.characters ?? [], imagePath: c.imagePath ?? "" });
 
 export function StudioPage({ cardId }: { cardId?: number }) {
   const [view, setView] = useState<"board" | "characters" | "trash">("board");
@@ -392,4 +392,3 @@ function Snapshot({ title, card }: { title: string; card: CardInput }) {
 function CharacterArchive() {
   return <><section className="studio-character-archive">{characters.map((c) => <article className="panel" key={c.id}><div className="studio-character-art"><img src={`/studio-assets/${c.id}.png`} alt={`${c.name} 캐릭터 원본`} /></div><h2>{c.name}</h2><p className="small muted">{c.role}</p><p>{c.detail}</p><a className="btn sm" href={`/studio-assets/${c.id}.png`} download={`${c.name}.png`}>원본 다운로드</a></article>)}</section><section className="panel studio-canon"><h2>세계관·외형 기준</h2><p>남극성-09에서 온 네 가족. 둥근 우주 헬멧, 옆모습 중심, 뾰족한 검은 부리, 작은 흰 점 눈, 길쭉한 검정·흰색 몸과 일정한 굵기의 선을 유지합니다.</p><p className="small muted">Alligodang은 아이와 함께 뉴스·과학·세상 이야기를 나누는 채널입니다. ‘지구 통신실’은 세계관 속 장소입니다.</p></section></>;
 }
-

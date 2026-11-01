@@ -1,3 +1,4 @@
+import { studioCards } from "../../shared/schema";
 import { loadCardPages } from "../services/cardCarousel";
 import { zipFiles } from "../services/zip";
 import { studioAiStatus } from "../services/studioAi";
@@ -393,6 +394,34 @@ itemRoutes.post(
   }),
 );
 
+itemRoutes.get("/channels/:cid/media/:mid/alt-text",ah(async(req,res)=>{
+  const ch=await loadChannel(req.params.cid);
+  const [asset]=await getDb().select().from(mediaAssets).where(and(eq(mediaAssets.id,intParam(req.params.mid)),eq(mediaAssets.channelId,ch.id),eq(mediaAssets.kind,"card")));
+  if(!asset)throw new HttpError(404,"카드뉴스를 찾을 수 없습니다.");
+  const [item]=await getDb().select({title:contentItems.title}).from(contentItems).where(eq(contentItems.id,asset.contentItemId));
+  res.json(cardAltTextState(asset,item.title));
+}));
+itemRoutes.patch("/channels/:cid/media/:mid/alt-text",ah(async(req,res)=>{
+  const ch=await loadChannel(req.params.cid),id=intParam(req.params.mid);
+  const body=parse(z.object({version:z.number().int().min(0),values:z.array(z.string().trim().min(1,"대체텍스트를 입력해 주세요.").max(1000)).min(1).max(10)}).strict(),req.body);
+  const result=await getDb().transaction(async tx=>{
+    const [initial]=await tx.select().from(mediaAssets).where(and(eq(mediaAssets.id,id),eq(mediaAssets.channelId,ch.id),eq(mediaAssets.kind,"card")));
+    if(!initial)throw new HttpError(404,"카드뉴스를 찾을 수 없습니다.");
+    const [item]=await tx.select().from(contentItems).where(eq(contentItems.id,initial.contentItemId)).for("update");
+    const [board]=await tx.select().from(studioCards).where(eq(studioCards.sourceItemId,item.id));
+    if(board?.trashedAt)throw new HttpError(409,"휴지통에서 복원한 뒤 수정해 주세요.");
+    const [asset]=await tx.select().from(mediaAssets).where(eq(mediaAssets.id,id)).for("update");
+    const current=cardAltTextState(asset,item.title);
+    if(current.version!==body.version)throw new HttpError(409,"다른 곳에서 대체텍스트가 변경됐습니다. 입력을 복사한 뒤 최신 내용을 확인해 주세요.");
+    if(current.values.length!==body.values.length)throw new HttpError(400,"카드 장수와 대체텍스트 개수가 다릅니다.");
+    const manifest=asset.carousel??{version:1 as const,pages:[{id:asset.id,sha256:asset.sha256,title:item.title}],cover:{kind:"typography" as const,credit:""}};
+    const carousel={...manifest,altVersion:body.version+1,pages:manifest.pages.map((p,i)=>({...p,altText:body.values[i]}))};
+    await tx.update(mediaAssets).set({carousel}).where(eq(mediaAssets.id,id));
+    await audit(tx,{actor:actorOf(req),action:"update_alt_text",entity:"media_asset",entityId:id,channelId:ch.id,detail:{version:carousel.altVersion,pages:body.values.length}});
+    return {version:carousel.altVersion,values:body.values};
+  });res.json(result);
+}));
+
 itemRoutes.get("/channels/:cid/media/:mid/deck.zip", ah(async (req, res) => {
   const ch = await loadChannel(req.params.cid);
   const [cover] = await getDb().select().from(mediaAssets).where(and(eq(mediaAssets.id, intParam(req.params.mid)), eq(mediaAssets.channelId, ch.id), eq(mediaAssets.kind, "card")));
@@ -403,7 +432,7 @@ itemRoutes.get("/channels/:cid/media/:mid/deck.zip", ah(async (req, res) => {
   const primary = await itemPrimarySource(getDb(), item);
   const captions = buildCaptions({ kind: item.kind, payload: revision.payload, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), sourceUrl: primary?.originalUrl ?? null });
   const files = pages.map((page, i) => ({ name: `page-${String(i + 1).padStart(2, "0")}.jpg`, bytes: page.bytes }));
-  files.push({ name: "caption.txt", bytes: Buffer.from(captions.instagram) }, { name: "credits.txt", bytes: Buffer.from(cover.carousel?.cover.credit ?? "출처는 각 카드 하단을 확인하세요.") });
+  files.push({name:"alt-text.txt",bytes:Buffer.from(altTextFile(cardAltTextState(cover,item.title).values))},{ name: "caption.txt", bytes: Buffer.from(captions.instagram) }, { name: "credits.txt", bytes: Buffer.from(cover.carousel?.cover.credit ?? "출처는 각 카드 하단을 확인하세요.") });
   res.type("application/zip").set("Content-Disposition", `attachment; filename="cardnews-${cover.contentItemId}-r${cover.revisionId}.zip"`).send(zipFiles(files));
 }));
 
@@ -429,12 +458,13 @@ itemRoutes.post(
       z.object({
         revisionId: z.number().int(),
         mediaAssetId: z.number().int(),
+        altTextVersion: z.number().int().min(0).optional(),
         captions: z.object({ instagram: z.string().max(5000), telegram: z.string().max(5000) }),
         scheduledAt: z.string().datetime({ offset: true }),
       }),
       req.body,
     );
-    const r = await approveItem(getDb(), { itemId: item.id, revisionId: body.revisionId, mediaAssetId: body.mediaAssetId, captions: body.captions, scheduledAt: new Date(body.scheduledAt), actor: actorOf(req) });
+    const r = await approveItem(getDb(), { itemId: item.id, revisionId: body.revisionId, mediaAssetId: body.mediaAssetId, altTextVersion:body.altTextVersion, captions: body.captions, scheduledAt: new Date(body.scheduledAt), actor: actorOf(req) });
     if (!r.ok) throw new HttpError(400, r.error);
     res.status(201).json(r);
   }),
@@ -513,3 +543,5 @@ itemRoutes.post(
 );
 
 
+import { altTextFile } from "../../shared/altText";
+import { cardAltTextState } from "../services/cardAccessibility";

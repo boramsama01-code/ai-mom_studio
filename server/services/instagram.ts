@@ -44,17 +44,19 @@ async function igFetch(path: string, method: "GET" | "POST", params: Record<stri
   return { ok: true as const, json };
 }
 
-export async function createContainer(userId: string, token: string, imageUrl: string, caption: string) {
-  const r = await igFetch(`${userId}/media`, "POST", { image_url: imageUrl, caption }, token);
+export async function createContainer(userId: string, token: string, imageUrl: string, caption: string, altText?: string) {
+  if(altText!==undefined&&(!altText.trim()||altText.length>1000))return {ok:false as const,lost:false,err:{kind:"terminal",error:"대체텍스트는 1~1000자로 작성해 주세요."} as IgError};
+  const r = await igFetch(`${userId}/media`, "POST", { image_url: imageUrl, caption, ...(altText?.trim()?{alt_text:altText.trim()}: {}) }, token);
   if (!r.ok) return r;
   return { ok: true as const, containerId: String(r.json.id) };
 }
 
-export async function createCarouselContainer(userId: string, token: string, imageUrls: string[], caption: string) {
+export async function createCarouselContainer(userId: string, token: string, imageUrls: string[], caption: string, altTexts?: string[]) {
+  if(altTexts&&(altTexts.length!==imageUrls.length||altTexts.some(v=>!v.trim()||v.length>1000)))return {ok:false as const,lost:false,err:{kind:"terminal",error:"각 이미지의 대체텍스트를 1~1000자로 작성해 주세요."} as IgError};
   if (imageUrls.length < 2 || imageUrls.length > 10) return { ok: false as const, lost: false, err: { kind: "terminal", error: "카드뉴스는 2~10장이어야 합니다." } as IgError };
   const children: string[] = [];
-  for (const image_url of imageUrls) {
-    const child = await igFetch(`${userId}/media`, "POST", { image_url, is_carousel_item: "true" }, token);
+  for (const [index,image_url] of imageUrls.entries()) {
+    const child = await igFetch(`${userId}/media`, "POST", { image_url, is_carousel_item: "true", ...(altTexts?.[index]?.trim()?{alt_text:altTexts[index].trim()}: {}) }, token);
     if (!child.ok) return child;
     if (!child.json.id) return { ok: false as const, lost: false, err: { kind: "transient", error: "하위 이미지 컨테이너 ID를 받지 못했습니다." } as IgError };
     children.push(String(child.json.id));
@@ -105,4 +107,3 @@ export async function waitForContainer(containerId: string, token: string, budge
     wait = Math.min(wait * 2, 20_000);
   }
 }
-

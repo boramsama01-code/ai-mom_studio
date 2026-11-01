@@ -7,6 +7,7 @@ export const EXPERIENCE_TOTAL_BYTES = 100 * 1024 * 1024;
 export const experiencePageSchema = z.object({
   mediaId: z.number().int().positive().nullable(), title: z.string().trim().max(70), body: z.string().max(300),
   fit: z.enum(["contain", "cover"]).default("contain"),
+  altText: z.string().max(1000).default(""),
 }).strict();
 export const experienceSchema = z.object({
   event: z.string().max(160).default(""), place: z.string().max(160).default(""),
@@ -18,6 +19,7 @@ export const experienceSchema = z.object({
   media: z.array(z.object({ id: z.number().int().positive(), note: z.string().max(500).default("") }).strict()).max(EXPERIENCE_MAX_FILES).default([])
     .refine(v => new Set(v.map(m=>m.id)).size === v.length, "같은 자료를 중복 선택할 수 없습니다."),
   coverId: z.number().int().positive().nullable().default(null),
+  coverAltText: z.string().max(1000).default(""),
   pages: z.array(experiencePageSchema).max(9).default([]),
   questions: z.array(z.string().max(300)).max(8).default([]),
 }).strict();

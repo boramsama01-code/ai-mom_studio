@@ -1,3 +1,4 @@
+import { cardAltTextState } from "../services/cardAccessibility";
 import { itemPrimarySource } from "../services/itemSources";
 /**
  * 카드 생성 · 최종 승인 · 목적지별 전송
@@ -130,9 +131,10 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
     const hash = sha256(page.bytes);
     await db.insert(mediaAssets).values({ channelId: ch.id, contentItemId: item.id, revisionId: rev.id, kind: index === 0 ? "card" : "carousel_page", sha256: hash, width: 1080, height: 1350, bytes: page.bytes, source: key.startsWith("custom:") ? "custom" : "builtin", templateKey: key }).onConflictDoNothing();
     const [stored] = await db.select({ id: mediaAssets.id }).from(mediaAssets).where(and(eq(mediaAssets.revisionId, rev.id), eq(mediaAssets.sha256, hash)));
-    pages.push({ id: stored.id, sha256: hash, title: page.title });
+    pages.push({ id: stored.id, sha256: hash, title: page.title, altText:page.altText });
   }
-  const carousel: CardCarousel = { version: 1, pages, cover };
+  const [previous]=await db.select({carousel:mediaAssets.carousel}).from(mediaAssets).where(eq(mediaAssets.id,pages[0].id));
+  const carousel: CardCarousel = previous?.carousel?.pages.length===pages.length && previous.carousel.pages.every((p,i)=>p.id===pages[i].id) ? {...previous.carousel,pages:pages.map((p,i)=>({...p,altText:previous.carousel!.pages[i].altText||p.altText}))} : { version: 1, pages, cover };
   await db.update(mediaAssets).set({ carousel }).where(eq(mediaAssets.id, pages[0].id));
   const board = await createStudioCard(db, studioContentSchema.parse({ title: String(title).slice(0, 160), channel: studioKey(ch.slug), format: "카드뉴스", stage: "review" }), options.actor ?? "system", item.id);
   // Keep all manually edited board fields and version history; only its generated output changes.
@@ -143,7 +145,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
 /* ───────────── 최종 승인 ───────────── */
 export async function approveItem(
   db: DB,
-  a: { itemId: number; revisionId: number; mediaAssetId: number; captions: { instagram: string; telegram: string }; scheduledAt: Date; actor: string; now?: Date },
+  a: { itemId: number; revisionId: number; mediaAssetId: number; altTextVersion?:number; captions: { instagram: string; telegram: string }; scheduledAt: Date; actor: string; now?: Date },
 ) {
   const now = a.now ?? new Date();
   const cr = await currentRevision(db, a.itemId);
@@ -154,6 +156,7 @@ export async function approveItem(
   if (item.relevance === "irrelevant" || item.excluded) return { ok: false as const, error: "관련 없음/제외 항목은 승인할 수 없습니다." };
   const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, a.mediaAssetId));
   if (!asset || asset.kind !== "card" || asset.revisionId !== rev.id) return { ok: false as const, error: "현재 버전으로 만든 카드가 아닙니다. 카드를 다시 생성하세요." };
+  if(a.altTextVersion!==undefined && a.altTextVersion!==cardAltTextState(asset,item.title).version)throw new HttpError(409,"대체텍스트가 변경됐습니다. 최신 설명을 확인하고 다시 승인해 주세요.");
   let approvedHash: string;
   try { approvedHash = cardApprovalHash(await loadCardPages(db, asset)); }
   catch (e) { return { ok: false as const, error: (e as Error).message }; }
@@ -169,6 +172,8 @@ export async function approveItem(
     await tx.select({ id: contentItems.id }).from(contentItems).where(eq(contentItems.id, item.id)).for("update");
     const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
     if (board) assertStudioActive(board);
+    const [freshAsset]=await tx.select().from(mediaAssets).where(eq(mediaAssets.id,asset.id));
+    if(JSON.stringify(cardAltTextState(freshAsset,item.title))!==JSON.stringify(cardAltTextState(asset,item.title)))throw new HttpError(409,"대체텍스트가 변경됐습니다. 최신 설명을 확인하고 다시 승인해 주세요.");
     // 기존 활성 승인은 새 승인으로 대체
     const prev = await tx.select({ id: approvals.id }).from(approvals).where(and(eq(approvals.contentItemId, item.id), eq(approvals.status, "active")));
     if (prev.length) {
@@ -178,7 +183,7 @@ export async function approveItem(
     }
     const [ap] = await tx
       .insert(approvals)
-      .values({ channelId: item.channelId, contentItemId: item.id, revisionId: rev.id, mediaAssetId: asset.id, cardSha256: approvedHash, captions: a.captions, scheduledAt: a.scheduledAt, approvedBy: a.actor })
+      .values({ channelId: item.channelId, contentItemId: item.id, revisionId: rev.id, mediaAssetId: asset.id, cardSha256: approvedHash, captions: {...a.captions,altTexts:cardAltTextState(asset,item.title).values}, scheduledAt: a.scheduledAt, approvedBy: a.actor })
       .returning();
     for (const d of dests) {
       await tx.insert(deliveries).values({ channelId: item.channelId, approvalId: ap.id, destinationId: d.id, status: "scheduled" }).onConflictDoNothing();
@@ -347,7 +352,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
         await finish(db, d, { status: "failed", errorKind: "transient", lastError: `이미지 업로드 실패: ${(e as Error).message}` });
         return "failed";
       }
-      const c = urls.length > 1 ? await ig.createCarouselContainer(userId, token, urls, ap.captions.instagram) : await ig.createContainer(userId, token, urls[0], ap.captions.instagram);
+      const c = urls.length > 1 ? await ig.createCarouselContainer(userId, token, urls, ap.captions.instagram, ap.captions.altTexts) : await ig.createContainer(userId, token, urls[0], ap.captions.instagram, ap.captions.altTexts?.[0]);
       if (!c.ok) {
         // 컨테이너 생성 응답 유실은 게시가 아니므로(발행 전 단계) 실패로 기록
         await finish(db, d, { status: "failed", errorKind: c.err.kind, lastError: c.err.error });
@@ -398,5 +403,3 @@ export async function retryDelivery(db: DB, deliveryId: number, actor: string, c
   await audit(db, { actor, action: "retry_delivery", entity: "delivery", entityId: d.id, channelId: d.channelId, detail: { from: d.status, confirmNotPosted } });
   return { ok: true as const };
 }
-
-
