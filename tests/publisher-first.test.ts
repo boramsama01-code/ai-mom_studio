@@ -25,6 +25,14 @@ describe("publisher-first article navigation",()=>{
    const fetcher=transport({[home]:form,[search.href]:link,[article]:html});
    expect((await fetchPublisherArticle(wrapper,fetcher,context)).ok).toBe(true);expect(fetcher).toHaveBeenCalledTimes(3);
  });
+ it("supports an advertised Korean newspaper search form without guessing an endpoint",async()=>{
+   const advertised='<form method="get" action="/news/articleList.html"><input type="hidden" name="sc_area" value="A"><input name="sc_word" type="text"></form>';
+   const search=new URL('/news/articleList.html',home);search.searchParams.set('sc_area','A');search.searchParams.set('sc_word',title);
+   expect(publisherSearchLink(advertised,home,title)).toBe(search.href);
+   expect(publisherSearchLink(advertised.replace('method="get"','method="post"'),home,title)).toBeNull();
+   const fetcher=transport({[home]:advertised,[search.href]:link,[article]:html});
+   expect(await fetchPublisherArticle(wrapper,fetcher,context)).toMatchObject({ok:true,text:body});
+ });
  it.each([404,410,200])("continues to advertised public search when the RSS is missing or not XML (HTTP %i)",async status=>{
    const search=new URL('/search',home);search.searchParams.set('q',title);
    const fetcher=transport({[home]:form+'<link rel="alternate" type="application/rss+xml" href="/rss.xml">',[search.href]:link,[article]:html});

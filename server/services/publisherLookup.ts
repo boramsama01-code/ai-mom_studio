@@ -51,15 +51,19 @@ export function publisherSearchLink(html: string, base: string, title: string): 
   $("form").slice(0, 20).each((_, el) => {
     const form = $(el), method = (form.attr("method") || "get").toLowerCase();
     const action = samePublisherUrl(form.attr("action") || "", base);
-    if (method !== "get" || !action || !/(?:^|[/_.-])search(?:[/_.-]|$)/i.test(new URL(action).pathname)) return;
+    if (method !== "get" || !action) return;
     const inputs = form.find("input").toArray();
     if (inputs.some(e => ["password", "file"].includes($(e).attr("type") || ""))) return;
-    const field = inputs.find(e => /^(q|query|search|keyword|search_word|searchword|searchtext)$/i.test($(e).attr("name") || "") && ["text", "search", ""].includes($(e).attr("type") || ""));
+    const field = inputs.find(e => /^(q|query|search|keyword|search_word|searchword|searchtext|sc_word)$/i.test($(e).attr("name") || "") && ["text", "search", ""].includes($(e).attr("type") || ""));
     if (!field) return;
+    const searchable = /(?:^|[/_.-])search(?:[/_.-]|$)/i.test(new URL(action).pathname)
+      || form.attr("role") === "search"
+      || ($(field).attr("name") === "sc_word" && /\/articleList\.html$/i.test(new URL(action).pathname));
+    if (!searchable) return;
     const u = new URL(action);
     for (const e of inputs) {
       const n = $(e), name = n.attr("name") || "";
-      if (n.attr("type") === "hidden" && /^(mode|type|section|search_field|search_type|code)$/i.test(name)) u.searchParams.set(name, (n.attr("value") || "").slice(0, 100));
+      if (n.attr("type") === "hidden" && /^(mode|type|section|search_field|search_type|code|sc_area|sc_section_code|sc_order_by|view_type)$/i.test(name)) u.searchParams.set(name, (n.attr("value") || "").slice(0, 100));
     }
     u.searchParams.set($(field).attr("name")!, title.slice(0, 200)); urls.add(u.href);
   });
