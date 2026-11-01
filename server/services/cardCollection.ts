@@ -28,7 +28,7 @@ function canvas(d: CardDesign) {
   };
   const grid = (color = d.soft) => { for (let x = 0; x < W; x += 48) line(x, 0, 1, color, H); for (let y = 0; y < H; y += 48) line(0, y, W, color); };
   const header = (brand: string, label: string, color = d.ink) => {
-    text(brand, 80, 62, 750, 37, { size: 24, min: 18, weight: "semibold", color, field: "brandLine" });
+    text(brand, 80, 56, 750, 48, { size: 34, min: 18, weight: "bold", color, field: "brandLine" });
     text(label, 860, 62, 140, 37, { size: 24, color });
   };
   const footer = (model: CardModel, credit = "", color = d.ink) => {

@@ -27,7 +27,7 @@ export async function migrateSitesStarter(db: DB) {
     // imported records still commit/roll back as one outer transaction.
     const imported = await importStudioBoard(tx as unknown as DB, board, "migration:sites");
     const [highway] = await tx.select().from(channels).where(eq(channels.slug, "opportunities"));
-    if (!highway) throw new Error("Sites 이전 전 Highway 기본 채널을 생성해야 합니다.");
+    if (!highway) throw new Error("Sites 이전 전 Highscoop 기본 채널을 생성해야 합니다.");
     let sampleNotices = 0;
 
     for (const notice of starter.notices) {
@@ -77,3 +77,4 @@ export async function migrateSitesStarter(db: DB) {
     return { applied: true, studioCards: imported.imported, sampleNotices };
   });
 }
+

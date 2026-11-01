@@ -68,7 +68,7 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
     </div>}
     {form.format === "카드뉴스" && <div className="stack">
       <button type="button" className="btn" aria-expanded={showCollection} onClick={() => setShowCollection(v => !v)}>{showCollection ? "디자인 컬렉션 접기" : "디자인 5종 · 컬러 30가지 둘러보기"}</button>
-      {showCollection && <TemplatePicker cid="studio" value={form.exportDesign} disabled={busy || prepare.isPending} onChange={key => change("exportDesign", key as StudioContent["exportDesign"])} items={cardDesignOptions()} />}
+      {showCollection && <TemplatePicker cid="studio" studioChannel={form.channel} value={form.exportDesign} disabled={busy || prepare.isPending} onChange={key => change("exportDesign", key as StudioContent["exportDesign"])} items={cardDesignOptions()} />}
       {form.exportDesign.startsWith("set:") && <p className="small muted">사진형 표지는 첫 번째 본문의 이미지를 함께 사용합니다. 각 본문에 넣은 그림도 유지됩니다.</p>}
     </div>}
     <label className="field">출처 표기<input id="studio-sourceLabel" disabled={busy || prepare.isPending} maxLength={180} value={form.sourceLabel} onChange={event => change("sourceLabel", event.target.value)} placeholder="예: ○○대학교 입학처 · 2026.10.23 확인" /><span className="hint">이미지 하단에 표시됩니다.</span></label>

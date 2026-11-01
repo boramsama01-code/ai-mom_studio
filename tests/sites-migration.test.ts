@@ -52,7 +52,7 @@ describe("Sites 기본 자료 통합", () => {
   it("이전 중 오류가 나면 카드·메모·완료 표시를 모두 되돌린다", async () => {
     const db = getDb();
     await db.update(channels).set({ slug: "renamed-opportunities" }).where(eq(channels.slug, "opportunities"));
-    await expect(migrateSitesStarter(db)).rejects.toThrow("Highway 기본 채널");
+    await expect(migrateSitesStarter(db)).rejects.toThrow("Highscoop 기본 채널");
     expect(await db.select().from(studioCards)).toHaveLength(0);
     expect(await db.select().from(studioRevisions)).toHaveLength(0);
     expect((await loadStudioNotes(db)).notes).toBe("");
@@ -67,3 +67,4 @@ describe("Sites 기본 자료 통합", () => {
     expect(await loadStudioNotes(db)).toEqual({ notes: "", notesVersion: 2 });
   });
 });
+

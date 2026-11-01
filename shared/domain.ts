@@ -1,3 +1,4 @@
+import { CHANNEL_BRANDS } from "./branding";
 /**
  * 도메인 상수·라벨·정규화 함수 (클라이언트/서버 공용)
  */
@@ -5,22 +6,22 @@
 export const CHANNEL_SEEDS = [
   {
     slug: "opportunities",
-    name: "Highway · 고입",
+    name: CHANNEL_BRANDS.highway.name,
     description: "특목고·자사고·영재학교 입시와 STEM 캠프·대회·영재교육원 공고를 모아 확인합니다.",
     contentType: "notice",
     accentColor: "#0B766E",
   },
   {
     slug: "science-dialogue",
-    name: "과학 대화",
+    name: `${CHANNEL_BRANDS.news.name} · 과학`,
     description: "중학생과 부모가 5~10분 과학 질문을 근거로 이야기합니다.",
     contentType: "science_dialogue",
     accentColor: "#6550A6",
   },
   {
     slug: "current-dialogue",
-    name: "시사 채널 · 이름 미정",
-    description: "사실·관점·가치를 구분하며 시사 주제를 이야기합니다.",
+    name: CHANNEL_BRANDS.news.name,
+    description: "뉴스·과학·AI·사회 등 다양한 이슈를 아이와 함께 이야기합니다.",
     contentType: "current_dialogue",
     accentColor: "#285FAD",
   },
@@ -258,4 +259,5 @@ export type DiscoveryInfo = {
   headline: string; // 대표 기사 제목(초안 생성 후 제목이 바뀌어도 같은 사건 판별에 사용)
   discoveredAt: string;
 };
+
 
