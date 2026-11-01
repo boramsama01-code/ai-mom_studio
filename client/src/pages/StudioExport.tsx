@@ -6,6 +6,8 @@ import { TemplatePicker } from "./Design";
 import { api, apiBlob } from "../api";
 import { ErrorBox } from "../ui";
 import { useToast } from "../toast";
+import { studioAltTexts } from "@shared/altText";
+import { AltTextEditor } from "../AltTextEditor";
 
 async function downloadCard(card: StudioCard) {
   const zip = !!card.sourceOutput || card.format === "카드뉴스";
@@ -72,6 +74,11 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
       {form.exportDesign.startsWith("set:") && <p className="small muted">사진형 표지는 첫 번째 본문의 이미지를 함께 사용합니다. 각 본문에 넣은 그림도 유지됩니다.</p>}
     </div>}
     <label className="field">출처 표기<input id="studio-sourceLabel" disabled={busy || prepare.isPending} maxLength={180} value={form.sourceLabel} onChange={event => change("sourceLabel", event.target.value)} placeholder="예: ○○대학교 입학처 · 2026.10.23 확인" /><span className="hint">이미지 하단에 표시됩니다.</span></label>
+    {form.format === "카드뉴스" && <AltTextEditor values={studioAltTexts(form)} selected={page} onSelect={setPage} disabled={busy||prepare.isPending} change={(index,value)=>{
+      if(form.experience){const e=form.experience;change("experience",index===0?{...e,coverAltText:value}:{...e,pages:e.pages.map((p,i)=>i===index-1?{...p,altText:value}:p)});}
+      else {const values=[...form.altTexts];while(values.length<=index)values.push("");values[index]=value;change("altTexts",values);}
+    }}/>}
+    {form.format === "카드뉴스" && <p className="small muted">ZIP에 페이지별 대체텍스트(alt-text.txt)를 함께 담습니다.</p>}
     <div className="studio-export-status" aria-live="polite">
       {pendingCheck || check.isFetching ? <p className="small muted">출력 영역 확인 중…</p> : check.error ? <ErrorBox error={check.error} retry={() => check.refetch()} /> : !!check.data?.errors.length ? <ul className="notice warn">{check.data.errors.map((error, i) => <li key={i}><button className="text-btn" onClick={() => focusField(error.field)}>{error.message}</button></li>)}</ul> : <p className="small export-ready">글이 출력 영역에 맞습니다.</p>}
       {!pendingCheck && check.data?.warnings.map(warning => <p className="small muted" key={warning}>{warning}</p>)}
@@ -89,4 +96,3 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
     <p className="small studio-handoff">이미지를 내려받고 위 캡션을 복사해 SNS에 직접 게시하세요. ‘완료’는 제작 완료를 뜻합니다.</p>
   </section>;
 }
-

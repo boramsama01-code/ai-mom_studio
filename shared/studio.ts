@@ -24,6 +24,7 @@ export type StudioProvider = AiProvider;
 const date = z.string().refine(v => v === "" || (/^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(new Date(`${v}T00:00:00Z`).getTime()) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v), "올바른 날짜를 입력하세요.");
 export const studioPanelSchema = z.object({ scene: z.string().max(4000), dialogue: z.string().max(3000), imageId: z.number().int().positive().nullable().default(null) }).strict();
 export const studioContentSchema = z.object({
+  altTexts: z.array(z.string().max(1000)).max(10).default([]),
   experience: experienceSchema.nullable().default(null),
   title: z.string().trim().min(1).max(160),
   channel: z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/).transform(normalizeStudioChannel).default("penguin"),
@@ -49,6 +50,7 @@ export const studioPatchSchema = z.object({
   memo: studioContentSchema.shape.memo.unwrap().optional(),
   script: studioContentSchema.shape.script.unwrap().optional(),
   caption: studioContentSchema.shape.caption.unwrap().optional(),
+  altTexts: studioContentSchema.shape.altTexts.unwrap().optional(),
   exportDesign: studioContentSchema.shape.exportDesign.unwrap().optional(),
   sourceLabel: studioContentSchema.shape.sourceLabel.unwrap().optional(),
   panels: studioContentSchema.shape.panels.unwrap().optional(),
@@ -81,4 +83,3 @@ export type StudioTrashResult = { card: StudioCard; cancelledJobs: number; cance
 export type StudioCardDetail = { card: StudioCard; revisions: StudioRevision[]; jobs: StudioJob[] };
 export type StudioExportCheck = { errors: Array<{ field: string; message: string }>; warnings: string[]; pageCount: number };
 export function emptyStudioCard(): StudioContent { return studioContentSchema.parse({ title: "새 콘텐츠" }); }
-

@@ -1,3 +1,4 @@
+import { conciseAlt } from "../../shared/altText";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import { and, eq, inArray } from "drizzle-orm";
@@ -104,9 +105,9 @@ export async function renderCarouselCover(model: CardModel, count: number, art: 
 }
 
 export async function renderCarouselPages(plan: ReturnType<typeof planCarousel>, style: CardStyle, art: Buffer | null, credit: string) {
-  const output = [{ title: plan.base.title, bytes: await renderCarouselCover(plan.base, plan.count, art, credit, style) }];
+  const output = [{ title: plan.base.title, altText:conciseAlt([`카드뉴스 표지. ${plan.base.title}`,plan.base.brandLine,plan.base.footer]), bytes: await renderCarouselCover(plan.base, plan.count, art, credit, style) }];
   // Sequential rendering keeps the free instance's peak memory bounded.
-  for (const model of plan.pages) output.push({ title: model.title, bytes: style.collection ? await renderCollectionBody(model, style.collection) : (await renderCardJpeg(model, style)).jpeg });
+  for (const model of plan.pages) output.push({ title: model.title, altText:conciseAlt([model.title,...model.blocks.map(b=>[b.label,b.text].filter(Boolean).join(": ")),model.footer]), bytes: style.collection ? await renderCollectionBody(model, style.collection) : (await renderCardJpeg(model, style)).jpeg });
   // Bind the cover's identity to every body page, even when only a body template changes.
   // A standard JPEG comment preserves pixels while preventing a saved manifest being overwritten.
   const comment = Buffer.from(`cardnews-v1:${sha256(output.slice(1).map(p => sha256(p.bytes)).join(":"))}`);
@@ -122,7 +123,7 @@ export async function loadCardPages(db: DB, cover: typeof mediaAssets.$inferSele
     if (sha256(cover.bytes) !== cover.sha256) throw new HttpError(409, "카드 파일이 저장본과 다릅니다.");
     return [cover];
   }
-  if (manifest.version !== 1 || manifest.pages.length < 2 || manifest.pages.length > 10 || manifest.pages[0].id !== cover.id || new Set(manifest.pages.map(p => p.id)).size !== manifest.pages.length) throw new HttpError(409, "카드뉴스 구성 정보를 확인할 수 없습니다.");
+  if (manifest.version !== 1 || manifest.pages.length < 1 || manifest.pages.length > 10 || manifest.pages[0].id !== cover.id || new Set(manifest.pages.map(p => p.id)).size !== manifest.pages.length) throw new HttpError(409, "카드뉴스 구성 정보를 확인할 수 없습니다.");
   const rows = await db.select().from(mediaAssets).where(and(eq(mediaAssets.revisionId, cover.revisionId), eq(mediaAssets.contentItemId, cover.contentItemId), inArray(mediaAssets.id, manifest.pages.map(p => p.id))));
   return manifest.pages.map(p => {
     const row = rows.find(r => r.id === p.id);

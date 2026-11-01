@@ -1,3 +1,4 @@
+import { altTextFile, studioAltTexts } from "../../shared/altText";
 import { checkExperienceExport, createExperienceRenderer } from "./experienceExport";
 import { cardBrandName } from "../../shared/branding";
 import sharp, { type OverlayOptions } from "sharp";
@@ -170,7 +171,7 @@ export async function exportStudioZip(db: DB, id: number, version?: number) {
   if (output.content.format !== "카드뉴스") throw new HttpError(400, "카드뉴스 형식을 선택한 뒤 ZIP으로 내려받으세요.");
   const files: Array<{ name: string; bytes: Buffer }> = [];
   for (let index = 0; index < output.pageCount; index++) files.push({ name: `page-${String(index + 1).padStart(2, "0")}.png`, bytes: await output.page(index) });
-  files.push({ name: "caption.txt", bytes: Buffer.from(output.content.caption, "utf8") });
+  files.push({ name: "caption.txt", bytes: Buffer.from(output.content.caption, "utf8") }, {name:"alt-text.txt",bytes:Buffer.from(altTextFile(studioAltTexts(output.content)),"utf8")});
   if(output.content.experience){
     const selected=output.content.experience.media.map(m=>m.id);
     const media=await db.select().from(studioMedia).where(eq(studioMedia.cardId,id));
@@ -180,4 +181,3 @@ export async function exportStudioZip(db: DB, id: number, version?: number) {
   }
   return { bytes: zipFiles(files), version: output.version };
 }
-

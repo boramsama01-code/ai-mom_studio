@@ -428,6 +428,7 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
   const toast = useToast();
   const [coverChoice, setCoverChoice] = useState<"ai" | "typography" | null>(null);
   const revCards = d.cards.filter((c) => c.revisionId === d.current?.id);
+  const [altDirty,setAltDirty]=useState(false);
   const [pickedCard, setPickedCard] = useState<number | null>(null);
   const currentCard = revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
   const [caps, setCaps] = useState(d.defaultCaptions ?? { instagram: "", telegram: "" });
@@ -475,7 +476,7 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
     mutationFn: () =>
       api(`/channels/${cid}/items/${d.item.id}/approve`, {
         method: "POST",
-        body: { revisionId: d.current!.id, mediaAssetId: currentCard!.id, captions: caps, scheduledAt: `${when}:00+09:00` },
+        body: { revisionId: d.current!.id, mediaAssetId: currentCard!.id, altTextVersion:qc.getQueryData<{version:number}>(["card-alt",currentCard!.id])?.version, captions: caps, scheduledAt: `${when}:00+09:00` },
       }),
     onSuccess: () => {
       toast("ok", "최종 승인했습니다. 발행함에서 진행 상황을 볼 수 있습니다.");
@@ -564,7 +565,7 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
           )}
           {!currentCard && <p className="small muted">현재 버전(r{d.current.revisionNo})으로 만든 카드가 없습니다.</p>}
 
-          {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} />}
+          {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} onDirtyChange={setAltDirty} />}
           <CopyFields cid={cid} itemId={d.item.id} revisionId={d.current.id} />
 
           <h3 style={{ margin: "8px 0 0" }}>캡션 (목적지별)</h3>
@@ -599,7 +600,7 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
             <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
           </label>
           <div className="row">
-            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || !currentCard || d.item.reviewStatus !== "reviewed"}>
+            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || altDirty || !currentCard || d.item.reviewStatus !== "reviewed"}>
               {approve.isPending ? "승인 중…" : "이 버전·카드·캡션으로 최종 승인"}
             </button>
           </div>
@@ -807,5 +808,3 @@ function Progress({ d, onGo, actionsOnly = false, forTab }: { d: Detail; onGo?: 
     </>
   );
 }
-
-

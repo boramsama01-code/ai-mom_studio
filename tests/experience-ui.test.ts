@@ -40,9 +40,11 @@ describe("사진 후기 편집의 입력 보존",()=>{
   expect(mocks.api.mock.calls.some(([path])=>String(path).includes("generate"))).toBe(false);
  });
  it("자료를 제외하면 표지와 페이지 참조도 정리하고 AI를 자동 호출하지 않는다",async()=>{
+  card.experience!.coverAltText="제외할 사진 설명";card.experience!.pages[0].altText="제외할 사진 설명";
   await render();const checkbox=host.querySelector<HTMLInputElement>('.experience-media-controls input[type="checkbox"]')!;
   await act(async()=>checkbox.click());await act(async()=>{await vi.advanceTimersByTimeAsync(1400);});
   expect(card.experience?.coverId).toBe(2);expect(card.experience?.media.map(m=>m.id)).toEqual([2]);expect(card.experience?.pages[0].mediaId).toBeNull();
+  expect(card.experience?.coverAltText).toBe("");expect(card.experience?.pages[0].altText).toBe("");
   expect(mocks.api.mock.calls.some(([path])=>String(path).includes("generate"))).toBe(false);
  });
  it("동시 수정 충돌에서 입력을 보존하고 비교 후에만 최신 버전 위에 저장한다",async()=>{

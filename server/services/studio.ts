@@ -27,7 +27,7 @@ export async function studioCardsWithOutput(db: DB, rows: Array<typeof studioCar
     const own = outputs.filter(o => o.itemId === row.sourceItemId);
     const output = own.find(o => o.id === row.importedMeta?.generatedAssetId) ?? own[0];
     if (output) dto.sourceOutput = { assetId: output.id, channelId: output.channelId, itemId: output.itemId, revisionId: output.revisionId, stale: output.revisionId !== output.currentRevisionId,
-      pages: output.carousel?.pages.map(p => ({ id: p.id, title: p.title })) ?? [{ id: output.id, title: row.content.title }], coverCredit: output.carousel?.cover.credit ?? "" };
+      pages: output.carousel?.pages.map(p => ({ id: p.id, title: p.title, altText:p.altText })) ?? [{ id: output.id, title: row.content.title }], coverCredit: output.carousel?.cover.credit ?? "" };
     return dto;
   });
 }
@@ -237,4 +237,3 @@ export async function exportStudioComic(db: DB, cardId: number) {
   if (output.content.format !== "웹툰") throw new HttpError(400, "웹툰 형식을 선택한 뒤 PNG로 내려받으세요.");
   return { bytes: await output.page(0), version: output.version };
 }
-

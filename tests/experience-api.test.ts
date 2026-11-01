@@ -36,7 +36,7 @@ describe("사진·영상 후기의 저장과 내보내기",()=>{
   const ready=await agent.patch(`/api/studio/cards/${card.id}`).set(headers).send({version:3,experience,caption:"내가 쓴 후기 캡션"});expect(ready.status).toBe(200);
   const zip=await agent.get(`/api/studio/cards/${card.id}/export.zip?version=4`).buffer(true).parse((res,cb)=>{const buffers:Buffer[]=[];res.on("data",chunk=>buffers.push(chunk));res.on("end",()=>cb(null,Buffer.concat(buffers)));});expect(zip.status).toBe(200);
   const report=JSON.parse(execFileSync("python3",["-c","import io,json,sys,zipfile; z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())); print(json.dumps({'names':z.namelist(),'bad':z.testzip(),'caption':z.read('caption.txt').decode()}))"],{input:zip.body}).toString());
-  expect(report.names).toContain(`video-${id}.mp4`);expect(report.names.filter((n:string)=>n.endsWith(".png"))).toHaveLength(5);expect(report.bad).toBeNull();expect(report.caption).toBe("내가 쓴 후기 캡션");
+  expect(report.names).toContain(`video-${id}.mp4`);expect(report.names).toContain("alt-text.txt");expect(report.names.filter((n:string)=>n.endsWith(".png"))).toHaveLength(5);expect(report.bad).toBeNull();expect(report.caption).toBe("내가 쓴 후기 캡션");
  });
  it("AI 호출은 저장한 실제 사진을 전송하고 오래된 결과로 새 편집을 덮어쓰지 않는다",async()=>{
   const {agent,headers,card}=await setup();const uploaded=await agent.post(`/api/studio/cards/${card.id}/media?version=1&name=photo.jpg`).set(headers).type("image/jpeg").send(photo);const id=uploaded.body.mediaId;

@@ -300,7 +300,7 @@ export const approvals = pgTable(
     revisionId: integer("revision_id").notNull().references(() => contentRevisions.id),
     mediaAssetId: integer("media_asset_id").notNull().references(() => mediaAssets.id),
     cardSha256: text("card_sha256").notNull(),
-    captions: jsonb("captions").$type<{ instagram: string; telegram: string }>().notNull(),
+    captions: jsonb("captions").$type<{ instagram: string; telegram: string; altTexts?: string[] }>().notNull(),
     scheduledAt: ts("scheduled_at").notNull(),
     status: text("status").notNull().default("active"), // active | invalidated | cancelled | completed
     invalidatedReason: text("invalidated_reason"),

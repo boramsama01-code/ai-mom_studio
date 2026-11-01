@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { setTestEnv } from "./helpers";
 setTestEnv();
 const { sendAlbumToChannel } = await import("../server/services/telegram");
-const { createCarouselContainer } = await import("../server/services/instagram");
+const { createCarouselContainer,createContainer } = await import("../server/services/instagram");
 afterEach(() => { vi.unstubAllGlobals(); delete process.env.TELEGRAM_BOT_TOKEN; delete process.env.INSTAGRAM_API_VERSION; });
 describe("ordered carousel publishing adapters", () => {
   it("sends every Telegram photo in one album with the caption only on its first page", async () => {
@@ -36,5 +36,20 @@ describe("ordered carousel publishing adapters", () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ error: { message: "failed" } }), { status: 400 })); vi.stubGlobal("fetch", fetcher);
     expect(await createCarouselContainer("account", "token", ["https://example.com/1.jpg", "https://example.com/2.jpg"], "")).toMatchObject({ ok: false });
     expect(fetcher).toHaveBeenCalledOnce();
+  });
+  it("sends each approved alt text on its own image container, never on the carousel parent",async()=>{
+    process.env.INSTAGRAM_API_VERSION="v23.0";let next=0;
+    const fetcher=vi.fn(async()=>new Response(JSON.stringify({id:String(++next)}),{status:200}));vi.stubGlobal("fetch",fetcher);
+    const descriptions=["책상 위 감자 사진. 첫 번째 카드 제목.","창밖을 담은 사진. 두 번째 카드 본문."];
+    expect(await createCarouselContainer("account","test-only",["https://example.com/1.jpg","https://example.com/2.jpg"],"게시 캡션",descriptions)).toMatchObject({ok:true});
+    const params=fetcher.mock.calls.map(call=>(call as unknown as [string,RequestInit])[1].body as URLSearchParams);
+    expect(params[0].get("alt_text")).toBe(descriptions[0]);expect(params[1].get("alt_text")).toBe(descriptions[1]);expect(params[2].has("alt_text")).toBe(false);
+    await createContainer("account","test-only","https://example.com/one.jpg","단일 게시","단일 이미지 설명");
+    expect(((fetcher.mock.calls[3] as unknown as [string,RequestInit])[1].body as URLSearchParams).get("alt_text")).toBe("단일 이미지 설명");
+  });
+  it("rejects misaligned or overlong alt text before sending any image",async()=>{
+    const fetcher=vi.fn();vi.stubGlobal("fetch",fetcher);
+    expect(await createCarouselContainer("a","test",["https://example.com/1.jpg","https://example.com/2.jpg"],"",["한 장뿐"])).toMatchObject({ok:false});
+    expect(await createContainer("a","test","https://example.com/1.jpg","","가".repeat(1001))).toMatchObject({ok:false});expect(fetcher).not.toHaveBeenCalled();
   });
 });

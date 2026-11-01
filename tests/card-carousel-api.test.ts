@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
+import request from "supertest";
 import { execFileSync } from "node:child_process";
 import { eq } from "drizzle-orm";
 import { login, resetDb, setTestEnv } from "./helpers";
@@ -8,7 +9,7 @@ const makeImage = vi.fn();
 vi.mock("../server/services/studioAi", async original => ({ ...await original<object>(), generateStudioImage: (...args: unknown[]) => makeImage(...args) }));
 const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
-const { mediaAssets, studioCards, approvals, deliveries, destinations } = await import("../shared/schema");
+const { mediaAssets, studioCards, approvals, deliveries, destinations, contentItems } = await import("../shared/schema");
 const { loadCardPages } = await import("../server/services/cardCarousel");
 let app: ReturnType<typeof createApp>;
 const payload = { topic: "빛", age_band: "중학생", key_question: "하늘은 왜 파랄까요?", background: ["빛에는 여러 색이 있습니다.", "공기가 빛을 산란합니다.", "색마다 정도가 다릅니다."], scientific_basis: "짧은 파장이 더 많이 산란합니다.", misconceptions: [], discussion_questions: ["노을은 왜 다를까요?", "달에서도 같을까요?", "무엇을 관찰할까요?"], parent_hints: ["하늘을 관찰해요."], safe_activity: null, sources: [], evidence: [] };
@@ -22,6 +23,39 @@ async function setup() {
   return { agent, H, id, endpoint: `/api/channels/2/items/${id}` };
 }
 describe("source cards automatically reach the board", () => {
+  it("saves scoped alt text with version checks, exports it, and preserves the approved snapshot", async () => {
+    const { agent, H, id, endpoint } = await setup();
+    const generated = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography" });
+    expect(generated.status).toBe(200);
+    const url = `/api/channels/2/media/${generated.body.id}/alt-text`;
+    const initial = await agent.get(url);
+    expect(initial.body.values).toHaveLength(5);
+    expect(initial.body.values[1]).toContain("빛");
+    const values = initial.body.values.map((v:string,i:number)=>`${i+1}페이지 확인한 설명. ${v}`);
+    expect((await request(app).get(url)).status).toBe(401);
+    expect((await agent.patch(url).send({version:0,values})).status).toBe(403);
+    expect((await agent.get(url.replace('/channels/2/','/channels/1/'))).status).toBe(404);
+    expect((await agent.patch(url).set(H).send({version:0,values:values.slice(1)})).status).toBe(400);
+    const saved=await agent.patch(url).set(H).send({version:0,values});
+    expect(saved.body).toEqual({version:1,values});
+    expect((await agent.patch(url).set(H).send({version:0,values})).status).toBe(409);
+    const regenerated=await agent.post(`${endpoint}/card`).set(H).send({coverMode:"typography"});
+    expect(regenerated.body.id).toBe(generated.body.id);
+    expect((await agent.get(url)).body).toEqual(saved.body);
+    await getDb().update(contentItems).set({reviewStatus:"reviewed"}).where(eq(contentItems.id,id));
+    const approvalBody={revisionId:generated.body.revisionId,mediaAssetId:generated.body.id,altTextVersion:0,captions:{instagram:"확인한 캡션",telegram:"확인한 캡션"},scheduledAt:"2030-01-01T00:00:00Z"};
+    expect((await agent.post(`${endpoint}/approve`).set(H).send(approvalBody)).status).toBe(409);
+    const approved=await agent.post(`${endpoint}/approve`).set(H).send({...approvalBody,altTextVersion:1});
+    expect(approved.status,JSON.stringify(approved.body)).toBe(201);
+    expect(approved.body.approval.captions.altTexts).toEqual(values);
+    const updated=values.map((v:string)=>`새 설명. ${v}`);
+    expect((await agent.patch(url).set(H).send({version:1,values:updated})).status).toBe(200);
+    const [snapshot]=await getDb().select().from(approvals).where(eq(approvals.id,approved.body.approval.id));
+    expect(snapshot.captions.altTexts).toEqual(values);
+    const zip=await agent.get(`/api/channels/2/media/${generated.body.id}/deck.zip`).buffer(true).parse((res,done)=>{const chunks:Buffer[]=[];res.on("data",c=>chunks.push(c));res.on("end",()=>done(null,Buffer.concat(chunks)));});
+    const text=execFileSync("python3",["-c","import io,sys,zipfile;print(zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())).read('alt-text.txt').decode())"],{input:zip.body}).toString();
+    for(const value of updated)expect(text).toContain(value);
+  });
   it("trashes linked output, cancels scheduled delivery, and restores every page without reviving the schedule", async () => {
     const { agent, H, id, endpoint } = await setup();
     const generated = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography" });
@@ -78,7 +112,7 @@ describe("source cards automatically reach the board", () => {
     });
     expect(zip.status).toBe(200); expect(zip.headers["content-type"]).toContain("application/zip");
     const archive = JSON.parse(execFileSync("python3", ["-c", "import io,json,sys,zipfile; z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())); print(json.dumps({'names':z.namelist(),'bad':z.testzip()}))"], { input: zip.body }).toString());
-    expect(archive.bad).toBeNull(); expect(archive.names).toEqual(["page-01.jpg", "page-02.jpg", "page-03.jpg", "page-04.jpg", "page-05.jpg", "caption.txt", "credits.txt"]);
+    expect(archive.bad).toBeNull(); expect(archive.names).toEqual(["page-01.jpg", "page-02.jpg", "page-03.jpg", "page-04.jpg", "page-05.jpg", "alt-text.txt", "caption.txt", "credits.txt"]);
     await agent.patch(`/api/studio/cards/${studioCardId}`).set(H).send({ version: board.version, title: "직접 정한 제목", memo: "직접 쓴 메모", stage: "making" });
     const second = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography", templateKey: "builtin:minimal" });
     expect(second.status).toBe(200); expect(second.body.id).not.toBe(generated.body.id);
