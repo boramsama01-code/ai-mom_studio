@@ -44,6 +44,7 @@ async function jpeg(svg: string) {
 }
 
 const COVER_TITLES: Record<string, { x: number; y: number; w: number; h: number; size: number; inverse?: boolean; center?: boolean }> = {
+  f01: { x:80,y:652,w:920,h:380,size:112 },
   r01: { x:80,y:254,w:910,h:310,size:98 }, r02: { x:80,y:398,w:920,h:460,size:122 },
   r03: { x:108,y:316,w:864,h:345,size:100 }, r04: { x:92,y:292,w:880,h:350,size:102 },
   r05: { x:80,y:845,w:920,h:245,size:88 }, r06: { x:108,y:712,w:735,h:330,size:96 },
@@ -85,6 +86,19 @@ export async function renderCollectionCover(model: CardModel, count: number, art
   const tag = model.badge || (d.family === "recruitment" ? "모집 안내" : "뉴스 브리핑");
   const page = `01 / ${String(count).padStart(2, "0")}`;
   switch (d.layoutId ?? id) {
+    case "f01":
+      if (art) {
+        await photo(0, 0, W, H);
+        els.push(`<defs><linearGradient id="fry-shade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${d.bg}" stop-opacity=".52"/><stop offset=".45" stop-color="${d.bg}" stop-opacity=".28"/><stop offset=".78" stop-color="${d.bg}" stop-opacity=".95"/><stop offset="1" stop-color="${d.bg}"/></linearGradient></defs>`);
+        rect(0,0,W,H,"url(#fry-shade)");
+      } else {
+        // Original vector motif, never passed off as a food photograph.
+        for (let i=0;i<6;i++) els.push(`<rect x="${470+i*96}" y="${175+(i%3)*38}" width="59" height="350" rx="15" fill="${d.accent}" transform="rotate(19 ${500+i*96} 350)" opacity="${1-i*.07}"/>`);
+      }
+      c.header(model.brandLine, page); line(80,127,920,d.ink);
+      pill("FRYDAY / FOOD & CULTURE",80,169);
+      text("한 입에서 시작하는 이야기",80,579,850,54,{size:31,weight:"semibold",color:d.accent});
+      headline(); text("알고 먹으면 더 재밌는 한 입  →",80,1100,900,54,{size:30,weight:"semibold"}); break;
     case "r01":
       c.header(model.brandLine, page); line(80, 127, 920, d.ink);
       pill(tag, 80, 169); headline();

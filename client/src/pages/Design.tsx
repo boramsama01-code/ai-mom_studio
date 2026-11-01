@@ -10,7 +10,7 @@ import { useToast } from "../toast";
 import { Badge, Empty, ErrorBox, GuardedLink, Loading } from "../ui";
 import { CARD_FIELD_KEYS } from "@shared/cardFields";
 
-export type Tpl = { key: string; name: string; description: string; kind: "builtin" | "custom"; family?: "recruitment" | "news"; setId?: string; pageCount?: number; colors?: { key: string; name: string; bg: string; ink: string; accent: string; secondary?: string }[]; id?: number; layout?: string; textTone?: string; overlay?: number; allChannels?: boolean };
+export type Tpl = { key: string; name: string; description: string; kind: "builtin" | "custom"; family?: "recruitment" | "news" | "food"; setId?: string; pageCount?: number; colors?: { key: string; name: string; bg: string; ink: string; accent: string; secondary?: string }[]; id?: number; layout?: string; textTone?: string; overlay?: number; allChannels?: boolean };
 const includesKey = (template: Tpl, key: string) => template.key === key || !!template.colors?.some(color => color.key === key);
 
 export function useTemplates(cid: number | "all") {
@@ -32,7 +32,7 @@ export function TemplatePicker({ cid, value, onChange, items, version, studioCha
     <div className="collection-picker">
       {!items.some(t => includesKey(t, value)) && <p className="small muted collection-legacy">현재 작업에는 이전 디자인이 적용되어 있습니다. 아래에서 새 디자인을 적용할 수 있습니다.</p>}
       <div className="collection-filters" role="group" aria-label="디자인 종류">
-        {[{ id: "recruitment", label: "모집정보" }, { id: "news", label: "뉴스·속보" }, { id: "other", label: "내 배경" }].filter(f => items.some(t => (t.family ?? "other") === f.id)).map(f => <button key={f.id} type="button" className="collection-filter" aria-pressed={family === f.id} onClick={() => { setFamily(f.id); setPage(0); }}>{f.label}<span>{items.filter(t => (t.family ?? "other") === f.id).length}</span></button>)}
+        {[{ id: "recruitment", label: "모집정보" }, { id: "news", label: "뉴스·속보" }, { id: "food", label: "Fryday" }, { id: "other", label: "내 배경" }].filter(f => items.some(t => (t.family ?? "other") === f.id)).map(f => <button key={f.id} type="button" className="collection-filter" aria-pressed={family === f.id} onClick={() => { setFamily(f.id); setPage(0); }}>{f.label}<span>{items.filter(t => (t.family ?? "other") === f.id).length}</span></button>)}
       </div>
       <div className="collection-workspace">
         <div className="tpl-grid collection-grid" role="group" aria-label="카드 템플릿">

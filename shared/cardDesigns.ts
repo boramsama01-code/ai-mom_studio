@@ -1,13 +1,14 @@
 /** Original paired cover/body systems. Template IDs are stable persisted values. */
 export type CardDesign = {
-  id: string; name: string; family: "recruitment" | "news"; description: string;
+  id: string; name: string; family: "recruitment" | "news" | "food"; description: string;
   bg: string; ink: string; accent: string; soft: string; onAccent: string;
   body: "plain" | "panels" | "timeline" | "notes" | "ledger" | "split" | "framed" | "bands" | "spotlight" | "index";
-  art: "lab" | "rocket" | "city" | "globe";
+  art: "lab" | "rocket" | "city" | "globe" | "fries";
   layoutId?: string; colorName?: string; overlay?: string; onSoft?: string;
 };
 /** Retained only to render previously saved work without changing its design. */
 export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
+  { id: "f01", name: "Fryday · 크리스프", family: "food", description: "전체 배경 이미지와 큰 제목, 네 장의 지식·비교 카드", bg: "#2C201B", ink: "#FFF5E0", accent: "#F9CB45", soft: "#453329", onAccent: "#2C201B", body: "panels", art: "fries" },
   { id: "r01", name: "캠퍼스 에디토리얼", family: "recruitment", description: "사진과 여백으로 여는 차분한 모집 안내", bg: "#F4F1E9", ink: "#163B35", accent: "#176752", soft: "#E3E9DC", onAccent: "#FFFFFF", body: "plain", art: "lab" },
   { id: "r02", name: "오픈콜", family: "recruitment", description: "큰 글자와 코발트 블루의 선명한 공고", bg: "#2447E8", ink: "#FFFFFF", accent: "#E4FF83", soft: "#3557EF", onAccent: "#173224", body: "bands", art: "rocket" },
   { id: "r03", name: "보딩패스", family: "recruitment", description: "티켓에서 시작해 일정표로 이어지는 구성", bg: "#F2EDE3", ink: "#252D36", accent: "#BA3F2C", soft: "#E9DFD1", onAccent: "#FFFFFF", body: "ledger", art: "rocket" },
@@ -29,11 +30,12 @@ export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
   { id: "n09", name: "두 가지 시선", family: "news", description: "분할 화면으로 관점과 질문을 나란히 배치", bg: "#F5E8E3", ink: "#253749", accent: "#2C5275", soft: "#E5D2C9", onAccent: "#FFFFFF", body: "split", art: "city" },
   { id: "n10", name: "미니멀 업데이트", family: "news", description: "작은 업데이트 표시와 큰 제목에 집중", bg: "#FAF8F3", ink: "#22262B", accent: "#AA342B", soft: "#EEEBE3", onAccent: "#FFFFFF", body: "notes", art: "city" },
 ];
-export const CARD_DESIGNS = PERSISTED_CARD_DESIGNS.filter(d => ["r01", "r05", "n01", "n03", "n04"].includes(d.id));
+export const CARD_DESIGNS = PERSISTED_CARD_DESIGNS.filter(d => ["r01", "r05", "n01", "n03", "n04", "f01"].includes(d.id));
 type Palette = Pick<CardDesign, "bg" | "ink" | "accent" | "soft" | "onAccent" | "overlay" | "onSoft"> & { suffix: string; name: string };
 const palette = (suffix: string, name: string, bg: string, ink: string, accent: string, soft: string, onAccent: string, overlay?: string, onSoft?: string): Palette => ({ suffix, name, bg, ink, accent, soft, onAccent, onSoft, ...(overlay ? { overlay } : {}) });
-const ORIGINAL_NAMES: Record<string, string> = { r01: "아이보리", r05: "미드나이트", n01: "시그널 레드", n03: "페이퍼", n04: "레몬" };
+const ORIGINAL_NAMES: Record<string, string> = { f01: "브라운", r01: "아이보리", r05: "미드나이트", n01: "시그널 레드", n03: "페이퍼", n04: "레몬" };
 const PALETTES: Record<string, Palette[]> = {
+  f01: [palette("cream", "크림", "#FFF5E0", "#2C201B", "#58351E", "#F8E4AE", "#FFF5E0"), palette("olive", "올리브", "#26372D", "#FFF5E0", "#F9CB45", "#3A4D3F", "#26372D")],
   r01: [
     palette("blue", "페이퍼 블루", "#F0F5FC", "#203853", "#2457A6", "#DDE8F6", "#FFFFFF"),
     palette("sage", "세이지", "#EEF3E8", "#243D31", "#396448", "#DDE7D3", "#FFFFFF"),

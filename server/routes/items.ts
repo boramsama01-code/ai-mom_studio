@@ -58,6 +58,7 @@ const listQuery = z.object({
   noticeIntent: z.enum([...NOTICE_INTENTS, "all"]).optional(),
   view: z.enum(["inbox", "drafts", "excluded", "all"]).optional(),
   sample: z.enum(["0", "1"]).optional(),
+  origin: z.enum(["idea", "scrap"]).optional(),
   page: z.coerce.number().int().min(1).max(1000).optional(),
   pageSize: z.coerce.number().int().min(5).max(100).optional(),
 });
@@ -74,6 +75,8 @@ itemRoutes.get(
     if (view === "excluded") conds.push(eq(contentItems.excluded, true));
     else if (view !== "all") conds.push(eq(contentItems.excluded, false));
     if (view === "drafts") conds.push(sql`${contentItems.currentRevisionId} is not null`);
+    if (q.origin === "idea") conds.push(eq(contentItems.origin, "idea"));
+    if (q.origin === "scrap") conds.push(ne(contentItems.origin, "idea"));
     if (q.q) conds.push(or(ilike(contentItems.title, `%${q.q.replace(/[%_\\]/g, "\\$&")}%`))!);
     if (q.review) conds.push(inArray(contentItems.reviewStatus, q.review.split(",")));
     if (q.schedule) conds.push(inArray(contentItems.scheduleStatus, q.schedule.split(",")));
@@ -81,7 +84,7 @@ itemRoutes.get(
     if (q.category) conds.push(eq(contentItems.category, q.category));
     const intent = noticeIntentSql();
     if (q.noticeIntent && q.noticeIntent !== "all") conds.push(sql`${intent} = ${q.noticeIntent}`);
-    if (q.collectedOn) {
+    if (q.collectedOn && q.origin !== "idea") {
       const { start, end } = collectionDayRange(q.collectedOn);
       conds.push(gte(contentItems.createdAt, start), lt(contentItems.createdAt, end), inArray(contentItems.origin, ["collected", "discovered"]));
     }

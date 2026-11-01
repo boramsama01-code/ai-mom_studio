@@ -10,6 +10,11 @@ import type { CardStyle } from "./card";
 export function collectionSample(id: string, channelName?: string) {
   const d = cardDesign(id);
   if (!d) throw new Error("알 수 없는 카드 세트");
+  if (d.family === "food") {
+    const base = { accent:d.accent, brandLine:channelName ?? "Fryday", badge:"디자인 예시", title:"왜 두 번\n튀길까?", blocks:[], footer:"Fryday · 디자인 예시 · 게시 전 원자료 확인" };
+    const pages = [["한 번의 튀김,\n두 가지 역할", "속을 익히는 과정과 겉의 식감을 만드는 과정을 나눠 살펴봅니다."], ["무엇을\n비교할까?", "같은 감자와 두께로 시작하세요. 시간·온도·양을 기록하면 차이를 설명하기 쉬워집니다."], ["사진보다\n중요한 조건", "기기와 제품의 안전 지침을 따르고, 관찰한 결과와 일반적인 사실을 구분합니다."], ["당신의\n바삭함은?", "얇고 바삭한 프라이와 두툼한 프라이. 어떤 한 입을 좋아하나요?"]].map(([title,text],i)=>({...base,title,badge:`0${i+2} / 05`,blocks:[{label:"Fryday 노트",text,field:"summary",maxLines:10}]}));
+    return {d,style:{layout:"minimal" as const,collection:id},plan:{base,pages,count:5}};
+  }
   const notice = d.family === "recruitment";
   const input = {
     kind: notice ? "notice" : "current_dialogue",
@@ -47,6 +52,7 @@ export function collectionSample(id: string, channelName?: string) {
 export function collectionSampleArt(id: string) {
   const d = cardDesign(id);
   if (!d) throw new Error("알 수 없는 카드 세트");
+  if (d.art === "fries") return null;
   return fs.readFileSync(path.resolve(process.cwd(), `assets/card-art/${d.art}.jpg`));
 }
 export async function renderCollectionPreview(id: string, page = 0, channelName?: string) {
