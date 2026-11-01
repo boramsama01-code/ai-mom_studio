@@ -28,7 +28,7 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
   const collect = useMutation({ mutationFn: (channelId: number | "all" = selected) => api<{ inline: boolean; requested: unknown[] }>("/collection/collect", { method: "POST", body: { channelId } }),
     onSuccess: r => { toast("ok", r.inline ? `${r.requested.length}개 채널의 수집을 시작했습니다. 결과는 자동으로 갱신됩니다.` : "요청을 등록했습니다. 다음 워커 실행을 기다립니다."); qc.invalidateQueries({ queryKey: ["collection"] }); }, onError: e => toast("err", (e as Error).message) });
   const auto = useMutation({ mutationFn: (enabled: boolean) => api("/settings/auto-collect", { method: "PUT", body: { enabled } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["collection"] }); qc.invalidateQueries({ queryKey: ["status"] }); }, onError: e => toast("err", (e as Error).message) });
+    onSuccess: async () => { await Promise.all([qc.invalidateQueries({ queryKey: ["collection"] }), qc.invalidateQueries({ queryKey: ["status"] })]); }, onError: e => toast("err", (e as Error).message) });
   const profile = useMutation({ mutationFn: (c: CollectionOverview["channels"][number]) => api<{ added: number }>(`/channels/${c.id}/collection-profile`, { method: "POST", body: { version: c.version } }),
     onSuccess: r => { toast(r.added ? "ok" : "info", r.added ? `새 추천 검색어 ${r.added}개를 추가했습니다. ‘이 채널 지금 수집’으로 자료를 모으세요.` : "추천 검색어가 이미 모두 등록되어 있습니다. ‘이 채널 지금 수집’을 눌러 자료를 모으세요."); qc.invalidateQueries({ queryKey: ["collection"] }); qc.invalidateQueries({ queryKey: ["ch"] }); qc.invalidateQueries({ queryKey: ["channels"] }); }, onError: e => { toast("err", (e as Error).message); qc.invalidateQueries({ queryKey: ["collection"] }); } });
   if (query.isLoading) return <Loading label="수집 현황 확인 중" />;
@@ -64,7 +64,7 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
       <div><span>다음 예약</span><strong className="collection-next">{d.nextAt ? fmtDate(d.nextAt) : d.globalStop ? "전체 정지" : "자동 수집 꺼짐"}</strong></div>
     </div>
     <div className="row between small">
-      <label className="check"><input type="checkbox" checked={d.autoCollect} disabled={auto.isPending} onChange={e => auto.mutate(e.target.checked)} />매일 자동 수집</label>
+      <label className="check"><input type="checkbox" checked={auto.isPending ? auto.variables ?? d.autoCollect : d.autoCollect} disabled={auto.isPending} onChange={e => auto.mutate(e.target.checked)} />매일 자동 수집</label>
       <span className="muted">05:13 · 07:13 · 19:13 예약 / GitHub 실행 지연 가능</span>
     </div>
     {d.sourceMode === "public_rss" && <div className="small muted">최근 7일 뉴스 · Google 뉴스 RSS + 언론사 RSS {d.publicFeeds?.length ?? 0}곳 · 뉴스 수집은 API 키 없이 이용</div>}

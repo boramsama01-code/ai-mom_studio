@@ -51,7 +51,8 @@ try {
       const checkbox = page.getByRole("checkbox", { name: "매일 자동 수집" });
       const checkBox = await checkbox.boundingBox();
       assert(checkBox.width >= 18 && checkBox.width <= 24 && checkBox.height <= 24, "checkbox has inherited full-size input dimensions");
-      await Promise.all([page.waitForResponse(r => r.url().endsWith("/settings/auto-collect") && r.status() === 200), checkbox.uncheck()]);
+      await Promise.all([page.waitForResponse(r => r.url().endsWith("/settings/auto-collect") && r.status() === 200), checkbox.click()]);
+      await page.waitForFunction(() => document.querySelector('.collection-summary input[type="checkbox"]')?.checked === false);
       await page.locator(".collection-preset summary").click();
       assert.equal(await page.getByRole("button", { name: /새 검색어 .*개 추가/ }).count(), 0);
       await page.getByRole("button", { name: "이 채널 지금 수집", exact: true }).click();
@@ -73,6 +74,7 @@ try {
       assert.deepEqual(errors, []);
       console.log(`WebKit ${width}px: date/buttons, checkbox tap, channel collection, four account routes passed`);
     } catch (e) {
+      console.error(JSON.stringify({ width, errors, writes, controls: await page.locator('.collection-toolbar, .collection-summary input[type="checkbox"]').evaluateAll(nodes => nodes.map(n => ({ tag: n.tagName, checked: n.checked, rect: n.getBoundingClientRect().toJSON() }))) }));
       await page.screenshot({ path: `test-results/mobile/failure-${width}.png`, fullPage: true });
       throw e;
     } finally { await context.close(); }
