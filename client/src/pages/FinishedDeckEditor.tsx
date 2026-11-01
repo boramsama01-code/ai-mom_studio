@@ -9,6 +9,7 @@ import { useDirtyGuard } from "../state";
 import { StudioQuickExport } from "./StudioExport";
 import { StudioPublish } from "./StudioPublish";
 import { FinishedDeckAi } from "./FinishedDeckAi";
+import { AltTextInput } from "../AltTextEditor";
 import "../studioPublish.css";
 
 export function FinishedDeckEditor({ data }: { data: StudioCardDetail }) {
@@ -56,7 +57,7 @@ export function FinishedDeckEditor({ data }: { data: StudioCardDetail }) {
       </div>
       {progress && <p role="status">{progress}</p>}{uploading.error && <><ErrorBox error={uploading.error} /><p className="small">이미 저장한 장은 남아 있습니다. 목록을 확인하고 빠진 파일만 추가하세요.</p></>}
       {pages.length > 0 && <FinishedDeckAi card={base} dirty={dirty} save={save} disabled={saving.isPending || uploading.isPending} onBusy={setAiBusy} onApply={proposal => setForm(f => ({ ...f, caption: proposal.mode === "alt" ? f.caption : proposal.caption, finishedDeck: { pages: f.finishedDeck!.pages.map((p, i) => ({ ...p, altText: proposal.altTexts[i] })) } }))} />}
-      <div className="finished-pages">{pages.map((p, i) => <article key={p.imageId} className="finished-page"><img src={`/api/studio/images/${p.imageId}`} alt={p.altText || `${i + 1}페이지: ${p.name}`} /><strong>{i + 1}장 · {i === 0 ? "표지" : i === pages.length - 1 ? "마지막 장" : "본문"}</strong><small title={p.name}>{p.name}</small><div className="row"><button className="btn sm" aria-label={`${i + 1}장 앞으로`} disabled={busy || !i} onClick={() => move(i, -1)}>←</button><button className="btn sm" aria-label={`${i + 1}장 뒤로`} disabled={busy || i === pages.length - 1} onClick={() => move(i, 1)}>→</button><button className="btn sm ghost" disabled={busy} onClick={() => setForm(f => ({ ...f, finishedDeck: { pages: pages.filter(x => x.imageId !== p.imageId) } }))}>빼기</button></div><label className="field">대체텍스트 (이미지 설명)<textarea aria-label={`${i + 1}페이지 대체텍스트`} rows={3} value={p.altText} maxLength={ALT_TEXT_LIMIT} disabled={busy} placeholder="이미지의 핵심을 1~2문장으로 설명" onChange={e => setForm(f => ({ ...f, finishedDeck: { pages: pages.map((x, j) => j === i ? { ...x, altText: e.target.value } : x) } }))} /><span className="hint">공백 포함 {altTextLength(p.altText)} / {ALT_TEXT_LIMIT}자 · 1~2문장</span>{altTextError(p.altText,true) && <span role="alert" className="small notice warn">{altTextError(p.altText,true)}</span>}</label></article>)}</div>
+      <div className="finished-pages">{pages.map((p, i) => <article key={p.imageId} className="finished-page"><img src={`/api/studio/images/${p.imageId}`} alt={p.altText || `${i + 1}페이지: ${p.name}`} /><strong>{i + 1}장 · {i === 0 ? "표지" : i === pages.length - 1 ? "마지막 장" : "본문"}</strong><small title={p.name}>{p.name}</small><div className="row"><button className="btn sm" aria-label={`${i + 1}장 앞으로`} disabled={busy || !i} onClick={() => move(i, -1)}>←</button><button className="btn sm" aria-label={`${i + 1}장 뒤로`} disabled={busy || i === pages.length - 1} onClick={() => move(i, 1)}>→</button><button className="btn sm ghost" disabled={busy} onClick={() => setForm(f => ({ ...f, finishedDeck: { pages: pages.filter(x => x.imageId !== p.imageId) } }))}>빼기</button></div><label className="field">대체텍스트 (이미지 설명)<AltTextInput aria-label={`${i + 1}페이지 대체텍스트`} rows={3} value={p.altText} disabled={busy} placeholder="이미지의 핵심을 1~2문장으로 설명" change={value => setForm(f => ({ ...f, finishedDeck: { pages: pages.map((x, j) => j === i ? { ...x, altText: value } : x) } }))} /><span className="hint">공백 포함 {altTextLength(p.altText)} / {ALT_TEXT_LIMIT}자 · 1~2문장</span>{altTextError(p.altText,true) && <span role="alert" className="small notice warn">{altTextError(p.altText,true)}</span>}</label></article>)}</div>
       <p className="small muted">인스타용 4:5 크기에 맞추고 비율이 다른 이미지는 흰 여백으로 채웁니다. 그림과 글자는 잘리지 않습니다.</p>
       <label className="field">게시할 캡션<textarea rows={7} value={form.caption} disabled={busy} onChange={e => setForm(f => ({ ...f, caption: e.target.value }))} /><span className="hint">{[...form.caption].length} / 2,200자</span></label>
       {invalidAltIndex >= 0 && <p className="notice warn" role="alert">{invalidAltIndex + 1}페이지 대체텍스트를 1~2문장, 공백 포함 125자 이내로 수정해 주세요. 기존 문구는 자동 삭제하지 않습니다.</p>}
@@ -66,4 +67,5 @@ export function FinishedDeckEditor({ data }: { data: StudioCardDetail }) {
     <StudioPublish base={base} dirty={dirty} busy={busy} save={save} />
   </div>;
 }
+
 

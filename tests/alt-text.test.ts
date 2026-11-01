@@ -1,9 +1,9 @@
 import { describe,it,expect } from "vitest";
 import {studioContentSchema,studioPatchSchema,studioCreateSchema} from "../shared/studio";
-import {studioAltTexts,altTextFile,altTextLength,altTextError,altTextSentenceCount,conciseAlt} from "../shared/altText";
+import {studioAltTexts,altTextFile,altTextLength,altTextError,altTextSentenceCount,conciseAlt,limitAltTextInput} from "../shared/altText";
 import { importedProposalSchema } from "../server/services/importedCarousel";
 import { checkStudioExport } from "../server/services/studioExport";
-import {applyExperienceDraft} from "../server/services/experienceAi";
+import {applyExperienceDraft,experienceDraftSchema} from "../server/services/experienceAi";
 describe("페이지별 대체텍스트",()=>{
  it("기존 카드의 제목과 실제 본문으로 초안을 만들고 수정한 설명은 보존한다",()=>{
   const c=studioContentSchema.parse({title:"하늘의 색",format:"카드뉴스",exportDesign:"set:n01",panels:Array.from({length:4},(_,i)=>({scene:"",dialogue:`본문 ${i+1}`}))});
@@ -37,6 +37,38 @@ describe("125-character limit including spaces and at most two sentences", () =>
   expect(altTextSentenceCount("첫 문장. 두 번째 문장!")).toBe(2);
   expect(altTextError("첫 문장. 두 번째 문장! 세 번째 문장.")).toContain("1~2문장");
   expect(altTextError("", true)).toBeNull();
+  expect(altTextError(" ".repeat(126), true)).toContain("125자");
+  expect(altTextError(" " + "가".repeat(124) + " ")).toContain("125자");
+ });
+ it("uses the same Unicode limit for editor input, API drafts and image AI results", () => {
+  const boundary = "가".repeat(124) + "😀";
+  expect(boundary.length).toBe(126);
+  expect(altTextLength(boundary)).toBe(125);
+  expect(limitAltTextInput(boundary)).toBe(boundary);
+  expect(limitAltTextInput(boundary + "넘침")).toBe(boundary);
+  expect(limitAltTextInput("😀".repeat(126))).toBe("😀".repeat(125));
+  expect(studioPatchSchema.safeParse({ version: 1, altTexts: [boundary] }).success).toBe(true);
+  expect(studioPatchSchema.safeParse({ version: 1, altTexts: [boundary + "가"] }).success).toBe(false);
+  expect(importedProposalSchema.safeParse({ caption: "캡션", altTexts: [boundary] }).success).toBe(true);
+  expect(importedProposalSchema.safeParse({ caption: "캡션", altTexts: [boundary + "가"] }).success).toBe(false);
+  const experience = { title: "후기", caption: "캡션", coverId: null, coverAltText: boundary, pages: Array.from({length: 2}, () => ({mediaId: null, title: "장면", body: "본문", altText: boundary, fit: "contain"})), questions: [] };
+  expect(experienceDraftSchema.safeParse(experience).success).toBe(true);
+  expect(experienceDraftSchema.safeParse({...experience, coverAltText: boundary + "가"}).success).toBe(false);
+  const legacy = "가".repeat(180);
+  expect(limitAltTextInput(legacy.slice(0, -1), legacy)).toBe(legacy.slice(0, -1));
+  expect(limitAltTextInput(legacy + "더", legacy)).toBe(legacy);
+ });
+ it("counts Korean sentences without spaces and sentences ending in quotation marks", () => {
+  for (const text of ["첫 문장.둘째 문장.셋째 문장.", "“첫 문장.” “둘째 문장.” “셋째 문장.”", "첫 문장。둘째 문장！셋째 문장？"]) {
+   expect(altTextSentenceCount(text)).toBe(3);
+   expect(altTextError(text)).toContain("1~2문장");
+   expect(studioPatchSchema.safeParse({version: 1, altTexts: [text]}).success).toBe(false);
+   expect(importedProposalSchema.safeParse({caption: "캡션", altTexts: [text]}).success).toBe(false);
+   expect(altTextSentenceCount(conciseAlt([text]))).toBe(2);
+  }
+  expect(altTextSentenceCount("온도는 3.5도다. 두 번째 문장.")).toBe(2);
+  expect(altTextSentenceCount("U.S. scientists discuss Mars. 두 번째 문장.")).toBe(2);
+  expect(conciseAlt(["“첫 문장.” “둘째 문장.” “셋째 문장.”"])).toBe("“첫 문장.” “둘째 문장.”");
  });
  it("shortens automatic defaults without cutting manually saved old text", () => {
   const generated = conciseAlt(["첫 문장. 둘째 문장. 셋째 문장.", "가".repeat(200)]);

@@ -7,6 +7,7 @@ import { useToast } from "./toast";
 import { Icon } from "./icons";
 import { ErrorBox, fmtDate, GuardedLink, Loading, StatusBadge } from "./ui";
 import { kstDay, type CollectionOverview } from "@shared/collection";
+import { isPrivateWorkroom } from "./workroom";
 
 export function useKstToday() {
   const [today, setToday] = useState(kstDay());
@@ -15,6 +16,7 @@ export function useKstToday() {
 }
 
 export function CollectionPanel({ date, detailed = false }: { date?: string; detailed?: boolean }) {
+  const workroom = isPrivateWorkroom();
   const { selected, select, current } = useChannel();
   const qc = useQueryClient(), toast = useToast();
   const [, navigate] = useLocation();
@@ -47,7 +49,7 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
     {!(d.searchReady ?? d.naverReady) && <p className="notice warn">검색 연결을 확인해 주세요. <GuardedLink href="/connections?service=naver">연결 설정</GuardedLink></p>}
     {searchAuthFailed && <p className="notice err" role="alert">최근 수집이 네이버 인증 단계에서 멈췄습니다. <GuardedLink href="/connections?service=naver">네이버 키 확인·수정 →</GuardedLink></p>}
     {d.channels.some(c => c.lastRun?.errors.length || c.jobs.some(j => j.stale)) && <p className="notice warn">최근 수집에 확인할 내용이 있습니다. <GuardedLink href="/today">실행 결과 확인 →</GuardedLink></p>}
-    <div className="collection-compact-foot"><span>{d.lastScheduledAt ? `최근 예약 수집 ${fmtDate(d.lastScheduledAt)}` : "예약 수집 기록이 아직 없습니다"}</span><GuardedLink href="/today">자동 수집 설정·상세 기록 <Icon name="chevron" size={13} /></GuardedLink></div>
+    <div className="collection-compact-foot"><span>{d.lastScheduledAt ? `최근 예약 수집 ${fmtDate(d.lastScheduledAt)}` : "예약 수집 기록이 아직 없습니다"}</span><GuardedLink href="/today">{workroom ? "자동 수집 현황·상세 기록" : "자동 수집 설정·상세 기록"} <Icon name="chevron" size={13} /></GuardedLink></div>
   </section>;
   return <section className="panel stack collection-summary" aria-label="날짜별 수집 현황">
     <div className="collection-summary-head">
@@ -64,9 +66,10 @@ export function CollectionPanel({ date, detailed = false }: { date?: string; det
       <div><span>다음 예약</span><strong className="collection-next">{d.nextAt ? fmtDate(d.nextAt) : d.globalStop ? "전체 정지" : "자동 수집 꺼짐"}</strong></div>
     </div>
     <div className="row between small">
-      <label className="check"><input type="checkbox" checked={auto.isPending ? auto.variables ?? d.autoCollect : d.autoCollect} disabled={auto.isPending} onChange={e => auto.mutate(e.target.checked)} />매일 자동 수집</label>
+      <label className="check"><input type="checkbox" checked={auto.isPending ? auto.variables ?? d.autoCollect : d.autoCollect} disabled={workroom || auto.isPending} aria-describedby={workroom ? "workroom-auto-collect-note" : undefined} onChange={e => { if (!workroom) auto.mutate(e.target.checked); }} />매일 자동 수집</label>
       <span className="muted">05:13 · 07:13 · 19:13 예약 / GitHub 실행 지연 가능</span>
     </div>
+    {workroom && <p id="workroom-auto-collect-note" className="small muted">비공개 작업실에서는 예약 수집 설정을 바꿀 수 없어요. ‘지금 수집’은 바로 사용할 수 있어요.</p>}
     {d.sourceMode === "public_rss" && <div className="small muted">최근 7일 뉴스 · Google 뉴스 RSS + 언론사 RSS {d.publicFeeds?.length ?? 0}곳 · 뉴스 수집은 API 키 없이 이용</div>}
     {current?.contentType === "notice" && <div className="small muted">공식 모집 게시판부터 확인하고, 뉴스는 모집·접수 단어로 좁혀 검색합니다. 사후 홍보·대상 외 모집은 새로 저장하지 않습니다.</div>}
     {!d.naverReady && d.sourceMode !== "public_rss" && <div className="notice warn">네이버 검색 연결이 필요합니다. <GuardedLink href="/connections?service=naver">연결 확인</GuardedLink></div>}

@@ -1,4 +1,4 @@
-import { InstagramConnect } from "./InstagramAccounts";
+import { InstagramAccounts, InstagramConnect } from "./InstagramAccounts";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StudioCard } from "@shared/studio";
@@ -6,9 +6,18 @@ import type { StudioPublishPreview, StudioPublishStatus } from "@shared/studioPu
 import { api } from "../api";
 import { ErrorBox, GuardedLink } from "../ui";
 import { useToast } from "../toast";
+import { isPrivateWorkroom } from "../workroom";
 
 const deliveryLabel: Record<string, string> = { scheduled: "발행 대기", processing: "인스타그램 처리 중", succeeded: "발행 완료", failed: "발행 실패", unknown: "게시 여부 확인 필요", cancelled: "취소됨", dry_run: "모의 실행" };
-export function StudioPublish({ base, dirty, busy, save }: { base: StudioCard; dirty: boolean; busy: boolean; save: () => Promise<StudioCard> }) {
+type StudioPublishProps = { base: StudioCard; dirty: boolean; busy: boolean; save: () => Promise<StudioCard> };
+export function StudioPublish(props: StudioPublishProps) {
+  if (isPrivateWorkroom()) return <section className="stack studio-workroom" aria-label="비공개 초안 작업실">
+    <div className="notice"><strong>초안 작업실</strong><p className="small">이미지·캡션·대체텍스트를 편집하고 저장할 수 있어요. 외부 발행은 잠겨 있으며, 아래에서 게시 계정과 연결 상태를 확인할 수 있어요.</p></div>
+    <InstagramAccounts channel={props.base.channel} />
+  </section>;
+  return <PublicationEditor {...props} />;
+}
+function PublicationEditor({ base, dirty, busy, save }: StudioPublishProps) {
   const qc = useQueryClient(), toast = useToast();
   const [preview, setPreview] = useState<StudioPublishPreview | null>(null);
   const [page, setPage] = useState(0), [destinationId, setDestinationId] = useState(0);

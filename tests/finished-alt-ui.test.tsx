@@ -41,14 +41,50 @@ it("keeps manual entry and saving available without any configured AI",async()=>
  const el=await type("AI 없이 입력");expect(el.disabled).toBe(false);await click("변경 내용 저장");expect(saved.finishedDeck!.pages[0].altText).toBe("AI 없이 입력");
 });
 
-it("limits manual image descriptions to 125 characters and flags legacy overflow", async () => {
- const first = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="1페이지 대체텍스트"]')!;
- expect(first.maxLength).toBe(125);
+it("accepts exactly 125 Unicode characters and caps pasted input without splitting emoji", async () => {
+ const boundary = "가".repeat(124) + "😀";
+ expect((await type(boundary)).value).toBe(boundary);
+ expect(host.textContent).toContain("125 / 125자");
+ expect((await type(boundary + "더")).value).toBe(boundary);
+ await click("변경 내용 저장");
+ expect(saved.finishedDeck!.pages[0].altText).toBe(boundary);
+});
+
+it("keeps Korean IME composition intact and enforces the limit when composition ends", async () => {
+ const prefix = "가".repeat(124);
+ const field = await type(prefix);
+ await act(async()=>field.dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true,data:"ㅎ"})));
+ await type(prefix + "ㅎㅏ");
+ expect(field.value).toBe(prefix + "ㅎㅏ");
+ await type(prefix + "하");
+ await act(async()=>field.dispatchEvent(new CompositionEvent("compositionend",{bubbles:true,data:"하"})));
+ expect(field.value).toBe(prefix + "하");
+ expect(host.textContent).toContain("125 / 125자");
+ await click("변경 내용 저장");
+ expect(saved.finishedDeck!.pages[0].altText).toBe(prefix + "하");
+});
+
+it("preserves legacy overflow until the operator explicitly shortens it", async () => {
+ const legacy = "가".repeat(126);
+ saved = {...saved, version: 2, finishedDeck: {pages: saved.finishedDeck!.pages.map((page, i) => i === 0 ? {...page, altText: legacy} : page)}};
+ await act(async()=>root.render(createElement(QueryClientProvider,{client},createElement(FinishedDeckEditor,{data:{card:saved,revisions:[],jobs:[]}}))));
+ await settle();
+ expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="1페이지 대체텍스트"]')!.value).toBe(legacy);
  expect(host.textContent).toContain("1~2문장");
- await type("가".repeat(126));
  expect(host.textContent).toContain("126 / 125자");
- const saveButton = [...host.querySelectorAll("button")].find(b => b.textContent === "변경 내용 저장")!;
- expect(saveButton.disabled).toBe(true);
  expect(host.textContent).toContain("기존 문구는 자동 삭제하지 않습니다.");
+ expect(mocks.api.mock.calls.some(([_, opts]) => opts?.method === "PATCH")).toBe(false);
+ await type(legacy.slice(0, -1));
+ await click("변경 내용 저장");
+ expect(saved.finishedDeck!.pages[0].altText).toBe("가".repeat(125));
+});
+
+it("blocks saving three adjacent or quoted sentences", async () => {
+ for (const text of ["첫 문장.둘째 문장.셋째 문장.", "“첫 문장.” “둘째 문장.” “셋째 문장.”"]) {
+  await type(text);
+  const saveButton = [...host.querySelectorAll("button")].find(b => b.textContent === "변경 내용 저장")!;
+  expect(saveButton.disabled).toBe(true);
+  expect(host.textContent).toContain("1~2문장으로 작성해 주세요.");
+ }
  expect(mocks.api.mock.calls.some(([_, opts]) => opts?.method === "PATCH")).toBe(false);
 });
