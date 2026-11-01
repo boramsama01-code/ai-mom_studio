@@ -36,12 +36,12 @@ async function makeItem(agent: import("supertest").Agent, H: Record<string, stri
 }
 
 describe("카드 템플릿", () => {
-  it("선택한 5종·컬러 30가지 목록, 새 컬러 생성과 이전 디자인 호환", async () => {
+  it("선택한 5종과 Fryday·컬러 33가지 목록, 새 컬러 생성과 이전 디자인 호환", async () => {
     const { agent, csrf } = await login(app);
     const H = { "x-csrf-token": csrf };
     const list = await agent.get("/api/channels/1/templates");
-    expect(list.body.items.map((t: { key: string }) => t.key)).toEqual(["set:r01", "set:r05", "set:n01", "set:n03", "set:n04"]);
-    for (const item of list.body.items) expect(item.colors).toHaveLength(6);
+    expect(list.body.items.map((t: { key: string }) => t.key)).toEqual(["set:r01", "set:r05", "set:n01", "set:n03", "set:n04", "set:f01"]);
+    for (const item of list.body.items) expect(item.colors).toHaveLength(item.key === "set:f01" ? 3 : 6);
     expect(list.body.current).toBe("builtin:classic");
     const pv = await agent.get("/api/channels/1/templates/preview?key=builtin:header&size=sm");
     expect(pv.status).toBe(200);

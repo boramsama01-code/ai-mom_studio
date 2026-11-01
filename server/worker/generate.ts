@@ -19,7 +19,7 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   const primary = await itemPrimarySource(db, item);
   if (primary) docIds.add(primary.id);
   const linked = await db.select().from(contentSources).where(eq(contentSources.contentItemId, itemId));
-  linked.filter(l => l.role !== "previous_manual" && (primary?.kind !== "manual_text" || l.sourceDocumentId !== item.primarySourceId)).forEach((l) => docIds.add(l.sourceDocumentId));
+  linked.filter(l => l.role !== "previous_manual" && (primary?.kind !== "manual_text" || (l.sourceDocumentId !== item.primarySourceId && l.role !== "merged_primary"))).forEach((l) => docIds.add(l.sourceDocumentId));
   const docs = docIds.size
     ? await db.select().from(sourceDocuments).where(sql`${sourceDocuments.id} in (${sql.join([...docIds].map((i) => sql`${i}`), sql`, `)})`)
     : [];
@@ -71,4 +71,5 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   });
   return { ok: true as const, revisionId: rev.id, usage: r.usage, model: r.model };
 }
+
 

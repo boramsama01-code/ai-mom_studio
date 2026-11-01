@@ -11,6 +11,8 @@ import { NOTICE_CATEGORIES, CONTENT_KIND_LABEL, type ContentKind } from "@shared
 import type { ContentItem } from "@shared/schema";
 import { kstDay } from "@shared/collection";
 import { CollectionPanel, useKstToday } from "../collection";
+import { isIdeaChannel, readIdea } from "@shared/ideaBank";
+import { InboxKeywords } from "./InboxKeywords";
 import { NOTICE_INTENTS, NOTICE_INTENT_LABEL, type NoticeIntent } from "@shared/noticeIntent";
 
 export type ListRow = {
@@ -26,7 +28,7 @@ type ListResp = { total: number; page: number; pageSize: number; items: ListRow[
 const SOURCE_KIND: Record<string, string> = { naver_news: "네이버 뉴스", naver_blog: "블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 RSS", official: "공식", manual: "직접 추가", manual_text: "본문 직접 저장" };
 
 export function InboxPage() {
-  const { selected, current } = useChannel();
+  const { selected, current, channels, select } = useChannel();
   const params = new URLSearchParams(useSearch());
   const today = useKstToday();
   const [followToday, setFollowToday] = useState(!params.has("collectedOn"));
@@ -43,11 +45,14 @@ export function InboxPage() {
   const [page, setPage] = useState(1);
   useEffect(() => { if (followToday) { setF(old => ({ ...old, collectedOn: today })); setPage(1); } }, [today, followToday]);
   const [qInput, setQInput] = useState(f.q);
+  const [mode, setMode] = useState<"ideas" | "scraps">("ideas");
+  const ideas = isIdeaChannel(current) && mode === "ideas";
+  useEffect(() => { setPage(1); setMode("ideas"); }, [selected]);
   const noticeChannel = current?.contentType === "notice";
   const query = useQuery({
-    queryKey: ["ch", selected, "items", f, page],
-    queryFn: () => api<ListResp>(`/items?${qs({ channelId: selected, ...f, noticeIntent: noticeChannel ? f.noticeIntent : undefined, collectedOn: f.collectedOn || undefined, page, pageSize: 20 })}`),
-    placeholderData: keepPreviousData,
+    queryKey: ["ch", selected, "items", f, page, ideas],
+    queryFn: () => api<ListResp>(`/items?${qs({ channelId: selected, ...f, noticeIntent: noticeChannel ? f.noticeIntent : undefined, collectedOn: ideas ? undefined : f.collectedOn || undefined, origin: ideas ? "idea" : "scrap", page, pageSize: 20 })}`),
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === selected && previousQuery?.queryKey[5] === ideas ? previous : undefined,
     refetchInterval: 60_000,
   });
   const set = (k: keyof typeof f, v: string) => {
@@ -63,23 +68,27 @@ export function InboxPage() {
       <div className="page-head">
         <div>
           <h1>수집함</h1>
-          <p className="muted small">좋은 콘텐츠의 시작. 모아 둔 자료를 살펴보고 다음 이야기를 골라보세요.</p>
+          <p className="muted small">{current?.contentType === "manual" ? "아이디어를 골라 원고·카드뉴스·웹툰으로 이어가세요." : "자료를 고르고, 원문을 확인한 뒤 콘텐츠로 만드세요."}</p>
         </div>
+        <label className="field inbox-channel"><span className="sr-only">수집함 채널</span><select aria-label="수집함 채널" value={selected} onChange={e => select(e.target.value === "all" ? "all" : Number(e.target.value))}>{channels.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}<option value="all">모든 채널</option></select></label>
       </div>
-      <CollectionPanel date={f.collectedOn || undefined} />
+      {isIdeaChannel(current) && <div className="tabs inbox-modes" role="group" aria-label="수집함 자료 유형"><button aria-pressed={ideas} onClick={() => { setMode("ideas"); resetFilters(); }}>아이디어 100</button><button aria-pressed={!ideas} onClick={() => { setMode("scraps"); resetFilters(); }}>스크랩 자료</button></div>}
+      {!ideas && <CollectionPanel date={f.collectedOn || undefined} />}
+      {current && <InboxKeywords key={current.id} cid={current.id} kind={current.contentType} />}
       {noticeChannel && <section className="panel stack" aria-label="공고 선별" style={{ marginBottom: 16 }}>
         <div className="row" role="group" aria-label="공고 성격">
           {[...NOTICE_INTENTS, "all"].map(intent => <button key={intent} className={`btn sm ${f.noticeIntent === intent ? "primary" : ""}`} aria-pressed={f.noticeIntent === intent} onClick={() => set("noticeIntent", intent)}>{intent === "all" ? "전체 자료" : NOTICE_INTENT_LABEL[intent as NoticeIntent]}</button>)}
         </div>
         <p className="small muted" style={{ margin: 0 }}>모집·접수 단서가 있는 자료를 먼저 보여드립니다. 제목·요약에 따른 분류이며, 현재 신청 가능 여부·대상·마감일은 공식 원문에서 확인해야 합니다. 기존 자료는 삭제하지 않으며 ‘전체 자료’에서 볼 수 있습니다.</p>
       </section>}
-      <div className="row collection-date-filter" role="group" aria-label="수집 날짜">
+      {ideas && <p className="small muted idea-intro">소재를 선택하면 구성안과 참고 자료를 볼 수 있습니다. 제작 보드에서 원고와 이미지를 완성하세요.</p>}
+      {!ideas && <div className="row collection-date-filter" role="group" aria-label="수집 날짜">
         <button className={`btn sm ${f.collectedOn === today ? "primary" : ""}`} onClick={() => { setFollowToday(true); set("collectedOn", today); }}>오늘</button>
         <button className={`btn sm ${f.collectedOn === yesterday ? "primary" : ""}`} aria-pressed={f.collectedOn === yesterday} onClick={() => { setFollowToday(false); set("collectedOn", yesterday); }}>어제</button>
         <button className={`btn sm ${!f.collectedOn ? "primary" : ""}`} onClick={() => { setFollowToday(false); set("collectedOn", ""); }}>전체 기간</button>
         <label className="field"><span className="sr-only">수집일 선택</span><input type="date" aria-label="수집일 선택" value={f.collectedOn} onChange={e => { setFollowToday(false); set("collectedOn", e.target.value); }} /></label>
         <span className="small muted">{query.data?.total ?? "—"}건{f.review ? " · 검토 상태 필터 적용 중" : ""}</span>
-      </div>
+      </div>}
       <form
         className="panel stack inbox-search-panel"
         style={{ marginBottom: 16 }}
@@ -92,7 +101,7 @@ export function InboxPage() {
         <div className="row">
           <label className="field" style={{ flex: "2 1 220px" }}>
             <span className="sr-only">검색</span>
-            <input placeholder="제목 검색" value={qInput} onChange={(e) => setQInput(e.target.value)} />
+            <input placeholder={ideas ? "아이디어 제목 검색" : "제목 검색"} value={qInput} onChange={(e) => setQInput(e.target.value)} />
           </label>
           <button className="btn primary">검색</button>
           <button type="button" className="btn ghost" onClick={resetFilters}>필터 초기화</button>
@@ -160,7 +169,7 @@ export function InboxPage() {
       ) : !query.data?.items.length ? (
         <Empty>
           {noticeChannel && f.noticeIntent !== "all" ? `선택한 기간에 ‘${NOTICE_INTENT_LABEL[f.noticeIntent as NoticeIntent] ?? "공고"}’ 자료가 없습니다. ‘확인 필요’ 또는 ‘전체 자료’도 확인하세요. ` : f.collectedOn ? `${f.collectedOn}에 새로 수집된 자료가 없습니다. ` : "조건에 맞는 자료가 없습니다. "}
-          {f.view === "inbox" && !f.q && !f.review && !f.evidence ? "검색 설정에서 키워드를 켜고 수집을 요청하거나, 시험 검색 결과를 저장해 보세요." : "필터를 바꿔 보세요."}
+          {f.view === "inbox" && !f.q && !f.review && !f.evidence ? "위에서 수집 키워드를 추가하거나, 전체 기간의 자료를 확인해 보세요." : "필터를 바꿔 보세요."}
           <div className="empty-actions"><button className="btn" onClick={resetFilters}>전체 자료 보기</button></div>
         </Empty>
       ) : (
@@ -186,6 +195,8 @@ export function ItemList({ rows, showChannel }: { rows: ListRow[]; showChannel: 
 }
 
 function ItemBody({ row: { item, source, channelName, matchedQuery, noticeIntent }, showChannel }: { row: ListRow; showChannel: boolean }) {
+  const idea = readIdea(item.edited);
+  if (item.origin === "idea" && idea) return <div className="idea-list-content"><span className="idea-number">{String(idea.number).padStart(3, "0")}</span><div><div className="meta"><span>{idea.category}</span><span>{idea.format}</span>{showChannel && <span>{channelName}</span>}</div><GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">{item.title}</GuardedLink><p className="small muted snippet">{idea.angle}</p><span className="small muted">기획 아이디어 · 게시 전 확인 필요</span></div></div>;
   return (
     <>
       <GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">

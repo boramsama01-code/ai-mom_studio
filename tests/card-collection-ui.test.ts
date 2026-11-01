@@ -16,7 +16,7 @@ describe("paired design browser", () => {
     const button = (text: string) => [...host.querySelectorAll("button")].find(b => b.textContent?.includes(text))!;
     await act(async () => button("뉴스·속보").click());
     expect(host.querySelectorAll(".collection-grid .tpl")).toHaveLength(3);
-    await act(async () => button("와이 브리프").click());
+    await act(async () => button("알리고당 브리프").click());
     expect(host.querySelectorAll(".collection-colors button")).toHaveLength(6);
     await act(async () => button("코발트").click());
     await act(async () => button("본문 4").click());

@@ -1,3 +1,5 @@
+import { readIdea } from "../../shared/ideaBank";
+import { itemPrimarySource } from "./itemSources";
 import crypto from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -107,9 +109,16 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
       if (!source) throw new HttpError(404, "연결할 수집 콘텐츠가 없습니다.");
       const [existing] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, sourceItemId));
       if (existing) { assertStudioActive(existing); return studioCardDto(existing); }
+      const idea = readIdea(source.edited);
+      if (idea && source.origin === "idea") {
+        content = { ...content, format: idea.format, exportDesign: idea.format === "카드뉴스" ? "set:f01" : content.exportDesign,
+          memo: [idea.angle, ...idea.beats, idea.verification, ...idea.references.map(r=>`${r.label}: ${r.url}`)].join("\n\n"),
+          script: `${idea.title}\n\n${idea.angle}\n\n${idea.beats.join("\n\n")}`,
+          panels: idea.beats.map(scene=>({scene,dialogue:"",imageId:null})) };
+      }
       // Copy explicit source material as editable context; never infer a new channel mapping.
       if (!content.memo) {
-        const [document] = source.primarySourceId ? await tx.select().from(sourceDocuments).where(eq(sourceDocuments.id, source.primarySourceId)) : [];
+        const document = await itemPrimarySource(tx as unknown as DB, source);
         content = { ...content, sourceLabel: content.sourceLabel || (document?.originalUrl ? new URL(document.originalUrl).hostname : ""), memo: JSON.stringify({ sourceTitle: source.title, sourceUrl: document?.originalUrl ?? null, facts: source.edited ?? source.extracted ?? {} }, null, 2).slice(0, 12000) };
       }
     }

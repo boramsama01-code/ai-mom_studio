@@ -96,6 +96,7 @@ channelRoutes.patch(
   "/channels/:cid",
   ah(async (req, res) => {
     const ch = await loadChannel(req.params.cid);
+    if (ch.id !== intParam(req.params.cid)) throw new HttpError(409, "알리고당으로 통합된 채널입니다. 통합 채널에서 설정을 변경해 주세요.");
     const body = parse(channelPatch, req.body);
     const { version, ...patch } = body;
     const db = getDb();
@@ -253,4 +254,5 @@ channelRoutes.patch(
     res.json(destinationView(updated[0], ch.slug));
   }),
 );
+
 

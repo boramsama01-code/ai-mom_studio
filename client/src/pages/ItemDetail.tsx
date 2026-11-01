@@ -18,6 +18,8 @@ import type { Approval, ContentItem, ContentRevision, Delivery, SourceDocument }
 import { SourceTextEditor } from "../SourceTextEditor";
 import { ChatGptLaunch } from "../ChatGptLaunch";
 import { itemChatGptPrompt } from "@shared/chatgptLink";
+import { readIdea } from "@shared/ideaBank";
+import { IdeaDetail } from "./IdeaDetail";
 import { collectionUsesArt } from "@shared/cardDesigns";
 
 type Detail = {
@@ -36,12 +38,15 @@ type Detail = {
 
 const SRC_KIND: Record<string, string> = { naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 직접 RSS", official: "공식 게시물", manual: "직접 추가 자료", manual_text: "직접 붙여넣은 본문 · 내용 확인 필요" };
 
-export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
+export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: number }) {
   const { selected, allChannels } = useChannel();
+  const q = useQuery({ queryKey: ["ch", requestedCid, "item", id], queryFn: () => api<Detail>(`/channels/${requestedCid}/items/${id}`) });
+  const cid = q.data?.item.channelId ?? requestedCid;
   const sourceChannel = allChannels.find(ch => ch.id === cid);
-  const q = useQuery({ queryKey: ["ch", cid, "item", id], queryFn: () => api<Detail>(`/channels/${cid}/items/${id}`) });
-  const [tab, setTab] = useState<"source" | "edit" | "publish" | "history">("edit");
+  const [tab, setTab] = useState<"source" | "edit" | "publish" | "history">("source");
   const [, navigate] = useLocation();
+  useEffect(() => { setTab("source"); }, [requestedCid, id]);
+  useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, navigate]);
   const guard = useDirtyGuard();
   const transfer = useMutation({
     mutationFn: () => {
@@ -50,17 +55,13 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
     },
     onSuccess: (card) => navigate(`/studio/${card.id}`),
   });
-  if (selected !== "all" && selected !== cid)
-    return (
-      <div className="notice warn">
-        이 항목은 다른 채널의 자료입니다. <GuardedLink href="/inbox">수집함으로 돌아가기</GuardedLink>
-      </div>
-    );
   if (q.isLoading) return <Loading lines={5} />;
   if (q.error) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   const d = q.data!;
+  const idea = readIdea(d.item.edited);
+  if (d.item.origin === "idea" && idea && sourceChannel) return <IdeaDetail item={d.item} idea={idea} channel={sourceChannel.slug} />;
   const go = (t: "source" | "edit" | "publish" | "history", anchor: string) => guard.confirmLeave(() => { setTab(t); setTimeout(() => { const node = document.getElementById(anchor); node?.scrollIntoView({ behavior: "smooth", block: "start" }); node?.focus({ preventScroll: true }); }, 30); });
-  const tabs: Array<[typeof tab, string]> = [["source", "원문·근거"], ["edit", "편집"], ["publish", "카드·승인"], ["history", "이력"]];
+  const tabs: Array<[typeof tab, string]> = [["source", "1 원문 확인"], ["edit", "2 초안 편집"], ["publish", "3 카드·내보내기"], ["history", "이력"]];
   return (
     <>
       <div className="page-head">
@@ -84,33 +85,14 @@ export function ItemDetailPage({ cid, id }: { cid: number; id: number }) {
       </div>
       {transfer.error && <ErrorBox error={transfer.error} />}
       <DiscoveryNote info={d.item.discovery} />
-      <Progress d={d} />
-      <div className="tabs only-mobile" role="tablist">
-        {tabs.map(([k, l]) => (
-          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>
-            {l}
-          </button>
-        ))}
+      <div className="tabs workflow-tabs" role="tablist" aria-label="콘텐츠 제작 단계">
+        {tabs.map(([k, label]) => <button key={k} id={`tab-${k}`} role="tab" aria-selected={tab === k} aria-controls={`step-${k}`} onClick={() => go(k, `step-${k}`)}>{label}</button>)}
       </div>
-      <div className="split">
-        <div className={tab === "source" ? "" : "hide-mobile"}>
-          <SourcePanel d={d} cid={cid} />
-          <Progress d={d} onGo={go} actionsOnly forTab="source" />
-        </div>
-        <div className="stack">
-          <div className={tab === "edit" ? "" : "hide-mobile"}>
-            <EditPanel d={d} cid={cid} />
-            <Progress d={d} onGo={go} actionsOnly forTab="edit" />
-          </div>
-          <div className={tab === "publish" ? "" : "hide-mobile"}>
-            <ReviewPanel d={d} cid={cid} />
-            <CardApprovePanel d={d} cid={cid} />
-            <Progress d={d} onGo={go} actionsOnly forTab="publish" />
-          </div>
-          <div className={tab === "history" ? "" : "hide-mobile"}>
-            <HistoryPanel d={d} />
-          </div>
-        </div>
+      <div className="item-workspace" role="tabpanel" id={`step-${tab}`} aria-labelledby={`tab-${tab}`} tabIndex={-1}>
+        {tab === "source" && <><SourcePanel d={d} cid={cid} /><Progress d={d} onGo={go} actionsOnly forTab="source" /></>}
+        {tab === "edit" && <><EditPanel d={d} cid={cid} /><Progress d={d} onGo={go} actionsOnly forTab="edit" /></>}
+        {tab === "publish" && <><ReviewPanel d={d} cid={cid} /><CardApprovePanel d={d} cid={cid} /><Progress d={d} onGo={go} actionsOnly forTab="publish" /></>}
+        {tab === "history" && <HistoryPanel d={d} />}
       </div>
     </>
   );

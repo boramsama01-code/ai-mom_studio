@@ -46,15 +46,15 @@ export function RulesPage() {
           </button>
         ))}
       </div>
-      {tab === "rules" && <RulesTab cid={current.id} kind={current.contentType} />}
-      {tab === "bulk" && <BulkTab cid={current.id} isNotice={current.contentType === "notice"} />}
-      {tab === "official" && <OfficialTab cid={current.id} />}
-      {tab === "deleted" && <DeletedTab cid={current.id} />}
+      {tab === "rules" && <RulesTab key={current.id} cid={current.id} kind={current.contentType} />}
+      {tab === "bulk" && <BulkTab key={current.id} cid={current.id} isNotice={current.contentType === "notice"} />}
+      {tab === "official" && <OfficialTab key={current.id} cid={current.id} />}
+      {tab === "deleted" && <DeletedTab key={current.id} cid={current.id} />}
     </>
   );
 }
 
-function useRules(cid: number, deleted = false) {
+export function useRules(cid: number, deleted = false) {
   return useQuery({ queryKey: ["ch", cid, "rules", deleted], queryFn: () => api<RulesResp>(`/channels/${cid}/rules${deleted ? "?deleted=1" : ""}`) });
 }
 
@@ -79,7 +79,7 @@ function RulesTab({ cid, kind }: { cid: number; kind: string }) {
       {discovery && (kind === "science_dialogue" || kind === "current_dialogue") && <DiscoveryPanel cid={cid} kind={kind} settings={discovery} />}
       <div className="panel row between">
         <div>
-          <strong>한 번 실행할 때 예상 네이버 호출: {estimate.callsPerRun}회</strong>
+          <strong>한 번 실행할 때 예상 검색 요청: {estimate.callsPerRun}회</strong>
           <div className="small muted">
             {estimate.discoveryCalls > 0 && `자동 발굴 ${estimate.discoveryCalls}회 + `}
             활성 검색어 {estimate.activeRules}개 (뉴스·블로그는 각각 1회) · 실행당 한도 {estimate.budget}회
@@ -140,7 +140,7 @@ function RulesTab({ cid, kind }: { cid: number; kind: string }) {
   );
 }
 
-function RuleForm({ cid, rule, onClose }: { cid: number; rule: SearchRule | null; onClose: () => void }) {
+export function RuleForm({ cid, rule, onClose }: { cid: number; rule: SearchRule | null; onClose: () => void }) {
   const qc = useQueryClient();
   const [query, setQuery] = useState(rule?.query ?? "");
   const [endpoints, setEndpoints] = useState<Array<"news" | "blog">>(rule ? [rule.endpoint as "news" | "blog"] : ["news"]);
@@ -169,12 +169,13 @@ function RuleForm({ cid, rule, onClose }: { cid: number; rule: SearchRule | null
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["ch", cid, "rules"] });
+      qc.invalidateQueries({ queryKey: ["collection"] });
       onClose();
     },
   });
   const flip = (e: "news" | "blog") => setEndpoints((a) => (rule ? [e] : a.includes(e) ? a.filter((x) => x !== e) : [...a, e]));
   return (
-    <Modal title={rule ? "검색어 수정" : "검색어 추가"} onClose={onClose}>
+    <Modal title={rule ? "수집 키워드 수정" : "수집 키워드 추가"} onClose={() => !m.isPending && onClose()}>
       <form
         className="stack"
         onSubmit={(e) => {
@@ -183,11 +184,11 @@ function RuleForm({ cid, rule, onClose }: { cid: number; rule: SearchRule | null
         }}
       >
         <label className="field">
-          검색어
+          수집 키워드
           <span className="hint">검색창에 입력하듯 적습니다. 쉼표로 나누지 않습니다.</span>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} required maxLength={100} />
+          <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} required maxLength={100} disabled={m.isPending} />
         </label>
-        {booleanWarn && <div className="notice warn small">네이버 검색 API는 OR/AND 문법을 지원하지 않아 글자 그대로 검색됩니다. 검색어를 나눠서 추가하세요.</div>}
+        {booleanWarn && <div className="notice warn small">검색 경로마다 OR/AND 해석이 다를 수 있습니다. 안정적인 수집을 위해 검색어를 나눠 추가하세요.</div>}
         <fieldset className="row">
           <legend>검색 대상</legend>
           <label className="check">
@@ -197,7 +198,7 @@ function RuleForm({ cid, rule, onClose }: { cid: number; rule: SearchRule | null
             <input type={rule ? "radio" : "checkbox"} name="ep" checked={endpoints.includes("blog")} onChange={() => flip("blog")} /> 블로그
           </label>
         </fieldset>
-        {endpoints.length === 2 && <p className="small muted">뉴스·블로그를 모두 고르면 실행마다 호출이 2회로 계산됩니다.</p>}
+        {endpoints.length === 2 && <p className="small muted">뉴스와 블로그를 각각 수집합니다. 블로그 검색에는 네이버 연결이 필요합니다.</p>}
         <label className="check">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> 사용
         </label>
@@ -243,10 +244,10 @@ function RuleForm({ cid, rule, onClose }: { cid: number; rule: SearchRule | null
         </details>
         {m.error && <ErrorBox error={m.error} />}
         <div className="row">
-          <button className="btn primary" disabled={m.isPending || !endpoints.length}>
-            저장
+          <button className="btn primary" disabled={m.isPending || !endpoints.length || !query.trim()}>
+            {m.isPending ? "저장 중…" : "키워드 저장"}
           </button>
-          <button type="button" className="btn" onClick={onClose}>
+          <button type="button" className="btn" disabled={m.isPending} onClick={onClose}>
             취소
           </button>
         </div>
@@ -609,4 +610,5 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
     </Modal>
   );
 }
+
 

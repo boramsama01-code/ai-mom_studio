@@ -7,6 +7,9 @@ import { loadStoredSecrets } from "./secretStore";
 import { migrateSitesStarter } from "./services/sitesMigration";
 import { kickInlineStudio } from "./worker/studio";
 
+import { consolidateAlligodang } from "./services/channelConsolidation";
+import { seedIdeaBank } from "./services/ideaBank";
+
 async function main() {
   if (env.databaseUrl) {
     try {
@@ -14,6 +17,8 @@ async function main() {
       const r = await seedIfNeeded(getDb());
       if (r.createdChannels.length) console.log(`초기 채널 생성: ${r.createdChannels.join(", ")}`);
       await migrateSitesStarter(getDb());
+      await consolidateAlligodang(getDb());
+      await seedIdeaBank(getDb());
       const s = await loadStoredSecrets(getDb());
       if (s.loaded) console.log(`화면에서 입력한 연결 키 ${s.loaded}개를 불러왔습니다.`);
       kickInlineStudio(getDb());
@@ -29,4 +34,5 @@ async function main() {
 }
 
 main();
+
 

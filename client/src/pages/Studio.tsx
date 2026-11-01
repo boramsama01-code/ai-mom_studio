@@ -24,7 +24,7 @@ const stages: Array<{ id: Stage; label: string }> = [{ id: "idea", label: "아�
 const formats: readonly Format[] = studioOutputFormats;
 function useStudioChannels(includeArchived = false) {
   const { allChannels } = useChannel();
-  return allChannels.filter(c => includeArchived || c.active).map(c => ({ id: studioKey(c.slug), name: c.name, role: c.description, active: c.active, accent: c.accentColor,
+  return allChannels.filter(c => (includeArchived || c.active) && !(c.slug === "science-dialogue" && allChannels.some(other => other.slug === "current-dialogue"))).map(c => ({ id: studioKey(c.slug), name: c.name, role: c.description, active: c.active, accent: c.accentColor,
     image: (c.slug === "opportunities" ? "pempem" : c.slug === "current-dialogue" ? "pengpeng" : c.slug === "penguin" ? "pengki" : c.slug === "fryday" ? "penguin" : null) as Character | null }));
 }
 const characters: Array<{ id: Character; name: string; role: string; detail: string }> = [
@@ -124,11 +124,11 @@ function NewCard({ channel, stage, onClose }: { channel: Channel; stage: Stage; 
   const channelName = (id: string) => channels.find(c => c.id === id)?.name ?? id;
   const [title, setTitle] = useState("");
   const [ch, setCh] = useState(channel);
-  const [format, setFormat] = useState<Format>(channel === "penguin" ? "웹툰" : "카드뉴스");
+  const [format, setFormat] = useState<Format>(channel === "penguin" || /웹툰|webtoon/i.test(channelName(channel)) ? "웹툰" : "카드뉴스");
   const guard = useDirtyGuard();
   const [, navigate] = useLocation();
   const qc = useQueryClient();
-  const create = useMutation({ mutationFn: () => api<{ card: Card } | Card>("/studio/cards", { method: "POST", body: { title, channel: ch, format, stage, exportDesign: format === "카드뉴스" ? ch === "highscoop" ? "set:r01" : "set:n03" : "editorial", dueDate: "", memo: "", script: "", caption: "", panels: Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), characters: ch === "highscoop" ? ["pempem"] : ch === "fryday" ? ["penguin"] : ch === "news" ? ["pengpeng"] : ch === "penguin" ? ["pengki"] : [] } }), onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["studio"] }); onClose(); guard.confirmLeave(() => navigate(`/studio/${"card" in d ? d.card.id : d.id}`)); } });
+  const create = useMutation({ mutationFn: () => api<{ card: Card } | Card>("/studio/cards", { method: "POST", body: { title, channel: ch, format, stage, exportDesign: format === "카드뉴스" ? ch === "highscoop" ? "set:r01" : ch === "fryday" ? "set:f01" : "set:n03" : "editorial", dueDate: "", memo: "", script: "", caption: "", panels: Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), characters: ch === "highscoop" ? ["pempem"] : ch === "fryday" ? ["penguin"] : ch === "news" ? ["pengpeng"] : ch === "penguin" ? ["pengki"] : [] } }), onSuccess: (d) => { qc.invalidateQueries({ queryKey: ["studio"] }); onClose(); guard.confirmLeave(() => navigate(`/studio/${"card" in d ? d.card.id : d.id}`)); } });
   return <Dialog title="새 작업" onClose={() => !create.isPending && onClose()}><form className="stack" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}><label className="field">제목<input autoFocus required value={title} maxLength={160} onChange={(e) => setTitle(e.target.value)} placeholder="어떤 이야기를 만들까요?" /></label><div className="grid grid-2"><label className="field">채널<select value={ch} onChange={(e) => setCh(e.target.value as Channel)}>{channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="field">형식<select value={format} onChange={(e) => setFormat(e.target.value as Format)}>{formats.map((f) => <option key={f}>{f}</option>)}</select></label></div><p className="small muted">{studioOutputDescription(format)}</p>{create.error && <ErrorBox error={create.error} />}<button className="btn primary" disabled={!title.trim() || create.isPending}>{create.isPending ? "만드는 중…" : "작업 만들기"}</button></form></Dialog>;
 }
 

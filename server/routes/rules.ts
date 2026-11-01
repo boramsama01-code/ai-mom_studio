@@ -56,7 +56,7 @@ const ruleBase = {
 };
 
 const ruleCreate = z.object({
-  query: z.string().min(1).max(100),
+  query: z.string().trim().min(1, "수집 키워드를 입력해 주세요.").max(100),
   endpoints: z.array(z.enum(["news", "blog"])).min(1).max(2),
   ...ruleBase,
 });
@@ -166,7 +166,7 @@ ruleRoutes.post(
   }),
 );
 
-const rulePatch = z.object({ version: zVersion, query: z.string().min(1).max(100).optional(), endpoint: z.enum(["news", "blog"]).optional(), ...ruleBase });
+const rulePatch = z.object({ version: zVersion, query: z.string().trim().min(1, "수집 키워드를 입력해 주세요.").max(100).optional(), endpoint: z.enum(["news", "blog"]).optional(), ...ruleBase });
 
 ruleRoutes.patch(
   "/channels/:cid/rules/:id",
@@ -207,11 +207,13 @@ ruleRoutes.post(
     const ch = await loadChannel(req.params.cid);
     const id = intParam(req.params.id);
     const db = getDb();
+    const body = parse(z.object({ version: zVersion.optional() }), req.body ?? {});
     const updated = await db
       .update(searchRules)
       .set({ deletedAt: new Date(), enabled: false, version: sql`${searchRules.version} + 1`, updatedAt: new Date() })
-      .where(and(eq(searchRules.id, id), eq(searchRules.channelId, ch.id), isNull(searchRules.deletedAt)))
+      .where(and(eq(searchRules.id, id), eq(searchRules.channelId, ch.id), isNull(searchRules.deletedAt), body.version ? eq(searchRules.version, body.version) : undefined))
       .returning();
+    if (!updated.length && body.version) conflict(null);
     if (!updated.length) throw new HttpError(404, "삭제할 검색어가 없습니다.");
     await audit(db, { actor: actorOf(req), action: "delete", entity: "search_rule", entityId: id, channelId: ch.id });
     res.json(updated[0]);
@@ -224,13 +226,15 @@ ruleRoutes.post(
     const ch = await loadChannel(req.params.cid);
     const id = intParam(req.params.id);
     const db = getDb();
+    const body = parse(z.object({ version: zVersion.optional() }), req.body ?? {});
     try {
       const updated = await db
         .update(searchRules)
         .set({ deletedAt: null, enabled: false, version: sql`${searchRules.version} + 1`, updatedAt: new Date() })
-        .where(and(eq(searchRules.id, id), eq(searchRules.channelId, ch.id), isNotNull(searchRules.deletedAt)))
+        .where(and(eq(searchRules.id, id), eq(searchRules.channelId, ch.id), isNotNull(searchRules.deletedAt), body.version ? eq(searchRules.version, body.version) : undefined))
         .returning();
-      if (!updated.length) throw new HttpError(404, "복구할 검색어가 없습니다.");
+      if (!updated.length && body.version) conflict(null);
+    if (!updated.length) throw new HttpError(404, "복구할 검색어가 없습니다.");
       await audit(db, { actor: actorOf(req), action: "restore", entity: "search_rule", entityId: id, channelId: ch.id });
       res.json(updated[0]);
     } catch (e) {
@@ -358,4 +362,5 @@ ruleRoutes.put(
     res.json({ discovery: resolveDiscovery(ch.contentType, discovery) });
   }),
 );
+
 

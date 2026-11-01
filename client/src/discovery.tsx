@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
+import { useDirtyGuard } from "./state";
 import { useToast } from "./toast";
 import { GuardedLink, StatusBadge, fmtDate } from "./ui";
 import { DISCOVERY_DEFAULT_QUERIES, type DiscoveryInfo, type DiscoverySettings } from "@shared/domain";
@@ -86,9 +87,12 @@ export function DiscoveryPanel({ cid, kind, settings }: { cid: number; kind: "sc
   const toast = useToast();
   const [f, setF] = useState(settings);
   const [text, setText] = useState(settings.queries.join("\n"));
+  const guard = useDirtyGuard();
+  const [baseline,setBaseline] = useState(JSON.stringify(settings));
+  const draft = {...f,queries:text.split(/\r?\n/).map(s=>s.trim()).filter(Boolean)};
+  const dirty = JSON.stringify(draft) !== baseline;
   useEffect(() => {
-    setF(settings);
-    setText(settings.queries.join("\n"));
+    if (!dirty) { setF(settings); setText(settings.queries.join("\n")); setBaseline(JSON.stringify(settings)); }
   }, [settings]);
   const status = useQuery({ queryKey: ["status"], queryFn: () => api<{ integrations: Record<string, unknown> }>("/status") });
   const ai = !!status.data?.integrations.aiConfigured && !!(status.data?.integrations.flags as Record<string, boolean> | undefined)?.autoGenerate;
@@ -100,18 +104,23 @@ export function DiscoveryPanel({ cid, kind, settings }: { cid: number; kind: "sc
       }),
     onSuccess: () => {
       toast("ok", "자동 발굴 설정을 저장했습니다. 다음 수집부터 반영됩니다.");
+      setBaseline(JSON.stringify(draft));
       qc.invalidateQueries({ queryKey: ["ch", cid] });
+      qc.invalidateQueries({ queryKey: ["collection"] });
     },
     onError: (e) => toast("err", (e as Error).message),
   });
-  const dirty = JSON.stringify({ ...f, queries: text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) }) !== JSON.stringify(settings);
+  useEffect(() => {
+    guard.setDirty(`discovery-${cid}`,dirty,async()=>{try { await save.mutateAsync(); return true; } catch { return false; }});
+    return ()=>guard.setDirty(`discovery-${cid}`,false);
+  },[cid,dirty,text,f,guard.setDirty,save.mutateAsync]);
   return (
-    <section className="panel stack discovery-panel">
+    <fieldset disabled={save.isPending} className="panel stack discovery-panel">
       <div className="row between">
         <div>
           <h2 style={{ margin: 0 }}>자동 화제 발굴 {f.enabled ? <span className="badge ok">켜짐</span> : <span className="badge">꺼짐</span>}</h2>
           <p className="small muted" style={{ margin: "4px 0 0" }}>
-            검색어를 넣지 않아도 됩니다. 수집할 때마다 아래 탐색 주제로 최신 뉴스를 주제당 100건씩 훑고, <b>여러 언론사가 함께 다루는 사건</b>을 화제로 찾습니다.
+            검색어를 넣지 않아도 됩니다. 수집할 때마다 아래 탐색 주제로 최근 뉴스를 확인하고, <b>여러 언론사가 함께 다루는 사건</b>을 화제로 찾습니다.
             {ai ? " 자동 작성이 켜진 예약 수집에서는 AI가 화제 선정과 초안 작성을 도울 수 있습니다." : " 현재는 유료 AI 호출 없이 화제도 순으로 저장합니다."}
           </p>
         </div>
@@ -121,7 +130,7 @@ export function DiscoveryPanel({ cid, kind, settings }: { cid: number; kind: "sc
       </div>
       <div className="grid grid-2">
         <label className="field">
-          탐색 주제 (한 줄에 하나, 최대 8개 · 주제 1개 = 네이버 호출 1회)
+          탐색 주제 (한 줄에 하나, 최대 8개 · 뉴스 탐색에 사용)
           <textarea rows={5} value={text} onChange={(e) => setText(e.target.value)} />
           <span className="hint">
             넓은 말일수록 좋습니다. 기본값: {DISCOVERY_DEFAULT_QUERIES[kind].join(", ")}{" "}
@@ -148,7 +157,8 @@ export function DiscoveryPanel({ cid, kind, settings }: { cid: number; kind: "sc
           {save.isPending ? "저장 중…" : "저장"}
         </button>
       </div>
-    </section>
+    </fieldset>
   );
 }
+
 

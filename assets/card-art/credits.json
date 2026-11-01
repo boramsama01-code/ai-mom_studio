@@ -23,6 +23,11 @@
       "id": "globe",
       "file": "globe.jpg",
       "prompt": "Use case: stylized-concept. Asset type: original sophisticated editorial artwork for a breaking-news/current-affairs Instagram carousel, no lettering. A luminous frosted-glass cobalt-blue planet-like sphere suspended in a dark midnight-navy studio. A single narrow radiant burnt-orange orbital arc sweeps elegantly around the sphere in three-dimensional space. Subtle abstract misty shapes within the glass suggest interconnected continents without forming an accurate geographical map. Beautiful refraction, soft glow, minimal fine grain, premium conceptual editorial still life, dramatic but tasteful. Square composition, entire sphere and arc visible, generous navy negative space, controlled high contrast, no extra objects. This is a symbolic illustration not a scientific chart. No text, no numbers, no logo, no watermark."
+    },
+    {
+      "id": "fries",
+      "file": "fries.jpg",
+      "prompt": "Original AI-staged editorial macro food photograph: crisp golden French fries, warm charcoal-brown tabletop, partial ivory dish, subtle side light. Full portrait background with dark lower-left space for headlines; no text, logos or real restaurant claim."
     }
   ]
 }

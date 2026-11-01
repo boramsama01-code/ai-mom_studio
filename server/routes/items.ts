@@ -58,6 +58,7 @@ const listQuery = z.object({
   noticeIntent: z.enum([...NOTICE_INTENTS, "all"]).optional(),
   view: z.enum(["inbox", "drafts", "excluded", "all"]).optional(),
   sample: z.enum(["0", "1"]).optional(),
+  origin: z.enum(["idea", "scrap"]).optional(),
   page: z.coerce.number().int().min(1).max(1000).optional(),
   pageSize: z.coerce.number().int().min(5).max(100).optional(),
 });
@@ -74,6 +75,8 @@ itemRoutes.get(
     if (view === "excluded") conds.push(eq(contentItems.excluded, true));
     else if (view !== "all") conds.push(eq(contentItems.excluded, false));
     if (view === "drafts") conds.push(sql`${contentItems.currentRevisionId} is not null`);
+    if (q.origin === "idea") conds.push(eq(contentItems.origin, "idea"));
+    if (q.origin === "scrap") conds.push(ne(contentItems.origin, "idea"));
     if (q.q) conds.push(or(ilike(contentItems.title, `%${q.q.replace(/[%_\\]/g, "\\$&")}%`))!);
     if (q.review) conds.push(inArray(contentItems.reviewStatus, q.review.split(",")));
     if (q.schedule) conds.push(inArray(contentItems.scheduleStatus, q.schedule.split(",")));
@@ -81,7 +84,7 @@ itemRoutes.get(
     if (q.category) conds.push(eq(contentItems.category, q.category));
     const intent = noticeIntentSql();
     if (q.noticeIntent && q.noticeIntent !== "all") conds.push(sql`${intent} = ${q.noticeIntent}`);
-    if (q.collectedOn) {
+    if (q.collectedOn && q.origin !== "idea") {
       const { start, end } = collectionDayRange(q.collectedOn);
       conds.push(gte(contentItems.createdAt, start), lt(contentItems.createdAt, end), inArray(contentItems.origin, ["collected", "discovered"]));
     }
@@ -103,7 +106,7 @@ itemRoutes.get(
       .leftJoin(sourceDocuments, eq(sourceDocuments.id, itemSourceIdSql()))
       .leftJoin(runs, eq(runs.id, contentItems.runId))
       .where(where)
-      .orderBy(desc(contentItems.createdAt), desc(contentItems.id))
+      .orderBy(...(q.origin === "idea" ? [asc(contentItems.topicKey), asc(contentItems.id)] : [desc(contentItems.createdAt), desc(contentItems.id)]))
       .limit(pageSize)
       .offset((page - 1) * pageSize);
     res.json({ total, page, pageSize, items: rows });
@@ -314,10 +317,10 @@ itemRoutes.post(
   "/channels/:cid/items/:id/fetch",
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
-    if (!item.primarySourceId) throw new HttpError(400, "연결된 원문이 없습니다.");
     const db = getDb();
-    if ((await itemPrimarySource(db, item))?.kind === "manual_text") throw new HttpError(409, "직접 저장한 본문을 사용 중입니다. 본문 붙여넣기에서 수정해 주세요.");
-    const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId));
+    const doc = await itemPrimarySource(db, item);
+    if (!doc) throw new HttpError(400, "연결된 원문이 없습니다.");
+    if (doc.kind === "manual_text") throw new HttpError(409, "직접 저장한 본문을 사용 중입니다. 본문 붙여넣기에서 수정해 주세요.");
     const r = await fetchAndExtract(sourceFetchUrl(doc), undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined });
     const now = new Date();
     if (!r.ok) {
