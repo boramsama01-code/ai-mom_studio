@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 
 const paths = {
+  lock: "M5 10h14v11H5z M8 10V6a4 4 0 0 1 8 0v4 M12 14v3",
   trash: "M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7",
   undo: "M9 4 4 9l5 5 M4 9h10a6 6 0 0 1 0 12h-3",
   grid: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
