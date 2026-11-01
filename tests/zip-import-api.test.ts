@@ -15,7 +15,7 @@ beforeAll(async () => {
   await resetDb(); app = createApp();
   png = await sharp({ create: { width: 40, height: 60, channels: 3, background: "red" } }).png().toBuffer();
   const second = await sharp({ create: { width: 60, height: 60, channels: 3, background: "blue" } }).png().toBuffer();
-  archive = Buffer.from(zipSync({ "모음/01_김펭귄/01.png": png, "모음/01_김펭귄/02.png": second, "모음/02_김펭키/01.png": second, "모음/게시글_초안.txt": strToU8("[01 김펭귄]\n첫째의 게시글\n\n[02 김펭키]\n막내의 게시글"), "모음/README.md": strToU8("아빠는 사진기자, 엄마는 사업기획자") }));
+  archive = Buffer.from(zipSync({ "모음/01_김펭귄/01.png": new Uint8Array(png), "모음/01_김펭귄/02.png": new Uint8Array(second), "모음/02_김펭키/01.png": new Uint8Array(second), "모음/게시글_초안.txt": strToU8("[01 김펭귄]\n첫째의 게시글\n\n[02 김펭키]\n막내의 게시글"), "모음/README.md": strToU8("아빠는 사진기자, 엄마는 사업기획자") }));
 });
 afterAll(closeDb);
 async function imported() {
@@ -31,7 +31,7 @@ describe("ZIP to the existing finished-deck editor and publication flow", () => 
     const { agent, csrf } = await login(app);
     expect((await agent.post("/api/studio/import-zip?channel=penguin").set("Content-Type", "application/zip").send(archive)).status).toBe(403);
     const before = await getDb().select({ id: studioCards.id }).from(studioCards);
-    const bad = Buffer.from(zipSync({ "01/1.png": png, "02/1.png": strToU8("not an image") }));
+    const bad = Buffer.from(zipSync({ "01/1.png": new Uint8Array(png), "02/1.png": strToU8("not an image") }));
     expect((await agent.post("/api/studio/import-zip?channel=penguin").set({ "x-csrf-token": csrf, "Content-Type": "application/zip" }).send(bad)).status).toBe(400);
     expect(await getDb().select({ id: studioCards.id }).from(studioCards)).toEqual(before);
   });
