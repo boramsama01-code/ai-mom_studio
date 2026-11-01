@@ -41,17 +41,17 @@ export function InboxPage() {
     evidence: params.get("evidence") ?? "",
     category: params.get("category") ?? "",
     subcategory: params.get("subcategory") ?? "",
-    noticeIntent: params.get("noticeIntent") ?? "candidate",
+    noticeIntent: params.get("noticeIntent") ?? (params.has("subcategory") ? "all" : "candidate"),
     view: (params.get("view") as "inbox" | "excluded" | "all") ?? "inbox",
     collectedOn: params.get("collectedOn") === "all" ? "" : params.get("collectedOn") ?? kstDay(),
   });
   const [page, setPage] = useState(1);
   useEffect(() => { if (followToday) { setF(old => ({ ...old, collectedOn: today })); setPage(1); } }, [today, followToday]);
   const [qInput, setQInput] = useState(f.q);
-  const [mode, setMode] = useState<"ideas" | "scraps">("ideas");
+  const [mode, setMode] = useState<"ideas" | "scraps">(() => params.has("collectedOn") || params.has("subcategory") ? "scraps" : "ideas");
   const ideas = isIdeaChannel(current) && mode === "ideas";
   const previousChannel = useRef(selected);
-  useEffect(() => { setPage(1); setMode("ideas"); if (previousChannel.current !== selected) { setF(old => ({ ...old, subcategory: "" })); previousChannel.current = selected; } }, [selected]);
+  useEffect(() => { setPage(1); if (previousChannel.current !== selected) { setMode("ideas"); setF(old => ({ ...old, subcategory: "" })); previousChannel.current = selected; } }, [selected]);
   const noticeChannel = current?.contentType === "notice";
   const query = useQuery({
     queryKey: ["ch", selected, "items", f, page, ideas],
