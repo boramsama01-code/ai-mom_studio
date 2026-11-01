@@ -1,9 +1,10 @@
+import { channelSlug } from "../../shared/channelKeys";
 import { Router, raw } from "express";
 import { count, desc, eq, isNull, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
 import { actorOf } from "../auth";
-import { jobs, studioCards, studioImages, studioRevisions } from "../../shared/schema";
+import { channels, jobs, studioCards, studioImages, studioRevisions } from "../../shared/schema";
 import { studioContentSchema, studioCreateSchema, studioGenerationSchema, studioPatchSchema } from "../../shared/studio";
 import { ah, HttpError, intParam, parse } from "./util";
 import { setStudioTrash, createStudioCard, importStudioBoard, loadStudioNotes, queueStudioGeneration, saveStudioCard, saveStudioNotes, studioCardDto, studioCardsWithOutput, studioDetail, studioImportSchema, studioJobDto } from "../services/studio";
@@ -38,10 +39,13 @@ studioRoutes.get("/studio/design-preview", ah(async (req, res) => {
   if (!key.startsWith("set:") || !cardDesign(key.slice(4))) throw new HttpError(404, "디자인을 찾을 수 없습니다.");
   const page = parse(z.coerce.number().int().min(0).max(4).default(0), req.query.page);
   const small = req.query.size === "sm";
-  const cacheKey = `${key}|${page}|${small}`;
+  const channel = req.query.channel === undefined ? undefined : parse(z.string().min(1).max(100), req.query.channel);
+  const [selected] = channel ? await getDb().select().from(channels).where(eq(channels.slug, channelSlug(channel))) : [];
+  if (channel && !selected) throw new HttpError(404, "채널을 찾을 수 없습니다.");
+  const cacheKey = `${key}|${page}|${small}|${selected?.name ?? ""}`;
   let bytes = designPreviewCache.get(cacheKey);
   if (!bytes) {
-    const image = await renderCollectionPreview(key.slice(4), page);
+    const image = await renderCollectionPreview(key.slice(4), page, selected?.name);
     bytes = small ? await sharp(image).resize(360, 450).jpeg({ quality: 85 }).toBuffer() : image;
     if (designPreviewCache.size >= 120) designPreviewCache.clear();
     designPreviewCache.set(cacheKey, bytes);

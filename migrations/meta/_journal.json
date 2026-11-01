@@ -57,6 +57,13 @@
       "when": 1793491200001,
       "tag": "0007_studio_trash",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793491200002,
+      "tag": "0008_channel_brands",
+      "breakpoints": true
     }
   ]
 }

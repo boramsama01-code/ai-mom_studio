@@ -17,7 +17,7 @@ import { AiServiceError } from "../services/llm";
 import { getSetting } from "../seed";
 
 const payloadSchema = studioGenerationSchema.safeExtend({ cardId: z.number().int().positive(), snapshot: studioContentSchema });
-const characterGuide = `우주펭귄상회 가족의 고향은 남극성-09. 펭펭은 지구 특파원, 펨펨은 전 우주기관 연구원으로 고입 전문 Highway를 안내한다. 김펭귄은 식품공학 대학원생으로 Fryday에서 감자튀김을 연구한다. 김펭키는 행성 탐사 과학자를 꿈꾸는 학생이다. 둥근 우주 헬멧, 옆모습, 뾰족한 검은 부리, 작은 흰 점 눈, 길고 가느다란 흑백 몸, 일정한 선 두께를 유지한다. Highway는 특목고 중심 고입 채널이며 입시 사실은 제공한 근거에서만 사용한다.`;
+const characterGuide = `우주펭귄상회 가족의 고향은 남극성-09. 펭펭은 Alligodang의 지구 특파원, 펨펨은 전 우주기관 연구원으로 고입 전문 Highscoop를 안내한다. 김펭귄은 식품공학 대학원생으로 Fryday에서 감자튀김을 연구한다. 김펭키는 행성 탐사 과학자를 꿈꾸는 학생이다. 둥근 우주 헬멧, 옆모습, 뾰족한 검은 부리, 작은 흰 점 눈, 길고 가느다란 흑백 몸, 일정한 선 두께를 유지한다. Highscoop는 특목고 중심 고입 채널이며 입시 사실은 제공한 근거에서만 사용한다.`;
 
 async function canonicalReference(character: string) {
   const candidates = [path.resolve("dist/public/studio-assets", `${character}.png`), path.resolve("client/public/studio-assets", `${character}.png`)];

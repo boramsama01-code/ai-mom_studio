@@ -1,3 +1,4 @@
+import { cardBrandName, CHANNEL_BRANDS } from "../../shared/branding";
 import fs from "node:fs";
 import path from "node:path";
 import { cardDesign } from "../../shared/cardDesigns";
@@ -6,7 +7,7 @@ import { renderCollectionBody } from "./cardCollection";
 import type { CardStyle } from "./card";
 
 /** Fictional, explicitly labelled content. Never used as actual generated content. */
-export function collectionSample(id: string) {
+export function collectionSample(id: string, channelName?: string) {
   const d = cardDesign(id);
   if (!d) throw new Error("알 수 없는 카드 세트");
   const notice = d.family === "recruitment";
@@ -32,12 +33,12 @@ export function collectionSample(id: string) {
       discussion_questions: ["AI의 도움과 나의 생각을 어떻게 구분해 표시하면 좋을까요?"],
       parent_hints: "정답을 정하기보다 도움받은 과정부터 함께 이야기해 보세요.",
     },
-    channelName: notice ? "새로운 배움" : "오늘의 맥락", accent: d.accent,
+    channelName: channelName ?? (notice ? CHANNEL_BRANDS.highway.name : CHANNEL_BRANDS.news.name), accent: d.accent,
     sourceOrg: "디자인 예시", checkedDate: "2026-10-31",
   };
   const style: CardStyle = { layout: "minimal", collection: id };
   const plan = planCarousel(input, style);
-  plan.base.brandLine = "우주펭귄상회 / " + (notice ? "모집정보" : "뉴스 브리핑");
+  plan.base.brandLine = cardBrandName(input.channelName);
   plan.base.badge = notice ? "모집 디자인 예시" : "뉴스 디자인 예시";
   plan.base.footer = "디자인 예시 · 실제 모집/보도 아님 · 우주펭귄상회";
   plan.pages.forEach(p => { p.brandLine = plan.base.brandLine; p.footer = plan.base.footer; });
@@ -48,8 +49,8 @@ export function collectionSampleArt(id: string) {
   if (!d) throw new Error("알 수 없는 카드 세트");
   return fs.readFileSync(path.resolve(process.cwd(), `assets/card-art/${d.art}.jpg`));
 }
-export async function renderCollectionPreview(id: string, page = 0) {
-  const { plan, style } = collectionSample(id);
+export async function renderCollectionPreview(id: string, page = 0, channelName?: string) {
+  const { plan, style } = collectionSample(id, channelName);
   if (page === 0) return renderCarouselCover(plan.base, plan.count, collectionSampleArt(id), "이미지: AI 생성 · 연출 이미지", style);
   const model = plan.pages[page - 1];
   if (!model) throw new Error("미리보기 페이지를 찾을 수 없습니다.");

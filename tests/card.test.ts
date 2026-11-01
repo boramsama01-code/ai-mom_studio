@@ -65,7 +65,7 @@ describe("우주펭귄상회 브랜드", () => {
   it("새 카드의 브랜드만 변경하고 기존 채널명과 입력은 보존", () => {
     const args = { kind: "notice", payload: base, channelName: "아이맘 · 도전·진학", accent: "#0B766E", sourceOrg: null, checkedDate: "2026-10-18" };
     const before = JSON.stringify(args);
-    expect(buildCardModel(args).brandLine).toBe("우주펭귄상회 스튜디오 · 도전·진학");
+    expect(buildCardModel(args).brandLine).toBe("도전·진학");
     expect(JSON.stringify(args)).toBe(before);
   });
   it.each(["classic", "header", "magazine", "minimal"] as const)("%s: 긴 브랜드와 분류도 영역 안에서 생성", async (layout) => {
@@ -76,3 +76,4 @@ describe("우주펭귄상회 브랜드", () => {
     expect(mascot.channels[0].stdev).toBeGreaterThan(20);
   });
 });
+

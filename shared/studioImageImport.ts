@@ -5,7 +5,7 @@ export const STUDIO_IMAGE_MAX_BYTES = 12 * 1024 * 1024;
 export const STUDIO_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 export const studioCharacterReferences: Record<StudioCharacter, { name: string; detail: string }> = {
   pengpeng: { name: "펭펭", detail: "아빠, 지구 특파원. 펼친 신문을 든 모습." },
-  pempem: { name: "펨펨", detail: "엄마, 전 우주기관 연구원. 학사모와 연필, 분홍 볼터치. Highway 안내자." },
+  pempem: { name: "펨펨", detail: "엄마, 전 우주기관 연구원. 학사모와 연필, 분홍 볼터치. Highscoop 안내자." },
   penguin: { name: "김펭귄", detail: "첫째, 식품공학 대학원생. 흰 용기에 담긴 노란 감자튀김. Fryday 안내자." },
   pengki: { name: "김펭키", detail: "둘째, 탐사 과학자를 꿈꾸는 학생. 작은 체구, 노란 가방." },
 };
@@ -31,3 +31,4 @@ export function studioImageFileError(file: Pick<File, "type" | "size">): string 
   if (file.size > STUDIO_IMAGE_MAX_BYTES) return "이미지는 한 장당 12MB까지 저장할 수 있습니다.";
   return null;
 }
+

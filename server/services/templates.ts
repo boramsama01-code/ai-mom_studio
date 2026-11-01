@@ -72,12 +72,12 @@ const SAMPLE: Record<string, Record<string, unknown>> = {
 /** 미리보기(예시 문구) — 메모리 캐시 */
 const cache = new Map<string, Buffer>();
 export async function renderPreview(db: DB, key: string, channel: Channel, page = 0): Promise<Buffer> {
-  const ck = key.startsWith("set:") ? `${key}|${page}` : `${key}|${channel.id}|${channel.accentColor}|${channel.name}|${channel.contentType}`;
+  const ck = `${key}|${page}|${channel.id}|${channel.accentColor}|${channel.name}|${channel.contentType}`;
   const hit = cache.get(ck);
   if (hit) return hit;
   const style = await resolveStyle(db, key, channel.id);
   if (style.collection) {
-    const jpeg = await renderCollectionPreview(style.collection, page);
+    const jpeg = await renderCollectionPreview(style.collection, page, channel.name);
     if (cache.size >= 120) cache.clear();
     cache.set(ck, jpeg);
     return jpeg;

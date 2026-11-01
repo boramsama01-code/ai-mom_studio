@@ -95,7 +95,7 @@ export async function validateStudioImages(db: DB, cardId: number, content: Stud
 }
 export async function validateStudioChannel(db: DB, key: string) {
   const [ch] = await db.select({ id: channels.id, active: channels.active }).from(channels).where(eq(channels.slug, channelSlug(key)));
-  if (!ch) throw new HttpError(400, key === "highway" ? "Highway 기본 채널을 먼저 추가해 주세요." : "채널을 먼저 추가해 주세요.");
+  if (!ch) throw new HttpError(400, key === "highway" ? "Highscoop 기본 채널을 먼저 추가해 주세요." : "채널을 먼저 추가해 주세요.");
   if (!ch.active) throw new HttpError(409, "보관된 채널입니다. 채널을 복원한 뒤 새 작업을 시작하세요.");
 }
 export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number) {

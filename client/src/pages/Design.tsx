@@ -1,6 +1,7 @@
 /**
  * 카드 디자인 — 템플릿 고르기, 내 배경 템플릿 올리기, Canva 자동 채우기, 대량 제작·망고보드용 글자 내보내기
  */
+import { BRAND_REVISION } from "@shared/branding";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiUpload } from "../api";
@@ -16,7 +17,7 @@ export function useTemplates(cid: number | "all") {
   return useQuery({ queryKey: ["ch", cid, "templates"], queryFn: () => api<{ items: Tpl[]; current: string }>(`/channels/${cid}/templates`), enabled: cid !== "all" });
 }
 
-export function TemplatePicker({ cid, value, onChange, items, version, disabled = false }: { cid: number | "studio"; value: string; onChange: (k: string) => void; items: Tpl[]; version?: string; disabled?: boolean }) {
+export function TemplatePicker({ cid, value, onChange, items, version, studioChannel, disabled = false }: { cid: number | "studio"; value: string; onChange: (k: string) => void; items: Tpl[]; version?: string; studioChannel?: string; disabled?: boolean }) {
   const [family, setFamily] = useState<string>(() => { const selected = items.find(t => includesKey(t, value)); return selected ? selected.family ?? "other" : items[0]?.family ?? "other"; });
   const [preview, setPreview] = useState<string>(value);
   const [page, setPage] = useState(0);
@@ -26,7 +27,7 @@ export function TemplatePicker({ cid, value, onChange, items, version, disabled 
   const activeColor = active?.colors?.find(color => color.key === activeKey);
   const pages = active?.pageCount ?? 1;
   const shownPage = Math.min(page, pages - 1);
-  const src = (key: string, p = 0, small = true) => `${cid === "studio" ? "/api/studio/design-preview" : `/api/channels/${cid}/templates/preview`}?${small ? "size=sm&" : ""}key=${encodeURIComponent(key)}&page=${p}&v=${encodeURIComponent(version ?? "")}`;
+  const src = (key: string, p = 0, small = true) => `${cid === "studio" ? "/api/studio/design-preview" : `/api/channels/${cid}/templates/preview`}?${small ? "size=sm&" : ""}key=${encodeURIComponent(key)}&page=${p}&v=${encodeURIComponent(`${BRAND_REVISION}-${version ?? ""}`)}${studioChannel ? `&channel=${encodeURIComponent(studioChannel)}` : ""}`;
   return (
     <div className="collection-picker">
       {!items.some(t => includesKey(t, value)) && <p className="small muted collection-legacy">현재 작업에는 이전 디자인이 적용되어 있습니다. 아래에서 새 디자인을 적용할 수 있습니다.</p>}

@@ -1,3 +1,4 @@
+import { CHANNEL_BRANDS } from "./branding";
 import { z } from "zod";
 import { aiProviders, type AiProvider } from "./aiProviders";
 import { PERSISTED_CARD_DESIGNS, CARD_COLOR_VARIANTS } from "./cardDesigns";
@@ -10,7 +11,7 @@ export const studioOutputFormats = ["웹툰", "카드뉴스"] as const;
 export const studioOutputDescription = (format: string, design = "editorial") => format === "웹툰" ? "네컷 이미지 1장 · 1080 × 1350 PNG" : format === "카드뉴스" ? design.startsWith("set:") ? "표지 + 본문 4장 · 1080 × 1350 PNG 5장 (ZIP)" : "표지 + 본문 4장 + 마무리 · 1080 × 1350 PNG 6장 (ZIP)" : "기획용 형식 · 이미지·영상 내보내기 미지원";
 export const studioStages = ["idea", "writing", "making", "review", "done"] as const;
 export const studioCharacters = ["pengpeng", "pempem", "penguin", "pengki"] as const;
-export const studioChannelLabels = { penguin: "우주펭귄상회", highway: "Highway", fryday: "Fryday", news: "시사 채널 · 이름 미정" };
+export const studioChannelLabels = { penguin: CHANNEL_BRANDS.penguin.name, highway: CHANNEL_BRANDS.highway.name, fryday: CHANNEL_BRANDS.fryday.name, news: CHANNEL_BRANDS.news.name };
 export const studioStageLabels = { idea: "아이디어", writing: "원고", making: "제작", review: "검토", done: "완료" };
 export type StudioChannel = string;
 export type StudioCharacter = typeof studioCharacters[number];
