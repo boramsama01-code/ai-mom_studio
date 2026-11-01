@@ -24,7 +24,7 @@ export function FinishedDeckAi({ card, disabled, dirty, save, onBusy, onApply }:
     a.href = url; a.download = `original-${card.id}.zip`; a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 30000);
   } });
   return <section className="stack finished-ai" aria-label="대체텍스트 자동 생성">
-    <div><h3>대체텍스트</h3><p className="small muted">아래 이미지마다 직접 입력하거나, AI로 그림과 글을 읽어 설명을 만들 수 있어요. AI 제안은 확인 후 적용하고 저장하세요.</p></div>
+    <div><h3>대체텍스트</h3><p className="small muted">아래 이미지마다 직접 입력하거나, AI로 그림과 글을 읽어 설명을 만들 수 있어요. 대체텍스트는 1~2문장, 공백 포함 최대 125자입니다. AI 제안은 확인 후 적용하고 저장하세요.</p></div>
     <div className="row"><label className="field">이미지를 읽을 AI<select value={provider} disabled={disabled || ai.isPending} onChange={e => setChosen(e.target.value as AiProvider)}>{(Object.keys(names) as AiProvider[]).map(p => <option key={p} value={p}>{names[p]}{status.data && !status.data.text[p] ? " · 연결 필요" : ""}</option>)}</select></label>
       <button type="button" className="btn primary" disabled={disabled || ai.isPending || !ready} onClick={() => ai.mutate("alt")}>{ai.isPending ? "이미지 설명 생성 중…" : "대체텍스트 자동 생성"}</button></div>
     {status.isLoading && <p className="small" role="status">AI 연결 확인 중…</p>}{status.error && <ErrorBox error={status.error} retry={() => status.refetch()} />}
