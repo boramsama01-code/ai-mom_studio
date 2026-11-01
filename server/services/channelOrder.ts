@@ -10,5 +10,8 @@ export async function orderedChannels(db: DB) {
   const [setting] = await db.select().from(appSettings).where(eq(appSettings.key, CHANNEL_ORDER_KEY));
   const parsed = channelIdsSchema.safeParse(setting?.value);
   const rank = new Map((parsed.success ? parsed.data : []).map((id, index) => [id, index]));
-  return rows.sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER) || a.id - b.id);
+  const [redirects] = await db.select().from(appSettings).where(eq(appSettings.key, "channel_redirects"));
+  const retired = new Set(Object.keys((redirects?.value ?? {}) as object).map(Number));
+  return rows.filter(c => !retired.has(c.id)).sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER) || a.id - b.id);
 }
+

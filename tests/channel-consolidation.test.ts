@@ -27,6 +27,7 @@ describe("Alligodang consolidation and idea inbox",()=>{
     expect((await db.select().from(contentSources).where(eq(contentSources.contentItemId,a.id))).some(x=>x.sourceDocumentId===source.id&&x.role==="merged_primary")).toBe(true);
     expect((await db.select().from(contentItems).where(eq(contentItems.id,b.id)))[0].primarySourceId).toBe(source.id);
     expect((await orderedChannels(db))[0].slug).toBe("penguin");
+    expect((await orderedChannels(db)).some(c=>c.id===old.id)).toBe(false);
     expect((await db.select().from(channels).where(eq(channels.id,old.id)))[0].active).toBe(false);
     const {agent}=await login(createApp());const detail=await agent.get(`/api/channels/${old.id}/items/${a.id}`);expect(detail.status).toBe(200);expect(detail.body.item.channelId).toBe(target.id);expect(detail.body.current.payload.title).toBe("사용자가 작성한 원고");
     // Removing a pasted override still reveals the original overlapping source.
