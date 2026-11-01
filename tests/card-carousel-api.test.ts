@@ -32,6 +32,7 @@ describe("source cards automatically reach the board", () => {
     expect(initial.body.values).toHaveLength(5);
     expect(initial.body.values[1]).toContain("빛");
     const values = initial.body.values.map((v:string,i:number)=>`${i+1}페이지 확인한 설명.`);
+    values[0] = "가".repeat(124) + "😀";
     expect(initial.body.values.every((v:string)=>[...v].length<=125)).toBe(true);
     expect((await request(app).get(url)).status).toBe(401);
     expect((await agent.patch(url).send({version:0,values})).status).toBe(403);
@@ -39,6 +40,7 @@ describe("source cards automatically reach the board", () => {
     expect((await agent.patch(url).set(H).send({version:0,values:values.slice(1)})).status).toBe(400);
     expect((await agent.patch(url).set(H).send({version:0,values:[...values.slice(0,1),"가".repeat(126),...values.slice(2)]})).status).toBe(400);
     expect((await agent.patch(url).set(H).send({version:0,values:["첫 문장. 둘째 문장. 셋째 문장.",...values.slice(1)]})).status).toBe(400);
+    expect((await agent.patch(url).set(H).send({version:0,values:["첫 문장.둘째 문장.셋째 문장.",...values.slice(1)]})).status).toBe(400);
     const saved=await agent.patch(url).set(H).send({version:0,values});
     expect(saved.body).toEqual({version:1,values});
     expect((await agent.patch(url).set(H).send({version:0,values})).status).toBe(409);
@@ -51,7 +53,7 @@ describe("source cards automatically reach the board", () => {
     const approved=await agent.post(`${endpoint}/approve`).set(H).send({...approvalBody,altTextVersion:1});
     expect(approved.status,JSON.stringify(approved.body)).toBe(201);
     expect(approved.body.approval.captions.altTexts).toEqual(values);
-    const updated=values.map((v:string)=>`새 설명. ${v}`);
+    const updated=values.map((_:string,i:number)=>`새 설명. ${i+1}페이지 확인한 설명.`);
     expect((await agent.patch(url).set(H).send({version:1,values:updated})).status).toBe(200);
     const [snapshot]=await getDb().select().from(approvals).where(eq(approvals.id,approved.body.approval.id));
     expect(snapshot.captions.altTexts).toEqual(values);

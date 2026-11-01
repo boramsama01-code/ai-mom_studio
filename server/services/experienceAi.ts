@@ -9,8 +9,8 @@ import { studioContentSchema, type StudioContent } from "../../shared/studio";
 import { env } from "../env";
 import { openaiRequest, AiServiceError } from "./llm";
 
-export const experienceDraftSchema=z.object({title:z.string().trim().min(1).max(100),caption:z.string().trim().min(1).max(2200),coverId:z.number().int().positive().nullable(),coverAltText:z.string().max(ALT_TEXT_LIMIT).refine(value => !altTextError(value, true), "대체텍스트는 1~2문장으로 작성해 주세요.").default(""),
- pages:z.array(experiencePageSchema.extend({altText:z.string().max(ALT_TEXT_LIMIT).refine(value => !altTextError(value, true), "대체텍스트는 1~2문장으로 작성해 주세요.").default("")})).min(2).max(9),questions:z.array(z.string().max(300)).max(8)}).strict();
+export const experienceDraftSchema=z.object({title:z.string().trim().min(1).max(100),caption:z.string().trim().min(1).max(2200),coverId:z.number().int().positive().nullable(),coverAltText:z.string().refine(value => !altTextError(value, true), "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.").default(""),
+ pages:z.array(experiencePageSchema.extend({altText:z.string().refine(value => !altTextError(value, true), "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.").default("")})).min(2).max(9),questions:z.array(z.string().max(300)).max(8)}).strict();
 export function applyExperienceDraft(content:StudioContent, raw:unknown) {
  const draft=experienceDraftSchema.parse(raw);const e=content.experience;
  if(!e) throw new AiServiceError("후기 작업을 찾을 수 없습니다.","parse");
@@ -49,3 +49,4 @@ caption은 바로 편집 가능한 SNS 게시 초안(2200자 이내), 홍보 과
  let raw:unknown;try{raw=JSON.parse(block.arguments);}catch{throw new AiServiceError("AI 초안의 형식을 읽을 수 없습니다.","parse");}
  return {content:applyExperienceDraft(content,raw),model:typeof response.model==="string"?response.model:env.openaiModel};
 }
+

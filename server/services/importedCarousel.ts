@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { ALT_TEXT_LIMIT, altTextError } from "../../shared/altText";
+import { altTextError } from "../../shared/altText";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
@@ -22,7 +22,7 @@ export async function importedCard(db: DB, id: number, version?: number) {
   return { card, pages: ids.map(id => rows.find(row => row.id === id)!) };
 }
 
-export const importedProposalSchema = z.object({ caption: z.string().trim().min(1).max(2200), altTexts: z.array(z.string().min(1).max(ALT_TEXT_LIMIT).refine(text => !altTextError(text), "대체텍스트는 1~2문장, 공백 포함 최대 125자입니다.")).min(1).max(10) }).strict();
+export const importedProposalSchema = z.object({ caption: z.string().trim().min(1).max(2200), altTexts: z.array(z.string().min(1).refine(text => !altTextError(text), "대체텍스트는 1~2문장, 공백 포함 최대 125자입니다.")).min(1).max(10) }).strict();
 const active = new Set<number>();
 export async function suggestImportedCaption(db: DB, id: number, version: number, instruction: string, options: { provider?: AiProvider; mode?: "all" | "alt" } = {}) {
   if (active.has(id)) throw new HttpError(409, "이 카드뉴스의 AI 초안을 작성 중입니다. 잠시 기다려 주세요.");
@@ -44,3 +44,4 @@ export async function suggestImportedCaption(db: DB, id: number, version: number
     return { ...proposal, version, provider, mode: options.mode ?? "all" };
   } finally { active.delete(id); }
 }
+

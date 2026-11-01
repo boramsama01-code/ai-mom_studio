@@ -403,7 +403,7 @@ itemRoutes.get("/channels/:cid/media/:mid/alt-text",ah(async(req,res)=>{
 }));
 itemRoutes.patch("/channels/:cid/media/:mid/alt-text",ah(async(req,res)=>{
   const ch=await loadChannel(req.params.cid),id=intParam(req.params.mid);
-  const body=parse(z.object({version:z.number().int().min(0),values:z.array(z.string().min(1,"대체텍스트를 입력해 주세요.").max(ALT_TEXT_LIMIT).refine(value => !altTextError(value), "대체텍스트는 1~2문장, 공백 포함 125자 이내로 작성해 주세요.")).min(1).max(10)}).strict(),req.body);
+  const body=parse(z.object({version:z.number().int().min(0),values:z.array(z.string().min(1,"대체텍스트를 입력해 주세요.").refine(value => !altTextError(value), "대체텍스트는 1~2문장, 공백 포함 125자 이내로 작성해 주세요.")).min(1).max(10)}).strict(),req.body);
   const result=await getDb().transaction(async tx=>{
     const [initial]=await tx.select().from(mediaAssets).where(and(eq(mediaAssets.id,id),eq(mediaAssets.channelId,ch.id),eq(mediaAssets.kind,"card")));
     if(!initial)throw new HttpError(404,"카드뉴스를 찾을 수 없습니다.");
@@ -546,5 +546,5 @@ itemRoutes.post(
 );
 
 
-import { ALT_TEXT_LIMIT, altTextError, altTextFile } from "../../shared/altText";
+import { altTextError, altTextFile } from "../../shared/altText";
 import { cardAltTextState } from "../services/cardAccessibility";

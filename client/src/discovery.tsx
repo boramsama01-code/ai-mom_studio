@@ -6,6 +6,7 @@ import { useDirtyGuard } from "./state";
 import { useToast } from "./toast";
 import { GuardedLink, StatusBadge, fmtDate } from "./ui";
 import { DISCOVERY_DEFAULT_QUERIES, type DiscoveryInfo, type DiscoverySettings } from "@shared/domain";
+import { isPrivateWorkroom } from "./workroom";
 
 export function DiscoveryBadge({ info }: { info: DiscoveryInfo | null | undefined }) {
   if (!info) return null;
@@ -52,7 +53,7 @@ export function HotTopics({ cid, rows, settings }: { cid: number; rows: Discover
       <div className="row between">
         <h2 style={{ margin: 0 }}>최근 발굴한 화제</h2>
         <GuardedLink href="/rules" className="small">
-          {settings.enabled ? `자동 발굴 켜짐 · 1회 ${settings.picksPerRun}건` : "자동 발굴 꺼짐"} · 설정
+          {settings.enabled ? `자동 발굴 켜짐 · 1회 ${settings.picksPerRun}건` : "자동 발굴 꺼짐"} · {isPrivateWorkroom() ? "현황" : "설정"}
         </GuardedLink>
       </div>
       {!rows.length ? (
@@ -82,7 +83,17 @@ export function HotTopics({ cid, rows, settings }: { cid: number; rows: Discover
 }
 
 /** 검색 설정: 자동 발굴 켜기·탐색 주제 */
-export function DiscoveryPanel({ cid, kind, settings }: { cid: number; kind: "science_dialogue" | "current_dialogue"; settings: DiscoverySettings }) {
+type DiscoveryPanelProps = { cid: number; kind: "science_dialogue" | "current_dialogue"; settings: DiscoverySettings };
+export function DiscoveryPanel(props: DiscoveryPanelProps) {
+  if (isPrivateWorkroom()) return <section className="panel stack discovery-panel" aria-label="자동 화제 발굴 현황">
+    <div><h2 style={{ margin: 0 }}>자동 화제 발굴 <span className={`badge ${props.settings.enabled ? "ok" : ""}`}>{props.settings.enabled ? "켜짐" : "꺼짐"}</span></h2>
+      <p className="small muted">비공개 작업실에서는 자동 발굴 설정을 바꿀 수 없어요. 이 작업실의 ‘지금 수집’은 저장된 주제로 자료만 모아요.</p></div>
+    <div><strong className="small">저장된 탐색 주제</strong>{props.settings.queries.length ? <ul>{props.settings.queries.map((query, index) => <li key={`${index}:${query}`}>{query}</li>)}</ul> : <p className="small muted">저장된 주제가 없습니다.</p>}</div>
+    <p className="small muted">1회 최대 {props.settings.picksPerRun}건 · 예약 수집의 초안 자동 작성 {props.settings.autoDraft ? "켜짐" : "꺼짐"}</p>
+  </section>;
+  return <DiscoverySettingsEditor {...props} />;
+}
+function DiscoverySettingsEditor({ cid, kind, settings }: DiscoveryPanelProps) {
   const qc = useQueryClient();
   const toast = useToast();
   const [f, setF] = useState(settings);
