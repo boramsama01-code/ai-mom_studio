@@ -40,3 +40,15 @@ it("keeps manual entry and saving available without any configured AI",async()=>
  expect(host.textContent).toContain("직접 입력·저장은 바로 사용할 수 있어요");expect([...host.querySelectorAll("button")].find(b=>b.textContent==="대체텍스트 자동 생성")?.disabled).toBe(true);
  const el=await type("AI 없이 입력");expect(el.disabled).toBe(false);await click("변경 내용 저장");expect(saved.finishedDeck!.pages[0].altText).toBe("AI 없이 입력");
 });
+
+it("limits manual image descriptions to 125 characters and flags legacy overflow", async () => {
+ const first = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="1페이지 대체텍스트"]')!;
+ expect(first.maxLength).toBe(125);
+ expect(host.textContent).toContain("1~2문장");
+ await type("가".repeat(126));
+ expect(host.textContent).toContain("126 / 125자");
+ const saveButton = [...host.querySelectorAll("button")].find(b => b.textContent === "변경 내용 저장")!;
+ expect(saveButton.disabled).toBe(true);
+ expect(host.textContent).toContain("기존 문구는 자동 삭제하지 않습니다.");
+ expect(mocks.api.mock.calls.some(([_, opts]) => opts?.method === "PATCH")).toBe(false);
+});
