@@ -24,6 +24,10 @@ describe("finished cardnews archive recognition", () => {
     const parsed = readCardNewsZip(zipSync({ "10.png": bytes, "2.png": bytes, "caption.txt": strToU8("원본 캡션") }));
     expect(parsed.posts[0].pages.map(p => p.name)).toEqual(["2.png", "10.png"]); expect(parsed.posts[0].caption).toBe("원본 캡션");
   });
+  it("keeps numeric-only folder names and years that are part of the title", () => {
+    const parsed = readCardNewsZip(zipSync({ "01/1.png": bytes, "2026년_이야기/1.png": bytes }));
+    expect(parsed.posts.map(p => p.title)).toEqual(["01", "2026년 이야기"]);
+  });
   it("ignores macOS metadata and rejects traversal, unsupported archive and an 11-page folder", () => {
     expect(readCardNewsZip(zipSync({ "1.png": bytes, "__MACOSX/._1.png": bytes })).pageCount).toBe(1);
     for (const name of ["../1.png", "/1.png", "C:/1.png", "a/../1.png", "a\\1.png"]) expect(() => readCardNewsZip(zipSync({ [name]: bytes }))).toThrow(/경로/);

@@ -5,7 +5,7 @@ export const ZIP_IMAGE_MAX_BYTES = 12 * 1024 * 1024;
 export type ZipPost = { folder: string; title: string; caption: string; pages: Array<{ name: string; bytes: Uint8Array }> };
 export type ZipImportResult = { imported: number; skipped: number; pageCount: number; cards: Array<{ id: number; title: string; pages: number; duplicate: boolean; trashed: boolean }> };
 const natural = new Intl.Collator("ko", { numeric: true, sensitivity: "variant" });
-const label = (name: string) => name.replace(/^\d+[\s_.-]*/, "").replace(/_/g, " ").trim();
+const label = (name: string) => name.replace(/^\d+[\s_.-]+/, "").replace(/_/g, " ").trim() || name;
 const key = (name: string) => label(name).replace(/\s/g, "");
 
 /** No paths are written to disk. Limit allocations before decompressing any selected entry. */

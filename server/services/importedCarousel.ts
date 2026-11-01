@@ -30,7 +30,7 @@ export async function suggestImportedCaption(db: DB, id: number, version: number
     const { card, pages } = await importedCard(db, id, version);
     const parts: Record<string, unknown>[] = [{ type: "input_text", text: JSON.stringify({ title: card.content.title, channel: card.content.channel, existingCaption: card.content.caption, reference: card.content.memo, instruction }) }];
     for (const [i, page] of pages.entries()) {
-      const small = await sharp(page.bytes).resize({ width: 900, withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
+      const small = await sharp(page.bytes).rotate().resize({ width: 900, height: 1200, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 80 }).toBuffer();
       parts.push({ type: "input_text", text: `${i + 1} / ${pages.length} 페이지` }, { type: "input_image", image_url: `data:image/jpeg;base64,${small.toString("base64")}`, detail: "auto" });
     }
     const response = await openaiRequest("/responses", {
