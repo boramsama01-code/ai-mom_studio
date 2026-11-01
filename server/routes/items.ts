@@ -403,7 +403,7 @@ itemRoutes.get("/channels/:cid/media/:mid/alt-text",ah(async(req,res)=>{
 }));
 itemRoutes.patch("/channels/:cid/media/:mid/alt-text",ah(async(req,res)=>{
   const ch=await loadChannel(req.params.cid),id=intParam(req.params.mid);
-  const body=parse(z.object({version:z.number().int().min(0),values:z.array(z.string().trim().min(1,"대체텍스트를 입력해 주세요.").max(1000)).min(1).max(10)}).strict(),req.body);
+  const body=parse(z.object({version:z.number().int().min(0),values:z.array(z.string().min(1,"대체텍스트를 입력해 주세요.").max(ALT_TEXT_LIMIT).refine(value => !altTextError(value), "대체텍스트는 1~2문장, 공백 포함 125자 이내로 작성해 주세요.")).min(1).max(10)}).strict(),req.body);
   const result=await getDb().transaction(async tx=>{
     const [initial]=await tx.select().from(mediaAssets).where(and(eq(mediaAssets.id,id),eq(mediaAssets.channelId,ch.id),eq(mediaAssets.kind,"card")));
     if(!initial)throw new HttpError(404,"카드뉴스를 찾을 수 없습니다.");
@@ -432,7 +432,10 @@ itemRoutes.get("/channels/:cid/media/:mid/deck.zip", ah(async (req, res) => {
   const primary = await itemPrimarySource(getDb(), item);
   const captions = buildCaptions({ kind: item.kind, payload: revision.payload, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), sourceUrl: primary?.originalUrl ?? null });
   const files = pages.map((page, i) => ({ name: `page-${String(i + 1).padStart(2, "0")}.jpg`, bytes: page.bytes }));
-  files.push({name:"alt-text.txt",bytes:Buffer.from(altTextFile(cardAltTextState(cover,item.title).values))},{ name: "caption.txt", bytes: Buffer.from(captions.instagram) }, { name: "credits.txt", bytes: Buffer.from(cover.carousel?.cover.credit ?? "출처는 각 카드 하단을 확인하세요.") });
+  const descriptions = cardAltTextState(cover, item.title).values;
+  const invalidPage = descriptions.findIndex(value => !!altTextError(value));
+  if (invalidPage >= 0) throw new HttpError(400, `${invalidPage + 1}페이지: ${altTextError(descriptions[invalidPage])} 대체텍스트를 수정한 후 내려받으세요.`);
+  files.push({name:"alt-text.txt",bytes:Buffer.from(altTextFile(descriptions))},{ name: "caption.txt", bytes: Buffer.from(captions.instagram) }, { name: "credits.txt", bytes: Buffer.from(cover.carousel?.cover.credit ?? "출처는 각 카드 하단을 확인하세요.") });
   res.type("application/zip").set("Content-Disposition", `attachment; filename="cardnews-${cover.contentItemId}-r${cover.revisionId}.zip"`).send(zipFiles(files));
 }));
 
@@ -543,5 +546,5 @@ itemRoutes.post(
 );
 
 
-import { altTextFile } from "../../shared/altText";
+import { ALT_TEXT_LIMIT, altTextError, altTextFile } from "../../shared/altText";
 import { cardAltTextState } from "../services/cardAccessibility";

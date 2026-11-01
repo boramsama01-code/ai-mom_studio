@@ -1,4 +1,4 @@
-import { altTextFile, studioAltTexts } from "../../shared/altText";
+import { altTextError, altTextFile, studioAltTexts } from "../../shared/altText";
 import { checkExperienceExport, createExperienceRenderer } from "./experienceExport";
 import { cardBrandName } from "../../shared/branding";
 import sharp, { type OverlayOptions } from "sharp";
@@ -34,9 +34,13 @@ function contentLayout(content: StudioContent) {
   };
 }
 export function checkStudioExport(content: StudioContent): StudioExportCheck {
-  if (content.finishedDeck) return { pageCount: content.finishedDeck.pages.length, errors: content.finishedDeck.pages.length ? [] : [{ field: "finishedDeck", message: "완성 이미지를 한 장 이상 올려 주세요." }], warnings: [] };
-  if (content.experience) return checkExperienceExport(content);
-  const result: StudioExportCheck = { errors: [], warnings: [], pageCount: studioPageCount(content) };
+  const altErrors = studioAltTexts(content).flatMap((value, i) => {
+    const issue = altTextError(value);
+    return issue ? [{field: `altTexts.${i}`, message: `${i + 1}페이지: ${issue} 기존 설명을 직접 수정해 주세요.`}] : [];
+  });
+  if (content.finishedDeck) return { pageCount: content.finishedDeck.pages.length, errors: [...altErrors, ...(content.finishedDeck.pages.length ? [] : [{ field: "finishedDeck", message: "완성 이미지를 한 장 이상 올려 주세요." }])], warnings: [] };
+  if (content.experience) { const check = checkExperienceExport(content); check.errors.push(...altErrors); return check; }
+  const result: StudioExportCheck = { errors: altErrors, warnings: [], pageCount: studioPageCount(content) };
   if (content.format !== "웹툰" && content.format !== "카드뉴스") {
     result.errors.push({ field: "format", message: "이 형식은 기획용입니다. 웹툰 또는 카드뉴스를 선택하면 이미지로 내보낼 수 있습니다." });
     return result;

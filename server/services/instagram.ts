@@ -1,3 +1,4 @@
+import { altTextError } from "../../shared/altText";
 /**
  * Instagram 게시 — "Instagram API with Instagram Login" 한 방식만 사용 (graph.instagram.com)
  * Facebook Login의 Page 토큰과 혼용하지 않는다.
@@ -55,14 +56,14 @@ async function igFetch(path: string, method: "GET" | "POST", params: Record<stri
 }
 
 export async function createContainer(userId: string, token: string, imageUrl: string, caption: string, altText?: string) {
-  if(altText!==undefined&&(!altText.trim()||altText.length>1000))return {ok:false as const,lost:false,err:{kind:"terminal",error:"대체텍스트는 1~1000자로 작성해 주세요."} as IgError};
+  if(altText!==undefined&&!!altTextError(altText))return {ok:false as const,lost:false,err:{kind:"terminal",error:"대체텍스트는 1~2문장, 공백 포함 125자 이내로 작성해 주세요."} as IgError};
   const r = await igFetch(`${userId}/media`, "POST", { image_url: imageUrl, caption, ...(altText?.trim()?{alt_text:altText.trim()}: {}) }, token);
   if (!r.ok) return r;
   return { ok: true as const, containerId: String(r.json.id) };
 }
 
 export async function createCarouselContainer(userId: string, token: string, imageUrls: string[], caption: string, altTexts?: string[]) {
-  if(altTexts&&(altTexts.length!==imageUrls.length||altTexts.some(v=>!v.trim()||v.length>1000)))return {ok:false as const,lost:false,err:{kind:"terminal",error:"각 이미지의 대체텍스트를 1~1000자로 작성해 주세요."} as IgError};
+  if(altTexts&&(altTexts.length!==imageUrls.length||altTexts.some(v=>!!altTextError(v))))return {ok:false as const,lost:false,err:{kind:"terminal",error:"각 이미지의 대체텍스트를 1~2문장, 공백 포함 125자 이내로 작성해 주세요."} as IgError};
   if (imageUrls.length < 2 || imageUrls.length > 10) return { ok: false as const, lost: false, err: { kind: "terminal", error: "카드뉴스는 2~10장이어야 합니다." } as IgError };
   const children: string[] = [];
   for (const [index,image_url] of imageUrls.entries()) {

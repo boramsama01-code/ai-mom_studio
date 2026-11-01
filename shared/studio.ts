@@ -1,4 +1,5 @@
 import { experienceSchema, type Experience } from "./experience";
+import { altTextError } from "./altText";
 import { CHANNEL_BRANDS } from "./branding";
 import { normalizeStudioChannel } from "./channelKeys";
 import { z } from "zod";
@@ -39,11 +40,32 @@ export const studioContentSchema = z.object({
   characters: z.array(z.enum(studioCharacters)).max(4).default(["penguin"]),
   imagePath: z.union([z.literal(""), z.literal("/studio-assets/webtoon-01.png")]).default(""),
 }).strict();
-export const studioCreateSchema = studioContentSchema.extend({ sourceItemId: z.number().int().positive().optional() });
+/** Keep legacy 1,000-character descriptions readable; enforce the new rule on newly submitted fields. */
+function studioInputAltIssues(value: { altTexts?: string[]; finishedDeck?: StudioContent["finishedDeck"]; experience?: Experience | null }) {
+ const issues: Array<{ path: (string | number)[]; message: string }> = [];
+ const check = (text: string, path: (string | number)[]) => {
+  const message = altTextError(text, true);
+  if (message) issues.push({ path, message });
+ };
+ value.altTexts?.forEach((text, i) => check(text, ["altTexts", i]));
+ value.finishedDeck?.pages.forEach((p, i) => check(p.altText, ["finishedDeck", "pages", i, "altText"]));
+ if (value.experience) {
+  check(value.experience.coverAltText, ["experience", "coverAltText"]);
+  value.experience.pages.forEach((p, i) => check(p.altText, ["experience", "pages", i, "altText"]));
+ }
+ return issues;
+}
+export const studioCreateSchema = studioContentSchema.extend({ sourceItemId: z.number().int().positive().optional() }).superRefine((value, ctx) => { for (const issue of studioInputAltIssues(value)) ctx.addIssue({code:"custom",...issue}); });
 // Zod 4 applies defaults inside optional fields; unwrap them so a stage-only PATCH cannot erase content.
 export const studioPatchSchema = z.object({
-  finishedDeck: studioContentSchema.shape.finishedDeck.unwrap().optional(),
-  experience: studioContentSchema.shape.experience.unwrap().optional(),
+  finishedDeck: studioContentSchema.shape.finishedDeck.unwrap().refine(
+    value => !value || value.pages.every(page => !altTextError(page.altText, true)),
+    "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.",
+  ).optional(),
+  experience: studioContentSchema.shape.experience.unwrap().refine(
+    value => !value || !altTextError(value.coverAltText, true) && value.pages.every(page => !altTextError(page.altText, true)),
+    "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.",
+  ).optional(),
   title: studioContentSchema.shape.title.optional(),
   channel: studioContentSchema.shape.channel.unwrap().optional(),
   format: studioContentSchema.shape.format.unwrap().optional(),
@@ -52,7 +74,10 @@ export const studioPatchSchema = z.object({
   memo: studioContentSchema.shape.memo.unwrap().optional(),
   script: studioContentSchema.shape.script.unwrap().optional(),
   caption: studioContentSchema.shape.caption.unwrap().optional(),
-  altTexts: studioContentSchema.shape.altTexts.unwrap().optional(),
+  altTexts: studioContentSchema.shape.altTexts.unwrap().refine(
+    values => values.every(value => !altTextError(value, true)),
+    "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.",
+  ).optional(),
   exportDesign: studioContentSchema.shape.exportDesign.unwrap().optional(),
   sourceLabel: studioContentSchema.shape.sourceLabel.unwrap().optional(),
   panels: studioContentSchema.shape.panels.unwrap().optional(),
