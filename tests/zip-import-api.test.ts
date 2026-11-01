@@ -5,8 +5,9 @@ import sharp from "sharp";
 import { eq } from "drizzle-orm";
 import { login, resetDb, setTestEnv } from "./helpers";
 setTestEnv();
-const mocks = vi.hoisted(() => ({ response: vi.fn() }));
+const mocks = vi.hoisted(() => ({ response: vi.fn(), gemini: vi.fn() }));
 vi.mock("../server/services/llm", async original => ({ ...await original<object>(), openaiRequest: mocks.response }));
+vi.mock("../server/services/gemini", () => ({ geminiRequest: mocks.gemini }));
 const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
 const { studioCards, studioImages, approvals, deliveries, channels } = await import("../shared/schema");
@@ -70,6 +71,21 @@ describe("ZIP to the existing finished-deck editor and publication flow", () => 
     expect((await agent.post(`/api/studio/cards/${card.id}/imported-ai`).set(H).send({ version: card.version })).status).toBe(502);
     mocks.response.mockImplementationOnce(async () => { await agent.patch(`/api/studio/cards/${card.id}`).set(H).send({ version: card.version, caption: "생성 중 직접 편집" }); return response(draft); });
     expect((await agent.post(`/api/studio/cards/${card.id}/imported-ai`).set(H).send({ version: card.version })).status).toBe(409);
+  });
+  it("uses the configured image provider for alt-only generation, preserving caption and saved data", async () => {
+    const { agent, H, card } = await imported();
+    process.env.AI_PROVIDER = "gemini";
+    const altTexts = card.finishedDeck.pages.map((_: unknown, i: number) => `${i + 1}번째 이미지 설명`);
+    mocks.gemini.mockResolvedValueOnce({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({ altTexts }) }] } }] });
+    const beforeCalls = mocks.response.mock.calls.length;
+    try {
+      const result = await agent.post(`/api/studio/cards/${card.id}/imported-ai`).set(H).send({ version: card.version, mode: "alt" });
+      expect(result.status, JSON.stringify(result.body)).toBe(200);
+      expect(result.body).toMatchObject({ caption: card.caption, altTexts, provider: "gemini", mode: "alt", version: card.version });
+      expect(mocks.response.mock.calls.length).toBe(beforeCalls);
+      const saved = (await agent.get(`/api/studio/cards/${card.id}`)).body.card;
+      expect(saved).toMatchObject({ caption: card.caption, finishedDeck: card.finishedDeck, version: card.version });
+    } finally { delete process.env.AI_PROVIDER; }
   });
   it("returns trashed duplicates without silently restoring and refuses an archived channel", async () => {
     const { agent, H, card } = await imported();

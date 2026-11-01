@@ -1,6 +1,6 @@
 import { appendFinishedImage } from "../services/studioFinishedDeck";
 import { prepareStudioPublication, approveStudioPublication, studioPublishStatus } from "../services/studioPublish";
-import { checkInstagramConnection, connectInstagram } from "../services/instagramConnection";
+import { checkInstagramConnection, connectInstagram, instagramAccounts } from "../services/instagramConnection";
 import { kickInlinePublish } from "../worker/inlinePublish";
 import { listExperienceMedia, uploadExperienceMedia, saveVideoPreview, mediaRange } from "../services/experienceMedia";
 import { channelSlug } from "../../shared/channelKeys";
@@ -26,6 +26,7 @@ import { zipImportRoutes } from "./zipImport";
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
 studioRoutes.use(zipImportRoutes);
+studioRoutes.get("/studio/instagram/accounts", ah(async (_req, res) => { res.json(await instagramAccounts(getDb())); }));
 studioRoutes.get("/studio/cards", ah(async (req, res) => {
   const db = getDb();
   const trash = parse(z.enum(["0", "1"]).default("0"), req.query.trash) === "1";

@@ -1,3 +1,4 @@
+import { expectedInstagramUsername } from "../../shared/channelInstagram";
 import sharp from "sharp";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { DB } from "../db";
@@ -34,7 +35,7 @@ export async function studioPublishStatus(db: DB, cardId: number): Promise<Studi
   if (ch.budget.dailyPublishLimit < 1) blockers.push("채널의 하루 발행 한도를 1건 이상으로 설정하세요.");
   if (env.dryRun || !env.autoPublish) blockers.push("서버가 모의 실행 또는 발행 중지 상태입니다.");
   const history = card.sourceItemId ? await db.select({ id: deliveries.id, status: deliveries.status, lastError: deliveries.lastError, externalUrl: deliveries.externalUrl, scheduledAt: approvals.scheduledAt }).from(deliveries).innerJoin(approvals, eq(deliveries.approvalId, approvals.id)).where(eq(approvals.contentItemId, card.sourceItemId)).orderBy(desc(deliveries.id)).limit(20) : [];
-  return { channelId: ch.id, channelName: ch.name, ready: !blockers.length, blockers, dailyLimit: ch.budget.dailyPublishLimit, dryRun: env.dryRun, autoPublish: env.autoPublish, destinations: choices, deliveries: history.map(d => ({ ...d, scheduledAt: d.scheduledAt.toISOString() })) };
+  return { channelId: ch.id, channelName: ch.name, expectedUsername: expectedInstagramUsername(ch.slug), ready: !blockers.length, blockers, dailyLimit: ch.budget.dailyPublishLimit, dryRun: env.dryRun, autoPublish: env.autoPublish, destinations: choices, deliveries: history.map(d => ({ ...d, scheduledAt: d.scheduledAt.toISOString() })) };
 }
 
 async function previewDto(db: DB, card: typeof studioCards.$inferSelect): Promise<StudioPublishPreview> {
@@ -114,3 +115,4 @@ export async function approveStudioPublication(db: DB, cardId: number, input: { 
     return { approvalId: result.approval.id, scheduledAt: result.approval.scheduledAt };
   });
 }
+

@@ -28,7 +28,7 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
   const globalStop = await getSetting(db, "global_stop", false) === true;
   const [scheduled] = await db.select({ startedAt: runs.startedAt }).from(runs).where(eq(runs.trigger, "schedule")).orderBy(desc(runs.id)).limit(1);
   const rows = await Promise.all(chs.map(async ch => {
-    const ruleRows = await db.select({ id: searchRules.id }).from(searchRules).where(and(eq(searchRules.channelId, ch.id), eq(searchRules.enabled, true), isNull(searchRules.deletedAt)));
+    const ruleRows = await db.select({ id: searchRules.id, normalizedQuery: searchRules.normalizedQuery, endpoint: searchRules.endpoint, enabled: searchRules.enabled, deletedAt: searchRules.deletedAt }).from(searchRules).where(eq(searchRules.channelId, ch.id));
     const boards = await db.select({ id: officialSources.id }).from(officialSources).where(and(eq(officialSources.channelId, ch.id), eq(officialSources.enabled, true), sql`${officialSources.adapter} is not null and ${officialSources.verifiedAt} is not null`));
     const [counts] = await db.select({
       newItems: sql<number>`count(*)::int`,
@@ -42,8 +42,13 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
     const pendingJobs = await db.select({ id: jobs.id, status: jobs.status, createdAt: jobs.createdAt, leaseExpiresAt: jobs.leaseExpiresAt }).from(jobs).where(and(eq(jobs.channelId, ch.id), eq(jobs.type, "collect"), inArray(jobs.status, ["queued", "running"])));
     const discovery = resolveDiscovery(ch.contentType, ch.budget.discovery);
     const profile = COLLECTION_PROFILES[ch.slug];
-    return { id: ch.id, version: ch.version, slug: ch.slug, name: ch.name, active: ch.active, queries: ruleRows.length, discoveryQueries: discovery?.enabled ? discovery.queries.length : 0, boards: boards.length, budget: ch.budget.naverCallsPerRun,
-      profile: profile ? { label: profile.label, count: profile.news.length + profile.blog.length } : null, ...counts,
+    const profileRules = profile ? (["news", "blog"] as const).flatMap(endpoint => profile[endpoint].map(query => {
+      const matches = ruleRows.filter(r => r.normalizedQuery === normalizeQuery(query) && r.endpoint === endpoint);
+      const existing = matches.find(r => !r.deletedAt) ?? matches[0];
+      return { query, endpoint, state: !existing ? "missing" as const : existing.deletedAt ? "removed" as const : existing.enabled ? "active" as const : "paused" as const };
+    })) : [];
+    return { id: ch.id, version: ch.version, slug: ch.slug, name: ch.name, active: ch.active, queries: ruleRows.filter(r => r.enabled && !r.deletedAt).length, discoveryQueries: discovery?.enabled ? discovery.queries.length : 0, boards: boards.length, budget: ch.budget.naverCallsPerRun,
+      profile: profile ? { label: profile.label, count: profileRules.length, missing: profileRules.filter(r => r.state === "missing").length, active: profileRules.filter(r => r.state === "active").length, paused: profileRules.filter(r => r.state === "paused").length, removed: profileRules.filter(r => r.state === "removed").length, rules: profileRules } : null, ...counts,
       jobs: pendingJobs.map(j => ({ id: j.id, status: j.status, createdAt: j.createdAt, stale: j.status === "queued" ? now.getTime() - j.createdAt.getTime() > 120_000 : !j.leaseExpiresAt || j.leaseExpiresAt < now })),
       lastRun: lastRun ? { id: lastRun.id, status: lastRun.status, startedAt: lastRun.startedAt, finishedAt: lastRun.finishedAt, counts: lastRun.counts, errors: lastRun.errors } : null };
   }));
@@ -61,7 +66,9 @@ collectionRoutes.post("/channels/:cid/collection-profile", ah(async (req, res) =
     const [updated] = await tx.update(channels).set({ budget, version: sql`${channels.version} + 1`, updatedAt: new Date() }).where(and(eq(channels.id, ch.id), eq(channels.version, body.version))).returning();
     if (!updated) conflict(ch);
     const candidates = (["news", "blog"] as const).flatMap(endpoint => profile[endpoint].map(query => ({ channelId: ch.id, query, normalizedQuery: normalizeQuery(query), endpoint, enabled: true, display: 10, priority: 100, memo: `추천 검색어 · ${profile.label}` })));
-    const created = await tx.insert(searchRules).values(candidates).onConflictDoNothing().returning({ id: searchRules.id });
+    const existing = await tx.select({ normalizedQuery: searchRules.normalizedQuery, endpoint: searchRules.endpoint }).from(searchRules).where(eq(searchRules.channelId, ch.id));
+    const missing = candidates.filter(c => !existing.some(r => r.normalizedQuery === c.normalizedQuery && r.endpoint === c.endpoint));
+    const created = missing.length ? await tx.insert(searchRules).values(missing).onConflictDoNothing().returning({ id: searchRules.id }) : [];
     await audit(tx, { actor: actorOf(req), action: "apply_collection_profile", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { added: created.length, profile: profile.label, budget } });
     return { added: created.length, preserved: candidates.length - created.length, channel: updated };
   });
@@ -89,3 +96,4 @@ collectionRoutes.post("/collection/collect", ah(async (req, res) => {
   await audit(db, { actor: actorOf(req), action: "collect_channels", entity: "job", detail: { requested, inline } });
   res.status(202).json({ requested, inline });
 }));
+

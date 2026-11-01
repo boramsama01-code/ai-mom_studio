@@ -16,3 +16,11 @@ describe("페이지별 대체텍스트",()=>{
   expect(studioAltTexts({...result,experience:{...result.experience!,pages:[...result.experience!.pages].reverse()}})).toEqual(["사진이 배경에 놓인 표지.","둘째 장면의 설명","첫 장면의 설명"]);
  });
 });
+
+it("keeps deliberately cleared manual descriptions empty during editing and can explicitly regenerate text defaults",async()=>{
+ const {studioAltTextDrafts,studioAltTextDefaults}=await import("../shared/altText");
+ const c=studioContentSchema.parse({title:"하늘의 색",format:"카드뉴스",altTexts:[""],panels:[{scene:"",dialogue:"첫 본문"},{scene:"",dialogue:"둘째"},{scene:"",dialogue:"셋째"},{scene:"",dialogue:"넷째"}]});
+ expect(studioAltTextDrafts(c)[0]).toBe("");expect(studioAltTextDefaults(c)[0]).toContain("하늘의 색");
+ const e=studioContentSchema.parse({...c,experience:{coverAltText:"",pages:[{title:"본문",body:"내용",altText:"",mediaId:null,fit:"contain"}]}});
+ expect(studioAltTextDrafts(e)).toEqual(["",""]);expect(studioAltTextDefaults(e)[1]).toContain("내용");
+});

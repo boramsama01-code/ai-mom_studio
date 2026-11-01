@@ -1,3 +1,4 @@
+import { expectedInstagramUsername, instagramAccountMismatch } from "../../shared/channelInstagram";
 import { and, eq } from "drizzle-orm";
 import type { DB } from "../db";
 import { appSettings, channels, destinations } from "../../shared/schema";
@@ -11,9 +12,13 @@ import { testCloudinary } from "./connectionTest";
 export async function connectInstagram(db: DB, channelId: number, input: { token: string; username: string; dailyLimit: number }, actor: string) {
   const [ch] = await db.select().from(channels).where(eq(channels.id, channelId));
   if (!ch?.active) throw new HttpError(409, "사용 중인 채널을 선택하세요.");
+  const intended = instagramAccountMismatch(ch.slug, input.username);
+  if (intended) throw new HttpError(400, intended);
   const identity = await accountIdentity(input.token);
   if (!identity.ok) throw new HttpError(400, identity.error);
   if (identity.username.toLowerCase() !== input.username.replace(/^@/, "").toLowerCase()) throw new HttpError(400, `이 토큰은 @${identity.username}의 토큰입니다. 게시하려는 계정과 일치하는지 확인하세요.`);
+  const mismatch = instagramAccountMismatch(ch.slug, identity.username);
+  if (mismatch) throw new HttpError(409, mismatch);
   const quota = await publishingLimit(identity.userId, input.token);
   if (!quota.ok) throw new HttpError(400, "계정은 확인했지만 게시 API 접근이 거부됐습니다. 프로페셔널 계정과 instagram_business_content_publish 권한을 확인하세요.");
   const refs = defaultSecretRefs("instagram", ch.slug);
@@ -44,9 +49,26 @@ export async function checkInstagramConnection(db: DB, channelId: number, destin
   const identity = await accountIdentity(sec.values.accessToken);
   if (!identity.ok) throw new HttpError(400, identity.error);
   if (identity.userId !== sec.values.userId) throw new HttpError(409, "저장된 게시 계정과 토큰의 계정이 다릅니다. 계정을 다시 연결하세요.");
+  const mismatch = instagramAccountMismatch(ch.slug, identity.username);
+  if (mismatch) throw new HttpError(409, mismatch);
   const quota = await publishingLimit(identity.userId, sec.values.accessToken);
   if (!quota.ok) throw new HttpError(400, "게시 권한 또는 인스타그램 API 한도를 확인할 수 없습니다.");
   const cloud = await testCloudinary();
   if (!cloud.ok) throw new HttpError(400, "Cloudinary 인증에 실패했습니다. API 키 관리에서 연결을 확인하세요.");
   return { ok: true, username: identity.username, used: quota.used, total: quota.total, checkedAt: new Date().toISOString() };
+}
+
+
+/** Read connection presence without exposing credentials or claiming a fresh API check. */
+export async function instagramAccounts(db: DB) {
+  const chs = await db.select().from(channels).where(eq(channels.active, true));
+  const rows = await db.select().from(destinations).where(eq(destinations.platform, "instagram"));
+  return { accounts: chs.flatMap(ch => {
+    const expectedUsername = expectedInstagramUsername(ch.slug);
+    if (!expectedUsername) return [];
+    return [{ channelId: ch.id, channelName: ch.name, expectedUsername, destinations: rows.filter(d => d.channelId === ch.id).map(d => {
+      const sec = resolveSecrets(d.platform, ch.slug, d.secretRefs);
+      return { id: d.id, label: d.label, enabled: d.enabled, configured: !sec.missing.length && !sec.invalid.length };
+    }) }];
+  }) };
 }

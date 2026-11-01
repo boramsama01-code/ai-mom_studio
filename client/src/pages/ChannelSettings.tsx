@@ -1,3 +1,4 @@
+import { InstagramAccounts } from "./InstagramAccounts";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
@@ -27,7 +28,7 @@ const INTEG: Array<[string, string, string]> = [
 export function ChannelSettingsPage() {
   const { allChannels: channels } = useChannel();
   const guard = useDirtyGuard();
-  const [tab, setTab] = useState(() => new URLSearchParams(location.search).get("tab") === "connections" ? "connections" : "channels");
+  const [tab, setTab] = useState(() => ["connections", "instagram"].includes(new URLSearchParams(location.search).get("tab") ?? "") ? new URLSearchParams(location.search).get("tab")! : "channels");
   const [editing, setEditing] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
   const current = channels.find(c => c.id === editing);
@@ -36,13 +37,14 @@ export function ChannelSettingsPage() {
   return <div className="settings-page">
     <header className="page-head"><div><span className="studio-eyebrow">WORKSPACE</span><h1>설정</h1><p className="muted">내 채널과 제작 환경을 한곳에서 관리하세요.</p></div>
       {tab === "channels" && !creating && !current && <button className="btn primary" onClick={() => leave(() => setCreating(true))}>＋ 새 채널</button>}</header>
-    <nav className="settings-tabs" aria-label="설정 메뉴">{[["channels", "내 채널"], ["operations", "운영 설정"]].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} onClick={() => leave(() => { setTab(key); setEditing(null); setCreating(false); })}>{label}</button>)}<GuardedLink className="btn ghost" href="/connections">API 키 관리 →</GuardedLink></nav>
+    <nav className="settings-tabs" aria-label="설정 메뉴">{[["channels", "내 채널"], ["instagram", "인스타그램 연결"], ["operations", "운영 설정"]].map(([key, label]) => <button key={key} className={tab === key ? "active" : ""} aria-current={tab === key ? "page" : undefined} onClick={() => leave(() => { setTab(key); setEditing(null); setCreating(false); })}>{label}</button>)}<GuardedLink className="btn ghost" href="/connections">API 키 관리 →</GuardedLink></nav>
     {tab === "channels" && <>
       {(creating || current) && <button className="btn ghost settings-back" onClick={() => leave(() => { setEditing(null); setCreating(false); })}>← 내 채널 목록</button>}
-      {creating ? <NewChannel onCreated={ch => { setCreating(false); setEditing(ch.id); }} /> : current ? <><ChannelForm key={current.id} ch={current} onArchived={() => setEditing(null)} /><details className="panel settings-details"><summary>수집 콘텐츠의 게시 계정</summary><p className="small muted">수집함 → 콘텐츠 초안 → 발행함에서 사용합니다. Studio 제작물은 편집 화면에서 내려받아 직접 게시하세요.</p><Destinations cid={current.id} /></details></> : <>
+      {creating ? <NewChannel onCreated={ch => { setCreating(false); setEditing(ch.id); }} /> : current ? <><ChannelForm key={current.id} ch={current} onArchived={() => setEditing(null)} /><details className="panel settings-details"><summary>이 채널의 게시 계정</summary><InstagramAccounts channelId={current.id} /><p className="small muted">수집 콘텐츠와 제작보드 콘텐츠는 같은 채널의 게시 계정을 사용합니다. 아래는 추가 목적지·텔레그램 설정입니다.</p><Destinations cid={current.id} /></details></> : <>
         <ChannelDirectory channels={channels} onEdit={id => leave(() => setEditing(id))} onCreate={() => leave(() => setCreating(true))} />
       </>}
     </>}
+    {tab === "instagram" && <InstagramAccounts />}
     {tab === "connections" && <ConnectionsSection />}
     {tab === "operations" && <><section className="panel stack"><h2>운영 상태</h2>{status.isLoading ? <Loading lines={2} /> : status.error ? <ErrorBox error={status.error} /> : status.data && <>
       <p className="small muted">{status.data.workerConnected ? "최근 자동 작업 실행 기록이 있습니다." : "최근 6시간 자동 작업 실행 기록이 없습니다."}</p>
@@ -290,4 +292,5 @@ function DestinationKeys({ d }: { d: DestView }) {
     </form>
   );
 }
+
 

@@ -58,3 +58,22 @@ it("공개 뉴스 수집은 네이버 키가 없어도 실행할 수 있다", as
   await act(async () => button.click());
   expect(mocks.api).toHaveBeenCalledWith("/collection/collect", { method: "POST", body: { channelId: "all" } });
 });
+
+it("shows already registered recommendations and collects the specific channel instead of adding zero keywords", async()=>{
+ const ready={...overview,channels:[{...overview.channels[0],profile:{label:"추천",count:2,missing:0,active:1,paused:1,removed:0,rules:[{query:"과학고",endpoint:"news",state:"active"},{query:"영재고",endpoint:"news",state:"paused"}]}}]};
+ await act(async()=>{client.setQueryData(["collection","all",kstDay()],ready);});
+ await act(async()=>{await new Promise(r=>setTimeout(r,20));});
+ expect(host.textContent).toContain("추천 검색어가 모두 등록되어 있어요");
+ expect(host.textContent).toContain("일시정지 1개");
+ expect([...host.querySelectorAll("button")].some(b=>b.textContent?.includes("개 추가"))).toBe(false);
+ const b=[...host.querySelectorAll("button")].find(b=>b.textContent==="이 채널 지금 수집")!;
+ await act(async()=>b.click());expect(mocks.api).toHaveBeenCalledWith("/collection/collect",{method:"POST",body:{channelId:1}});
+});
+it("explains a duplicate-only profile result without claiming zero keywords were added",async()=>{
+ const ready={...overview,channels:[{...overview.channels[0],profile:{label:"추천",count:2,missing:1,active:1,paused:0,removed:0,rules:[]}}]};
+ await act(async()=>{client.setQueryData(["collection","all",kstDay()],ready);});await act(async()=>{await new Promise(r=>setTimeout(r,20));});
+ mocks.api.mockImplementation(async(path:string)=>path.endsWith("/collection-profile")?{added:0}:ready);
+ await act(async()=>[...host.querySelectorAll("button")].find(b=>b.textContent==="새 검색어 1개 추가")!.click());
+ await act(async()=>{await new Promise(r=>setTimeout(r,20));});
+ expect(mocks.toast).toHaveBeenCalledWith("info",expect.stringContaining("이미 모두 등록"));
+});
