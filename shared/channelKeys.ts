@@ -1,3 +1,6 @@
-// Stable aliases keep existing content attached when display names change.
-export const studioKey = (slug: string) => slug === "opportunities" ? "highway" : slug === "current-dialogue" ? "news" : slug;
-export const channelSlug = (key: string) => key === "highway" ? "opportunities" : key === "news" ? "current-dialogue" : key;
+// Read old backups and saved revisions without reviving the former public name.
+export const normalizeStudioChannel = (key: string) => key === "highway" ? "highscoop" : key;
+export const studioKey = (slug: string) => slug === "opportunities" ? "highscoop" : slug === "current-dialogue" ? "news" : normalizeStudioChannel(slug);
+// Database IDs and collection slugs stay stable to preserve sources and approvals.
+export const channelSlug = (key: string) => normalizeStudioChannel(key) === "highscoop" ? "opportunities" : key === "news" ? "current-dialogue" : key;
+

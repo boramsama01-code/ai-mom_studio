@@ -21,7 +21,7 @@ describe("카드 렌더링", () => {
   });
 
   it("1080×1350 RGB JPEG, 복수 일정·숫자 혼합", async () => {
-    const model = buildCardModel({ kind: "notice", payload: base, channelName: "아이맘 · 도전·진학", accent: "#0B766E", sourceOrg: "경기과학고등학교", checkedDate: "2026-09-28" });
+    const model = buildCardModel({ kind: "notice", payload: base, channelName: "Highscoop", accent: "#0B766E", sourceOrg: "경기과학고등학교", checkedDate: "2026-09-28" });
     const { jpeg } = await renderCardJpeg(model);
     const meta = await sharp(jpeg).metadata();
     expect([meta.format, meta.width, meta.height, meta.channels, meta.space]).toEqual(["jpeg", 1080, 1350, 3, "srgb"]);
@@ -41,7 +41,7 @@ describe("카드 렌더링", () => {
 
   it("과학·시사 카드도 생성", async () => {
     const sci = { topic: "나무", age_band: "중학생", key_question: "도시의 나무는 어디에 먼저 심어야 할까?", background: ["나무는 그늘을 만든다.", "도시는 열섬 현상이 있다.", "나무마다 필요한 공간이 다르다."], discussion_questions: ["우리 동네에서 가장 더운 곳은 어디일까?", "b", "c"], scientific_basis: "x", misconceptions: [], parent_hints: [], safe_activity: null, sources: [], evidence: [] };
-    const r = await renderCardJpeg(buildCardModel({ kind: "science_dialogue", payload: sci, channelName: "아이맘 · 하루 과학 대화", accent: "#6550A6", sourceOrg: null, checkedDate: "2026-09-28" }));
+    const r = await renderCardJpeg(buildCardModel({ kind: "science_dialogue", payload: sci, channelName: "Alligodang · 과학", accent: "#6550A6", sourceOrg: null, checkedDate: "2026-09-28" }));
     expect(r.jpeg.length).toBeGreaterThan(10_000);
   });
 });
@@ -63,13 +63,13 @@ describe("캡션", () => {
 
 describe("우주펭귄상회 브랜드", () => {
   it("새 카드의 브랜드만 변경하고 기존 채널명과 입력은 보존", () => {
-    const args = { kind: "notice", payload: base, channelName: "아이맘 · 도전·진학", accent: "#0B766E", sourceOrg: null, checkedDate: "2026-10-18" };
+    const args = { kind: "notice", payload: base, channelName: "Highscoop", accent: "#0B766E", sourceOrg: null, checkedDate: "2026-10-18" };
     const before = JSON.stringify(args);
-    expect(buildCardModel(args).brandLine).toBe("도전·진학");
+    expect(buildCardModel(args).brandLine).toBe("Highscoop");
     expect(JSON.stringify(args)).toBe(before);
   });
   it.each(["classic", "header", "magazine", "minimal"] as const)("%s: 긴 브랜드와 분류도 영역 안에서 생성", async (layout) => {
-    const model = buildCardModel({ kind: "notice", payload: { ...base, title: "입학설명회", category: "영재학교·과학고 입시", schedules: [], one_line_summary: "공식 공고를 확인하세요." }, channelName: "아이맘 · 하루 과학 대화", accent: "#0B766E", sourceOrg: null, checkedDate: "2026-10-18" });
+    const model = buildCardModel({ kind: "notice", payload: { ...base, title: "입학설명회", category: "영재학교·과학고 입시", schedules: [], one_line_summary: "공식 공고를 확인하세요." }, channelName: "Alligodang · 과학", accent: "#0B766E", sourceOrg: null, checkedDate: "2026-10-18" });
     const { jpeg } = await renderCardJpeg(model, { layout });
     expect(jpeg.length).toBeGreaterThan(10_000);
     const mascot = await sharp(jpeg).extract({ left: 84, top: layout === "minimal" ? 119 : 79, width: 46, height: 46 }).stats();

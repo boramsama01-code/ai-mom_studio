@@ -1,8 +1,8 @@
 {
-  "name": "ai-mom-studio",
+  "name": "spacepenguin-studio",
   "version": "0.1.0",
   "private": true,
-  "description": "아이맘 스튜디오 — 중학생과 부모를 위한 3채널 콘텐츠 운영 관리자 앱",
+  "description": "우주펭귄상회 스튜디오 — Fryday·Highscoop·Alligodang 콘텐츠 제작·운영",
   "type": "module",
   "engines": {
     "node": "22.x"
@@ -68,3 +68,4 @@
     "vitest": "^5.0.2"
   }
 }
+

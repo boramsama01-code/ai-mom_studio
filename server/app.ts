@@ -56,6 +56,16 @@ export function createApp() {
   }
   app.use("/api", (_req, res) => res.status(404).json({ error: "없는 API입니다." }));
 
+  // Keep API callbacks and media links working on the previous address. Only
+  // browser navigation moves, with paths/query strings preserved and no host-derived target.
+  app.use((req, res, next) => {
+    const canonical = env.canonicalRedirectUrl;
+    if (canonical && (req.method === "GET" || req.method === "HEAD") && req.get("host") !== new URL(canonical).host) {
+      return res.redirect(308, `${canonical}${req.originalUrl}`);
+    }
+    next();
+  });
+
   const publicDir = [path.resolve(process.cwd(), "dist/public"), path.resolve(import.meta.dirname ?? ".", "../public")].find((p) => fs.existsSync(path.join(p, "index.html")));
   if (publicDir) {
     app.use(express.static(publicDir, { index: false, maxAge: "1h" }));
@@ -71,3 +81,4 @@ export function createApp() {
   });
   return app;
 }
+

@@ -33,7 +33,7 @@ export function collectionSample(id: string, channelName?: string) {
       discussion_questions: ["AI의 도움과 나의 생각을 어떻게 구분해 표시하면 좋을까요?"],
       parent_hints: "정답을 정하기보다 도움받은 과정부터 함께 이야기해 보세요.",
     },
-    channelName: channelName ?? (notice ? CHANNEL_BRANDS.highway.name : CHANNEL_BRANDS.news.name), accent: d.accent,
+    channelName: channelName ?? (notice ? CHANNEL_BRANDS.highscoop.name : CHANNEL_BRANDS.news.name), accent: d.accent,
     sourceOrg: "디자인 예시", checkedDate: "2026-10-31",
   };
   const style: CardStyle = { layout: "minimal", collection: id };

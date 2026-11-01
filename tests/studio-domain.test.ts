@@ -4,7 +4,7 @@ describe("Studio 수정 계약", () => {
   it("단계만 수정할 때 원고·채널·그림 기본값을 주입하지 않는다", () => {
     const patch = studioPatchSchema.parse({ version: 2, stage: "review" });
     expect(patch).toEqual({ version: 2, stage: "review" });
-    const original = studioContentSchema.parse({ title: "고입", channel: "highway", memo: "공식 원문", script: "편집 원고", caption: "기존 캡션", panels: Array.from({ length: 4 }, () => ({ scene: "장면", dialogue: "대사", imageId: 42 })) });
+    const original = studioContentSchema.parse({ title: "고입", channel: "highscoop", memo: "공식 원문", script: "편집 원고", caption: "기존 캡션", panels: Array.from({ length: 4 }, () => ({ scene: "장면", dialogue: "대사", imageId: 42 })) });
     const { version, ...changes } = patch;
     const result = studioContentSchema.parse({ ...original, ...changes });
     expect(result).toEqual({ ...original, stage: "review" });
@@ -15,3 +15,4 @@ describe("Studio 수정 계약", () => {
     expect(studioGenerationSchema.safeParse({ ...input, kind: "image" }).success).toBe(false);
   });
 });
+

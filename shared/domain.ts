@@ -6,7 +6,7 @@ import { CHANNEL_BRANDS } from "./branding";
 export const CHANNEL_SEEDS = [
   {
     slug: "opportunities",
-    name: CHANNEL_BRANDS.highway.name,
+    name: CHANNEL_BRANDS.highscoop.name,
     description: "특목고·자사고·영재학교 입시와 STEM 캠프·대회·영재교육원 공고를 모아 확인합니다.",
     contentType: "notice",
     accentColor: "#0B766E",

@@ -412,7 +412,7 @@ itemRoutes.get(
     if (!a) throw new HttpError(404, "이미지 없음");
     res.setHeader("content-type", a.mime);
     res.setHeader("cache-control", "private, max-age=86400, immutable");
-    if (req.query.download === "1") res.setHeader("content-disposition", `attachment; filename="ai-mom-card-${a.contentItemId}-r${a.revisionId}.jpg"`);
+    if (req.query.download === "1") res.setHeader("content-disposition", `attachment; filename="spacepenguin-card-${a.contentItemId}-r${a.revisionId}.jpg"`);
     res.send(a.bytes);
   }),
 );

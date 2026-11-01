@@ -64,6 +64,13 @@
       "when": 1793491200002,
       "tag": "0008_channel_brands",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793491200003,
+      "tag": "0009_studio_brand_keys",
+      "breakpoints": true
     }
   ]
 }

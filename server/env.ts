@@ -21,6 +21,15 @@ export const env = {
     const render = process.env.RENDER_EXTERNAL_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : "");
     return (process.env.APP_BASE_URL || render || `http://localhost:${this.port}`).replace(/\/$/, "");
   },
+  /** Previous web addresses can send browser navigation to the current Studio. */
+  get canonicalRedirectUrl() {
+    try {
+      const url = new URL(process.env.APP_CANONICAL_REDIRECT_URL || "");
+      return url.protocol === "https:" && !url.username && !url.password && !url.search && !url.hash ? url.origin : "";
+    } catch {
+      return "";
+    }
+  },
   /** APP_DATABASE_URL 우선, 없으면 DATABASE_URL (README 참고) */
   get databaseUrl() {
     return process.env.APP_DATABASE_URL || process.env.DATABASE_URL || "";
@@ -139,4 +148,5 @@ export function integrationStatus() {
     },
   };
 }
+
 

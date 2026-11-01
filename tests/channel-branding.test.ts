@@ -9,6 +9,25 @@ beforeAll(resetDb);
 afterAll(closeDb);
 
 describe("channel brand rollout", () => {
+  it("migrates current board keys once while preserving authored content and old revisions", async () => {
+    const pool = getPool();
+    const original = { title: "직접 쓴 제목", channel: "highway", memo: "수정하지 않을 메모", characters: ["pempem"] };
+    const card = (await pool.query("insert into studio_cards(content,version,external_id) values ($1,3,'legacy-brand-test') returning *", [JSON.stringify(original)])).rows[0];
+    await pool.query("insert into studio_revisions(card_id,version,snapshot,instruction,applied) values ($1,3,$2,'원본',true)", [card.id,JSON.stringify(original)]);
+    const migration = fs.readFileSync("migrations/0009_studio_brand_keys.sql", "utf8");
+    await pool.query(migration);
+    await pool.query(migration);
+    const saved = (await pool.query("select * from studio_cards where id=$1",[card.id])).rows[0];
+    expect(saved).toMatchObject({ id: card.id, version: 4, external_id: "legacy-brand-test", content: { ...original, channel: "highscoop" } });
+    const revisions = (await pool.query("select * from studio_revisions where card_id=$1 order by version",[card.id])).rows;
+    expect(revisions).toHaveLength(2);
+    expect(revisions[0].snapshot).toEqual(original);
+    const { agent, csrf } = await login(createApp());
+    const restored = await agent.post(`/api/studio/cards/${card.id}/restore`).set("x-csrf-token",csrf).send({ version: 4, revisionId: revisions[0].id });
+    expect(restored.status).toBe(200);
+    expect(restored.body).toMatchObject({ channel: "highscoop", memo: original.memo, characters: ["pempem"] });
+  });
+
   it("renames existing channels in place without altering their settings or content", async () => {
     const pool = getPool();
     await pool.query("update channels set name = 'Highway', editorial_guide = '직접 쓴 지침', card_template = 'set:r05-plum' where slug = 'opportunities'");

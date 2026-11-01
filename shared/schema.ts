@@ -1,5 +1,5 @@
 /**
- * 아이맘 스튜디오 DB 스키마 (PostgreSQL + Drizzle)
+ * 우주펭귄상회 스튜디오 DB 스키마 (PostgreSQL + Drizzle)
  *
  * 원칙
  * - 채널 소유 데이터는 모두 channel_id를 가진다. 서버가 조회·변경 범위를 검증한다.

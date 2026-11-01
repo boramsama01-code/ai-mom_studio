@@ -3,6 +3,8 @@ dist/
 .env
 .env.*
 !.env.example
+spacepenguin-prep-*/
+# Existing preparation directories from before the rename remain excluded.
 ai-mom-prep-*/
 coverage/
 *.log
@@ -12,4 +14,5 @@ tmp/
 
 # Restored byte-for-byte from assets/studio-comic during development and build.
 /client/public/studio-assets/webtoon-01.png
+
 

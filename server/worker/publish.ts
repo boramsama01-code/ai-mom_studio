@@ -337,7 +337,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
         for (const [index, page] of cardPages.entries()) {
           let url = page.cloudinaryUrl;
           if (!url) {
-            const up = await uploadCard(page.bytes, `ai-mom/${ch.slug}/approval-${ap.id}-${ap.cardSha256.slice(0, 12)}-${index + 1}`);
+            const up = await uploadCard(page.bytes, `spacepenguin/${ch.slug}/approval-${ap.id}-${ap.cardSha256.slice(0, 12)}-${index + 1}`);
             url = up.url;
             await db.update(mediaAssets).set({ cloudinaryPublicId: up.publicId, cloudinaryUrl: up.url }).where(eq(mediaAssets.id, page.id));
           }
