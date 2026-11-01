@@ -85,7 +85,6 @@ export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: num
       </div>
       {transfer.error && <ErrorBox error={transfer.error} />}
       <DiscoveryNote info={d.item.discovery} />
-      <Progress d={d} />
       <div className="tabs workflow-tabs" role="tablist" aria-label="콘텐츠 제작 단계">
         {tabs.map(([k, label]) => <button key={k} id={`tab-${k}`} role="tab" aria-selected={tab === k} aria-controls={`step-${k}`} onClick={() => go(k, `step-${k}`)}>{label}</button>)}
       </div>

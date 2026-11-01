@@ -106,7 +106,7 @@ itemRoutes.get(
       .leftJoin(sourceDocuments, eq(sourceDocuments.id, itemSourceIdSql()))
       .leftJoin(runs, eq(runs.id, contentItems.runId))
       .where(where)
-      .orderBy(desc(contentItems.createdAt), desc(contentItems.id))
+      .orderBy(...(q.origin === "idea" ? [asc(contentItems.topicKey), asc(contentItems.id)] : [desc(contentItems.createdAt), desc(contentItems.id)]))
       .limit(pageSize)
       .offset((page - 1) * pageSize);
     res.json({ total, page, pageSize, items: rows });
