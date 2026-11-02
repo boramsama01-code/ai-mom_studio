@@ -1,3 +1,4 @@
+import { CategorySelect } from "../CategorySelect";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { StudioCard, StudioCardDetail } from "@shared/studio";
@@ -25,7 +26,7 @@ export function FinishedDeckEditor({ data }: { data: StudioCardDetail }) {
   useEffect(() => { if (!dirty) { setBase(data.card); setForm(data.card); } }, [data.card]);
   async function save(): Promise<StudioCard> {
     if (!dirty) return base;
-    const card = await api<StudioCard>(`/studio/cards/${base.id}`, { method: "PATCH", body: { version: base.version, title: form.title, caption: form.caption, finishedDeck: form.finishedDeck, stage: form.stage } });
+    const card = await api<StudioCard>(`/studio/cards/${base.id}`, { method: "PATCH", body: { version: base.version, subcategory: form.subcategory ?? "", title: form.title, caption: form.caption, finishedDeck: form.finishedDeck, stage: form.stage } });
     adopt(card); return card;
   }
   const saving = useMutation({ mutationFn: save });
@@ -49,6 +50,7 @@ export function FinishedDeckEditor({ data }: { data: StudioCardDetail }) {
   return <div className="finished-deck-editor stack">
     <div className="page-head"><div><GuardedLink href="/">← 제작보드</GuardedLink><h1>완성 이미지로 게시물 만들기</h1><p className="small muted">한 작업이 게시물 한 건입니다. 표지부터 마지막 장까지 파일 이름 순서로 가져옵니다.</p></div><span className="badge">{pages.length} / 10장</span></div>
     <section className="panel stack">
+      <CategorySelect channel={form.channel} value={form.subcategory ?? ""} onChange={subcategory => setForm(f => ({ ...f, subcategory }))} disabled={busy} />
       <label className="field">게시물 제목<input value={form.title} maxLength={160} disabled={busy} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} /></label>
       <div className="finished-drop" onDragOver={e => { e.preventDefault(); }} onDrop={e => { e.preventDefault(); if (!busy) uploading.mutate(Array.from(e.dataTransfer.files)); }}>
         <strong>완성 이미지 여러 장 가져오기</strong><p>PNG · JPG · WEBP / 한 장 12MB 이하</p><p className="small">5장·7장 묶음을 그대로 올리세요. 마무리 이미지는 추가한 뒤 맨 끝으로 옮기면 됩니다.</p>
@@ -67,5 +69,6 @@ export function FinishedDeckEditor({ data }: { data: StudioCardDetail }) {
     <StudioPublish base={base} dirty={dirty} busy={busy} save={save} />
   </div>;
 }
+
 
 

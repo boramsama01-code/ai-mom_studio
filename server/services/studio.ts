@@ -1,3 +1,4 @@
+import { validSubcategory } from "../../shared/channelCategories";
 import { lockStudioPublication, invalidateStudioPublication } from "./studioPublicationState";
 import { validateExperienceMedia } from "./experienceMedia";
 import { readIdea } from "../../shared/ideaBank";
@@ -92,6 +93,7 @@ export async function saveStudioNotes(db: DB, version: number, notes: string) {
   });
 }
 function validateStudioMode(content: StudioContent) {
+  if (!validSubcategory(content.channel, content.subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
   if (content.finishedDeck && (content.experience || content.format !== "카드뉴스")) throw new HttpError(400, "완성 이미지는 카드뉴스 형식으로 사용해 주세요.");
 }
 export async function validateStudioImages(db: DB, cardId: number, content: StudioContent) {
@@ -117,6 +119,7 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
       if (!source) throw new HttpError(404, "연결할 수집 콘텐츠가 없습니다.");
       const [existing] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, sourceItemId));
       if (existing) { assertStudioActive(existing); return studioCardDto(existing); }
+      if (!content.subcategory && validSubcategory(content.channel, source.subcategory)) content = { ...content, subcategory: source.subcategory ?? "" };
       const idea = readIdea(source.edited);
       if (idea && source.origin === "idea") {
         content = { ...content, format: idea.format, exportDesign: idea.format === "카드뉴스" ? "set:f01" : content.exportDesign,
@@ -147,7 +150,7 @@ export async function saveStudioCard(db: DB, cardId: number, version: number, pa
     assertStudioActive(current);
     if (current.version !== version) conflict(studioCardDto(current));
     await invalidateStudioPublication(tx as unknown as DB, current);
-    const content = parse(studioContentSchema, { ...current.content, ...patch });
+    const content = parse(studioContentSchema, { ...current.content, ...patch, ...(patch.channel && patch.channel !== current.content.channel && patch.subcategory === undefined ? { subcategory: "" } : {}) });
     if (current.importedMeta?.studioPublication && patch.channel && patch.channel !== current.content.channel) throw new HttpError(409, "발행 준비한 콘텐츠의 채널은 바꿀 수 없습니다. 다른 채널용 작업을 새로 만들어 주세요.");
     if (patch.channel && patch.channel !== current.content.channel) await validateStudioChannel(tx as unknown as DB, content.channel);
     await validateStudioImages(tx as unknown as DB, cardId, content);
@@ -246,3 +249,4 @@ export async function exportStudioComic(db: DB, cardId: number) {
   if (output.content.format !== "웹툰") throw new HttpError(400, "웹툰 형식을 선택한 뒤 PNG로 내려받으세요.");
   return { bytes: await output.page(0), version: output.version };
 }
+

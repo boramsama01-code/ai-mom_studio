@@ -77,3 +77,13 @@ it("explains a duplicate-only profile result without claiming zero keywords were
  await act(async()=>{await new Promise(r=>setTimeout(r,20));});
  expect(mocks.toast).toHaveBeenCalledWith("info",expect.stringContaining("이미 모두 등록"));
 });
+
+
+it("소분류 브리핑에서 해당 날짜·채널·분류 자료로 이동한다", async () => {
+  await act(async () => { client.setQueryData(["collection", "all", kstDay()], { ...overview, channels: [{ ...overview.channels[0], categories: [{ label: "전국대회", newItems: 3 }] }] }); });
+  await act(async () => { await new Promise(r => setTimeout(r, 30)); });
+  const b = [...host.querySelectorAll("button")].find(b => b.textContent === "전국대회 · 3건")!;
+  await act(async () => b.click());
+  expect(mocks.select).toHaveBeenCalledWith(1);
+  expect(mocks.navigate).toHaveBeenCalledWith(`/inbox?collectedOn=${kstDay()}&subcategory=${encodeURIComponent("전국대회")}`);
+});

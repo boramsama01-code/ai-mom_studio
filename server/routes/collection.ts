@@ -1,3 +1,4 @@
+import { channelCategories, categoryLabel, validSubcategory } from "../../shared/channelCategories";
 import { Router } from "express";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -38,6 +39,8 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
       noticeUncertain: sql<number>`count(*) filter (where ${noticeIntentSql()} = 'uncertain')::int`,
       noticeReports: sql<number>`count(*) filter (where ${noticeIntentSql()} in ('retrospective','off_topic','closed'))::int`,
     }).from(contentItems).leftJoin(sourceDocuments, eq(sourceDocuments.id, itemSourceIdSql())).where(and(eq(contentItems.channelId, ch.id), eq(contentItems.isSample, !!req.session.demo), eq(contentItems.excluded, false), inArray(contentItems.origin, ["collected", "discovered"]), gte(contentItems.createdAt, start), lt(contentItems.createdAt, end)));
+    const categoryRows = await db.select({ subcategory: contentItems.subcategory, count: sql<number>`count(*)::int` }).from(contentItems).where(and(eq(contentItems.channelId, ch.id), eq(contentItems.isSample, !!req.session.demo), eq(contentItems.excluded, false), inArray(contentItems.origin, ["collected", "discovered"]), gte(contentItems.createdAt, start), lt(contentItems.createdAt, end))).groupBy(contentItems.subcategory);
+    const categories = [...channelCategories(ch.slug), "미분류"].map(label => ({ label, newItems: categoryRows.filter(r => categoryLabel(r.subcategory) === label).reduce((n, r) => n + r.count, 0) }));
     const [lastRun] = await db.select().from(runs).where(and(eq(runs.channelId, ch.id), eq(runs.kind, "collect"))).orderBy(desc(runs.id)).limit(1);
     const pendingJobs = await db.select({ id: jobs.id, status: jobs.status, createdAt: jobs.createdAt, leaseExpiresAt: jobs.leaseExpiresAt }).from(jobs).where(and(eq(jobs.channelId, ch.id), eq(jobs.type, "collect"), inArray(jobs.status, ["queued", "running"])));
     const discovery = resolveDiscovery(ch.contentType, ch.budget.discovery);
@@ -48,9 +51,10 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
       return { query, endpoint, state: !existing ? "missing" as const : existing.deletedAt ? "removed" as const : existing.enabled ? "active" as const : "paused" as const };
     })) : [];
     return { id: ch.id, version: ch.version, slug: ch.slug, name: ch.name, active: ch.active, queries: ruleRows.filter(r => r.enabled && !r.deletedAt).length, discoveryQueries: discovery?.enabled ? discovery.queries.length : 0, boards: boards.length, budget: ch.budget.naverCallsPerRun,
+      categories,
       profile: profile ? { label: profile.label, count: profileRules.length, missing: profileRules.filter(r => r.state === "missing").length, active: profileRules.filter(r => r.state === "active").length, paused: profileRules.filter(r => r.state === "paused").length, removed: profileRules.filter(r => r.state === "removed").length, rules: profileRules } : null, ...counts,
       jobs: pendingJobs.map(j => ({ id: j.id, status: j.status, createdAt: j.createdAt, stale: j.status === "queued" ? now.getTime() - j.createdAt.getTime() > 120_000 : !j.leaseExpiresAt || j.leaseExpiresAt < now })),
-      lastRun: lastRun ? { id: lastRun.id, status: lastRun.status, startedAt: lastRun.startedAt, finishedAt: lastRun.finishedAt, counts: lastRun.counts, errors: lastRun.errors } : null };
+      lastRun: lastRun ? { subcategory: typeof lastRun.snapshot.subcategory === "string" ? lastRun.snapshot.subcategory : null, id: lastRun.id, status: lastRun.status, startedAt: lastRun.startedAt, finishedAt: lastRun.finishedAt, counts: lastRun.counts, errors: lastRun.errors } : null };
   }));
   res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "public_rss", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
 }));
@@ -76,24 +80,28 @@ collectionRoutes.post("/channels/:cid/collection-profile", ah(async (req, res) =
 }));
 
 collectionRoutes.post("/collection/collect", ah(async (req, res) => {
-  const { channelId } = parse(z.object({ channelId: channelIdSchema }), req.body);
+  const { channelId, subcategory } = parse(z.object({ channelId: channelIdSchema, subcategory: z.string().min(1).max(40).optional() }), req.body);
+  if (subcategory && channelId === "all") throw new HttpError(400, "소분류 수집은 채널 하나를 선택해 주세요.");
   const db = getDb();
   if (await getSetting(db, "global_stop", false)) throw new HttpError(409, "전역 정지 중입니다. 실행 기록에서 정지 상태를 먼저 확인하세요.");
   const chs = await db.select().from(channels).where(and(eq(channels.active, true), channelId === "all" ? undefined : eq(channels.id, channelId)));
   const requested = [];
   for (const ch of chs) {
-    const [rule] = await db.select({ id: searchRules.id }).from(searchRules).where(and(eq(searchRules.channelId, ch.id), eq(searchRules.enabled, true), isNull(searchRules.deletedAt))).limit(1);
+    if (!validSubcategory(ch.slug, subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
+    const [rule] = await db.select({ id: searchRules.id }).from(searchRules).where(and(eq(searchRules.channelId, ch.id), eq(searchRules.enabled, true), isNull(searchRules.deletedAt), subcategory ? eq(searchRules.subcategory, subcategory) : undefined)).limit(1);
     const [board] = await db.select({ id: officialSources.id }).from(officialSources).where(and(eq(officialSources.channelId, ch.id), eq(officialSources.enabled, true), sql`${officialSources.adapter} is not null and ${officialSources.verifiedAt} is not null`)).limit(1);
     const d = resolveDiscovery(ch.contentType, ch.budget.discovery);
+    if (subcategory && (!rule || !ch.budget.naverCallsPerRun)) continue;
     if ((!rule && !board && !(d?.enabled && d.queries.length && d.picksPerRun)) || (!ch.budget.naverCallsPerRun && !board)) continue;
-    const r = await enqueueJob(db, { type: "collect", channelId: ch.id, dedupeKey: `collect:${ch.id}`, requestedBy: actorOf(req), maxAttempts: 2, payload: { collectionOnly: true } });
+    const r = await enqueueJob(db, { type: "collect", channelId: ch.id, dedupeKey: subcategory ? `collect:${ch.id}:category:${subcategory}` : `collect:${ch.id}`, requestedBy: actorOf(req), maxAttempts: 2, payload: { collectionOnly: true, ...(subcategory ? { subcategory } : {}) } });
     // 오래 대기한 요청도 같은 안전한 수집 경로로 재개한다.
     await db.update(jobs).set({ payload: { ...r.job.payload, collectionOnly: true } }).where(and(eq(jobs.id, r.job.id), eq(jobs.status, "queued")));
     requested.push({ channelId: ch.id, jobId: r.job.id, duplicate: r.duplicate });
   }
-  if (!requested.length) throw new HttpError(400, "활성 검색어 또는 연결된 공식 게시판을 먼저 설정하세요.");
+  if (!requested.length) throw new HttpError(400, subcategory ? "선택한 소분류에 활성 키워드를 추가하고 수집 한도를 설정해 주세요." : "활성 검색어 또는 연결된 공식 게시판을 먼저 설정하세요.");
   const inline = kickInlineCollect(db);
   await audit(db, { actor: actorOf(req), action: "collect_channels", entity: "job", detail: { requested, inline } });
   res.status(202).json({ requested, inline });
 }));
+
 

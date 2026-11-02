@@ -1,3 +1,4 @@
+import { validSubcategory } from "../../shared/channelCategories";
 /**
  * 수집 실행 1회 (채널 단위)
  * 1) 설정 스냅샷 → 2) 공식 게시판 → 3) 공개 뉴스 검색·저장 → 4) 원문 확보 → 5) 선택적 구조화 추출
@@ -48,6 +49,7 @@ export type CollectOptions = {
   fetchBoard?: typeof fetchBoardList; // 테스트용 주입
   heartbeat?: () => Promise<unknown>;
   collectionOnly?: boolean;
+  subcategory?: string;
 };
 
 export type CollectSummary = {
@@ -64,10 +66,11 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   if (!channel.active) throw new Error("보관된 채널 — 수집하지 않음");
   if (await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태 — 수집하지 않음");
 
+  if (!validSubcategory(channel.slug, opts.subcategory)) throw new Error("이 채널의 소분류를 선택해 주세요.");
   const rules = await db
     .select()
     .from(searchRules)
-    .where(and(eq(searchRules.channelId, channelId), eq(searchRules.enabled, true), isNull(searchRules.deletedAt)))
+    .where(and(eq(searchRules.channelId, channelId), eq(searchRules.enabled, true), isNull(searchRules.deletedAt), opts.subcategory ? eq(searchRules.subcategory, opts.subcategory) : undefined))
     .orderBy(sql`${searchRules.lastRunAt} asc nulls first`, asc(searchRules.priority), asc(searchRules.id));
 
   const budget = channel.budget;
@@ -77,9 +80,10 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   const officials = await db.select().from(officialSources).where(eq(officialSources.channelId, channelId));
   const unconnected = officials.filter((o) => o.enabled && !o.adapter).map((o) => o.name);
-  const boards = officials.filter((o) => o.enabled && o.adapter === "generic_board" && o.verifiedAt && o.domain && o.boardUrl);
+  const boards = officials.filter((o) => !opts.subcategory && o.enabled && o.adapter === "generic_board" && o.verifiedAt && o.domain && o.boardUrl);
 
   const snapshot = {
+    subcategory: opts.subcategory ?? null,
     channel: { id: channel.id, slug: channel.slug, budget },
     rules: selected.map(r => ({ ...ruleSnapshot(r), searchQuery: channel.contentType === "notice" && r.endpoint === "news" ? noticeSearchQuery(r.query) : r.query })),
     skippedRules: skippedRules.map(ruleSnapshot),
@@ -107,7 +111,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const llmBudget = new LlmBudget(budget.llmCallsPerRun);
 
   /* 1-2) 자동 화제 발굴(과학·시사 채널) — 사용자 검색어보다 먼저 */
-  const disc = await runDiscovery(db, channel, run.id, counter, llmBudget, now, search, opts.collectionOnly);
+  const disc = opts.subcategory ? null : await runDiscovery(db, channel, run.id, counter, llmBudget, now, search, opts.collectionOnly);
   if (disc) {
     Object.assign(counts, disc.counts);
     errors.push(...disc.errors);
@@ -323,7 +327,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 }
 
 function ruleSnapshot(r: SearchRule) {
-  return { id: r.id, version: r.version, query: r.query, endpoint: r.endpoint, display: r.display, excludeTerms: r.excludeTerms, excludeScope: r.excludeScope, categoryHint: r.categoryHint };
+  return { id: r.id, version: r.version, query: r.query, endpoint: r.endpoint, display: r.display, excludeTerms: r.excludeTerms, excludeScope: r.excludeScope, categoryHint: r.categoryHint, subcategory: r.subcategory };
 }
 
 async function saveSearchItem(db: DB, channel: Channel, rule: SearchRule, runId: number, it: NaverItem) {
@@ -341,6 +345,7 @@ async function saveSearchItem(db: DB, channel: Channel, rule: SearchRule, runId:
       runId,
       title: it.title || "(제목 없음)",
       category: rule.categoryHint,
+      subcategory: rule.subcategory,
       excluded: !!reason,
       excludedReason: reason,
       scheduleStatus: channel.contentType === "notice" ? "unknown" : "not_applicable",
@@ -502,4 +507,5 @@ async function fetchDoc(db: DB, docId: number, fetcher: typeof fetchAndExtract, 
     .where(eq(sourceDocuments.id, doc.id));
   return { ok: true };
 }
+
 

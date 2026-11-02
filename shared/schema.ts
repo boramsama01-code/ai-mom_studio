@@ -79,6 +79,7 @@ export const searchRules = pgTable(
     normalizedQuery: text("normalized_query").notNull(),
     endpoint: text("endpoint").notNull(), // news | blog
     categoryHint: text("category_hint"),
+    subcategory: text("subcategory"),
     enabled: boolean("enabled").notNull().default(true),
     priority: integer("priority").notNull().default(100),
     display: integer("display").notNull().default(10),
@@ -190,6 +191,7 @@ export const contentItems = pgTable(
     runId: integer("run_id").references(() => runs.id),
     title: text("title").notNull(),
     category: text("category"),
+    subcategory: text("subcategory"),
     schoolType: text("school_type"),
     // 상태 축 분리
     relevance: text("relevance").notNull().default("uncertain"), // relevant | irrelevant | uncertain
@@ -510,3 +512,4 @@ export const studioMedia = pgTable("studio_media", {
   bytes: bytea("bytes").notNull(), preview: bytea("preview"), frameTime: integer("frame_time_ms"),
   createdAt: createdAt(),
 }, t => [index("studio_media_card").on(t.cardId)]);
+

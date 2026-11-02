@@ -1,3 +1,4 @@
+import { CategorySelect } from "../CategorySelect";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
@@ -140,12 +141,15 @@ function RulesTab({ cid, kind }: { cid: number; kind: string }) {
   );
 }
 
-export function RuleForm({ cid, rule, onClose }: { cid: number; rule: SearchRule | null; onClose: () => void }) {
+export function RuleForm({ cid, rule, onClose, initialSubcategory = "" }: { cid: number; rule: SearchRule | null; onClose: () => void; initialSubcategory?: string }) {
   const qc = useQueryClient();
   const [query, setQuery] = useState(rule?.query ?? "");
   const [endpoints, setEndpoints] = useState<Array<"news" | "blog">>(rule ? [rule.endpoint as "news" | "blog"] : ["news"]);
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const [categoryHint, setCat] = useState(rule?.categoryHint ?? "");
+  const [subcategory, setSubcategory] = useState(rule?.subcategory ?? initialSubcategory);
+  const { allChannels } = useChannel();
+  const channel = allChannels.find(c => c.id === cid)?.slug ?? "";
   const [priority, setPriority] = useState(rule?.priority ?? 100);
   const [display, setDisplay] = useState(rule?.display ?? 10);
   const [excludeTerms, setEx] = useState((rule?.excludeTerms ?? []).join("\n"));
@@ -157,6 +161,7 @@ export function RuleForm({ cid, rule, onClose }: { cid: number; rule: SearchRule
       const common = {
         enabled,
         categoryHint: categoryHint || null,
+        subcategory: subcategory || null,
         priority: Number(priority),
         display: Number(display),
         excludeTerms: excludeTerms.split("\n").map((s) => s.trim()).filter(Boolean),
@@ -188,6 +193,7 @@ export function RuleForm({ cid, rule, onClose }: { cid: number; rule: SearchRule
           <span className="hint">검색창에 입력하듯 적습니다. 쉼표로 나누지 않습니다.</span>
           <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} required maxLength={100} disabled={m.isPending} />
         </label>
+        <CategorySelect channel={channel} value={subcategory} onChange={setSubcategory} disabled={m.isPending} />
         {booleanWarn && <div className="notice warn small">검색 경로마다 OR/AND 해석이 다를 수 있습니다. 안정적인 수집을 위해 검색어를 나눠 추가하세요.</div>}
         <fieldset className="row">
           <legend>검색 대상</legend>
@@ -610,5 +616,6 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
     </Modal>
   );
 }
+
 
 

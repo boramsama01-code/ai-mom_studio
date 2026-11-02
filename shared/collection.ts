@@ -204,8 +204,10 @@ export type CollectionOverview = {
   date: string; timezone: string; autoCollect: boolean; globalStop: boolean; naverReady: boolean; inlineWorker: boolean;
   nextAt: string | null; lastScheduledAt: string | null;
   channels: Array<{ id: number; version: number; slug: string; name: string; active: boolean; queries: number; discoveryQueries: number; boards: number; budget: number; profile: { label: string; count: number; missing: number; active: number; paused: number; removed: number; rules: Array<{ query: string; endpoint: "news" | "blog"; state: "missing" | "active" | "paused" | "removed" }> } | null;
+    categories?: { label: string; newItems: number }[];
     newItems: number; pending: number; fetched: number; noticeCandidates?: number; noticeUncertain?: number; noticeReports?: number; jobs: Array<{ id: number; status: string; createdAt: string; stale: boolean }>;
-    lastRun: { id: number; status: string; startedAt: string; finishedAt: string | null; counts: Record<string, number>; errors: Array<{ scope: string; message: string }> } | null;
+    lastRun: { subcategory?: string | null; id: number; status: string; startedAt: string; finishedAt: string | null; counts: Record<string, number>; errors: Array<{ scope: string; message: string }> } | null;
   }>;
 };
+
 
