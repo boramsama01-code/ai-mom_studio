@@ -47,9 +47,10 @@ function MetaConnectionSetup() {
   const guard = useDirtyGuard();
   const [values, setValues] = useState<Record<string, string>>({});
   const group = SECRET_GROUPS.find(g => g.id === "meta-instagram")!;
+  const fields = [...group.fields, ...SECRET_GROUPS.find(g => g.id === "instagram")!.fields];
   const dirty = Object.values(values).some(v => !!v.trim());
   const save = useMutation({ mutationFn: async () => {
-    for (const field of group.fields) if (values[field.key]?.trim()) await api(`/secrets/${field.key}`, { method: "PUT", body: { value: values[field.key].trim() } });
+    for (const field of fields) if (values[field.key]?.trim()) await api(`/secrets/${field.key}`, { method: "PUT", body: { value: values[field.key].trim() } });
   }, onSuccess: async () => { setValues({}); guard.setDirty("meta-instagram-setup", false); await Promise.all([qc.invalidateQueries({ queryKey: ["secrets"] }), qc.invalidateQueries({ queryKey: ["instagram-oauth-config"] })]); } });
   useEffect(() => { guard.setDirty("meta-instagram-setup", dirty, async () => { try { await save.mutateAsync(); return true; } catch { return false; } }); return () => guard.setDirty("meta-instagram-setup", false); }, [dirty, values]);
   const appId = config.data?.appId || secrets.data?.statuses.find(s => s.key === "META_APP_ID")?.value;
@@ -61,7 +62,7 @@ function MetaConnectionSetup() {
     {config.data?.redirectUri && <label className="field">Meta에 등록할 복귀 주소<input aria-label="Meta 복귀 주소" readOnly value={config.data.redirectUri} onFocus={e => e.target.select()} /><span className="hint">Meta 앱의 유효한 OAuth 리디렉션 URI에 그대로 등록하세요.</span></label>}
     <details className="instagram-app-details" open={config.data ? !config.data.configured || dirty : undefined}><summary>앱 설정 {config.data?.configured ? "확인·변경" : "입력"}</summary>
       {secrets.isLoading ? <Loading lines={2} /> : secrets.error ? <ErrorBox error={secrets.error} retry={() => secrets.refetch()} /> : <form className="stack" onSubmit={e => { e.preventDefault(); if (dirty) save.mutate(); }}>
-        {group.fields.map(f => <SecretInput key={f.key} k={f.key} label={f.label} hint={f.hint} secret={f.secret} status={secrets.data?.statuses.find(s => s.key === f.key)} value={values[f.key] ?? ""} onChange={v => setValues(prev => ({ ...prev, [f.key]: v }))} />)}
+        {fields.map(f => <SecretInput key={f.key} k={f.key} label={f.label} hint={f.hint} secret={f.secret} status={secrets.data?.statuses.find(s => s.key === f.key)} value={values[f.key] ?? ""} onChange={v => setValues(prev => ({ ...prev, [f.key]: v }))} />)}
         <div className="row"><button className="btn primary" disabled={!dirty || save.isPending}>{save.isPending ? "저장 중…" : "연결 준비 저장"}</button>{save.isSuccess && !dirty && <span className="small muted" role="status">저장했습니다.</span>}</div>{save.error && <ErrorBox error={save.error} />}
       </form>}
     </details>
