@@ -8,7 +8,7 @@ const token = "test-only-secret-token";
 let fetcher: ReturnType<typeof vi.fn>;
 beforeEach(() => { process.env.INSTAGRAM_API_VERSION = "v26.0"; fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher); });
 afterEach(() => { vi.unstubAllGlobals(); delete process.env.IG_PENGUIN_AUTH_MODE; });
-const response = (body: unknown) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } });
+const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 describe("Meta Unified Login accounts", () => {
   it("chooses only the expected username from a multi-account system-user token", async () => {
@@ -330,5 +330,71 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
     expect(await accountIdentity(token, "instagram", "spacepenguin.co")).toMatchObject({ ok: false });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(new URL(fetcher.mock.calls[0][0]).origin).toBe("https://graph.instagram.com");
+  });
+
+  describe("safe lookup failure diagnostics", () => {
+    const privateText = `provider-secret=${token}; https://private.example/?access_token=${token}`;
+
+    it.each([
+      [400, 100, 33],
+      [400, 190, 463],
+      [403, 200, undefined],
+    ])("shows only HTTP %s and numeric Graph %s/%s for a failed direct profile", async (status, code, subcode) => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response({
+        error: { code, error_subcode: subcode, message: privateText, type: "PRIVATE_PROVIDER_TYPE", fbtrace_id: "PRIVATE_TRACE", error_data: { access_token: token }, httpStatus: 299, lost: true },
+        access_token: token, url: privateText,
+      }, status));
+      const result = await accountIdentity(token, "facebook", "spacepenguin.co");
+      expect(result).toMatchObject({ ok: false, reason: "direct_account_access_failed", error: expect.stringContaining(`[진단: direct_profile / HTTP ${status} / Graph ${code} / subcode ${subcode ?? "-"} / lost=false]`) });
+      const shown = JSON.stringify(result);
+      for (const forbidden of [token, "https://", "PRIVATE_PROVIDER_TYPE", "PRIVATE_TRACE", "error_data", "299"]) expect(shown).not.toContain(forbidden);
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher.mock.calls.every(([, init]) => init.method === "GET")).toBe(true);
+    });
+
+    it("keeps diagnostics separate from the existing error classification", async () => {
+      fetcher.mockResolvedValueOnce(response({ error: { code: 190, error_subcode: 463, message: privateText, fbtrace_id: "PRIVATE_TRACE", arbitrary: privateText }, access_token: token }, 400));
+      const result = await publishingLimit(penguinId, token, "facebook");
+      expect(result).toMatchObject({ ok: false, lost: false, err: { kind: "token_expired", error: `액세스 토큰 만료·무효: ${privateText}` } });
+      expect(result.ok ? null : "diagnostic" in result ? result.diagnostic : null).toEqual({ httpStatus: 400, graphCode: 190, graphSubcode: 463 });
+    });
+
+    it.each([`190 ${token}`, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, { code: token }])("rejects non-allowlisted Graph number fields: %j", async unsafeCode => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response({ error: { code: unsafeCode, error_subcode: unsafeCode, message: privateText } }, 400));
+      const result = await accountIdentity(token, "facebook", "spacepenguin.co");
+      expect(result).toMatchObject({ ok: false, reason: "direct_account_access_failed", error: expect.stringContaining("[진단: direct_profile / HTTP 400 / Graph - / subcode - / lost=false]") });
+      expect(JSON.stringify(result)).not.toContain(token);
+      expect(JSON.stringify(result)).not.toContain("https://");
+    });
+
+    it("distinguishes a transport failure without exposing its exception", async () => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockRejectedValueOnce(new Error(privateText));
+      const result = await accountIdentity(token, "facebook", "spacepenguin.co");
+      expect(result).toMatchObject({ ok: false, reason: "direct_account_access_failed", error: expect.stringContaining("[진단: direct_profile / HTTP - / Graph - / subcode - / lost=true]") });
+      expect(JSON.stringify(result)).not.toContain(token);
+      expect(JSON.stringify(result)).not.toContain("https://");
+    });
+
+    it("identifies an assigned-list failure without starting another request", async () => {
+      fetcher.mockResolvedValueOnce(response({ error: { code: 190, error_subcode: 463, message: privateText, fbtrace_id: "PRIVATE_TRACE" } }, 400));
+      const result = await accountIdentity(token, "facebook", "spacepenguin.co");
+      expect(result).toMatchObject({ ok: false, error: expect.stringContaining("[진단: assigned_accounts / HTTP 400 / Graph 190 / subcode 463 / lost=false]") });
+      expect(JSON.stringify(result)).not.toContain(token);
+      expect(JSON.stringify(result)).not.toContain("PRIVATE_TRACE");
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    });
+
+    it("propagates only the safe diagnostic in the existing connection error without saving", async () => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response({ error: { code: 100, error_subcode: 33, message: privateText, fbtrace_id: "PRIVATE_TRACE" } }, 400));
+      const { db, transaction } = connectionDatabase();
+      const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_account_access_failed" }, message: expect.stringContaining("[진단: direct_profile / HTTP 400 / Graph 100 / subcode 33 / lost=false]") });
+      expect(failure.message).not.toContain(token);
+      expect(failure.message).not.toContain("https://");
+      expect(failure.message).not.toContain("PRIVATE_TRACE");
+      expect(failure.extra).toEqual({ code: "direct_account_access_failed" });
+      expect(transaction).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    });
   });
 });
