@@ -452,6 +452,14 @@ function CardApprovePanel({ d, cid, onApproved, runtime }: { d: Detail; cid: num
   const [altDirty,setAltDirty]=useState(false);
   const [pickedCard, setPickedCard] = useState<number | null>(null);
   const currentCard = revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
+  const currentApprovalIds = new Set(d.approvals.filter(approval => approval.revisionId === d.current?.id).map(approval => approval.id));
+  const existingDeliveryState = (["unknown", "processing", "succeeded", "scheduled"] as const).find(status => d.deliveries.some(({ d: delivery }) => currentApprovalIds.has(delivery.approvalId) && delivery.status === status));
+  const existingDeliveryMessage = existingDeliveryState ? {
+    scheduled: "이미 전송 예약이 있습니다. 예약 변경은 전송 상태에서 기존 예약을 취소한 뒤 다시 승인해 주세요.",
+    processing: "이 버전의 전송을 처리 중입니다. 전송 상태에서 결과를 확인해 주세요.",
+    succeeded: "이 버전은 이미 게시됐습니다. 전송 상태에서 게시물을 확인해 주세요.",
+    unknown: "이 버전의 게시 여부를 먼저 확인해야 합니다. 전송 상태에서 실제 게시물을 확인해 주세요.",
+  }[existingDeliveryState] : null;
   const [caps, setCaps] = useState(d.defaultCaptions ?? { instagram: "", telegram: "" });
   const [when, setWhen] = useState(() => toLocalInput(new Date(Date.now() + 3600_000)));
   const tpls = useTemplates(cid);
@@ -614,8 +622,9 @@ function CardApprovePanel({ d, cid, onApproved, runtime }: { d: Detail; cid: num
           </label>
           <PublicationRuntimeNotice runtime={runtime} />
           {d.publicationReadiness && !d.publicationReadiness.ready && <div className="notice warn" role="alert"><strong>전송 예약 전에 해결할 항목</strong><ul>{d.publicationReadiness.blockers.map(reason => <li key={reason}>{reason}</li>)}</ul><div className="row"><GuardedLink href="/instagram">인스타그램 연결 확인 →</GuardedLink><GuardedLink href="/connections">API 연결 확인 →</GuardedLink></div></div>}
+          {existingDeliveryMessage && <div className="notice warn"><p className="small">{existingDeliveryMessage}</p><button className="btn sm" onClick={onApproved}>전송 상태 확인</button></div>}
           <div className="row">
-            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || altDirty || !currentCard || d.item.reviewStatus !== "reviewed" || d.publicationReadiness?.ready === false}>
+            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || altDirty || !currentCard || d.item.reviewStatus !== "reviewed" || d.publicationReadiness?.ready === false || !!existingDeliveryState}>
               {approve.isPending ? "승인·예약 저장 중…" : "이 버전·카드·캡션으로 최종 승인"}
             </button>
           </div>

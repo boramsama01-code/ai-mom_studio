@@ -113,6 +113,30 @@ describe("승인 저장과 실제 전송의 구분", () => {
     expect(writes()).toEqual([]);
   });
 
+  it("blocks duplicate requests for the same revision while allowing an approval with no delivery to be approved again", async () => {
+    await render(createElement(ItemDetailPage, { cid: 2, id: 9 }));
+    for (const status of ["scheduled", "processing", "succeeded", "unknown"]) {
+      detail.deliveries[0].d.status = status;
+      await act(async () => { client.setQueryData(["ch", 2, "item", 9], structuredClone(detail)); });
+      await click("3 카드·승인");
+      expect(button("이 버전·카드·캡션으로 최종 승인").disabled, status).toBe(true);
+      if (status === "scheduled") expect(host.textContent).toContain("기존 예약을 취소한 뒤 다시 승인");
+      await click("전송 상태 확인");
+      expect(host.querySelector("#delivery-panel")).not.toBeNull();
+    }
+    for (const status of ["failed", "dry_run"]) {
+      detail.deliveries[0].d.status = status;
+      await act(async () => { client.setQueryData(["ch", 2, "item", 9], structuredClone(detail)); });
+      await click("3 카드·승인");
+      expect(button("이 버전·카드·캡션으로 최종 승인").disabled, status).toBe(false);
+    }
+    detail.deliveries = [];
+    await act(async () => { client.setQueryData(["ch", 2, "item", 9], structuredClone(detail)); }); await settle();
+    expect(button("이 버전·카드·캡션으로 최종 승인").disabled).toBe(false);
+    expect(host.textContent).not.toContain("이미 전송 예약이 있습니다");
+    expect(writes()).toEqual([]);
+  });
+
   it("moves to the persisted delivery record after approval without calling it a successful post", async () => {
     detail.approvals = []; detail.deliveries = []; detail.item.publishStatus = "waiting";
     await render(createElement(ItemDetailPage, { cid: 2, id: 9 })); await click("3 카드·승인");

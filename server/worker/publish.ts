@@ -182,6 +182,18 @@ export async function approveItem(
   const approval = await db.transaction(async (tx) => {
     const [freshItem] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
     if (freshItem.currentRevisionId !== rev.id || freshItem.reviewStatus !== "reviewed" || freshItem.excluded) throw new HttpError(409, "승인 전에 콘텐츠가 변경됐습니다. 다시 확인하세요.");
+    // Lock every existing delivery for this revision, including failed rows:
+    // a concurrent worker claim or retry must finish before this decision, or
+    // wait until approval replacement has committed. Item locking also prevents
+    // two new approvals from both observing an empty delivery history.
+    const priorDeliveries = await tx.select({ id: deliveries.id, status: deliveries.status }).from(deliveries)
+      .innerJoin(approvals, eq(approvals.id, deliveries.approvalId))
+      .where(and(eq(approvals.contentItemId, item.id), eq(approvals.revisionId, rev.id)))
+      .orderBy(deliveries.id).for("update", { of: deliveries });
+    if (priorDeliveries.some(delivery => delivery.status === "unknown")) throw new HttpError(409, "게시 결과가 확인되지 않은 전송이 있습니다. 전송 상태에서 실제 게시 여부를 먼저 확인하세요.");
+    if (priorDeliveries.some(delivery => delivery.status === "processing")) throw new HttpError(409, "이 버전이 이미 전송 중입니다. 전송 상태를 먼저 확인하세요.");
+    if (priorDeliveries.some(delivery => delivery.status === "succeeded")) throw new HttpError(409, "이 버전은 이미 게시됐습니다. 전송 상태에서 게시물을 확인하세요.");
+    if (priorDeliveries.some(delivery => delivery.status === "scheduled")) throw new HttpError(409, "이 버전은 이미 예약돼 있습니다. 전송 상태에서 기존 예약을 취소한 뒤 다시 승인하세요.");
     const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
     if (board) { assertStudioActive(board); if (board.importedMeta?.studioPublication && rev.payload.studioVersion !== board.version) throw new HttpError(409, "제작보드가 수정됐습니다. 미리보기를 다시 준비하세요."); }
     const [freshAsset]=await tx.select().from(mediaAssets).where(eq(mediaAssets.id,asset.id));

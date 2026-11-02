@@ -294,9 +294,27 @@ describe("카드·승인·게시", () => {
     expect(await db.select().from(schema.deliveries).where(eq(schema.deliveries.approvalId, legacy.id))).toHaveLength(0);
     expect((await db.select().from(schema.approvals).where(eq(schema.approvals.id, legacy.id)))[0].status).toBe("active");
     process.env.TG_OPPORTUNITIES_CHAT_ID = "@test_channel";
-    const approved = await agent.post(path).set(H).send(body);
+    let approved = await agent.post(path).set(H).send(body);
     expect(approved.status).toBe(201);
     expect(approved.body).toMatchObject({ destinations: 1, publicationReadiness: { ready: true, dryRun: false }, workerStarted: false });
+    let [delivery] = await db.select().from(schema.deliveries).where(eq(schema.deliveries.approvalId, approved.body.approval.id));
+    for (const status of ["scheduled", "processing", "succeeded", "unknown"]) {
+      await db.update(schema.deliveries).set({ status }).where(eq(schema.deliveries.id, delivery.id));
+      const [beforeDelivery] = await db.select().from(schema.deliveries).where(eq(schema.deliveries.id, delivery.id));
+      const [beforeApproval] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, approved.body.approval.id));
+      expect((await agent.post(path).set(H).send(body)).status).toBe(409);
+      expect((await db.select().from(schema.deliveries).where(eq(schema.deliveries.id, delivery.id)))[0]).toEqual(beforeDelivery);
+      expect((await db.select().from(schema.approvals).where(eq(schema.approvals.id, approved.body.approval.id)))[0]).toEqual(beforeApproval);
+    }
+    for (const status of ["failed", "dry_run"]) {
+      await db.update(schema.deliveries).set({ status }).where(eq(schema.deliveries.id, delivery.id));
+      const previousId = approved.body.approval.id;
+      approved = await agent.post(path).set(H).send(body);
+      expect(approved.status).toBe(201);
+      expect(approved.body.approval.id).not.toBe(previousId);
+      expect((await db.select().from(schema.deliveries).where(eq(schema.deliveries.id, delivery.id)))[0].status).toBe(status);
+      [delivery] = await db.select().from(schema.deliveries).where(eq(schema.deliveries.approvalId, approved.body.approval.id));
+    }
     const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ ok: true, result: { message_id: 701, chat: { username: "test_channel" } } }), { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
     expect((await publishDue(db, { now: new Date(scheduledAt.getTime() - 1000) })).processed).toBe(0);
