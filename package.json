@@ -14,6 +14,7 @@
     "build": "vite build && node scripts/build-server.mjs",
     "start": "NODE_ENV=production node dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "pretest": "node scripts/restore-studio-assets.mjs",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
@@ -69,3 +70,4 @@
     "vitest": "^5.0.2"
   }
 }
+

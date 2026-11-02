@@ -23,7 +23,12 @@ export type StudioStage = typeof studioStages[number];
 export type StudioProvider = AiProvider;
 
 const date = z.string().refine(v => v === "" || (/^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(new Date(`${v}T00:00:00Z`).getTime()) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v), "올바른 날짜를 입력하세요.");
-export const studioPanelSchema = z.object({ scene: z.string().max(4000), dialogue: z.string().max(3000), imageId: z.number().int().positive().nullable().default(null) }).strict();
+export const studioPoseReferenceSchema = z.object({ character: z.enum(studioCharacters), pose: z.number().int().min(1).max(100) }).strict();
+export const studioPanelSchema = z.object({
+  scene: z.string().max(4000), dialogue: z.string().max(3000), imageId: z.number().int().positive().nullable().default(null),
+  // Optional in TypeScript for existing callers; Zod fills the default for saved legacy panels.
+  poseRefs: z.array(studioPoseReferenceSchema).max(4).refine(refs => new Set(refs.map(ref => ref.character)).size === refs.length, "한 컷에서 같은 캐릭터의 포즈는 하나만 선택하세요.").default([]).optional(),
+}).strict();
 export const studioContentSchema = z.object({
   finishedDeck: z.object({ pages: z.array(z.object({ imageId: z.number().int().positive(), name: z.string().max(200), altText: z.string().max(1000).default(""), uploadId: z.string().uuid().optional() }).strict()).max(10).refine(pages => new Set(pages.map(p => p.imageId)).size === pages.length, "같은 이미지는 한 번만 넣어 주세요.") }).strict().nullable().default(null),
   altTexts: z.array(z.string().max(1000)).max(10).default([]),
@@ -37,10 +42,14 @@ export const studioContentSchema = z.object({
   script: z.string().max(24000).default(""), caption: z.string().max(8000).default(""),
   exportDesign: z.enum(studioExportDesigns).default("editorial"),
   sourceLabel: z.string().trim().max(180).default(""),
-  panels: z.array(studioPanelSchema).length(4).default(() => Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null }))),
+  panels: z.array(studioPanelSchema).length(4).default(() => Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null, poseRefs: [] }))),
   characters: z.array(z.enum(studioCharacters)).max(4).default(["penguin"]),
   imagePath: z.union([z.literal(""), z.literal("/studio-assets/webtoon-01.png")]).default(""),
-}).strict();
+}).strict().superRefine((content, ctx) => {
+  content.panels.forEach((panel, panelIndex) => panel.poseRefs?.forEach((ref, refIndex) => {
+    if (!content.characters.includes(ref.character)) ctx.addIssue({ code: "custom", path: ["panels", panelIndex, "poseRefs", refIndex, "character"], message: "이 컷에 참고할 캐릭터를 등장인물에서 먼저 선택하세요." });
+  }));
+});
 /** Keep legacy 1,000-character descriptions readable; enforce the new rule on newly submitted fields. */
 function studioInputAltIssues(value: { altTexts?: string[]; finishedDeck?: StudioContent["finishedDeck"]; experience?: Experience | null }) {
  const issues: Array<{ path: (string | number)[]; message: string }> = [];
@@ -56,7 +65,7 @@ function studioInputAltIssues(value: { altTexts?: string[]; finishedDeck?: Studi
  }
  return issues;
 }
-export const studioCreateSchema = studioContentSchema.extend({ sourceItemId: z.number().int().positive().optional() }).superRefine((value, ctx) => { for (const issue of studioInputAltIssues(value)) ctx.addIssue({code:"custom",...issue}); });
+export const studioCreateSchema = studioContentSchema.safeExtend({ sourceItemId: z.number().int().positive().optional() }).superRefine((value, ctx) => { for (const issue of studioInputAltIssues(value)) ctx.addIssue({code:"custom",...issue}); });
 // Zod 4 applies defaults inside optional fields; unwrap them so a stage-only PATCH cannot erase content.
 export const studioPatchSchema = z.object({
   finishedDeck: studioContentSchema.shape.finishedDeck.unwrap().refine(
@@ -101,6 +110,7 @@ export const studioGenerationSchema = z.object({
 });
 export type StudioGeneration = z.infer<typeof studioGenerationSchema>;
 export type StudioPanel = z.infer<typeof studioPanelSchema>;
+export type StudioPoseReference = z.infer<typeof studioPoseReferenceSchema>;
 export type StudioContent = z.infer<typeof studioContentSchema>;
 export type StudioCardInput = StudioContent;
 export type StudioCard = StudioContent & { id: number; version: number; sourceItemId: number | null; createdAt: string; updatedAt: string; trashedAt?: string | null; sourceOutput?: import("./carousel").SourceOutput };
@@ -112,4 +122,5 @@ export type StudioTrashResult = { card: StudioCard; cancelledJobs: number; cance
 export type StudioCardDetail = { card: StudioCard; revisions: StudioRevision[]; jobs: StudioJob[] };
 export type StudioExportCheck = { errors: Array<{ field: string; message: string }>; warnings: string[]; pageCount: number };
 export function emptyStudioCard(): StudioContent { return studioContentSchema.parse({ title: "새 콘텐츠" }); }
+
 

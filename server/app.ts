@@ -14,6 +14,7 @@ import { templateRoutes } from "./routes/templates";
 import { studioRoutes } from "./routes/studio";
 import { collectionRoutes } from "./routes/collection";
 import { HttpError } from "./routes/util";
+import { isPrivateStudioAssetPath } from "./studioAssetPath";
 
 export function createApp() {
   const app = express();
@@ -39,7 +40,7 @@ export function createApp() {
   // 공개: 헬스체크(비밀값 없음). Resolver version verifies the actual running backend.
   app.get("/api/health", async (_req, res) => {
     const db = await dbHealth();
-    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", sourceResolver: "publisher-direct-v4", studioDrafts: "complete-fields-v2", cardRenderer: "adaptive-body-v1", studioPublishing: "finished-deck-v1" });
+    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", sourceResolver: "publisher-direct-v4", studioDrafts: "complete-fields-v2", cardRenderer: "adaptive-body-v1", studioPublishing: "finished-deck-v1", studioPoses: "family-v2-100" });
   });
 
   const sessionOk = env.databaseUrl ? installSession(app) : false;
@@ -56,6 +57,13 @@ export function createApp() {
     app.use("/api", requireOperator, channelRoutes, ruleRoutes, itemRoutes, opsRoutes, secretRoutes, templateRoutes, studioRoutes, collectionRoutes);
   }
   app.use("/api", (_req, res) => res.status(404).json({ error: "없는 API입니다." }));
+
+  // New family artwork is private, including direct file downloads and Vite's dev middleware.
+  app.use((req, res, next) => {
+    if (!isPrivateStudioAssetPath(req.path)) return next();
+    res.set("Cache-Control", "private, no-store");
+    return requireOperator(req, res, next);
+  });
 
   // Keep API callbacks and media links working on the previous address. Only
   // browser navigation moves, with paths/query strings preserved and no host-derived target.
@@ -82,5 +90,6 @@ export function createApp() {
   });
   return app;
 }
+
 
 

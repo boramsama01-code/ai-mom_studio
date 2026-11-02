@@ -23,6 +23,8 @@ import { studioCaptionDraft } from "@shared/studioWorkflow";
 import type { StudioGeneration } from "@shared/studio";
 import { StudioExport, StudioQuickExport } from "./StudioExport";
 import { StudioPanelImport } from "./StudioPanelImport";
+import { CharacterPortrait, StudioCharacterArchive, StudioPosePicker } from "./StudioPosePicker";
+import { STUDIO_CHARACTERS, STUDIO_FAMILY_REFERENCE_URL } from "@shared/studioCharacters";
 import { StudioPromptCopy, StudioTextImport } from "./StudioTextImport";
 import { studioChatGptCaptionPrompt } from "@shared/studioTextImport";
 import type { StudioChannel as Channel, StudioStage as Stage, StudioCharacter as Character, StudioFormat as Format, StudioPanel as Panel, StudioContent as CardInput, StudioCard as Card, StudioRevision as Revision, StudioJob as Job, StudioBoard as Board, StudioCardDetail as Detail } from "@shared/studio";
@@ -33,12 +35,7 @@ function useStudioChannels(includeArchived = false) {
   return allChannels.filter(c => (includeArchived || c.active) && !(c.slug === "science-dialogue" && allChannels.some(other => other.slug === "current-dialogue"))).map(c => ({ id: studioKey(c.slug), name: c.name, role: c.description, active: c.active, accent: c.accentColor,
     image: (c.slug === "opportunities" ? "pempem" : c.slug === "current-dialogue" ? "pengpeng" : c.slug === "penguin" ? "pengki" : c.slug === "fryday" ? "penguin" : null) as Character | null }));
 }
-const characters: Array<{ id: Character; name: string; role: string; detail: string }> = [
-  { id: "pengpeng", name: "펭펭", role: "아빠 · 지구 특파원", detail: "펼친 신문. Alligodang에서 아이와 나눌 뉴스와 지구의 이야기를 전합니다." },
-  { id: "pempem", name: "펨펨", role: "엄마 · 전 우주기관 연구원", detail: "학사모, 연필, 분홍 볼터치. Highscoop의 안내자입니다." },
-  { id: "penguin", name: "김펭귄", role: "첫째 · 식품공학 대학원생", detail: "흰 용기에 담긴 노란 감자튀김. 최고의 감자튀김을 고향에 전하려 합니다." },
-  { id: "pengki", name: "김펭키", role: "둘째 · 탐사 과학자를 꿈꾸는 학생", detail: "작은 체구와 노란 가방. 가족에게 새로운 질문을 건넵니다." },
-];
+const characters = STUDIO_CHARACTERS;
 
 const imageUrl = (id: number) => `/api/studio/images/${id}`;
 const dateTime = (v: string) => new Date(v).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -50,8 +47,8 @@ export function StudioPage({ cardId }: { cardId?: number }) {
   const guard = useDirtyGuard();
   if (cardId !== undefined) return Number.isSafeInteger(cardId) && cardId > 0 ? <StudioDetail key={cardId} id={cardId} /> : <div className="notice err">작업 주소를 확인해 주세요. <GuardedLink href="/">보드로</GuardedLink></div>;
   return <div className="studio">
-    <header className="studio-home-top"><span className="studio-eyebrow">MY STUDIO <span className="studio-today">{new Date().toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", weekday: "long" })}</span></span>{view !== "trash" && <button className="btn sm ghost" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 원본 ↗" : "← 내 콘텐츠"}</button>}</header>
-    {view === "trash" ? <StudioTrashView onBack={() => setView("board")} /> : view === "board" ? <StudioBoard onTrash={() => guard.confirmLeave(() => setView("trash"))} /> : <CharacterArchive />}
+    <header className="studio-home-top"><span className="studio-eyebrow">MY STUDIO <span className="studio-today">{new Date().toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", weekday: "long" })}</span></span>{view !== "trash" && <button className="btn sm ghost" onClick={() => guard.confirmLeave(() => setView(view === "board" ? "characters" : "board"))}>{view === "board" ? "캐릭터 · 100포즈 ↗" : "← 내 콘텐츠"}</button>}</header>
+    {view === "trash" ? <StudioTrashView onBack={() => setView("board")} /> : view === "board" ? <StudioBoard onTrash={() => guard.confirmLeave(() => setView("trash"))} /> : <StudioCharacterArchive />}
   </div>;
 }
 
@@ -263,6 +260,12 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   });
   function change<K extends keyof CardInput>(key: K, value: CardInput[K]) { setForm(f => ({ ...f, [key]: value })); }
   function changePanel(i: number, key: "scene" | "dialogue", value: string) { change("panels", form.panels.map((p, n) => n === i ? { ...p, [key]: value } : p)); }
+  function changeCast(character: Character, selected: boolean) {
+    setForm(current => {
+      const cast = characters.filter(c => c.id === character ? selected : current.characters.includes(c.id)).map(c => c.id);
+      return { ...current, characters: cast, panels: current.panels.map(panel => ({ ...panel, poseRefs: (panel.poseRefs ?? []).filter(reference => cast.includes(reference.character)) })) };
+    });
+  }
   const busy = save.isPending || generate.isPending || restore.isPending || uploading !== null;
   const archivedChannel = !channels.find(c => c.id === form.channel)?.active;
   const canGenerate = !busy && !working && !newer && !archivedChannel && !!form.title.trim();
@@ -342,8 +345,8 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         <div className="studio-section-heading"><div><span className="studio-step">02 · 그림 제작</span><h2>{form.format === "카드뉴스" ? "본문 4장" : "네컷 구성"}</h2></div><span className="small muted">{form.panels.filter(p => p.imageId).length} / 4 그림</span></div>
         <div className="studio-image-mode" role="group" aria-label="그림 제작 방법"><button aria-pressed={imageMode === "chatgpt"} disabled={busy} onClick={() => guard.confirmLeave(() => setImageMode("chatgpt"))}>ChatGPT로 만들기</button><button aria-pressed={imageMode === "api"} disabled={busy} onClick={() => guard.confirmLeave(() => setImageMode("api"))}>API로 자동 생성</button></div>
         <p className="small muted">{imageMode === "chatgpt" ? "프롬프트 복사 → ChatGPT에서 이미지 생성 → 해당 컷에 붙여넣기. 스튜디오 API 사용료 없이 저장합니다." : "장면·대사를 사용해 한 번에 한 컷을 생성합니다. 이미지 API 사용료가 발생합니다."}</p>
-        <fieldset className="studio-cast"><legend>등장인물 · 그림 기준</legend><div className="studio-character-picks">{characters.map(c => <label key={c.id} className={form.characters.includes(c.id) ? "selected" : ""}><input type="checkbox" disabled={busy} checked={form.characters.includes(c.id)} onChange={e => change("characters", e.target.checked ? [...form.characters, c.id] : form.characters.filter(id => id !== c.id))} /><img src={getCharacterImage(c.id)} alt="" /><span>{c.name}</span></label>)}</div></fieldset>
-        {imageMode === "chatgpt" && form.characters.length > 0 && <div className="studio-reference-downloads"><span className="small muted">처음 만들 때 캐릭터 원본도 ChatGPT에 첨부하세요.</span><div className="row">{characters.filter(c => form.characters.includes(c.id)).map(c => <a key={c.id} className="btn sm" href={getCharacterImage(c.id)} download={`${c.name}-원본.png`}>{c.name} 원본 ↓</a>)}</div></div>}
+        <fieldset className="studio-cast"><legend>등장인물 · 나이순</legend><div className="studio-character-picks">{characters.map(c => <label key={c.id} className={form.characters.includes(c.id) ? "selected" : ""}><input type="checkbox" disabled={busy} checked={form.characters.includes(c.id)} onChange={e => changeCast(c.id, e.target.checked)} /><CharacterPortrait character={c.id} /><span>{c.name}<small>{c.age}살</small></span></label>)}</div></fieldset>
+        {imageMode === "chatgpt" && form.characters.length > 0 && <div className="studio-reference-downloads"><span className="small muted">가족 기준 그림과 이 컷에서 고른 포즈 이미지를 ChatGPT에 함께 첨부하세요.</span><div className="row"><a className="btn sm" href={STUDIO_FAMILY_REFERENCE_URL} download="우주펭귄상회-가족-기준그림.png">가족 기준 그림 ↓</a></div></div>}
         {imageMode === "api" && settings.data?.ai.image === false && <p className="notice warn small">API 자동 생성에는 OpenAI 키가 필요합니다. <GuardedLink href="/connections?service=openai">OpenAI 키 입력 →</GuardedLink></p>}
         {form.imagePath && <details className="studio-original"><summary>이전 웹툰 시안 보기</summary><img src={form.imagePath} alt="이전 네컷 웹툰 시안" /></details>}
         <div className="studio-panel-selector" role="group" aria-label="편집할 컷">{form.panels.map((p, i) => <button key={i} aria-pressed={selectedPanel === i} onClick={() => setSelectedPanel(i)}><strong>{i + 1}{form.format === "카드뉴스" ? "번째 본문" : "컷"}</strong><span>{p.imageId ? "그림 있음" : p.scene || p.dialogue ? "구성 있음" : "비어 있음"}</span></button>)}</div>
@@ -351,6 +354,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
           <div className="row between"><h3>{i + 1}{form.format === "카드뉴스" ? "번째 본문" : "컷"}</h3><span className="small muted">{p.imageId ? "그림 있음" : "구성 중"}</span></div>
           <label className="field small">장면<textarea disabled={busy} aria-label={panelLabel(i, "장면")} rows={3} value={p.scene} maxLength={4000} onChange={e => changePanel(i, "scene", e.target.value)} placeholder="등장인물, 표정, 배경, 소품" /></label>
           <label className="field small">{form.format === "카드뉴스" ? "본문" : "대사"}<textarea id={panelField(i)} disabled={busy} aria-label={panelLabel(i, "대사")} rows={2} value={p.dialogue} maxLength={3000} onChange={e => changePanel(i, "dialogue", e.target.value)} placeholder="그림 아래에 표시할 글" /></label>
+          <StudioPosePicker cast={form.characters} value={p.poseRefs ?? []} onChange={poseRefs => change("panels", form.panels.map((panel, index) => index === i ? { ...panel, poseRefs } : panel))} disabled={busy || working || newer} panelIndex={i} imageMode={imageMode} />
           {imageMode === "chatgpt" ? <StudioPanelImport content={form} index={i} channelName={channelName(form.channel)} instruction={panelInstructions[i]} disabled={busy || working || newer || !form.title.trim()} upload={uploadImage} /> : <>
             <div className="studio-panel-picture">{p.imageId ? <a href={imageUrl(p.imageId)} target="_blank" rel="noopener noreferrer"><img src={imageUrl(p.imageId)} alt={panelLabel(i, "그림")} /></a> : <div className="studio-picture-empty">{i + 1}<span>위에 쓴 내용이 그림으로 이어집니다.</span></div>}</div>
             <button className="btn primary" aria-label={panelLabel(i, p.imageId ? "다시 그리기" : "그리기")} disabled={!canDraw || (!p.scene.trim() && !p.dialogue.trim() && !panelInstructions[i].trim())} onClick={() => run({ kind: "image", panelIndex: i, instruction: panelInstructions[i] })}>{generate.isPending && generate.variables?.kind === "image" && generate.variables.panelIndex === i ? "요청 중…" : p.imageId ? "이 컷 다시 그리기" : "이 컷 그리기"}</button>
@@ -392,7 +396,6 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   </div>;
 }
 
-const getCharacterImage = (id: Character) => "/studio-assets/" + id + ".png";
 const panelLabel = (i: number, label: string) => (i + 1) + "컷 " + label;
 const panelField = (i: number) => "studio-panels." + i + ".dialogue";
 const revisionLabel = (version: number) => "버전 " + version;
@@ -401,8 +404,6 @@ function Snapshot({ title, card }: { title: string; card: CardInput }) {
   return <article className="studio-snapshot"><h4>{title}</h4><strong>{card.title}</strong><p>{card.script || card.memo || "원고 없음"}</p>{card.panels?.map((p, i) => <div className="studio-snapshot-panel" key={i}><b>{i + 1}컷</b>{p.imageId && <img src={imageUrl(p.imageId)} alt={`${title} ${i + 1}컷`} />}<p>{p.scene}</p><blockquote>{p.dialogue}</blockquote></div>)}<h4>캡션</h4><p>{card.caption || "캡션 없음"}</p></article>;
 }
 
-function CharacterArchive() {
-  return <><section className="studio-character-archive">{characters.map((c) => <article className="panel" key={c.id}><div className="studio-character-art"><img src={`/studio-assets/${c.id}.png`} alt={`${c.name} 캐릭터 원본`} /></div><h2>{c.name}</h2><p className="small muted">{c.role}</p><p>{c.detail}</p><a className="btn sm" href={`/studio-assets/${c.id}.png`} download={`${c.name}.png`}>원본 다운로드</a></article>)}</section><section className="panel studio-canon"><h2>세계관·외형 기준</h2><p>남극성-09에서 온 네 가족. 둥근 우주 헬멧, 옆모습 중심, 뾰족한 검은 부리, 작은 흰 점 눈, 길쭉한 검정·흰색 몸과 일정한 굵기의 선을 유지합니다.</p><p className="small muted">Alligodang은 아이와 함께 뉴스·과학·세상 이야기를 나누는 채널입니다. ‘지구 통신실’은 세계관 속 장소입니다.</p></section></>;
-}
+
 
 

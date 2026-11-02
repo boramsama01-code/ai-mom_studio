@@ -21,6 +21,7 @@ import { audit } from "./audit";
 import { z } from "zod";
 import { ah, parse } from "./routes/util";
 import { checkPasswordReset, operatorCredential, setOperatorPassword } from "./services/operatorPassword";
+import { isPrivateStudioAssetPath } from "./studioAssetPath";
 
 declare module "express-session" {
   interface SessionData {
@@ -57,7 +58,7 @@ export function installSession(app: Express) {
   );
   // Password versions are checked against shared DB state on both Render services.
   app.use(ah(async (req, _res, next) => {
-    if (!req.path.startsWith("/api") || !req.session?.user || req.session.demo) return next();
+    if (!(req.path.startsWith("/api") || isPrivateStudioAssetPath(req.path)) || !req.session?.user || req.session.demo) return next();
     const credential = await operatorCredential(getDb());
     if ((req.session.credentialVersion ?? 0) !== credential.version || (req.session.privateLinkHash && (req.session.privateLinkHash !== env.privateLinkHash || req.session.privateLinkHash === credential.blockedPrivateLinkHash))) {
       delete req.session.user;
@@ -222,5 +223,6 @@ export function installAuthRoutes(app: Express) {
 export function actorOf(req: Request) {
   return req.session?.user ?? "unknown";
 }
+
 
 
