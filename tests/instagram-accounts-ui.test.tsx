@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InstagramAccounts } from "../client/src/pages/InstagramAccounts";
+import { InstagramConnectionsPage } from "../client/src/pages/InstagramConnections";
 import { DirtyGuardProvider } from "../client/src/state";
 import { DirtyModal, GuardedLink } from "../client/src/ui";
 import type { InstagramAccountRow, InstagramConnectionCheck } from "../shared/channelInstagram";
@@ -20,15 +21,17 @@ const accounts: InstagramAccountRow[] = [
   { channelId: 4, channelName: "fryday", expectedUsername: "fryday.official.kr", destinations: [] },
 ];
 const success: InstagramConnectionCheck = { ok: true, username: "spacepenguin.co", checkedAt: "2026-11-02T05:00:00Z", mediaHosting: { ok: true, message: "이미지 저장소 확인 완료" } };
-let host: HTMLDivElement, root: Root, client: QueryClient;
+let host: HTMLDivElement, root: Root, client: QueryClient, oauthConfigured: boolean;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  oauthConfigured = true;
   mocks.check.mockResolvedValue(success);
   mocks.connect.mockResolvedValue({ ok: true, username: "spacepenguin.co" });
   mocks.api.mockImplementation((path: string, options?: unknown) => {
     if (path === "/studio/instagram/accounts") return Promise.resolve({ accounts });
-    if (path === "/studio/instagram/oauth/config") return Promise.resolve({ configured: true, missing: [], appId: "123456", redirectUri: "https://studio.example/api/studio/instagram/oauth/callback" });
+    if (path === "/studio/instagram/oauth/config") return Promise.resolve({ configured: oauthConfigured, missing: oauthConfigured ? [] : ["META_APP_ID", "META_APP_SECRET", "META_IG_LOGIN_CONFIG_ID"], appId: oauthConfigured ? "123456" : null, redirectUri: "https://studio.example/api/studio/instagram/oauth/callback" });
+    if (path === "/secrets") return Promise.resolve({ groups: [], statuses: [], tests: {} });
     if (path === "/studio/instagram/1/check") return mocks.check();
     if (path === "/studio/instagram/1/connect") return mocks.connect(options);
     throw new Error(`Unexpected API: ${path}`);
@@ -92,6 +95,45 @@ describe("Instagram account connection states", () => {
     await click("취소");
     expect(host.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe("synthetic-ui-test-token");
     expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it("offers the token form directly when OAuth is not configured and explains the issuance screen without changing typed tokens", async () => {
+    oauthConfigured = false;
+    await render(); await click("연결 정보 확인·갱신", account());
+    expect(account().querySelector('input[type="password"]')).not.toBeNull();
+    expect(account().textContent).toContain("앱 ID·시크릿·구성 ID는 필요하지 않아요");
+    expect(account().textContent).not.toContain("최초 연결 준비가 필요해요");
+    expect(account().textContent).not.toContain("새 앱");
+    expect(account().textContent).not.toContain("기존 앱");
+    const mode = account().querySelector<HTMLSelectElement>("select")!;
+    expect(mode.value).toBe("facebook");
+    expect([...mode.options].map(option => option.textContent)).toEqual(["Meta 통합 로그인", "Instagram 로그인 (이전 API)"]);
+    expect(account().textContent).toContain("‘통합된 로그인이 포함된 API 설정’에서 발급한 토큰");
+    await fillToken();
+    await act(async () => { mode.value = "instagram"; mode.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(account().textContent).toContain("‘Instagram 로그인이 포함된 API 설정’에서 발급한 토큰");
+    expect(account().querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe("synthetic-ui-test-token");
+    oauthConfigured = true;
+    await act(async () => { await client.invalidateQueries({ queryKey: ["instagram-oauth-config"] }); }); await settle();
+    expect(account().querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe("synthetic-ui-test-token");
+    expect(mode.value).toBe("instagram");
+    expect(mocks.api.mock.calls.some(([, options]) => options?.method === "POST" || options?.method === "PUT")).toBe(false);
+  });
+
+  it("keeps optional login-button setup collapsed while manual token connection remains available", async () => {
+    oauthConfigured = false;
+    await render(<InstagramConnectionsPage />); await settle();
+    const setup = host.querySelector<HTMLDetailsElement>("details#setup")!;
+    expect(setup).not.toBeNull();
+    expect(setup.open).toBe(false);
+    expect(setup.querySelector("summary")?.textContent).toBe("로그인 버튼 설정 (선택)");
+    expect(setup.querySelector("#sec-META_APP_ID")).not.toBeNull();
+    expect(setup.querySelector("#sec-META_APP_SECRET")).not.toBeNull();
+    await click("연결 정보 확인·갱신", account());
+    expect(account().querySelector('input[type="password"]')).not.toBeNull();
+    expect(setup.open).toBe(false);
+    expect(account().textContent).not.toContain("최초 연결 준비가 필요해요");
+    expect(mocks.api.mock.calls.some(([, options]) => options?.method === "POST" || options?.method === "PUT")).toBe(false);
   });
 
   it("does not silently discard a typed token when closing the connection editor", async () => {

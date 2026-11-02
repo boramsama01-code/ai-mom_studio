@@ -59,19 +59,20 @@ function InstagramConnectForm({ channelId, defaultUsername, onConnected }: Insta
   const guard = useDirtyGuard();
   const [username, setUsername] = useState(defaultUsername), [token, setToken] = useState("");
   const [authMode, setAuthMode] = useState<"facebook" | "instagram">("facebook");
-  const [showToken, setShowToken] = useState(false);
+  const [showToken, setShowToken] = useState<boolean | null>(null);
+  const tokenFormOpen = showToken ?? (config.data?.configured === false || !!token.trim());
   const [dailyLimit, setDailyLimit] = useState(3);
   const connect = useMutation({ mutationFn: () => api(`/studio/instagram/${channelId}/connect`, { method: "POST", body: { username, token, dailyLimit, authMode } }), onSuccess: () => { setToken(""); onConnected(); } });
   const oauth = useMutation({ mutationFn: () => api<{ url: string }>(`/studio/instagram/${channelId}/oauth/start`, { method: "POST", body: {} }), onSuccess: data => { window.location.assign(data.url); } });
   useEffect(() => { guard.setDirty(`instagram-token-${channelId}`, !!token.trim(), async () => { if (!token.trim() || !username || dailyLimit < 1 || dailyLimit > 25) return false; try { await connect.mutateAsync(); return true; } catch { return false; } }); return () => guard.setDirty(`instagram-token-${channelId}`, false); }, [token, username, dailyLimit, authMode, channelId, guard]);
   return <div className="studio-instagram-connect stack">
     <div className="instagram-connect-target"><span className="small muted">연결할 계정</span><strong>@{defaultUsername || username}</strong></div>
-    {config.isLoading ? <p className="small muted">로그인 연결 준비 상태를 확인하고 있어요.</p> : config.data?.configured ? <><button className="btn primary" disabled={oauth.isPending || connect.isPending} onClick={() => guard.confirmLeave(() => oauth.mutate())}>{oauth.isPending ? "Instagram 여는 중…" : "Instagram으로 연결"}</button><p className="small muted">Meta 로그인 화면에서 위 계정을 선택해 주세요. 돌아오면 자동으로 연결을 확인합니다.</p></> : <div className="notice small"><strong>최초 연결 준비가 필요해요</strong><p>Meta 앱 설정을 한 번 저장하면 로그인 버튼으로 연결할 수 있어요. 개발 모드에서는 해당 계정의 테스터 초대도 수락해 주세요.</p><GuardedLink className="btn sm" href="/instagram#setup">연결 준비 보기</GuardedLink></div>}
+    {config.isLoading ? <p className="small muted">로그인 연결 준비 상태를 확인하고 있어요.</p> : config.data?.configured ? <><button className="btn primary" disabled={oauth.isPending || connect.isPending} onClick={() => guard.confirmLeave(() => oauth.mutate())}>{oauth.isPending ? "Instagram 여는 중…" : "Instagram으로 연결"}</button><p className="small muted">Meta 로그인 화면에서 위 계정을 선택해 주세요. 돌아오면 자동으로 연결을 확인합니다.</p></> : <p className="small muted">Meta에서 발급한 토큰을 아래에 넣으면 이 계정을 연결할 수 있어요. 앱 ID·시크릿·구성 ID는 필요하지 않아요.</p>}
     {config.error && <ErrorBox error={config.error} retry={() => config.refetch()} />}{oauth.error && <ErrorBox error={oauth.error} />}
-    <button className="btn ghost sm instagram-token-toggle" aria-expanded={showToken} onClick={() => setShowToken(v => !v)}>{showToken ? "토큰 입력 닫기" : "이미 발급한 토큰으로 연결"}</button>
-    {showToken && <form className="stack" onSubmit={e => { e.preventDefault(); if (token.trim() && username) connect.mutate(); }}>
+    <button className="btn ghost sm instagram-token-toggle" aria-expanded={tokenFormOpen} onClick={() => setShowToken(!tokenFormOpen)}>{tokenFormOpen ? "토큰 입력 닫기" : "이미 발급한 토큰으로 연결"}</button>
+    {tokenFormOpen && <form className="stack" onSubmit={e => { e.preventDefault(); if (token.trim() && username) connect.mutate(); }}>
       <label className="field">게시할 계정<input readOnly={!!defaultUsername} value={username} autoComplete="off" placeholder="spacepenguin.co" disabled={connect.isPending} onChange={e => setUsername(e.target.value)} /></label>
-      <label className="field">토큰 발급 방식<select value={authMode} disabled={connect.isPending} onChange={e => setAuthMode(e.target.value as typeof authMode)}><option value="facebook">Meta 통합 로그인 · 새 앱</option><option value="instagram">Instagram Login · 기존 앱</option></select></label>
+      <label className="field">토큰 발급 방식<select value={authMode} disabled={connect.isPending} onChange={e => setAuthMode(e.target.value as typeof authMode)}><option value="facebook">Meta 통합 로그인</option><option value="instagram">Instagram 로그인 (이전 API)</option></select><span className="hint">{authMode === "facebook" ? "Meta 개발자 화면의 ‘통합된 로그인이 포함된 API 설정’에서 발급한 토큰에 사용합니다." : "Meta 개발자 화면의 ‘Instagram 로그인이 포함된 API 설정’에서 발급한 토큰에 사용합니다."}</span></label>
       <label className="field">Instagram 액세스 토큰<input type="password" value={token} autoComplete="off" spellCheck={false} disabled={connect.isPending} onChange={e => setToken(e.target.value)} /><span className="hint">토큰은 여기에만 입력하세요. 실제 계정과 게시 권한을 확인한 뒤 암호화해 저장합니다.</span></label>
       <label className="field">하루 발행 한도<input type="number" min={1} max={25} value={dailyLimit} disabled={connect.isPending} onChange={e => setDailyLimit(Number(e.target.value))} /></label>
       <button className="btn" disabled={connect.isPending || !username || !token.trim() || dailyLimit < 1 || dailyLimit > 25}>{connect.isPending ? "계정 확인 중…" : "계정 확인하고 연결"}</button>
