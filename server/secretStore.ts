@@ -104,16 +104,22 @@ export async function secretStatuses(db: DB, keys: string[]): Promise<SecretStat
   });
 }
 
-export async function saveSecret(db: DB, key: string, value: string, actor: string) {
+export async function saveSecret(db: DB, key: string, value: string, actor: string, options: { activate?: boolean } = {}) {
   if (isFromEnvironment(key)) throw new Error("ENV_OWNED");
   const enc = encryptValue(value);
   await db
     .insert(storedSecrets)
     .values({ key, ...enc, valueLength: value.length, updatedBy: actor })
     .onConflictDoUpdate({ target: storedSecrets.key, set: { ...enc, valueLength: value.length, updatedBy: actor, updatedAt: new Date() } });
-  process.env[key] = value;
-  fromStore.add(key);
-  unreadable.delete(key);
+  const activate = () => {
+    process.env[key] = value;
+    fromStore.add(key);
+    unreadable.delete(key);
+  };
+  // A caller inside a transaction must wait for commit before changing the
+  // process's live credentials. Otherwise a rollback would leave a new token live.
+  if (options.activate !== false) activate();
+  return activate;
 }
 
 export async function deleteSecret(db: DB, key: string) {
@@ -131,4 +137,3 @@ export function __setOriginalEnvForTest(keys: string[]) {
   fromStore.clear();
   unreadable.clear();
 }
-

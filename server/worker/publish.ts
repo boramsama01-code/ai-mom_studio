@@ -34,6 +34,7 @@ import { computeScheduleStatus, kstToday, KST_OFFSET_MIN } from "../services/dat
 import { env } from "../env";
 import { getSetting } from "../seed";
 import { resolveSecrets } from "../services/secrets";
+import { loadPublicationReadiness, verifyInstagramPublicationAccess } from "../services/publishReadiness";
 import { uploadCard } from "../services/cloudinary";
 import { sendPhotoToChannel, sendAlbumToChannel, telegramPostUrl } from "../services/telegram";
 import * as ig from "../services/instagram";
@@ -190,14 +191,30 @@ export async function approveItem(
     const st = computeScheduleStatus((rev.payload as any).schedules, now);
     if (st === "closed") return { ok: false as const, error: "접수가 마감된 공고는 승인할 수 없습니다." };
   }
-  const capErr = validateCaptions(a.captions);
+  const { channel, selected: dests, readiness } = await loadPublicationReadiness(db, item.channelId, a.destinationIds);
+  if (!readiness.ready || !channel) return { ok: false as const, error: readiness.blockers.join(" "), publicationReadiness: readiness };
+  const capErr = validateCaptions({
+    instagram: dests.some(destination => destination.platform === "instagram") ? a.captions.instagram : "",
+    telegram: dests.some(destination => destination.platform === "telegram_channel") ? a.captions.telegram : "",
+  });
   if (capErr.length) return { ok: false as const, error: capErr.join(" ") };
-  const dests = await db.select().from(destinations).where(and(eq(destinations.channelId, item.channelId), eq(destinations.enabled, true), a.destinationIds ? inArray(destinations.id, a.destinationIds) : undefined));
-
-  if (a.destinationIds && dests.length !== a.destinationIds.length) return { ok: false as const, error: "게시 목적지가 변경됐습니다. 계정을 다시 확인하세요." };
+  const accessError = await verifyInstagramPublicationAccess(channel, dests);
+  if (accessError) return { ok: false as const, error: accessError };
   const approval = await db.transaction(async (tx) => {
     const [freshItem] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
     if (freshItem.currentRevisionId !== rev.id || freshItem.reviewStatus !== "reviewed" || freshItem.excluded) throw new HttpError(409, "승인 전에 콘텐츠가 변경됐습니다. 다시 확인하세요.");
+    // Lock every existing delivery for this revision, including failed rows:
+    // a concurrent worker claim or retry must finish before this decision, or
+    // wait until approval replacement has committed. Item locking also prevents
+    // two new approvals from both observing an empty delivery history.
+    const priorDeliveries = await tx.select({ id: deliveries.id, status: deliveries.status }).from(deliveries)
+      .innerJoin(approvals, eq(approvals.id, deliveries.approvalId))
+      .where(and(eq(approvals.contentItemId, item.id), eq(approvals.revisionId, rev.id)))
+      .orderBy(deliveries.id).for("update", { of: deliveries });
+    if (priorDeliveries.some(delivery => delivery.status === "unknown")) throw new HttpError(409, "게시 결과가 확인되지 않은 전송이 있습니다. 전송 상태에서 실제 게시 여부를 먼저 확인하세요.");
+    if (priorDeliveries.some(delivery => delivery.status === "processing")) throw new HttpError(409, "이 버전이 이미 전송 중입니다. 전송 상태를 먼저 확인하세요.");
+    if (priorDeliveries.some(delivery => delivery.status === "succeeded")) throw new HttpError(409, "이 버전은 이미 게시됐습니다. 전송 상태에서 게시물을 확인하세요.");
+    if (priorDeliveries.some(delivery => delivery.status === "scheduled")) throw new HttpError(409, "이 버전은 이미 예약돼 있습니다. 전송 상태에서 기존 예약을 취소한 뒤 다시 승인하세요.");
     const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
     if (board) { assertStudioActive(board); if (board.importedMeta?.studioPublication && rev.payload.studioVersion !== board.version) throw new HttpError(409, "제작보드가 수정됐습니다. 미리보기를 다시 준비하세요."); }
     const [freshAsset]=await tx.select().from(mediaAssets).where(eq(mediaAssets.id,asset.id));
@@ -220,7 +237,7 @@ export async function approveItem(
     await audit(tx, { actor: a.actor, action: "approve", entity: "content_item", entityId: item.id, channelId: item.channelId, detail: { approvalId: ap.id, revisionId: rev.id, cardSha256: approvedHash, destinations: dests.map((d) => d.id), scheduledAt: a.scheduledAt } });
     return ap;
   });
-  return { ok: true as const, approval, destinations: dests.length };
+  return { ok: true as const, approval, destinations: dests.length, publicationReadiness: readiness };
 }
 
 export async function cancelApproval(db: DB, approvalId: number, actor: string) {
@@ -369,8 +386,9 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
     const invalidAltPage = ap.captions.altTexts?.findIndex(value => !!altTextError(value)) ?? -1;
     if (invalidAltPage >= 0) return block(`${invalidAltPage + 1}페이지 대체텍스트가 125자·2문장 기준을 초과해 게시를 중단했습니다. 다시 검토·승인해 주세요.`);
     const token = sec.values.accessToken, userId = sec.values.userId;
+    const authMode = (sec.values.authMode ?? "instagram") as ig.InstagramAuthMode;
     if (expectedInstagramUsername(ch.slug)) {
-      const identity = await ig.accountIdentity(token);
+      const identity = await ig.accountIdentity(token, authMode, expectedInstagramUsername(ch.slug) ?? undefined);
       if (!identity.ok) { await finish(db, d, { status: "failed", errorKind: "auth", lastError: identity.error }); return "failed"; }
       if (identity.userId !== userId) return block("저장된 게시 계정과 토큰의 계정이 다릅니다.");
       const mismatch = instagramAccountMismatch(ch.slug, identity.username);
@@ -393,7 +411,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
         await finish(db, d, { status: "failed", errorKind: "transient", lastError: `이미지 업로드 실패: ${(e as Error).message}` });
         return "failed";
       }
-      const c = urls.length > 1 ? await ig.createCarouselContainer(userId, token, urls, ap.captions.instagram, ap.captions.altTexts) : await ig.createContainer(userId, token, urls[0], ap.captions.instagram, ap.captions.altTexts?.[0]);
+      const c = urls.length > 1 ? await ig.createCarouselContainer(userId, token, urls, ap.captions.instagram, ap.captions.altTexts, authMode) : await ig.createContainer(userId, token, urls[0], ap.captions.instagram, ap.captions.altTexts?.[0], authMode);
       if (!c.ok) {
         // 컨테이너 생성 응답 유실은 게시가 아니므로(발행 전 단계) 실패로 기록
         await finish(db, d, { status: "failed", errorKind: c.err.kind, lastError: c.err.error });
@@ -402,7 +420,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
       containerId = c.containerId;
       await db.update(deliveries).set({ externalContainerId: containerId, updatedAt: new Date() }).where(eq(deliveries.id, d.id));
     }
-    const w = await ig.waitForContainer(containerId, token);
+    const w = await ig.waitForContainer(containerId, token, 90_000, authMode);
     if (w.state === "IN_PROGRESS") {
       await db.update(deliveries).set({ lastError: "인스타그램 이미지 처리 중 — 다음 실행에서 이어서 확인", updatedAt: new Date() }).where(eq(deliveries.id, d.id));
       return "skipped";
@@ -415,7 +433,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
       await finish(db, d, { status: "failed", errorKind: w.err?.kind ?? "terminal", lastError: w.err?.error ?? `컨테이너 상태 ${w.state} ${w.detail ?? ""}` });
       return "failed";
     }
-    const p = await ig.publishContainer(userId, token, containerId);
+    const p = await ig.publishContainer(userId, token, containerId, authMode);
     if (!p.ok) {
       if (p.lost) {
         await finish(db, d, { status: "unknown", errorKind: "unknown", lastError: "게시 요청 응답 유실 — 계정에서 게시 여부 확인 필요" });
@@ -424,7 +442,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
       await finish(db, d, { status: "failed", errorKind: p.err.kind, lastError: p.err.error });
       return "failed";
     }
-    const link = await ig.mediaPermalink(p.mediaId, token);
+    const link = await ig.mediaPermalink(p.mediaId, token, authMode);
     await finish(db, d, { status: "succeeded", externalId: p.mediaId, externalUrl: link, completedAt: new Date(), lastError: null });
     return "succeeded";
   }
@@ -444,4 +462,3 @@ export async function retryDelivery(db: DB, deliveryId: number, actor: string, c
   await audit(db, { actor, action: "retry_delivery", entity: "delivery", entityId: d.id, channelId: d.channelId, detail: { from: d.status, confirmNotPosted } });
   return { ok: true as const };
 }
-

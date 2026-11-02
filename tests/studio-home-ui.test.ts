@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, createElement } from "react";
+import { act, createElement, Fragment } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { studioContentSchema, type StudioCard } from "../shared/studio";
 import { StudioPage } from "../client/src/pages/Studio";
 import { StudioTextImport } from "../client/src/pages/StudioTextImport";
+import { GlobalChannelSelect } from "../client/src/GlobalChannelSelect";
 
-const mocks = vi.hoisted(() => ({ guard: { setDirty: vi.fn(), confirmLeave: vi.fn((f: () => void) => f()) }, toast: vi.fn(), navigate: vi.fn(), api: vi.fn(), clipboard: vi.fn() }));
-vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => ({ allChannels: [{ id: 1, slug: "penguin", name: "내 채널", active: true, accentColor: "#285f6a" }, { id: 2, slug: "fryday", name: "감자 채널", active: true, accentColor: "#996633" }, { id: 3, slug: "archived", name: "보관 채널", active: false }], channels: [], select: vi.fn() }) }));
+const mocks = vi.hoisted(() => ({ guard: { setDirty: vi.fn(), confirmLeave: vi.fn((f: () => void) => f()) }, selected: "all" as "all" | number, select: vi.fn(), toast: vi.fn(), navigate: vi.fn(), api: vi.fn(), clipboard: vi.fn() }));
+vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => {
+  const allChannels = [{ id: 1, slug: "penguin", name: "내 채널", active: true, accentColor: "#285f6a" }, { id: 2, slug: "fryday", name: "감자 채널", active: true, accentColor: "#996633" }, { id: 3, slug: "archived", name: "보관 채널", active: false }];
+  return { allChannels, channels: allChannels.filter(c => c.active), current: allChannels.find(c => c.id === mocks.selected) ?? null, selected: mocks.selected, isLoading: false, select: mocks.select };
+} }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
 vi.mock("../client/src/api", async importOriginal => ({ ...await importOriginal<object>(), api: mocks.api }));
 vi.mock("wouter", () => ({ useLocation: () => ["/", mocks.navigate] }));
@@ -18,12 +22,20 @@ const draft = { script: "전체 원고 초안", caption: "캡션 초안", panels
 
 beforeEach(() => {
   vi.clearAllMocks();
+  history.replaceState(null, "", "/");
+  mocks.selected = "all"; mocks.select.mockImplementation(value => { mocks.selected = value; });
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.setAttribute("open", ""); } });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value() { this.removeAttribute("open"); } });
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: mocks.clipboard.mockResolvedValue(undefined) } });
   cards = [
     { title: "진행 작업", channel: "penguin", stage: "writing" }, { title: "완료 작업", channel: "penguin", stage: "done" },
     { title: "감자 작업", channel: "fryday", stage: "making" }, { title: "보관 작업", channel: "archived", stage: "idea" },
   ].map((c, i) => ({ ...studioContentSchema.parse(c), id: i + 1, version: 1, sourceItemId: null, createdAt: "2026-10-26T00:00:00Z", updatedAt: `2026-10-26T0${i}:00:00Z` }));
   mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: object }) => {
+    if (path === "/studio/cards" && options?.method === "POST") {
+      const card = { ...studioContentSchema.parse(options.body), id: cards.length + 1, version: 1, sourceItemId: null, createdAt: "2026-11-02T00:00:00Z", updatedAt: "2026-11-02T00:00:00Z" };
+      cards.push(card); return card;
+    }
     if (path === "/studio/cards" || path === "/studio/cards?trash=1") return { cards: cards.filter(c => !!c.trashedAt === path.includes("trash=1")), trashCount: cards.filter(c => c.trashedAt).length, notes: "", notesVersion: 1, ai: { defaultProvider: "openai", text: { openai: false, anthropic: false }, image: false } };
     const trashMatch = path.match(/^\/studio\/cards\/(\d+)\/(trash|untrash)$/);
     if (trashMatch) {
@@ -83,8 +95,9 @@ describe("홈과 단계별 제작 화면", () => {
     await click("복원");
     expect((host.querySelector("#studio-title") as HTMLInputElement).value).toBe("마지막으로 입력한 제목");
   });
-  it("진행 작업만 먼저 보여주고 완료·보관·채널 필터와 보드 전환을 제공한다", async () => {
-    await render(createElement(StudioPage));
+  it("진행 작업만 먼저 보여주고 전역 채널 선택에 맞춰 완료·보관·보드 보기를 제공한다", async () => {
+    const boardWithScope = () => createElement(Fragment, null, createElement(GlobalChannelSelect), createElement(StudioPage));
+    await render(boardWithScope());
     expect(host.querySelectorAll(".studio-content-card")).toHaveLength(2);
     expect(host.querySelector(".studio-content-grid")?.textContent).not.toContain("완료 작업");
     expect(host.querySelector(".studio-content-grid")?.textContent).not.toContain("보관 작업");
@@ -92,11 +105,47 @@ describe("홈과 단계별 제작 화면", () => {
     expect(host.querySelector(".studio-content-grid")?.textContent).toContain("완료 작업");
     await click("단계 보드"); expect(host.querySelectorAll(".studio-column")).toHaveLength(5); expect(host.querySelectorAll(".studio-task")).toHaveLength(3);
     await click("갤러리"); await click("전체");
-    const filter = host.querySelector('select[aria-label="채널 필터"]') as HTMLSelectElement;
-    await act(async () => { filter.value = "fryday"; filter.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(host.querySelector('select[aria-label="채널 필터"]')).toBeNull();
+    const filter = host.querySelector('select[aria-label="보기 채널"]') as HTMLSelectElement;
+    await act(async () => { filter.value = "2"; filter.dispatchEvent(new Event("change", { bubbles: true })); });
+    await render(boardWithScope());
     expect(host.querySelectorAll(".studio-content-card")).toHaveLength(1); expect(host.querySelector(".studio-content-grid")?.textContent).toContain("감자 작업");
     await click("보관 채널"); expect(host.querySelector(".studio-content-grid")?.textContent).toContain("보관 작업");
     expect(button("새 콘텐츠 만들기").disabled).toBe(true);
+  });
+  it("전체 조회의 새 콘텐츠는 작성폼에서 채널을 고른 뒤 그 채널에만 저장한다", async () => {
+    await render(createElement(StudioPage)); await click("새 콘텐츠 만들기");
+    const channel = host.querySelector('select[aria-label="제작 채널"]') as HTMLSelectElement;
+    expect(channel.value).toBe("");
+    expect(channel.required).toBe(true);
+    expect(host.querySelectorAll("dialog")).toHaveLength(1);
+    await click("아이디어부터 자유롭게");
+    await input(host.querySelector(".studio-create-form input") as HTMLInputElement, "새 감자 이야기");
+    expect(button("작업 만들기").disabled).toBe(true);
+    await act(async () => { channel.value = "fryday"; channel.dispatchEvent(new Event("change", { bubbles: true })); });
+    await click("작업 만들기");
+    expect(mocks.api).toHaveBeenCalledWith("/studio/cards", expect.objectContaining({ method: "POST", body: expect.objectContaining({ channel: "fryday", title: "새 감자 이야기" }) }));
+    expect(mocks.selected).toBe("all");
+    expect(mocks.navigate).toHaveBeenCalledWith("/studio/5");
+  });
+  it("선택한 채널은 새 작업의 기본값이며 기존 카드를 다른 채널로 바꾸지 않는다", async () => {
+    mocks.selected = 2;
+    await render(createElement(StudioPage)); await click("새 콘텐츠 만들기");
+    expect((host.querySelector('select[aria-label="제작 채널"]') as HTMLSelectElement).value).toBe("fryday");
+    await act(async () => host.querySelector<HTMLButtonElement>('dialog button[aria-label="닫기"]')!.click());
+    await render(createElement(StudioPage, { cardId: 1 }));
+    expect(host.querySelector(".studio-detail .studio-channel-tag")?.textContent).toBe("내 채널");
+    expect(cards[0].channel).toBe("penguin");
+    expect(mocks.api.mock.calls.some(([, opts]) => opts?.method === "PATCH")).toBe(false);
+  });
+  it("직접 작성 링크의 채널은 그 작업에만 적용하고 이후 새 작업에는 현재 선택을 쓴다", async () => {
+    history.replaceState(null, "", "/?start=experience&channel=penguin");
+    await render(createElement(StudioPage));
+    expect((host.querySelector('select[aria-label="제작 채널"]') as HTMLSelectElement).value).toBe("penguin");
+    await act(async () => host.querySelector<HTMLButtonElement>('dialog button[aria-label="닫기"]')!.click());
+    mocks.selected = 2;
+    await render(createElement(StudioPage)); await click("새 콘텐츠 만들기");
+    expect((host.querySelector('select[aria-label="제작 채널"]') as HTMLSelectElement).value).toBe("fryday");
   });
   it("단계를 옮겨도 원고 입력을 유지하고 오류 필드를 올바른 컷에서 연다", async () => {
     await render(createElement(StudioPage, { cardId: 1 }));

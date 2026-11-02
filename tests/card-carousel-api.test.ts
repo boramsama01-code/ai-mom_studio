@@ -50,6 +50,9 @@ describe("source cards automatically reach the board", () => {
     await getDb().update(contentItems).set({reviewStatus:"reviewed"}).where(eq(contentItems.id,id));
     const approvalBody={revisionId:generated.body.revisionId,mediaAssetId:generated.body.id,altTextVersion:0,captions:{instagram:"확인한 캡션",telegram:"확인한 캡션"},scheduledAt:"2030-01-01T00:00:00Z"};
     expect((await agent.post(`${endpoint}/approve`).set(H).send(approvalBody)).status).toBe(409);
+    process.env.DRY_RUN = "false"; process.env.AUTO_PUBLISH = "true";
+    process.env.TELEGRAM_BOT_TOKEN = "test-only-bot-token"; process.env.TG_SCIENCE_DIALOGUE_CHAT_ID = "@fixture";
+    await getDb().insert(destinations).values({ channelId: 2, platform: "telegram_channel", label: "alt-text fixture", enabled: true, secretRefs: { chatId: "TG_SCIENCE_DIALOGUE_CHAT_ID" } });
     const approved=await agent.post(`${endpoint}/approve`).set(H).send({...approvalBody,altTextVersion:1});
     expect(approved.status,JSON.stringify(approved.body)).toBe(201);
     expect(approved.body.approval.captions.altTexts).toEqual(values);

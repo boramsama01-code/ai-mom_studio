@@ -9,12 +9,12 @@ import { useToast } from "../toast";
 import { DiscoveryNote } from "../discovery";
 import { TemplatePicker, useTemplates } from "./Design";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { api, ApiError } from "../api";
 import { useChannel, useDirtyGuard } from "../state";
 import { Badge, ErrorBox, fmtDate, GuardedLink, Loading, StatusBadge } from "../ui";
 import { cleanPayload, FIELD_LABEL, PayloadEditor } from "./editors";
-import { CONTENT_KIND_LABEL, PUBLISH_LABEL, type ContentKind } from "@shared/domain";
+import { CONTENT_KIND_LABEL, type ContentKind } from "@shared/domain";
 import { studioKey } from "@shared/channelKeys";
 import type { Approval, ContentItem, ContentRevision, Delivery, SourceDocument } from "@shared/schema";
 import { SourceTextEditor } from "../SourceTextEditor";
@@ -24,9 +24,12 @@ import { readIdea } from "@shared/ideaBank";
 import { IdeaDetail } from "./IdeaDetail";
 import { collectionUsesArt } from "@shared/cardDesigns";
 import { sourceRecovery } from "@shared/sourceRecovery";
+import type { PublicationReadiness } from "@shared/publicationReadiness";
+import { deliveryState, PublicationRuntimeNotice, usePublicationRuntime, type PublicationRuntime } from "../publicationStatus";
 
 type Detail = {
   imageAiAvailable?: boolean;
+  publicationReadiness?: PublicationReadiness;
   item: ContentItem;
   primary: SourceDocument | null;
   linked: Array<{ link: { role: string }; doc: SourceDocument }>;
@@ -40,17 +43,22 @@ type Detail = {
 };
 
 const SRC_KIND: Record<string, string> = { naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 직접 RSS", official: "공식 게시물", manual: "직접 추가 자료", manual_text: "직접 붙여넣은 본문 · 내용 확인 필요" };
+type ItemTab = "source" | "edit" | "publish" | "delivery" | "history";
+const entryTab = (search: string): ItemTab => new URLSearchParams(search).get("tab") === "delivery" ? "delivery" : "source";
 
 export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: number }) {
   const { selected, allChannels } = useChannel();
-  const q = useQuery({ queryKey: ["ch", requestedCid, "item", id], queryFn: () => api<Detail>(`/channels/${requestedCid}/items/${id}`) });
+  const q = useQuery({ queryKey: ["ch", requestedCid, "item", id], queryFn: () => api<Detail>(`/channels/${requestedCid}/items/${id}`), refetchInterval: query => query.state.data?.deliveries.some(({ d }) => ["scheduled", "processing"].includes(d.status)) ? 5000 : false });
+  const runtime = usePublicationRuntime();
   const cid = q.data?.item.channelId ?? requestedCid;
   const sourceChannel = allChannels.find(ch => ch.id === cid);
-  const [tab, setTab] = useState<"source" | "edit" | "publish" | "history">("source");
+  const search = useSearch();
+  const [tab, setTab] = useState<ItemTab>(() => entryTab(search));
   const [templateChoice, setTemplateChoice] = useState<string | null>(null);
   const [, navigate] = useLocation();
-  useEffect(() => { setTab("source"); setTemplateChoice(null); }, [requestedCid, id]);
-  useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, navigate]);
+  useEffect(() => { setTab(entryTab(search)); }, [requestedCid, id, search]);
+  useEffect(() => { setTemplateChoice(null); }, [requestedCid, id]);
+  useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}${search ? `?${search}` : ""}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, search, navigate]);
   const guard = useDirtyGuard();
   const qc = useQueryClient();
   const categorize = useMutation({
@@ -69,8 +77,8 @@ export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: num
   const d = q.data!;
   const idea = readIdea(d.item.edited);
   if (d.item.origin === "idea" && idea && sourceChannel) return <IdeaDetail item={d.item} idea={idea} channel={sourceChannel.slug} />;
-  const go = (t: "source" | "edit" | "publish" | "history", anchor: string) => guard.confirmLeave(() => { setTab(t); setTimeout(() => { const node = document.getElementById(anchor); node?.scrollIntoView({ behavior: "smooth", block: "start" }); node?.focus({ preventScroll: true }); }, 30); });
-  const tabs: Array<[typeof tab, string]> = [["source", "1 원문 확인"], ["edit", "2 초안 편집"], ["publish", "3 카드·내보내기"], ["history", "이력"]];
+  const go = (t: ItemTab, anchor: string) => guard.confirmLeave(() => { setTab(t); setTimeout(() => { const node = document.getElementById(anchor); node?.scrollIntoView({ behavior: "smooth", block: "start" }); node?.focus({ preventScroll: true }); }, 30); });
+  const tabs: Array<[typeof tab, string]> = [["source", "1 원문 확인"], ["edit", "2 초안 편집"], ["publish", "3 카드·승인"], ["delivery", "전송 상태"], ["history", "이력"]];
   return (
     <>
       <div className="page-head">
@@ -102,7 +110,8 @@ export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: num
       <div className="item-workspace" role="tabpanel" id={`step-${tab}`} aria-labelledby={`tab-${tab}`} tabIndex={-1}>
         {tab === "source" && <><SourcePanel d={d} cid={cid} /><Progress d={d} onGo={go} actionsOnly forTab="source" /></>}
         {tab === "edit" && <><EditPanel d={d} cid={cid} templateKey={templateChoice} onTemplateChange={setTemplateChoice} /><Progress d={d} onGo={go} actionsOnly forTab="edit" /></>}
-        {tab === "publish" && <><ReviewPanel d={d} cid={cid} /><CardApprovePanel d={d} cid={cid} templateChoice={templateChoice} onTemplateChange={setTemplateChoice} /><Progress d={d} onGo={go} actionsOnly forTab="publish" /></>}
+        {tab === "publish" && <><ReviewPanel d={d} cid={cid} /><CardApprovePanel d={d} cid={cid} templateChoice={templateChoice} onTemplateChange={setTemplateChoice} onApproved={() => go("delivery", "delivery-panel")} runtime={runtime.data} /><Progress d={d} onGo={go} actionsOnly forTab="publish" /></>}
+        {tab === "delivery" && <ItemDeliveryPanel d={d} cid={cid} runtime={runtime.data} runtimeError={runtime.error} refresh={() => { q.refetch(); runtime.refetch(); }} refreshing={q.isFetching || runtime.isFetching} />}
         {tab === "history" && <HistoryPanel d={d} />}
       </div>
     </>
@@ -338,7 +347,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
         <label className="field">작성 AI<select value={provider} disabled={gen.isPending} onChange={e => setProviderChoice(e.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}</option>)}</select></label>
         <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate || t.colors?.some(color => color.key === draftTemplate))?.name ?? "기본"} ▾</button>
         {showTemplates && templates.data && <TemplatePicker cid={cid} value={draftTemplate} items={templates.data.items} disabled={gen.isPending} onChange={key => { setLocalTemplate(key); onTemplateChange?.(key); }} />}
-        <p className="hint">원고를 요약하고 선택한 템플릿에 맞는 제목·부제·본문을 함께 작성합니다. ‘3 카드·내보내기’에서 실제 카드 모양을 보며 고칠 수 있어요.</p>
+        <p className="hint">원고를 요약하고 선택한 템플릿에 맞는 제목·부제·본문을 함께 작성합니다. ‘3 카드·승인’에서 실제 카드 모양을 보며 고칠 수 있어요.</p>
         <AiUsageGuide provider={provider} />
         {ai.data?.integrations[provider] === false && <p className="notice warn small">선택한 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
         <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty || !ai.data?.integrations[provider]} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
@@ -445,7 +454,7 @@ function toLocalInput(date: Date) {
   return k.slice(0, 16);
 }
 
-function CardApprovePanel({ d, cid, templateChoice, onTemplateChange }: { d: Detail; cid: number; templateChoice?: string | null; onTemplateChange?: (key: string) => void }) {
+function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved, runtime }: { d: Detail; cid: number; templateChoice?: string | null; onTemplateChange?: (key: string) => void; onApproved: () => void; runtime?: PublicationRuntime }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [coverChoice, setCoverChoice] = useState<"reuse" | "ai" | "typography" | null>(null);
@@ -454,6 +463,14 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange }: { d: Det
   const [copyDirty, setCopyDirty] = useState(true);
   const [pickedCard, setPickedCard] = useState<number | null>(null);
   const currentCard = revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
+  const currentApprovalIds = new Set(d.approvals.filter(approval => approval.revisionId === d.current?.id).map(approval => approval.id));
+  const existingDeliveryState = (["unknown", "processing", "succeeded", "scheduled"] as const).find(status => d.deliveries.some(({ d: delivery }) => currentApprovalIds.has(delivery.approvalId) && delivery.status === status));
+  const existingDeliveryMessage = existingDeliveryState ? {
+    scheduled: "이미 전송 예약이 있습니다. 예약 변경은 전송 상태에서 기존 예약을 취소한 뒤 다시 승인해 주세요.",
+    processing: "이 버전의 전송을 처리 중입니다. 전송 상태에서 결과를 확인해 주세요.",
+    succeeded: "이 버전은 이미 게시됐습니다. 전송 상태에서 게시물을 확인해 주세요.",
+    unknown: "이 버전의 게시 여부를 먼저 확인해야 합니다. 전송 상태에서 실제 게시물을 확인해 주세요.",
+  }[existingDeliveryState] : null;
   const [caps, setCaps] = useState(d.defaultCaptions ?? { instagram: "", telegram: "" });
   const previousDefaultCaps = useRef(d.defaultCaptions);
   const captionsEdited = useRef(false);
@@ -501,24 +518,16 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange }: { d: Det
   });
   const approve = useMutation({
     mutationFn: () =>
-      api(`/channels/${cid}/items/${d.item.id}/approve`, {
+      api<{ destinations: number }>(`/channels/${cid}/items/${d.item.id}/approve`, {
         method: "POST",
         body: { revisionId: d.current!.id, mediaAssetId: currentCard!.id, altTextVersion:qc.getQueryData<{version:number}>(["card-alt",currentCard!.id])?.version, captions: caps, scheduledAt: `${when}:00+09:00` },
       }),
-    onSuccess: () => {
-      toast("ok", "최종 승인했습니다. 발행함에서 진행 상황을 볼 수 있습니다.");
-      qc.invalidateQueries({ queryKey: ["ch", cid] });
+    onSuccess: async (result) => {
+      toast(result.destinations === 0 ? "info" : "ok", result.destinations === 0 ? "승인은 저장됐지만 전송 예약이 없습니다. 게시 계정을 확인하세요." : "승인과 전송 예약을 저장했습니다. 전송 상태에서 실제 게시 결과를 확인하세요.");
+      await qc.invalidateQueries({ queryKey: ["ch", cid] });
+      onApproved();
     },
   });
-  const cancel = useMutation({
-    mutationFn: (aid: number) => api(`/channels/${cid}/approvals/${aid}/cancel`, { method: "POST", body: {} }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
-  });
-  const retry = useMutation({
-    mutationFn: (a: { id: number; confirm?: boolean }) => api(`/channels/${cid}/deliveries/${a.id}/retry`, { method: "POST", body: { confirmNotPosted: a.confirm } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
-  });
-  const active = d.approvals.find((a) => a.status === "active");
   const len = (s: string) => [...s].length;
   const cd = d.item.canvaDesign;
   const SRC: Record<string, string> = { builtin: "기본 템플릿", custom: "내 배경 템플릿", canva: "Canva" };
@@ -622,75 +631,67 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange }: { d: Det
           </label>
           <label className="field">
             예약 시각 (한국 시간)
-            <span className="hint">예약 시각 이후 다음 워커 실행에서 처리됩니다(정시 보장 아님).</span>
+            <span className="hint">승인은 전송 예약을 저장합니다. 실제 게시 완료와 오류는 ‘전송 상태’에서 확인하세요.</span>
             <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
           </label>
+          <PublicationRuntimeNotice runtime={runtime} />
+          {d.publicationReadiness && !d.publicationReadiness.ready && <div className="notice warn" role="alert"><strong>전송 예약 전에 해결할 항목</strong><ul>{d.publicationReadiness.blockers.map(reason => <li key={reason}>{reason}</li>)}</ul><div className="row"><GuardedLink href="/instagram">인스타그램 연결 확인 →</GuardedLink><GuardedLink href="/connections">API 연결 확인 →</GuardedLink></div></div>}
+          {existingDeliveryMessage && <div className="notice warn"><p className="small">{existingDeliveryMessage}</p><button className="btn sm" onClick={onApproved}>전송 상태 확인</button></div>}
           <div className="row">
-            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || altDirty || copyDirty || !currentCard || d.item.reviewStatus !== "reviewed"}>
-              {approve.isPending ? "승인 중…" : "이 버전·카드·캡션으로 최종 승인"}
+            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || altDirty || copyDirty || !currentCard || d.item.reviewStatus !== "reviewed" || d.publicationReadiness?.ready === false || !!existingDeliveryState}>
+              {approve.isPending ? "승인·예약 저장 중…" : "이 버전·카드·캡션으로 최종 승인"}
             </button>
           </div>
           {d.item.reviewStatus !== "reviewed" && <p className="small muted">먼저 ‘검토 완료’로 표시해야 최종 승인할 수 있습니다.</p>}
           {approve.error && <ErrorBox error={approve.error} />}
-          {approve.isSuccess && <div className="notice ok small">승인했습니다. 연결된 목적지로 예약되었습니다. (기본 설정은 모의 실행이며 실제 게시하지 않습니다)</div>}
-        </>
-      )}
-
-      {d.approvals.length > 0 && (
-        <>
-          <h3>승인·전송 기록</h3>
-          <ul className="list">
-            {d.approvals.map((a) => (
-              <li key={a.id} className="list-item">
-                <div className="row between">
-                  <span className="small">
-                    승인 #{a.id} · r{d.revisions.find((r) => r.id === a.revisionId)?.revisionNo ?? "?"} · 예약 {fmtDate(a.scheduledAt as unknown as string)}
-                  </span>
-                  <Badge kind={a.status === "active" ? "ok" : a.status === "completed" ? "ok" : ""}>
-                    {{ active: "유효", invalidated: "무효(재승인 필요)", cancelled: "취소", completed: "완료" }[a.status] ?? a.status}
-                  </Badge>
-                </div>
-                {a.invalidatedReason && <span className="small muted">{a.invalidatedReason}</span>}
-                {d.deliveries
-                  .filter((x) => x.d.approvalId === a.id)
-                  .map(({ d: del, dest }) => (
-                    <div key={del.id} className="row small">
-                      <span>{dest.label}</span>
-                      <Badge kind={del.status === "succeeded" ? "ok" : del.status === "failed" || del.status === "unknown" ? "err" : del.status === "dry_run" ? "warn" : ""}>{PUBLISH_LABEL[del.status] ?? del.status}</Badge>
-                      {del.externalUrl && (
-                        <a href={del.externalUrl} target="_blank" rel="noopener noreferrer">
-                          게시물 보기
-                        </a>
-                      )}
-                      {del.lastError && <span className="muted">{del.lastError}</span>}
-                      {del.status === "failed" && a.status === "active" && (
-                        <button className="btn sm" onClick={() => retry.mutate({ id: del.id })}>
-                          이 목적지만 재시도
-                        </button>
-                      )}
-                      {del.status === "unknown" && a.status === "active" && (
-                        <button className="btn sm" onClick={() => confirm("해당 채널/계정에 실제로 게시되지 않았음을 확인했나요? 중복 게시될 수 있습니다.") && retry.mutate({ id: del.id, confirm: true })}>
-                          게시 안 됨 확인 후 재시도
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                {a.status === "active" && (
-                  <div>
-                    <button className="btn sm danger" onClick={() => cancel.mutate(a.id)} disabled={cancel.isPending}>
-                      승인 취소(처리 시작 전 전송만)
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-          {!active && d.approvals[0]?.status === "invalidated" && <div className="notice warn small">콘텐츠가 바뀌어 기존 승인이 무효가 되었습니다. 카드를 다시 만들고 재승인하세요.</div>}
-          {(cancel.error || retry.error) && <ErrorBox error={cancel.error || retry.error} />}
         </>
       )}
     </section>
   );
+}
+
+function ItemDeliveryPanel({ d, cid, runtime, runtimeError, refresh, refreshing }: { d: Detail; cid: number; runtime?: PublicationRuntime; runtimeError?: unknown; refresh: () => void; refreshing: boolean }) {
+  const qc = useQueryClient();
+  const cancel = useMutation({
+    mutationFn: (aid: number) => api(`/channels/${cid}/approvals/${aid}/cancel`, { method: "POST", body: {} }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
+  });
+  const retry = useMutation({
+    mutationFn: (a: { id: number; confirm?: boolean }) => api(`/channels/${cid}/deliveries/${a.id}/retry`, { method: "POST", body: { confirmNotPosted: a.confirm } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
+  });
+  return <section className="panel stack" id="delivery-panel" tabIndex={-1} aria-label="전송 상태">
+    <div className="row between"><h2 style={{ margin: 0 }}>전송 상태</h2><button className="btn sm" onClick={refresh} disabled={refreshing}>{refreshing ? "상태 확인 중…" : "상태 새로고침"}</button></div>
+    <p className="small muted">승인은 이미지·캡션·예약을 저장한 기록입니다. 실제 게시 결과는 아래 목적지별 전송 상태에서 확인하세요. 대기·처리 중인 건은 자동으로 갱신됩니다.</p>
+    <PublicationRuntimeNotice runtime={runtime} error={runtimeError} retry={refresh} />
+    {d.publicationReadiness && !d.publicationReadiness.ready && <div className="notice warn"><strong>현재 전송 준비 상태</strong><ul>{d.publicationReadiness.blockers.map(reason => <li key={reason}>{reason}</li>)}</ul><GuardedLink href="/instagram">인스타그램 연결 확인 →</GuardedLink></div>}
+    {!d.approvals.length ? <div className="notice">아직 승인·전송 기록이 없습니다. 카드와 캡션을 확인하고 최종 승인하면 여기에 기록됩니다.</div> : <ul className="list" aria-live="polite">
+      {d.approvals.map(a => {
+        const deliveries = d.deliveries.filter(({ d: delivery }) => delivery.approvalId === a.id);
+        return <li key={a.id} className="list-item stack">
+          <div className="row between"><strong className="small">승인 #{a.id} · r{d.revisions.find(r => r.id === a.revisionId)?.revisionNo ?? "?"}</strong><Badge kind={a.status === "completed" ? "ok" : ""}>{{ active: "승인 저장됨", invalidated: "승인 무효 · 재승인 필요", cancelled: "승인 취소됨", completed: "전송 완료된 승인" }[a.status] ?? a.status}</Badge></div>
+          <span className="small muted">예약 {fmtDate(a.scheduledAt as unknown as string)} (한국 시간)</span>
+          {a.invalidatedReason && <p className="small muted">{a.invalidatedReason}</p>}
+          {!deliveries.length && (a.status === "active" ? <div className="notice warn"><strong>전송 예약이 없습니다</strong><p className="small">승인 기록에 연결된 전송 건이 없습니다. 게시 계정·목적지를 확인한 뒤 카드·승인 탭에서 다시 승인해 주세요.</p><GuardedLink href="/instagram">게시 계정 연결 확인 →</GuardedLink></div> : <p className="small muted">이전 승인에 연결된 전송 내역이 없습니다.</p>)}
+          {deliveries.map(({ d: delivery, dest }) => {
+            const state = deliveryState(delivery.status, a.scheduledAt);
+            return <div key={delivery.id} className={`notice ${state.tone}`}>
+              <div className="row between"><strong>{dest.label}</strong><Badge kind={state.tone}>{state.label}</Badge></div>
+              <p className="small">{state.detail}</p>
+              {delivery.lastError && <p className="small" role={delivery.status === "failed" ? "alert" : undefined}><strong>처리 사유: </strong>{delivery.lastError}</p>}
+              {delivery.completedAt && <p className="small muted">처리 기록 {fmtDate(delivery.completedAt as unknown as string)}</p>}
+              {delivery.externalUrl && <a href={delivery.externalUrl} target="_blank" rel="noopener noreferrer">게시물 보기 ↗</a>}
+              {delivery.status === "failed" && a.status === "active" && <button className="btn sm" disabled={retry.isPending || d.publicationReadiness?.ready === false} onClick={() => retry.mutate({ id: delivery.id })}>이 목적지만 재시도</button>}
+              {delivery.status === "unknown" && a.status === "active" && <button className="btn sm" disabled={retry.isPending || d.publicationReadiness?.ready === false} onClick={() => confirm("해당 계정에 실제로 게시되지 않았음을 확인했나요? 중복 게시될 수 있습니다.") && retry.mutate({ id: delivery.id, confirm: true })}>게시 안 됨 확인 후 재시도</button>}
+            </div>;
+          })}
+          {a.status === "active" && <div><button className="btn sm danger" onClick={() => cancel.mutate(a.id)} disabled={cancel.isPending}>승인 취소(처리 시작 전 전송만)</button></div>}
+        </li>;
+      })}
+    </ul>}
+    {(cancel.error || retry.error) && <ErrorBox error={cancel.error || retry.error} />}
+    <div className="row"><GuardedLink href="/publish">발행함 전체 보기 →</GuardedLink><GuardedLink href="/runs">실행 기록 보기 →</GuardedLink></div>
+  </section>;
 }
 
 /* ───────────── 이력 ───────────── */
@@ -779,7 +780,7 @@ function CopyFields({ cid, itemId, revisionId }: { cid: number; itemId: number; 
 }
 
 /* ───────────── 작업 단계 + 다음 할 일 ───────────── */
-function Progress({ d, onGo, actionsOnly = false, forTab }: { d: Detail; onGo?: (tab: "source" | "edit" | "publish" | "history", anchor: string) => void; actionsOnly?: boolean; forTab?: "source" | "edit" | "publish" }) {
+function Progress({ d, onGo, actionsOnly = false, forTab }: { d: Detail; onGo?: (tab: ItemTab, anchor: string) => void; actionsOnly?: boolean; forTab?: "source" | "edit" | "publish" }) {
   const p = d.primary;
   const curId = d.current?.id;
   const hasCard = d.cards.some((c) => c.revisionId === curId);
@@ -794,7 +795,7 @@ function Progress({ d, onGo, actionsOnly = false, forTab }: { d: Detail; onGo?: 
     { label: "게시", done: d.item.publishStatus === "succeeded" },
   ];
   const cur = steps.findIndex((s) => !s.done);
-  const next: { text: string; btn: string; tab: "source" | "edit" | "publish"; anchor: string } | null = d.item.excluded
+  const next: { text: string; btn: string; tab: ItemTab; anchor: string } | null = d.item.excluded
     ? null
     : cur === 1
       ? { text: "원문을 확보하지 못했습니다. 다시 시도하거나 공식 원문 주소를 연결하세요.", btn: "원문 확인", tab: "source", anchor: "source-panel" }
@@ -807,7 +808,7 @@ function Progress({ d, onGo, actionsOnly = false, forTab }: { d: Detail; onGo?: 
             : cur === 5
               ? { text: "카드와 캡션을 확인하고 예약 시각을 정해 최종 승인하세요.", btn: "승인하기", tab: "publish", anchor: "card-panel" }
               : cur === 6
-                ? { text: "승인되었습니다. 예약 시각 이후 워커가 게시합니다(기본은 모의 실행).", btn: "전송 상태", tab: "publish", anchor: "card-panel" }
+                ? { text: "승인 기록이 저장되었습니다. 전송 대기·모의 실행·실패 여부와 실제 게시 결과를 확인하세요.", btn: "전송 상태", tab: "delivery", anchor: "delivery-panel" }
                 : null;
   const action = forTab === "source" ? (!d.item.excluded && (!p || p.fetchStatus === "ok") ? { text: "본문을 확인했다면 초안을 작성하고 내용을 다듬어 주세요.", btn: "다음 단계로 · 초안 편집", tab: "edit" as const, anchor: "edit-panel" } : null) : forTab === "edit" ? (d.current && !d.item.excluded ? { text: "초안 내용을 확인한 뒤 검토를 마치고 카드뉴스를 만들어 주세요.", btn: "다음 단계로 · 검토·카드뉴스", tab: "publish" as const, anchor: "review-panel" } : null) : next;
   return (
@@ -834,4 +835,3 @@ function Progress({ d, onGo, actionsOnly = false, forTab }: { d: Detail; onGo?: 
     </>
   );
 }
-

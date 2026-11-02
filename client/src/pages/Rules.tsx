@@ -18,7 +18,7 @@ export function RulesPage() {
     return (
       <>
         <h1>검색 설정</h1>
-        <Empty>검색 설정은 채널별로 관리합니다. 채널을 하나 선택하세요.</Empty>
+        <Empty>검색 설정은 채널별로 관리합니다. 오른쪽 위 ‘보기 채널’에서 설정할 채널을 선택해 주세요.</Empty>
       </>
     );
   return (
@@ -616,6 +616,3 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
     </Modal>
   );
 }
-
-
-

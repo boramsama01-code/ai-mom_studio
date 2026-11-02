@@ -58,7 +58,7 @@ describe("card copy editor", () => {
   it("edits actual image title, subtitle and body through the exact-renderer preview without generating AI", async () => {
     saved.copy.cover.title = "기존에 저장된\n표지 제목";
     const dirty = vi.fn(); await render(createElement(CardCopyEditor, { channelId: 1, itemId: 9, onDirtyChange: dirty }));
-    expect(field("title").value).toBe(saved.copy.cover.title); expect(host.textContent).toContain("게시물 캡션은 아래에서 따로");
+    expect(field("title").value).toBe(saved.copy.cover.title); expect(host.textContent).toContain("게시물 캡션과 별도로 저장합니다.");
     expect(field("title").tagName).toBe("TEXTAREA");
     await input("title", "직접 쓴 표지\n제목"); await input("subtitle", "한글 부제\n줄바꿈"); await settle(480);
     expect(mocks.blob).toHaveBeenLastCalledWith(`${path}/preview`, "image/jpeg", expect.objectContaining({ method: "POST", body: expect.objectContaining({ version: 3, page: 0, coverMode: "reuse", copy: expect.objectContaining({ cover: { title: "직접 쓴 표지\n제목", subtitle: "한글 부제\n줄바꿈" } }) }) }));

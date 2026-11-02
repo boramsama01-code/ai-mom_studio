@@ -245,6 +245,11 @@ describe("추출·운영자 편집 보존·채널 격리", () => {
 });
 
 describe("카드·승인·게시", () => {
+  beforeEach(() => {
+    process.env.DRY_RUN = "false"; process.env.AUTO_PUBLISH = "true";
+    process.env.TELEGRAM_BOT_TOKEN = "test-only-bot-token";
+    process.env.TG_OPPORTUNITIES_CHAT_ID = "@test_channel";
+  });
   async function prepareApproved(agent: request.Agent, csrf: string, schedules = payload().schedules) {
     const H = { "x-csrf-token": csrf };
     const created = await agent.post("/api/channels/1/items").set(H).send({ title: "승인 테스트" });
@@ -264,6 +269,61 @@ describe("카드·승인·게시", () => {
     const r = await agent.post(`/api/channels/1/items/${id}/approve`).set(H).send({ revisionId: d.current.id, mediaAssetId: d.cards[0].id, captions: d.defaultCaptions, scheduledAt: "2026-09-28T12:00:00+09:00" });
     // 오늘 날짜 기준 이미 마감(테스트 실행일이 2026-08-28 이후라고 가정하지 않도록 서버 시각 사용)
     if (Date.now() > Date.parse("2026-08-28T15:00:00Z")) expect(r.status).toBe(400);
+  });
+
+  it("연결 전에는 승인 기록을 만들지 않고, 연결된 계정만 예약 시각 이후 처리", async () => {
+    const { agent, csrf } = await login(app), H = { "x-csrf-token": csrf }, db = getDb();
+    const { id, d } = await prepareApproved(agent, csrf, [{ kind: "apply", start: { date: "2099-10-20" }, end: { date: "2099-10-24" } }] as never);
+    const scheduledAt = new Date(Date.now() + 60_000);
+    const body = { revisionId: d.current.id, mediaAssetId: d.cards[0].id, captions: d.defaultCaptions, scheduledAt: scheduledAt.toISOString() };
+    const path = `/api/channels/1/items/${id}/approve`;
+    expect((await agent.get(`/api/channels/1/items/${id}`)).body.publicationReadiness.ready).toBe(false);
+    expect((await agent.post(path).set(H).send(body)).status).toBe(400);
+    const dest = await agent.post("/api/channels/1/destinations").set(H).send({ platform: "telegram_channel", label: "readiness fixture" });
+    await agent.patch(`/api/channels/1/destinations/${dest.body.id}`).set(H).send({ version: dest.body.version, enabled: true });
+    delete process.env.TG_OPPORTUNITIES_CHAT_ID;
+    expect((await agent.post(path).set(H).send(body)).status).toBe(400);
+    expect(await db.select().from(schema.approvals).where(eq(schema.approvals.contentItemId, id))).toHaveLength(0);
+    // A historical zero-destination approval remains visible, without creating
+    // or retrying a delivery merely because its diagnostic endpoint was read.
+    const [legacy] = await db.insert(schema.approvals).values({ channelId: 1, contentItemId: id, revisionId: d.current.id, mediaAssetId: d.cards[0].id, cardSha256: d.cards[0].sha256, captions: d.defaultCaptions, scheduledAt, approvedBy: "test" }).returning();
+    const orphans = await agent.get("/api/publication-orphans?channelId=all");
+    expect(orphans.status).toBe(200);
+    expect(orphans.body).toEqual(expect.arrayContaining([expect.objectContaining({ ap: expect.objectContaining({ id: legacy.id, status: "active" }), item: expect.objectContaining({ id, channelId: 1 }) })]));
+    expect((await agent.get("/api/publication-orphans?channelId=2")).body).toEqual([]);
+    expect((await request(app).get("/api/publication-orphans?channelId=all")).status).toBe(401);
+    expect(await db.select().from(schema.deliveries).where(eq(schema.deliveries.approvalId, legacy.id))).toHaveLength(0);
+    expect((await db.select().from(schema.approvals).where(eq(schema.approvals.id, legacy.id)))[0].status).toBe("active");
+    process.env.TG_OPPORTUNITIES_CHAT_ID = "@test_channel";
+    let approved = await agent.post(path).set(H).send(body);
+    expect(approved.status).toBe(201);
+    expect(approved.body).toMatchObject({ destinations: 1, publicationReadiness: { ready: true, dryRun: false }, workerStarted: false });
+    let [delivery] = await db.select().from(schema.deliveries).where(eq(schema.deliveries.approvalId, approved.body.approval.id));
+    for (const status of ["scheduled", "processing", "succeeded", "unknown"]) {
+      await db.update(schema.deliveries).set({ status }).where(eq(schema.deliveries.id, delivery.id));
+      const [beforeDelivery] = await db.select().from(schema.deliveries).where(eq(schema.deliveries.id, delivery.id));
+      const [beforeApproval] = await db.select().from(schema.approvals).where(eq(schema.approvals.id, approved.body.approval.id));
+      expect((await agent.post(path).set(H).send(body)).status).toBe(409);
+      expect((await db.select().from(schema.deliveries).where(eq(schema.deliveries.id, delivery.id)))[0]).toEqual(beforeDelivery);
+      expect((await db.select().from(schema.approvals).where(eq(schema.approvals.id, approved.body.approval.id)))[0]).toEqual(beforeApproval);
+    }
+    for (const status of ["failed", "dry_run"]) {
+      await db.update(schema.deliveries).set({ status }).where(eq(schema.deliveries.id, delivery.id));
+      const previousId = approved.body.approval.id;
+      approved = await agent.post(path).set(H).send(body);
+      expect(approved.status).toBe(201);
+      expect(approved.body.approval.id).not.toBe(previousId);
+      expect((await db.select().from(schema.deliveries).where(eq(schema.deliveries.id, delivery.id)))[0].status).toBe(status);
+      [delivery] = await db.select().from(schema.deliveries).where(eq(schema.deliveries.approvalId, approved.body.approval.id));
+    }
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ ok: true, result: { message_id: 701, chat: { username: "test_channel" } } }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    expect((await publishDue(db, { now: new Date(scheduledAt.getTime() - 1000) })).processed).toBe(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect((await publishDue(db, { now: new Date(scheduledAt.getTime() + 1000) })).succeeded).toBe(1);
+    expect((await db.select().from(schema.deliveries).where(eq(schema.deliveries.approvalId, approved.body.approval.id)))[0].status).toBe("succeeded");
+    expect((await agent.get("/api/publication-orphans?channelId=1")).body).toEqual([]);
+    await db.update(schema.destinations).set({ enabled: false }).where(eq(schema.destinations.id, dest.body.id));
   });
 
   it("채널을 보관하면 예약된 게시를 전송 직전에 취소", async () => {
@@ -299,6 +359,7 @@ describe("카드·승인·게시", () => {
     expect(card.status).toBe(200);
     const ap = await agent.post(`/api/channels/1/items/${id}/approve`).set(H).send({ revisionId: d.current.id, mediaAssetId: d.cards[0].id, captions: d.defaultCaptions, scheduledAt: "2026-01-01T00:00:00+09:00" });
     expect(ap.status).toBe(201);
+    process.env.DRY_RUN = "true";
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
     const s = await publishDue(db, { now: new Date() });
@@ -398,5 +459,3 @@ describe("재시작 후 영속성", () => {
     expect(r.body.items.some((x: { query: string }) => x.query === "서울과학고 모집요강")).toBe(true);
   });
 });
-
-
