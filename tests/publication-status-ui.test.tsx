@@ -10,11 +10,11 @@ import { studioContentSchema, type StudioCard } from "../shared/studio";
 import type { PublicationRuntime } from "../client/src/publicationStatus";
 
 const mocks = vi.hoisted(() => ({
-  api: vi.fn(), toast: vi.fn(), navigate: vi.fn(), search: "tab=delivery", scroll: vi.fn(),
+  api: vi.fn(), blob: vi.fn(), toast: vi.fn(), navigate: vi.fn(), search: "tab=delivery", scroll: vi.fn(),
   guard: { setDirty: vi.fn(), confirmLeave: vi.fn((action: () => void) => action()) },
 }));
 const channel = { id: 2, slug: "opportunities", name: "하이스쿱", active: true, accentColor: "#285f6a" };
-vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
+vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api, apiBlob: mocks.blob }));
 vi.mock("../client/src/state", () => ({ useChannel: () => ({ selected: "all", allChannels: [channel], channels: [channel] }), useDirtyGuard: () => mocks.guard }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
 vi.mock("wouter", () => ({ useLocation: () => ["/items/2/9", mocks.navigate], useSearch: () => mocks.search }));
@@ -45,12 +45,20 @@ function itemFixture() {
 
 beforeEach(() => {
   vi.clearAllMocks(); mocks.search = "tab=delivery"; detail = itemFixture(); orphanRows = [];
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:publication-card-preview") });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+  mocks.blob.mockResolvedValue(new Blob(["fixture-jpeg"], { type: "image/jpeg" }));
   runtime = { integrations: { flags: { dryRun: false, autoPublish: true } }, workerConnected: true, globalStop: false };
   studioStatus = { channelId: 2, channelName: "하이스쿱", expectedUsername: "highscoop.official", ready: true, blockers: [], dailyLimit: 3, dryRun: false, autoPublish: true, destinations: [{ id: 20, label: "@highscoop.official", enabled: true, configured: true }], deliveries: [] };
   HTMLElement.prototype.scrollIntoView = function () { mocks.scroll(this.id); };
   mocks.api.mockImplementation(async (path: string, options?: { method?: string }) => {
     if (path === "/status") return structuredClone(runtime);
     if (path === "/channels/2/items/9") return structuredClone(detail);
+    if (path === "/studio/ai-status") return { defaultProvider: "gemini", text: { gemini: false, openai: false, anthropic: false } };
+    if (path === "/channels/2/items/9/card-copy") return {
+      version: detail.item.version, revisionId: detail.current.id, hasSavedCopy: true,
+      copy: { version: 1, templateKey: "builtin:classic", cover: { title: detail.item.title, subtitle: "확인한 원고" }, pages: Array.from({ length: 4 }, (_, i) => ({ id: `body-${i + 1}`, title: `본문 제목 ${i + 1}`, subtitle: "", body: `원문에 근거한 본문 ${i + 1}` })) },
+    };
     if (path === "/canva/status") return { connected: false };
     if (path === "/channels/2/items/9/approve" && options?.method === "POST") {
       detail = { ...detail, approvals: [{ id: 11, revisionId: 4, scheduledAt: future, status: "active" }], deliveries: [{ d: { id: 101, approvalId: 11, status: "scheduled", lastError: null, externalUrl: null, completedAt: null }, dest: { label: "@highscoop.official", platform: "instagram" } }] };

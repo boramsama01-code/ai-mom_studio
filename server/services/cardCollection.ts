@@ -56,9 +56,9 @@ const COVER_TITLES: Record<string, { x: number; y: number; w: number; h: number;
   n07: { x:80,y:416,w:920,h:448,size:108 }, n08: { x:120,y:507,w:840,h:330,size:96 },
   n09: { x:80,y:335,w:920,h:363,size:101 }, n10: { x:80,y:409,w:920,h:450,size:116 },
 };
-function drawHeadline(c: ReturnType<typeof canvas>, title: string, d: CardDesign) {
+function drawHeadline(c: ReturnType<typeof canvas>, title: string, d: CardDesign, min = 54) {
   const s = COVER_TITLES[d.layoutId ?? d.id];
-  return c.text(title, s.x, s.y, s.w, s.h, { size: s.size, min: 54, weight: 'bold', color: s.inverse ? d.onAccent : d.ink, align: s.center ? 'center' : 'left' });
+  return c.text(title, s.x, s.y, s.w, s.h, { size: s.size, min, weight: 'bold', color: s.inverse ? d.onAccent : d.ink, align: s.center ? 'center' : 'left' });
 }
 export function checkCollectionTitle(title: string, id: string) { const d = getDesign(id); drawHeadline(canvas(d), title, d); }
 
@@ -80,8 +80,10 @@ export async function renderCollectionCover(model: CardModel, count: number, art
       text(d.family === "recruitment" ? "EXPLORE\nYOUR NEXT." : "CONTEXT\nMATTERS.", x + 40, y + h * .3, w - 80, h * .6, { size: Math.min(70, w / 7), min: 26, weight: "bold", color: d.ink });
     }
   };
-  const headline = () => drawHeadline(c, model.title, d);
-  const cue = (x = 80, y = 1112, color = d.ink) => text(d.family === "recruitment" ? "대상 · 일정 · 신청 안내  →" : "핵심 사실부터 맥락까지  →", x, y, 840, 50, { size: 30, weight: "semibold", color });
+  const headline = () => drawHeadline(c, model.title, d, model.subtitle === undefined ? 54 : 40);
+  const cue = (x = 80, y = 1112, color = d.ink) => model.subtitle === undefined
+    ? text(d.family === "recruitment" ? "대상 · 일정 · 신청 안내  →" : "핵심 사실부터 맥락까지  →", x, y, 840, 50, { size: 30, weight: "semibold", color })
+    : model.subtitle && text(model.subtitle, x, Math.min(y, 1098), 840, 72, { size: 30, min: 22, weight: "semibold", color, field: "cardCopy.cover.subtitle" });
   // A badge describes the source. We never invent a deadline, quote, statistic or a breaking-news claim.
   const tag = model.badge || (d.family === "recruitment" ? "모집 안내" : "뉴스 브리핑");
   const page = `01 / ${String(count).padStart(2, "0")}`;
@@ -98,7 +100,9 @@ export async function renderCollectionCover(model: CardModel, count: number, art
       c.header(model.brandLine, page); line(80,127,920,d.ink);
       pill("FRYDAY / FOOD & CULTURE",80,169);
       text("한 입에서 시작하는 이야기",80,579,850,54,{size:31,weight:"semibold",color:d.accent});
-      headline(); text("알고 먹으면 더 재밌는 한 입  →",80,1100,900,54,{size:30,weight:"semibold"}); break;
+      headline();
+      if (model.subtitle === undefined) text("알고 먹으면 더 재밌는 한 입  →",80,1100,900,54,{size:30,weight:"semibold"}); else cue(80, 1100);
+      break;
     case "r01":
       c.header(model.brandLine, page); line(80, 127, 920, d.ink);
       pill(tag, 80, 169); headline();
@@ -165,7 +169,9 @@ export async function renderCollectionCover(model: CardModel, count: number, art
       line(80, 1091, 920, d.ink); cue(80, 1124); break;
     case "n03":
       c.header(model.brandLine, page); await photo(0, 140, W, 560);
-      pill("NEWS DISPATCH", 80, 733); headline(); break;
+      pill("NEWS DISPATCH", 80, 733); headline();
+      if (model.subtitle) text(model.subtitle, 80, 1110, 920, 60, { size: 28, min: 22, weight: "semibold", field: "cardCopy.cover.subtitle" });
+      break;
     case "n04":
       c.header(model.brandLine, page); text("WHY IT", 80, 166, 920, 160, { size: 126, weight: "bold" });
       if (d.onSoft) rect(66, 292, 782, 157, d.soft);
@@ -204,7 +210,7 @@ export async function renderCollectionCover(model: CardModel, count: number, art
   return jpeg(c.svg());
 }
 
-type BodyEntry = { block: CardModel["blocks"][number]; lines: string[]; y: number; h: number; size: number };
+type BodyEntry = { block: CardModel["blocks"][number]; lines: string[]; labelLines: string[]; labelHeight: number; y: number; h: number; size: number };
 /** Body geometry is also the overflow check used by the carousel paginator. */
 export function layoutCollectionBody(model: CardModel, id: string, picture?: { data?: string; present: boolean }): string {
   const d = getDesign(id), c = canvas(d), { rect, line, text } = c;
@@ -216,7 +222,7 @@ export function layoutCollectionBody(model: CardModel, id: string, picture?: { d
   const titleX = d.body === "index" ? 230 : 80;
   if (d.body === "index") text(pageNo, 70, 171, 140, 150, { size: 96, weight: "bold", color: d.accent });
   if (d.body === "bands") { rect(0, 143, W, 263, d.accent); }
-  const titleEnd = text(model.title, titleX, 184, 1000 - titleX, 200, { size: 72, min: 54, weight: "bold", color: d.body === "bands" ? d.onAccent : d.ink });
+  const titleEnd = text(model.title, titleX, 184, 1000 - titleX, 200, { size: 72, min: model.subtitle === undefined ? 54 : 44, weight: "bold", color: d.body === "bands" ? d.onAccent : d.ink });
   let top = Math.max(422, titleEnd + 60);
   if (d.body !== "bands") line(titleX, top - 36, d.body === "plain" ? 920 : 92, d.accent, d.body === "plain" ? 2 : 6);
   if (picture?.present) {
@@ -237,9 +243,10 @@ export function layoutCollectionBody(model: CardModel, id: string, picture?: { d
     let y = top; const candidate: BodyEntry[] = [];
     for (const block of blocks) {
       const lines = wrapText(c.fonts.regular, block.text, size, width);
-      const labelHeight = block.label && !ledger ? 46 : 0;
+      const labelLines = block.label && !ledger ? wrapText(c.fonts.semibold, block.label, 26, width) : [];
+      const labelHeight = labelLines.length ? 46 + (labelLines.length - 1) * 34 : 0;
       const h = lines.length * size * 1.42 + labelHeight + (boxed ? 55 : 0);
-      candidate.push({ block, lines, y, h, size }); y += h + 42;
+      candidate.push({ block, lines, labelLines, labelHeight, y, h, size }); y += h + 42;
     }
     const total = split ? Math.max(...candidate.map(e => e.h), 0) : y - top - 42;
     if (total <= available) { entries = candidate; break; }
@@ -262,8 +269,8 @@ export function layoutCollectionBody(model: CardModel, id: string, picture?: { d
       line(80, y + e.h + 21, 920, d.soft, 2);
     }
     const labelY = y + (boxed ? 25 : 0);
-    if (e.block.label && !ledger) text(e.block.label, left + inset, labelY, width, 37, { size: 26, min: 22, weight: "semibold", color: ink, field: e.block.field });
-    const bodyY = labelY + (e.block.label && !ledger ? 46 : 0);
+    if (e.block.label && !ledger) e.labelLines.forEach((label, index) => text(label, left + inset, labelY + index * 34, width, 37, { size: 26, weight: "semibold", color: ink, field: e.block.field.replace(/\.body$/, ".subtitle") }));
+    const bodyY = labelY + e.labelHeight;
     e.lines.forEach((s, j) => text(s, left + inset, bodyY + j * e.size * 1.42, width, e.size * 1.45, { size: e.size, color: ink, field: e.block.field }));
     if (d.body === "notes" || d.body === "plain" || d.body === "index") line(left, y + e.h + 21, right - left, d.soft, 2);
   });

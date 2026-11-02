@@ -9,6 +9,7 @@ import type { DB } from "../db";
 import {
   channels,
   contentItems,
+  contentRevisions,
   officialSources,
   runs,
   searchRules,
@@ -39,6 +40,7 @@ import { generateDialogueDraft } from "./generate";
 import type { NoticePayload } from "../../shared/payloads";
 import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { itemPrimarySource } from "../services/itemSources";
+import { preserveCardCopy } from "../../shared/cardCopy";
 
 export type CollectOptions = {
   trigger: "manual" | "worker" | "cli" | "schedule";
@@ -399,15 +401,18 @@ export async function extractForItem(
   now: Date,
   officials?: Awaited<ReturnType<typeof loadOfficials>>,
   provider?: AiProvider,
+  templateKey?: string,
 ) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
+  if (!item) return { ok: false as const, kind: "no_source", error: "항목 없음" };
   const doc = await itemPrimarySource(db, item);
   if (!doc || doc.fetchStatus !== "ok" || !doc.fetchedText) return { ok: false as const, kind: "no_source", error: "원문 미확보 — 추출하지 않음" };
   const offs = officials ?? (await loadOfficials(db, item.channelId));
   const sources: LlmSource[] = [
     { source_id: doc.id, kind: doc.kind, url: doc.originalUrl, title: doc.title, published: doc.publishedRaw, text: doc.fetchedText },
   ];
-  const r = await extractNotice({ sources, sourceHint: item.category, now, budget, provider });
+  const [channel] = await db.select({ cardTemplate: channels.cardTemplate }).from(channels).where(eq(channels.id, item.channelId));
+  const r = await extractNotice({ sources, sourceHint: item.category, now, budget, provider, templateKey: templateKey ?? channel?.cardTemplate ?? "builtin:classic" });
   if (!r.ok) {
     await db.update(contentItems).set({ updatedAt: now }).where(eq(contentItems.id, itemId));
     return r;
@@ -417,20 +422,22 @@ export async function extractForItem(
   const evidenceStatus = computeEvidenceStatus(doc, payload, offs);
   const previous = item.extracted as NoticePayload | null;
 
-  await db.transaction(async (tx) => {
+  const applied = await db.transaction(async (tx) => {
+    const [locked] = await tx.select().from(contentItems).where(eq(contentItems.id, itemId)).for("update");
+    if (!locked || locked.version !== item.version || locked.currentRevisionId !== item.currentRevisionId) return false;
     // 현재 버전이 운영자 편집본이면 current를 바꾸지 않고 LLM 결과만 보관
-    const cur = item.currentRevisionId
-      ? (await tx.execute(sql`select author from content_revisions where id = ${item.currentRevisionId}`)).rows[0] as { author: string } | undefined
-      : undefined;
+    const [cur] = locked.currentRevisionId ? await tx.select().from(contentRevisions).where(eq(contentRevisions.id, locked.currentRevisionId)) : [];
     const operatorOwned = cur?.author === "operator";
+    const savedPayload = preserveCardCopy(payload, cur?.payload);
     await createRevision(tx, {
       contentItemId: itemId,
       author: "llm",
-      payload,
+      payload: savedPayload,
       model: r.model,
       promptVersion: PROMPT_VERSION.notice,
       usage: r.usage,
-      note: r.droppedEvidence ? `원문에서 찾을 수 없는 근거 구절 ${r.droppedEvidence}개 제거` : "",
+      note: [r.droppedEvidence ? `원문에서 찾을 수 없는 근거 구절 ${r.droppedEvidence}개 제거` : "",
+        cur?.payload.cardCopy ? "원문 요약을 새로 작성했습니다. 저장된 카드 문구는 유지했으니 바뀐 원문과 맞는지 검토해 주세요." : ""].filter(Boolean).join(" / "),
       makeCurrent: !operatorOwned,
     });
     const changed = materialChange(previous, payload);
@@ -449,7 +456,9 @@ export async function extractForItem(
         updatedAt: now,
       })
       .where(eq(contentItems.id, itemId));
+    return true;
   });
+  if (!applied) return { ok: false as const, kind: "conflict", error: "생성 중 원고가 변경되었습니다. 새 편집본을 유지했습니다. 새로고침 후 다시 생성해 주세요." };
   return { ok: true as const, scheduleStatus };
 }
 

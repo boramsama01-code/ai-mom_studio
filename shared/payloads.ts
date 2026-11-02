@@ -2,6 +2,7 @@
  * 콘텐츠 유형별 payload 스키마 (LLM 출력 검증 + 운영자 편집 검증 공용)
  */
 import { z } from "zod";
+import { cardCopySchema } from "./cardCopy";
 
 const nullableStr = z.string().trim().max(2000).nullable();
 
@@ -28,6 +29,7 @@ export const evidenceSchema = z.object({
 });
 
 export const noticePayloadSchema = z.object({
+  cardCopy: cardCopySchema.optional(),
   relevance: z.enum(["relevant", "irrelevant", "uncertain"]),
   irrelevance_reason: nullableStr.optional(),
   title: nullableStr,
@@ -53,6 +55,7 @@ export type NoticePayload = z.infer<typeof noticePayloadSchema>;
 export const sourceRefSchema = z.object({ source_id: z.number().int(), note: z.string().max(300).nullable().optional() });
 
 export const sciencePayloadSchema = z.object({
+  cardCopy: cardCopySchema.optional(),
   topic: z.string().max(200),
   age_band: z.string().max(60),
   key_question: z.string().max(300),
@@ -68,6 +71,7 @@ export const sciencePayloadSchema = z.object({
 export type SciencePayload = z.infer<typeof sciencePayloadSchema>;
 
 export const currentPayloadSchema = z.object({
+  cardCopy: cardCopySchema.optional(),
   title: z.string().max(200),
   event_at: nullableStr,
   published_at: nullableStr,
