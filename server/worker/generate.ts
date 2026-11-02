@@ -4,16 +4,19 @@
  */
 import { eq, sql } from "drizzle-orm";
 import type { DB } from "../db";
-import { contentItems, contentSources, sourceDocuments } from "../../shared/schema";
+import { channels, contentItems, contentRevisions, contentSources, sourceDocuments } from "../../shared/schema";
 import { draftCurrent, draftScience, LlmBudget, PROMPT_VERSION, type LlmSource, type AiProvider } from "../services/llm";
 import { createRevision } from "../content";
 import { itemPrimarySource } from "../services/itemSources";
+import { preserveCardCopy } from "../../shared/cardCopy";
 
-export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider) {
+export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider, templateKey?: string) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
   if (!item) return { ok: false as const, error: "항목 없음" };
   if (item.kind !== "science_dialogue" && item.kind !== "current_dialogue")
     return { ok: false as const, error: "공고 항목은 '구조화 추출'을 사용하세요" };
+  const [channel] = await db.select({ cardTemplate: channels.cardTemplate }).from(channels).where(eq(channels.id, item.channelId));
+  const selectedTemplate = templateKey ?? channel?.cardTemplate ?? "builtin:classic";
 
   const docIds = new Set<number>();
   const primary = await itemPrimarySource(db, item);
@@ -33,8 +36,8 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   const budget = new LlmBudget(2); // 한 항목: 본 호출 1 + 형식 수정 재시도 1
   const r =
     item.kind === "science_dialogue"
-      ? await draftScience({ topic: item.topicKey || item.title, sources, now, budget, provider })
-      : await draftCurrent({ sources, now, budget, provider });
+      ? await draftScience({ topic: item.topicKey || item.title, sources, now, budget, provider, templateKey: selectedTemplate })
+      : await draftCurrent({ sources, now, budget, provider, templateKey: selectedTemplate });
   if (!r.ok) return { ok: false as const, error: r.error };
 
   const payload = r.data as Record<string, unknown>;
@@ -43,14 +46,19 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   const evidenceStatus = !sources.length || !evidenceCount || sources.some(s => s.kind === "manual_text") ? "needs_review" : "secondary_only";
 
   const rev = await db.transaction(async (tx) => {
+    const [locked] = await tx.select().from(contentItems).where(eq(contentItems.id, itemId)).for("update");
+    if (!locked || locked.version !== item.version || locked.currentRevisionId !== item.currentRevisionId) return null;
+    const [previous] = locked.currentRevisionId ? await tx.select({ payload: contentRevisions.payload }).from(contentRevisions).where(eq(contentRevisions.id, locked.currentRevisionId)) : [];
+    const savedPayload = preserveCardCopy(payload, previous?.payload);
     const rev = await createRevision(tx, {
       contentItemId: itemId,
       author: "llm",
-      payload,
+      payload: savedPayload,
       model: r.model,
       promptVersion: item.kind === "science_dialogue" ? PROMPT_VERSION.science : PROMPT_VERSION.current,
       usage: r.usage,
       note: [
+        previous?.payload.cardCopy ? "원문 요약을 새로 작성했습니다. 저장된 카드 문구는 유지했으니 바뀐 원문과 맞는지 검토해 주세요." : "",
         r.droppedEvidence ? `원문에서 찾을 수 없는 근거 구절 ${r.droppedEvidence}개 제거` : "",
         indep !== null && indep < 2 ? "독립 출처가 2개 미만 — 추가 대조 권장" : "",
         !sources.length ? "확보된 출처 없이 생성 — 과학적 근거 검토 필요" : "",
@@ -69,6 +77,7 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
       .where(eq(contentItems.id, itemId));
     return rev;
   });
+  if (!rev) return { ok: false as const, error: "생성 중 원고가 변경되었습니다. 새 편집본을 유지했습니다. 새로고침 후 다시 생성해 주세요." };
   return { ok: true as const, revisionId: rev.id, usage: r.usage, model: r.model };
 }
 

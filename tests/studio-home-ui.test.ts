@@ -7,7 +7,7 @@ import { studioContentSchema, type StudioCard } from "../shared/studio";
 import { StudioPage } from "../client/src/pages/Studio";
 import { StudioTextImport } from "../client/src/pages/StudioTextImport";
 
-const mocks = vi.hoisted(() => ({ guard: { setDirty: vi.fn(), confirmLeave: (f: () => void) => f() }, toast: vi.fn(), navigate: vi.fn(), api: vi.fn(), clipboard: vi.fn() }));
+const mocks = vi.hoisted(() => ({ guard: { setDirty: vi.fn(), confirmLeave: vi.fn((f: () => void) => f()) }, toast: vi.fn(), navigate: vi.fn(), api: vi.fn(), clipboard: vi.fn() }));
 vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => ({ allChannels: [{ id: 1, slug: "penguin", name: "내 채널", active: true, accentColor: "#285f6a" }, { id: 2, slug: "fryday", name: "감자 채널", active: true, accentColor: "#996633" }, { id: 3, slug: "archived", name: "보관 채널", active: false }], channels: [], select: vi.fn() }) }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
 vi.mock("../client/src/api", async importOriginal => ({ ...await importOriginal<object>(), api: mocks.api }));
@@ -196,8 +196,10 @@ describe("수집 카드뉴스 보드 연결", () => {
     await act(async () => host.querySelector<HTMLButtonElement>('.card-carousel-thumbs button:last-child')!.click());
     expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/2/media/55");
     expect(button("다음 →").disabled).toBe(true);
-    await act(async () => [...host.querySelectorAll<HTMLAnchorElement>("a")].find(a => a.textContent === "원고·카드 수정 →")!.click());
+    await act(async () => [...host.querySelectorAll<HTMLAnchorElement>("a")].find(a => a.textContent === "원문·요약 확인 →")!.click());
     expect(mocks.navigate).toHaveBeenCalledWith("/items/2/20");
+    mocks.guard.confirmLeave.mockImplementationOnce(() => {});
+    await click("보드 제목·메모 편집"); expect(host.querySelector("#studio-title")).toBeNull();
     await click("보드 제목·메모 편집"); expect(host.querySelector("#studio-title")).not.toBeNull();
   });
 });

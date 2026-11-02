@@ -7,6 +7,7 @@ export type CardBodyBlock = {
 };
 export type FittedCardBlock = {
   block: CardBodyBlock; lines: string[]; size: number; lineHeight: number;
+  labelLines: string[];
   labelY: number | null; textY: number; inset: number;
   box: { top: number; height: number } | null; endY: number;
 };
@@ -41,18 +42,20 @@ export function fitCardBody(
       const size = block.emphasis ? profile.emphasis : profile.body;
       const lineHeight = size * profile.leading;
       const lines = wrap(block.text, size, width - (boxed ? 56 : 0), !!block.emphasis);
+      const labelLines = block.label ? wrap(block.label, 26, width - (boxed ? 56 : 0), true) : [];
+      const extraLabelHeight = Math.max(0, labelLines.length - 1) * 34;
       const labelY = block.label ? y : null;
       let textY: number, box: FittedCardBlock["box"] = null;
       if (boxed) {
-        box = { top: y - 40, height: profile.labelGap + 34 + lines.length * lineHeight };
-        textY = y + profile.labelGap + 4 + size * 0.35;
+        box = { top: y - 40, height: profile.labelGap + extraLabelHeight + 34 + lines.length * lineHeight };
+        textY = y + profile.labelGap + extraLabelHeight + 4 + size * 0.35;
         y += box.height + profile.boxGap;
       } else {
-        if (block.label) y += profile.labelGap;
+        if (block.label) y += profile.labelGap + extraLabelHeight;
         textY = y + size * 0.35;
         y += lines.length * lineHeight + profile.blockGap - lineHeight * 0.35;
       }
-      planned.push({ block, lines, size, lineHeight, labelY, textY, inset: boxed ? 28 : 0, box, endY: y });
+      planned.push({ block, lines, size, lineHeight, labelLines, labelY, textY, inset: boxed ? 28 : 0, box, endY: y });
       if (y > footerTop - 10) { failedField = block.field; break; }
     }
     if (planned.length === active.length && y <= footerTop - 10)

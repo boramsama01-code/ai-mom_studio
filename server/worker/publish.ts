@@ -46,6 +46,7 @@ import { studioContentSchema } from "../../shared/studio";
 import { studioKey } from "../../shared/channelKeys";
 import type { CardCarousel } from "../../shared/carousel";
 import { HttpError } from "../routes/util";
+import { cardCopySchema } from "../../shared/cardCopy";
 
 export async function currentRevision(db: DB, itemId: number) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
@@ -67,17 +68,33 @@ export async function sourceOrgFor(db: DB, item: { id?: number; primarySourceId:
 }
 
 /* ───────────── 카드 생성 ───────────── */
-export async function renderCardForItem(db: DB, itemId: number, now = new Date(), templateKey?: string | null, options: { coverMode?: "ai" | "typography"; actor?: string } = {}) {
+type CardRenderOptions = { version?: number; coverMode?: "ai" | "typography" | "reuse"; actor?: string };
+
+/** Editing typography must not buy another illustration for unchanged source facts. */
+export async function findReusableCardCover(db: DB, itemId: number, payload: Record<string, unknown>) {
+  const source = (value: Record<string, unknown>) => JSON.stringify(Object.fromEntries(Object.entries(value).filter(([key]) => key !== "cardCopy").sort(([a], [b]) => a.localeCompare(b))));
+  const expected = source(payload);
+  const candidates = await db.select({ id: mediaAssets.id, payload: contentRevisions.payload }).from(mediaAssets)
+    .innerJoin(contentRevisions, eq(contentRevisions.id, mediaAssets.revisionId))
+    .where(and(eq(mediaAssets.contentItemId, itemId), eq(mediaAssets.kind, "cover_art"))).orderBy(desc(mediaAssets.id)).limit(30);
+  const match = candidates.find(candidate => source(candidate.payload) === expected);
+  if (!match) return null;
+  const [art] = await db.select({ bytes: mediaAssets.bytes, templateKey: mediaAssets.templateKey }).from(mediaAssets).where(eq(mediaAssets.id, match.id));
+  return art ?? null;
+}
+
+export async function renderCardForItem(db: DB, itemId: number, now = new Date(), templateKey?: string | null, options: CardRenderOptions = {}) {
   // Serialize per item across web processes: concurrent clicks reuse the same cover art.
   return db.transaction(async tx => {
     await tx.execute(sql`select pg_advisory_xact_lock(7193202, ${itemId})`);
     return renderCarouselForItem(tx as unknown as DB, itemId, now, templateKey, options);
   });
 }
-async function renderCarouselForItem(db: DB, itemId: number, now: Date, templateKey: string | null | undefined, options: { coverMode?: "ai" | "typography"; actor?: string }) {
+async function renderCarouselForItem(db: DB, itemId: number, now: Date, templateKey: string | null | undefined, options: CardRenderOptions) {
   const cr = await currentRevision(db, itemId);
   if (!cr) return { ok: false as const, code: "not_found", error: "항목 없음" };
   const { item, rev } = cr;
+  if (options.version !== undefined && options.version !== item.version) return { ok: false as const, code: "conflict", error: "다른 곳에서 원고가 변경됐습니다. 최신 문구를 확인한 뒤 카드를 만들어 주세요." };
   const [existingBoard] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, itemId));
   if (existingBoard) assertStudioActive(existingBoard);
   if (!rev) return { ok: false as const, code: "no_revision", error: "초안이 없습니다. 먼저 추출·작성하세요." };
@@ -85,16 +102,20 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   if (!parsed.success) return { ok: false as const, code: "invalid_payload", error: "초안 형식이 올바르지 않습니다. 편집 화면에서 필수 항목을 채우세요." };
   const [ch] = await db.select().from(channels).where(eq(channels.id, item.channelId));
   if (!ch?.active) return { ok: false as const, code: "channel", error: "채널을 복원한 뒤 카드를 만들어 주세요." };
-  const payload = rev.payload as Record<string, any>;
-  const title = payload.title || payload.key_question;
+  const savedCopy = cardCopySchema.safeParse(rev.payload.cardCopy);
+  const key = templateKey || (savedCopy.success ? savedCopy.data.templateKey : null) || ch.cardTemplate || "builtin:classic";
+  const copy = savedCopy.success ? { ...savedCopy.data, templateKey: key } : undefined;
+  const payload = { ...rev.payload, ...(copy ? { cardCopy: copy } : {}) } as Record<string, any>;
+  const title = copy?.cover.title || payload.title || payload.key_question;
   if (!title || !String(title).trim()) return { ok: false as const, code: "invalid_payload", error: "카드 제목(제목/핵심 질문)이 비어 있습니다." };
-  const key = templateKey || ch.cardTemplate || "builtin:classic";
   let style;
   try { style = await resolveStyle(db, key, ch.id); }
   catch (e) { return { ok: false as const, code: "template", error: (e as Error).message }; }
-  const coverMode = style.collection && !collectionUsesArt(style.collection) ? "typography" : options.coverMode ?? (env.openaiKey ? "ai" : "typography");
-  if (coverMode === "ai" && !env.openaiKey) return { ok: false as const, code: "ai_not_configured", error: "AI 표지는 OpenAI 이미지 연결이 필요합니다. 연결 설정에서 키를 입력하거나 글자 중심 표지를 선택하세요." };
-  if (coverMode === "ai" && await getSetting(db, "global_stop", false)) return { ok: false as const, code: "global_stop", error: "전역 정지 상태입니다. 정지를 해제한 뒤 AI 표지를 만들어 주세요." };
+  const typographyOnly = !!style.collection && !collectionUsesArt(style.collection);
+  const cachedArt = typographyOnly || options.coverMode === "typography" ? null : await findReusableCardCover(db, item.id, payload);
+  const coverMode = typographyOnly ? "typography" : options.coverMode === "reuse" ? (cachedArt ? "ai" : "typography") : options.coverMode ?? (copy ? (cachedArt ? "ai" : "typography") : env.openaiKey ? "ai" : "typography");
+  if (coverMode === "ai" && !cachedArt && !env.openaiKey) return { ok: false as const, code: "ai_not_configured", error: "AI 표지는 OpenAI 이미지 연결이 필요합니다. 연결 설정에서 키를 입력하거나 글자 중심 표지를 선택하세요." };
+  if (coverMode === "ai" && !cachedArt && await getSetting(db, "global_stop", false)) return { ok: false as const, code: "global_stop", error: "전역 정지 상태입니다. 정지를 해제한 뒤 AI 표지를 만들어 주세요." };
   let output;
   let newCoverArt: { bytes: Buffer; model: string } | null = null;
   let cover: CardCarousel["cover"] = { kind: "typography", credit: style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오" };
@@ -104,7 +125,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
     await renderCarouselCover(plan.base, plan.count, null, cover.credit, style);
     let art: Buffer | null = null;
     if (coverMode === "ai") {
-      const [cached] = await db.select().from(mediaAssets).where(and(eq(mediaAssets.revisionId, rev.id), eq(mediaAssets.kind, "cover_art"))).orderBy(desc(mediaAssets.id)).limit(1);
+      const cached = cachedArt;
       if (cached) {
         art = cached.bytes;
         cover = { kind: "ai", credit: "표지: AI 생성 · OpenAI", model: cached.templateKey ?? undefined };
@@ -122,7 +143,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
     return { ok: false as const, code: "render", error: `카드뉴스를 완성하지 못했습니다: ${(e as Error).message}` };
   }
   const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
-  if (fresh.currentRevisionId !== rev.id) return { ok: false as const, code: "conflict", error: "생성 중 원고가 변경됐습니다. 최신 원고를 확인한 뒤 다시 만들어 주세요." };
+  if (fresh.currentRevisionId !== rev.id || (options.version !== undefined && fresh.version !== options.version)) return { ok: false as const, code: "conflict", error: "생성 중 원고가 변경됐습니다. 최신 원고를 확인한 뒤 다시 만들어 주세요." };
   const [freshBoard] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id)).for("update");
   if (freshBoard) assertStudioActive(freshBoard);
   if (freshBoard && (!existingBoard || freshBoard.version !== existingBoard.version)) throw new HttpError(409, "생성 중 보드의 작업 상태가 변경되어 결과를 반영하지 않았습니다. 최신 작업에서 다시 생성하세요.");
@@ -136,7 +157,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
     pages.push({ id: stored.id, sha256: hash, title: page.title, altText:page.altText });
   }
   const [previous]=await db.select({carousel:mediaAssets.carousel}).from(mediaAssets).where(eq(mediaAssets.id,pages[0].id));
-  const carousel: CardCarousel = previous?.carousel?.pages.length===pages.length && previous.carousel.pages.every((p,i)=>p.id===pages[i].id) ? {...previous.carousel,pages:pages.map((p,i)=>({...p,altText:previous.carousel!.pages[i].altText||p.altText}))} : { version: 1, pages, cover };
+  const carousel: CardCarousel = previous?.carousel?.pages.length===pages.length && previous.carousel.pages.every((p,i)=>p.id===pages[i].id) ? {...previous.carousel,pages:pages.map((p,i)=>({...p,altText:previous.carousel!.pages[i].altText||p.altText})), ...(copy ? { copy } : {})} : { version: 1, pages, cover, ...(copy ? { copy } : {}) };
   await db.update(mediaAssets).set({ carousel }).where(eq(mediaAssets.id, pages[0].id));
   const board = await createStudioCard(db, studioContentSchema.parse({ title: String(title).slice(0, 160), channel: studioKey(ch.slug), format: "카드뉴스", stage: "review" }), options.actor ?? "system", item.id);
   // Keep all manually edited board fields and version history; only its generated output changes.

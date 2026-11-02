@@ -94,6 +94,7 @@ export type CardModel = {
   brandLine: string; // "우주펭귄상회 스튜디오 · 도전·진학"
   badge: string; // 카테고리
   title: string;
+  subtitle?: string;
   blocks: Array<{ field: string; label?: string; text: string; maxLines: number; emphasis?: boolean }>;
   footer: string; // "출처: 기관 · 확인 2026-09-28"
 };
@@ -161,7 +162,7 @@ function drawBlocks(c: Ctx, model: CardModel, y: number, footerTop: number, opts
     const { block, lines, size, lineHeight, inset, labelY, textY, box } = entry;
     const font = block.emphasis ? c.fonts.semibold : c.fonts.regular;
     if (box) c.els.push('<rect x="' + c.x + '" y="' + box.top + '" width="' + c.w + '" height="' + box.height + '" rx="18" fill="' + c.accent + '" fill-opacity="0.09"/>');
-    if (block.label && labelY !== null) c.els.push(pathFor(c.fonts.semibold, block.label, c.x + inset, labelY, 26, box ? c.accent : opts.labelColor ?? c.muted));
+    if (block.label && labelY !== null) entry.labelLines.forEach((line, index) => c.els.push(pathFor(c.fonts.semibold, line, c.x + inset, labelY + index * 34, 26, box ? c.accent : opts.labelColor ?? c.muted)));
     lines.forEach((line, index) => c.els.push(pathFor(font, line, c.x + inset, textY + index * lineHeight, size, c.text)));
   }
   return fit.endY;

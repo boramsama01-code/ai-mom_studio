@@ -4,6 +4,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { login, naverResponse, resetDb, setTestEnv } from "./helpers";
+import { cardCopyFixture } from "./fixtures/cardCopy";
 
 setTestEnv();
 
@@ -210,7 +211,7 @@ describe("추출·운영자 편집 보존·채널 격리", () => {
     process.env.ANTHROPIC_MODEL = "m";
     const db = getDb();
     const [item] = await db.select().from(schema.contentItems).where(sql`${schema.contentItems.excluded} = false and ${schema.contentItems.channelId} = 1`).limit(1);
-    fakeExtract.mockResolvedValueOnce({ ok: true, data: payload(), model: "fake", usage: { inputTokens: 10, outputTokens: 5 }, droppedEvidence: 0 });
+    fakeExtract.mockResolvedValueOnce({ ok: true, data: { ...payload(), cardCopy: cardCopyFixture() }, model: "fake", usage: { inputTokens: 10, outputTokens: 5 }, droppedEvidence: 0 });
     const r = await extractForItem(db, item.id, new LlmBudget(2), NOW);
     expect(r.ok).toBe(true);
     let [cur] = await db.select().from(schema.contentItems).where(eq(schema.contentItems.id, item.id));
@@ -223,7 +224,7 @@ describe("추출·운영자 편집 보존·채널 격리", () => {
     expect(edited.status).toBe(200);
     await agent.post(`/api/channels/1/items/${item.id}/review`).set(H).send({ version: edited.body.version, status: "reviewed" });
 
-    fakeExtract.mockResolvedValueOnce({ ok: true, data: payload({ schedules: [{ kind: "apply", start: { date: "2026-10-21" }, end: { date: "2026-10-25" } }] }), model: "fake", usage: { inputTokens: 1, outputTokens: 1 }, droppedEvidence: 0 });
+    fakeExtract.mockResolvedValueOnce({ ok: true, data: { ...payload({ schedules: [{ kind: "apply", start: { date: "2026-10-21" }, end: { date: "2026-10-25" } }] }), cardCopy: cardCopyFixture() }, model: "fake", usage: { inputTokens: 1, outputTokens: 1 }, droppedEvidence: 0 });
     await extractForItem(db, item.id, new LlmBudget(2), NOW);
     [cur] = await db.select().from(schema.contentItems).where(eq(schema.contentItems.id, item.id));
     const [rev] = await db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, cur.currentRevisionId!));

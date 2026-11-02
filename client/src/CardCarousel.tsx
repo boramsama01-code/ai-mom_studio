@@ -7,7 +7,7 @@ import { AltTextEditor } from "./AltTextEditor";
 import { altTextError } from "@shared/altText";
 import { useDirtyGuard } from "./state";
 
-export function CardCarousel({ channelId, assetId, pages, credit = "", onDirtyChange }: { channelId: number; assetId: number; pages: Array<{ id: number; title: string; altText?: string }>; credit?: string; onDirtyChange?:(dirty:boolean)=>void }) {
+export function CardCarousel({ channelId, assetId, pages, credit = "", onDirtyChange, downloadDisabled = false }: { channelId: number; assetId: number; pages: Array<{ id: number; title: string; altText?: string }>; credit?: string; onDirtyChange?:(dirty:boolean)=>void; downloadDisabled?: boolean }) {
   const [index, setIndex] = useState(0);
   const [failed, setFailed] = useState(false);
   const qc=useQueryClient(),guard=useDirtyGuard(),path=`/channels/${channelId}/media/${assetId}/alt-text`;
@@ -29,7 +29,8 @@ export function CardCarousel({ channelId, assetId, pages, credit = "", onDirtyCh
   } });
   if (!page) return null;
   return <div className="card-carousel" aria-label="카드뉴스 전체 미리보기">
-    <div className="row between"><strong>완성된 카드뉴스 <span className="muted">{pages.length}장</span></strong><button className="btn sm" disabled={download.isPending||dirty||invalidAltIndex>=0} onClick={() => download.mutate()}>{download.isPending ? "준비 중…" : `${pages.length}장 ZIP 다운로드`}</button></div>
+    <div className="row between"><strong>완성된 카드뉴스 <span className="muted">{pages.length}장</span></strong><button className="btn sm" disabled={downloadDisabled||download.isPending||dirty||invalidAltIndex>=0} onClick={() => download.mutate()}>{download.isPending ? "준비 중…" : `${pages.length}장 ZIP 다운로드`}</button></div>
+    {downloadDisabled && <p className="notice small">카드 문구를 저장하고 이미지를 다시 만든 뒤 다운로드할 수 있습니다.</p>}
     <div className="card-carousel-stage">
       {failed ? <div role="alert" className="notice err">이미지를 불러오지 못했습니다.<button className="btn sm" onClick={() => setFailed(false)}>다시 보기</button></div> : <img key={page.id} src={`/api/channels/${channelId}/media/${page.id}`} alt={values[index]||`${index + 1} / ${pages.length} · ${page.title}`} onError={() => setFailed(true)} />}
     </div>

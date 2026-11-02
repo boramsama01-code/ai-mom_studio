@@ -180,13 +180,15 @@ export function StudioImport() {
 
 function StudioDetail({ id }: { id: number }) {
   const [editBoard, setEditBoard] = useState(false);
+  const guard = useDirtyGuard();
+  useEffect(() => { setEditBoard(false); }, [id]);
   const q = useQuery({ queryKey: ["studio", "card", id], queryFn: () => api<Detail>(`/studio/cards/${id}`), refetchInterval: (query) => query.state.data?.jobs.some(activeJob) ? 3000 : false });
   if (q.isLoading) return <Loading lines={5} />;
   if (!q.data) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   if (q.data.card.trashedAt) return <TrashedStudioDetail card={q.data.card} />;
   if (q.data.card.finishedDeck) return <FinishedDeckEditor key={q.data.card.id} data={q.data} />;
   if (q.data.card.experience) return <ExperienceEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} />;
-  if (!editBoard && q.data.card.sourceOutput && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard card={q.data.card} /><div className="source-output-detail"><button className="btn ghost sm" onClick={() => setEditBoard(true)}>보드 제목·메모 편집</button></div></>;
+  if (!editBoard && q.data.card.sourceOutput && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard key={q.data.card.id} card={q.data.card} /><div className="source-output-detail"><button className="btn ghost sm" onClick={() => guard.confirmLeave(() => setEditBoard(true))}>보드 제목·메모 편집</button></div></>;
   // A background polling failure must not unmount the editor and discard unsaved work.
   return <>{q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}<StudioEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} /></>;
 }
@@ -306,7 +308,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
     </header>
     {newer && dirty && <div className="notice warn row between"><span>서버에 새 버전이 있습니다. 현재 입력은 유지했습니다.</span><button className="btn sm" onClick={() => guard.confirmLeave(() => accept(data.card))}>새 버전 불러오기</button></div>}
     {(save.error || restore.error) && <ErrorBox error={save.error || restore.error} />}
-    {data.card.sourceOutput && <SourceStudioCard card={data.card} embedded />}
+    {data.card.sourceOutput && <SourceStudioCard key={data.card.id} card={data.card} embedded />}
     <div className="tabs" role="tablist" aria-label="콘텐츠 편집">
       <button role="tab" aria-selected={tab === "content"} onClick={() => setTab("content")}>콘텐츠 편집</button>
       <button role="tab" aria-selected={tab === "history"} onClick={() => guard.confirmLeave(() => setTab("history"))}>버전 기록 {data.revisions.length}</button>

@@ -3,6 +3,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { login, naverResponse, resetDb, setTestEnv } from "./helpers";
+import { cardCopyFixture } from "./fixtures/cardCopy";
 
 setTestEnv();
 
@@ -161,7 +162,7 @@ describe("수집 실행 안의 자동 발굴", () => {
     });
     fakeScience.mockResolvedValue({
       ok: true, model: "m", usage: { inputTokens: 1000, outputTokens: 500 }, droppedEvidence: 0,
-      data: { topic: "공룡 화석", age_band: "중1~3", key_question: "뼈 몇 조각으로 새 종을 알 수 있을까?", background: ["a", "b", "c"], discussion_questions: ["1", "2", "3"], scientific_basis: "x", misconceptions: [], parent_hints: [], safe_activity: null, sources: [], evidence: [] },
+      data: { topic: "공룡 화석", age_band: "중1~3", key_question: "뼈 몇 조각으로 새 종을 알 수 있을까?", background: ["a", "b", "c"], discussion_questions: ["1", "2", "3"], scientific_basis: "x", misconceptions: [], parent_hints: [], safe_activity: null, sources: [], evidence: [], cardCopy: cardCopyFixture() },
     });
     try {
       const db = getDb();

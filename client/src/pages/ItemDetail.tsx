@@ -1,5 +1,6 @@
 import { CategorySelect } from "../CategorySelect";
 import { CardCarousel } from "../CardCarousel";
+import { CardCopyEditor, type CardCopyResponse } from "../CardCopyEditor";
 import type { CardCarousel as CarouselData } from "@shared/carousel";
 import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import { AiUsageGuide } from "../AiUsageGuide";
@@ -46,8 +47,9 @@ export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: num
   const cid = q.data?.item.channelId ?? requestedCid;
   const sourceChannel = allChannels.find(ch => ch.id === cid);
   const [tab, setTab] = useState<"source" | "edit" | "publish" | "history">("source");
+  const [templateChoice, setTemplateChoice] = useState<string | null>(null);
   const [, navigate] = useLocation();
-  useEffect(() => { setTab("source"); }, [requestedCid, id]);
+  useEffect(() => { setTab("source"); setTemplateChoice(null); }, [requestedCid, id]);
   useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, navigate]);
   const guard = useDirtyGuard();
   const qc = useQueryClient();
@@ -99,8 +101,8 @@ export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: num
       </div>
       <div className="item-workspace" role="tabpanel" id={`step-${tab}`} aria-labelledby={`tab-${tab}`} tabIndex={-1}>
         {tab === "source" && <><SourcePanel d={d} cid={cid} /><Progress d={d} onGo={go} actionsOnly forTab="source" /></>}
-        {tab === "edit" && <><EditPanel d={d} cid={cid} /><Progress d={d} onGo={go} actionsOnly forTab="edit" /></>}
-        {tab === "publish" && <><ReviewPanel d={d} cid={cid} /><CardApprovePanel d={d} cid={cid} /><Progress d={d} onGo={go} actionsOnly forTab="publish" /></>}
+        {tab === "edit" && <><EditPanel d={d} cid={cid} templateKey={templateChoice} onTemplateChange={setTemplateChoice} /><Progress d={d} onGo={go} actionsOnly forTab="edit" /></>}
+        {tab === "publish" && <><ReviewPanel d={d} cid={cid} /><CardApprovePanel d={d} cid={cid} templateChoice={templateChoice} onTemplateChange={setTemplateChoice} /><Progress d={d} onGo={go} actionsOnly forTab="publish" /></>}
         {tab === "history" && <HistoryPanel d={d} />}
       </div>
     </>
@@ -265,7 +267,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
 }
 
 /* ───────────── 편집 ───────────── */
-export function EditPanel({ d, cid }: { d: Detail; cid: number }) {
+export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail; cid: number; templateKey?: string | null; onTemplateChange?: (key: string) => void }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
   const incoming = useMemo(() => d.current?.payload ?? null, [d.current]);
@@ -318,8 +320,12 @@ export function EditPanel({ d, cid }: { d: Detail; cid: number }) {
   const ai = useQuery({ queryKey: ["status"], queryFn: () => api<{ integrations: { aiProvider: AiProvider } & Record<AiProvider, boolean> }>("/status") });
   const [providerChoice, setProviderChoice] = useState<AiProvider | null>(null);
   const provider = providerChoice ?? ai.data?.integrations.aiProvider ?? "gemini";
+  const templates = useTemplates(cid);
+  const [localTemplate, setLocalTemplate] = useState<string | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const draftTemplate = templateKey ?? localTemplate ?? d.current?.payload.cardCopy?.templateKey ?? templates.data?.current ?? "builtin:classic";
   const gen = useMutation({
-    mutationFn: () => api(`/channels/${cid}/items/${d.item.id}/generate`, { method: "POST", body: { provider } }),
+    mutationFn: () => api(`/channels/${cid}/items/${d.item.id}/generate`, { method: "POST", body: { provider, templateKey: draftTemplate } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
   });
 
@@ -330,6 +336,9 @@ export function EditPanel({ d, cid }: { d: Detail; cid: number }) {
       </div>
       <details className="studio-more" open><summary>API 자동 작성 · Gemini·GPT</summary>
         <label className="field">작성 AI<select value={provider} disabled={gen.isPending} onChange={e => setProviderChoice(e.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}</option>)}</select></label>
+        <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate || t.colors?.some(color => color.key === draftTemplate))?.name ?? "기본"} ▾</button>
+        {showTemplates && templates.data && <TemplatePicker cid={cid} value={draftTemplate} items={templates.data.items} disabled={gen.isPending} onChange={key => { setLocalTemplate(key); onTemplateChange?.(key); }} />}
+        <p className="hint">원고를 요약하고 선택한 템플릿에 맞는 제목·부제·본문을 함께 작성합니다. ‘3 카드·내보내기’에서 실제 카드 모양을 보며 고칠 수 있어요.</p>
         <AiUsageGuide provider={provider} />
         {ai.data?.integrations[provider] === false && <p className="notice warn small">선택한 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
         <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty || !ai.data?.integrations[provider]} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
@@ -436,31 +445,36 @@ function toLocalInput(date: Date) {
   return k.slice(0, 16);
 }
 
-function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
+function CardApprovePanel({ d, cid, templateChoice, onTemplateChange }: { d: Detail; cid: number; templateChoice?: string | null; onTemplateChange?: (key: string) => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const [coverChoice, setCoverChoice] = useState<"ai" | "typography" | null>(null);
+  const [coverChoice, setCoverChoice] = useState<"reuse" | "ai" | "typography" | null>(null);
   const revCards = d.cards.filter((c) => c.revisionId === d.current?.id);
   const [altDirty,setAltDirty]=useState(false);
+  const [copyDirty, setCopyDirty] = useState(true);
   const [pickedCard, setPickedCard] = useState<number | null>(null);
   const currentCard = revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
   const [caps, setCaps] = useState(d.defaultCaptions ?? { instagram: "", telegram: "" });
+  const previousDefaultCaps = useRef(d.defaultCaptions);
+  const captionsEdited = useRef(false);
   const [when, setWhen] = useState(() => toLocalInput(new Date(Date.now() + 3600_000)));
   const tpls = useTemplates(cid);
   const [tpl, setTpl] = useState<string | null>(null);
-  const templateKey = tpl ?? tpls.data?.current ?? "builtin:classic";
+  const templateKey = templateChoice ?? tpl ?? currentCard?.templateKey ?? tpls.data?.current ?? "builtin:classic";
+  const chooseTemplate = (key: string) => { setTpl(key); onTemplateChange?.(key); };
   const typographyOnly = templateKey.startsWith("set:") && !collectionUsesArt(templateKey.slice(4));
-  const coverMode = typographyOnly ? "typography" : coverChoice ?? (d.imageAiAvailable ? "ai" : "typography");
+  const coverMode = typographyOnly ? "typography" : coverChoice ?? (d.cards.length ? "reuse" : d.imageAiAvailable ? "ai" : "typography");
   const [showTpl, setShowTpl] = useState(false);
   const canva = useQuery({ queryKey: ["canva-status"], queryFn: () => api<{ connected: boolean }>("/canva/status") });
   const { channels } = useChannel();
   const ch = channels.find((c) => c.id === cid);
   useEffect(() => {
-    if (d.defaultCaptions) setCaps(d.defaultCaptions);
+    if (d.defaultCaptions && JSON.stringify(d.defaultCaptions) !== JSON.stringify(previousDefaultCaps.current) && !captionsEdited.current) setCaps(d.defaultCaptions);
+    previousDefaultCaps.current = d.defaultCaptions;
     setPickedCard(null);
   }, [d.current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const render = useMutation({
-    mutationFn: () => api<{ id: number; carousel: CarouselData; studioCardId: number }>(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body: { templateKey: tpl, coverMode } }),
+    mutationFn: (saved: CardCopyResponse) => api<{ id: number; carousel: CarouselData; studioCardId: number }>(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body: { version: saved.version, templateKey: saved.copy.templateKey, coverMode } }),
     onSuccess: (a) => {
       setPickedCard(a.id);
       toast("ok", `${a.carousel.pages.length}장 카드뉴스를 만들고 제작 보드에 저장했습니다.`);
@@ -515,39 +529,38 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
         <p className="muted">초안이 있어야 카드를 만들 수 있습니다.</p>
       ) : (
         <>
-          <p className="small muted">표지와 본문을 기본 5장으로 구성합니다. 긴 원고는 최대 10장까지 나누며, 완성된 이미지는 제작 보드에 자동 저장됩니다.</p>
-          <label className="field">표지 이미지<select value={coverMode} disabled={render.isPending || typographyOnly} onChange={e => setCoverChoice(e.target.value as "ai" | "typography")}><option value="ai" disabled={!d.imageAiAvailable}>주제에 맞는 AI 일러스트</option><option value="typography">글자 중심 · 선택한 배경 템플릿</option></select><span className="hint">{typographyOnly ? "이 디자인은 타이포그래피 전용입니다. 이미지 생성 비용 없이 만듭니다." : coverMode === "ai" ? "OpenAI 이미지 API 비용이 발생합니다. 같은 원고로 다시 만들면 저장된 표지를 재사용합니다." : "이미지 생성 비용 없이 만듭니다."}</span></label>
+          <p className="small muted">템플릿을 고르고 페이지마다 들어갈 문구를 편집하세요. 완성된 이미지는 제작 보드에도 자동 저장됩니다.</p>
+          <label className="field">표지 이미지<select value={coverMode} disabled={render.isPending || typographyOnly} onChange={e => setCoverChoice(e.target.value as "reuse" | "ai" | "typography")}><option value="reuse">저장된 표지 그림 유지</option><option value="ai" disabled={!d.imageAiAvailable}>주제에 맞는 AI 일러스트</option><option value="typography">글자 중심 · 선택한 배경 템플릿</option></select><span className="hint">{typographyOnly ? "이 디자인은 타이포그래피 전용입니다. 이미지 생성 비용 없이 만듭니다." : coverMode === "ai" ? "OpenAI 이미지 API 비용이 발생합니다. 같은 원고로 다시 만들면 저장된 표지를 재사용합니다." : coverMode === "reuse" ? "글자만 수정해도 저장된 그림을 유지합니다. 저장된 그림이 없으면 글자 중심으로 만들며 이미지 생성 비용은 발생하지 않습니다." : "이미지 생성 비용 없이 만듭니다."}</span></label>
           {!d.imageAiAvailable && !typographyOnly && <p className="notice small">AI 표지를 사용하려면 <GuardedLink href="/connections?service=openai">OpenAI 이미지 연결</GuardedLink>을 설정해 주세요.</p>}
           <div className="row">
-            <button className="btn primary" onClick={() => render.mutate()} disabled={render.isPending}>
-              {render.isPending ? "카드뉴스 만드는 중…" : revCards.length ? "카드뉴스 다시 만들기" : "카드뉴스 만들기"}
-            </button>
-            <button className="btn" onClick={() => setShowTpl((v) => !v)} aria-expanded={showTpl}>
-              템플릿: {tpls.data?.items.find((t) => t.key === (tpl ?? tpls.data?.current))?.name ?? "기본"} ▾
+            <button className="btn" disabled={render.isPending} onClick={() => setShowTpl((v) => !v)} aria-expanded={showTpl}>
+              템플릿: {tpls.data?.items.find((t) => t.key === templateKey || t.colors?.some(color => color.key === templateKey))?.name ?? "기본"} ▾
             </button>
             {currentCard && (
-              <a className="btn" href={`/api/channels/${cid}/media/${currentCard.id}?download=1`}>
+              <a className="btn" aria-disabled={copyDirty || altDirty} tabIndex={copyDirty || altDirty ? -1 : undefined} href={copyDirty || altDirty ? undefined : `/api/channels/${cid}/media/${currentCard.id}?download=1`}>
                 표지 JPEG 다운로드
               </a>
             )}
           </div>
           {showTpl && tpls.data && (
-            <TemplatePicker cid={cid} value={tpl ?? tpls.data.current} onChange={(k) => setTpl(k)} items={tpls.data.items} version={ch?.accentColor} />
+            <TemplatePicker cid={cid} value={templateKey} onChange={chooseTemplate} items={tpls.data.items} version={ch?.accentColor} disabled={render.isPending} />
           )}
+          <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateChoice ?? tpl} onTemplateChange={chooseTemplate} coverMode={coverMode} disabled={render.isPending || altDirty} onDirtyChange={setCopyDirty} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel={d.cards.length ? "카드뉴스 다시 만들기" : "카드뉴스 만들기"} />
           {render.isPending && <p className="notice small" role="status">{coverMode === "ai" ? "표지 일러스트와 각 페이지를 만들고 있어요. 몇 분 정도 걸릴 수 있습니다." : "원고를 페이지로 나누고 보드에 저장하고 있어요."}</p>}
           {render.error && <ErrorBox error={render.error} />}
           {render.data && <div className="notice ok row between" role="status"><span>{render.data.carousel.pages.length}장 모두 제작 보드에 저장됐어요.</span><GuardedLink className="btn sm" href={`/studio/${render.data.studioCardId}`}>보드에서 보기 →</GuardedLink></div>}
 
           {canva.data?.connected && (
             <div className="notice stack" style={{ gap: 8 }}>
-              <strong className="small">Canva로 다듬기</strong>
+              <strong className="small">원문 요약으로 Canva 디자인 만들기</strong>
+              <span className="small muted">Canva 자동 채우기에는 ‘초안 편집’의 원문 요약 필드를 사용합니다.</span>
               {!ch?.canvaBrandTemplateId ? (
                 <span className="small muted">
                   <GuardedLink href="/design">카드 디자인</GuardedLink>에서 Canva 브랜드 템플릿을 먼저 고르세요.
                 </span>
               ) : (
                 <div className="row">
-                  <button className="btn sm" onClick={() => canvaMake.mutate()} disabled={canvaMake.isPending}>
+                  <button className="btn sm" onClick={() => canvaMake.mutate()} disabled={canvaMake.isPending || copyDirty}>
                     {canvaMake.isPending ? "Canva에서 만드는 중…" : cd && cd.revisionId === d.current.id ? "Canva 디자인 다시 만들기" : "Canva로 디자인 만들기"}
                   </button>
                   {cd?.editUrl && cd.revisionId === d.current.id && (
@@ -555,7 +568,7 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
                       <a className="btn sm" href={cd.editUrl} target="_blank" rel="noopener noreferrer">
                         Canva에서 열기 ↗
                       </a>
-                      <button className="btn sm primary" onClick={() => canvaImport.mutate()} disabled={canvaImport.isPending}>
+                      <button className="btn sm primary" onClick={() => canvaImport.mutate()} disabled={canvaImport.isPending || copyDirty}>
                         {canvaImport.isPending ? "가져오는 중…" : "다듬은 디자인을 카드로 가져오기"}
                       </button>
                     </>
@@ -578,16 +591,16 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
           )}
           {!currentCard && <p className="small muted">현재 버전(r{d.current.revisionNo})으로 만든 카드가 없습니다.</p>}
 
-          {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} onDirtyChange={setAltDirty} />}
+          {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} onDirtyChange={setAltDirty} downloadDisabled={copyDirty} />}
           <CopyFields cid={cid} itemId={d.item.id} revisionId={d.current.id} />
 
-          <h3 style={{ margin: "8px 0 0" }}>캡션 (목적지별)</h3>
+          <h3 style={{ margin: "8px 0 0" }}>게시물 캡션 (카드 이미지 밖의 글)</h3>
           <label className="field">
             인스타그램 캡션
             <span className="hint">
               {len(caps.instagram)} / 2200자 · 인스타그램 캡션의 URL은 클릭되는 링크가 아닙니다.
             </span>
-            <textarea rows={8} value={caps.instagram} onChange={(e) => setCaps({ ...caps, instagram: e.target.value })} />
+            <textarea rows={8} value={caps.instagram} onChange={(e) => { captionsEdited.current = true; setCaps({ ...caps, instagram: e.target.value }); }} />
           </label>
           {currentCard && (
             <details>
@@ -605,7 +618,7 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
           <label className="field">
             텔레그램 캡션
             <span className="hint">{len(caps.telegram)} / 1024자 (사진 캡션 제한)</span>
-            <textarea rows={6} value={caps.telegram} onChange={(e) => setCaps({ ...caps, telegram: e.target.value })} />
+            <textarea rows={6} value={caps.telegram} onChange={(e) => { captionsEdited.current = true; setCaps({ ...caps, telegram: e.target.value }); }} />
           </label>
           <label className="field">
             예약 시각 (한국 시간)
@@ -613,7 +626,7 @@ function CardApprovePanel({ d, cid }: { d: Detail; cid: number }) {
             <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
           </label>
           <div className="row">
-            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || altDirty || !currentCard || d.item.reviewStatus !== "reviewed"}>
+            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || altDirty || copyDirty || !currentCard || d.item.reviewStatus !== "reviewed"}>
               {approve.isPending ? "승인 중…" : "이 버전·카드·캡션으로 최종 승인"}
             </button>
           </div>
@@ -734,7 +747,7 @@ function CopyFields({ cid, itemId, revisionId }: { cid: number; itemId: number; 
   };
   return (
     <details onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary className="small">글자 복사 — 망고보드·Canva에서 직접 디자인할 때</summary>
+      <summary className="small">원문 요약 복사 — 망고보드·Canva로 옮길 때</summary>
       {q.isLoading ? (
         <Loading lines={2} />
       ) : q.error ? (

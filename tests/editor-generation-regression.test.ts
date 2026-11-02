@@ -37,6 +37,7 @@ beforeEach(() => {
       detail = { ...detail, jobs: [job] }; return { job, duplicate: false };
     }
     if (path === "/status") return { integrations: { aiProvider: "openai", openai: true, gemini: false, anthropic: false } };
+    if (path === "/channels/1/templates") return { current: "set:n04", items: [{ key: "set:n04", name: "뉴스 브리핑", description: "뉴스", kind: "builtin", family: "news", pageCount: 5 }] };
     if (path === "/channels/1/items/9/generate") return { version: 2 };
     if (path === "/channels/1/items/9" && opts?.method === "PATCH") return { version: 2 };
     throw new Error(`Unexpected API: ${path}`);
@@ -128,6 +129,7 @@ describe("collected-item editor generation regression", () => {
   it("places API before ChatGPT and fills all fields when a new server revision arrives", async () => {
     await render(createElement(EditPanel, { d: itemDetail(), cid: 1 }));
     expect(host.querySelector("details summary")?.textContent).toContain("API 자동 작성"); await click("GPT로 초안 생성");
+    expect(mocks.api).toHaveBeenCalledWith("/channels/1/items/9/generate", { method: "POST", body: { provider: "openai", templateKey: "set:n04" } });
     await render(createElement(EditPanel, { d: itemDetail(science, 2), cid: 1 }));
     expect(field("핵심 질문").value).toBe(science.key_question); expect(field("과학적 근거").value).toBe(science.scientific_basis);
     expect(host.querySelector<HTMLTextAreaElement>('[aria-label="쉬운 배경 (3문장) 1"]')!.value).toBe(science.background[0]);
