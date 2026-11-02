@@ -10,28 +10,66 @@ import { env } from "../env";
 
 export type InstagramAuthMode = "instagram" | "facebook";
 const HOSTS: Record<InstagramAuthMode, string> = { instagram: "https://graph.instagram.com", facebook: "https://graph.facebook.com" };
+const INSTAGRAM_USERNAME = /^[a-zA-Z0-9._]{1,30}$/;
+const MAX_IDENTITY_LOOKUPS = 10;
+
+function instagramId(value: unknown): string | undefined {
+  // Graph normally returns strings. Never turn an already rounded JSON number
+  // into a different account ID (Instagram IDs can exceed MAX_SAFE_INTEGER).
+  if (typeof value === "string" && /^\d+$/.test(value)) return value;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
+  return undefined;
+}
 
 /** Read the account identity from the token, never accept a user-entered account ID. */
 export async function accountIdentity(token: string, authMode: InstagramAuthMode = "instagram", expectedUsername?: string, fetchImpl: typeof fetch = fetch) {
   if (authMode === "facebook") {
-    const accounts = new Map<string, { userId: string; username: string }>();
+    const accounts = new Map<string, { userId: string; username?: string }>();
+    const invalidResponse = () => ({ ok: false as const, error: "Meta에서 받은 계정 정보가 완전하지 않거나 서로 일치하지 않습니다. 잠시 후 다시 연결해 주세요.", reason: "invalid_account_response" as const });
+    const incompleteIdentity = () => ({ ok: false as const, error: "Meta 계정 목록은 받았지만 일부 계정의 사용자명을 확인하지 못했습니다. 잠시 후 다시 연결하거나 Meta에서 연결할 계정만 선택해 다시 인증해 주세요.", reason: "account_identity_incomplete" as const });
     let after: string | undefined;
     for (let page = 0; page < 10; page++) {
       const result = await igFetch("me/assigned_instagram_accounts", "GET", { fields: "id,username", limit: "100", ...(after ? { after } : {}) }, token, authMode, fetchImpl);
       if (!result.ok) return { ok: false as const, error: "Meta 계정 권한을 확인하지 못했습니다. 통합 로그인에서 이 인스타그램 계정을 선택하고 다시 연결하세요." };
-      if (!Array.isArray(result.json.data)) return { ok: false as const, error: "Meta에서 연결 가능한 인스타그램 계정을 반환하지 않았습니다." };
+      if (!Array.isArray(result.json.data)) return invalidResponse();
       for (const entry of result.json.data) {
-        const userId = String(entry?.id ?? ""), username = String(entry?.username ?? "");
-        if (/^\d+$/.test(userId) && /^[a-zA-Z0-9._]{1,30}$/.test(username)) accounts.set(userId, { userId, username });
+        const userId = instagramId(entry?.id);
+        if (!userId) return invalidResponse();
+        const username = typeof entry?.username === "string" && INSTAGRAM_USERNAME.test(entry.username) ? entry.username : undefined;
+        const existing = accounts.get(userId);
+        if (existing?.username && username && existing.username.toLowerCase() !== username.toLowerCase()) return invalidResponse();
+        accounts.set(userId, { userId, username: existing?.username ?? username });
       }
       const next = result.json.paging?.cursors?.after;
       if (!result.json.paging?.next) break;
-      if (typeof next !== "string" || !next || next === after || page === 9) return { ok: false as const, error: "Meta 계정 목록을 모두 확인하지 못했습니다. 연결할 계정만 선택해 다시 인증하세요." };
+      if (typeof next !== "string" || !next || next === after || page === 9) return { ok: false as const, error: "Meta 계정 목록을 모두 확인하지 못했습니다. 연결할 계정만 선택해 다시 인증하세요.", reason: "account_list_incomplete" as const };
       after = next;
     }
+    if (accounts.size === 0) return { ok: false as const, error: "이 토큰에서 연결 가능한 인스타그램 계정 목록이 비어 있습니다. 토큰을 발급한 Meta 앱과 로그인한 인스타그램 계정을 확인해 주세요.", reason: "no_assigned_accounts" as const };
+
+    const unresolved = [...accounts.values()].filter(account => !account.username);
+    if (unresolved.length > MAX_IDENTITY_LOOKUPS) return incompleteIdentity();
+    // Only resolve IDs returned by the assigned-account edge, on the same host
+    // and with the same token. A known or user-entered ID is never a fallback.
+    const profiles = await Promise.all(unresolved.map(account => igFetch(account.userId, "GET", { fields: "id,username" }, token, authMode, fetchImpl)));
+    for (let index = 0; index < unresolved.length; index++) {
+      const account = unresolved[index], profile = profiles[index];
+      if (!profile.ok) return incompleteIdentity();
+      if (instagramId(profile.json.id) !== account.userId) return invalidResponse();
+      const username = profile.json.username;
+      if (typeof username !== "string" || !INSTAGRAM_USERNAME.test(username)) return incompleteIdentity();
+      account.username = username;
+    }
+    const verified = [...accounts.values()].filter((account): account is { userId: string; username: string } => typeof account.username === "string");
     const normalized = expectedUsername?.trim().replace(/^@/, "").toLowerCase();
-    const matches = [...accounts.values()].filter(a => !normalized || a.username.toLowerCase() === normalized);
-    if (matches.length !== 1) return { ok: false as const, error: normalized ? `이 토큰에 @${normalized} 계정 권한이 없습니다. Meta에서 해당 계정을 선택해 다시 연결하세요.` : "연결할 인스타그램 계정을 지정해 주세요.", reason: "account_mismatch" as const };
+    const matches = verified.filter(a => !normalized || a.username.toLowerCase() === normalized);
+    if (matches.length > 1) return { ok: false as const, error: normalized ? "같은 사용자명으로 여러 계정 ID가 반환되어 게시 계정을 확정할 수 없습니다. Meta에서 연결할 계정을 확인해 주세요." : "여러 인스타그램 계정이 확인됐습니다. 연결할 계정을 지정해 주세요.", reason: "ambiguous_account" as const };
+    if (matches.length === 0) {
+      const handles = [...new Set(verified.map(account => account.username.toLowerCase()))];
+      const shown = handles.slice(0, 5).map(username => `@${username}`).join(", ") + (handles.length > 5 ? ` 외 ${handles.length - 5}개` : "");
+      const target = normalized && INSTAGRAM_USERNAME.test(normalized) ? `@${normalized}` : "선택한 계정";
+      return { ok: false as const, error: `이 토큰에서 확인한 계정: ${shown}. 연결하려는 ${target}이 목록에 없습니다. Meta에서 로그인한 계정과 선택한 게시 계정을 확인해 주세요.`, reason: "account_mismatch" as const };
+    }
     return { ok: true as const, ...matches[0] };
   }
   const result = await igFetch("me", "GET", { fields: "user_id,username" }, token, "instagram", fetchImpl);
@@ -72,7 +110,8 @@ async function igFetch(path: string, method: "GET" | "POST", params: Record<stri
   } catch {
     return { ok: false as const, lost: true, err: { kind: "unknown", error: "응답을 받지 못함" } as IgError };
   }
-  const json = (await res.json().catch(() => ({}))) as Record<string, any>;
+  const parsed: unknown = await res.json().catch(() => null);
+  const json = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, any> : {};
   if (!res.ok || json.error) return { ok: false as const, lost: false, err: classify(res.status, json) };
   return { ok: true as const, json };
 }
