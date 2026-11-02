@@ -24,11 +24,12 @@ describe("Meta Unified Login accounts", () => {
   it("does not save or silently select another assigned account", async () => {
     fetcher.mockResolvedValue(response({ data: [{ id: "1", username: "highscoop.official" }] }));
     expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false, reason: "account_mismatch", error: expect.stringContaining("@highscoop.official") });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
-  it("distinguishes an empty assigned list without looking up a known or guessed account ID", async () => {
+  it.each(["unregistered.account", undefined])("keeps an empty list blocked without a trusted target for %s", async expectedUsername => {
     fetcher.mockResolvedValue(response({ data: [] }));
-    const result = await accountIdentity(token, "facebook", "spacepenguin.co");
+    const result = await accountIdentity(token, "facebook", expectedUsername);
     expect(result).toMatchObject({ ok: false, reason: "no_assigned_accounts", error: expect.stringContaining("목록이 비어") });
     expect(JSON.stringify(result)).not.toContain("권한이 없습니다");
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -195,5 +196,139 @@ describe("Meta Unified Login accounts", () => {
       expect(init.headers.authorization).toBe(`Bearer ${token}`);
       expect(init.redirect).toBe("error");
     }
+  });
+});
+
+describe("empty assigned lists with operator-confirmed target hints", () => {
+  const penguinId = "17841458158640250";
+  const profile = { id: penguinId, username: "spacepenguin.co" };
+  const quota = { data: [{ quota_usage: 0, config: { quota_total: 100 } }] };
+  function connectionDatabase() {
+    const transaction = vi.fn();
+    const db = { select: () => ({ from: () => ({ where: async () => [{ id: 1, slug: "penguin", active: true }] }) }), transaction } as unknown as DB;
+    return { db, transaction };
+  }
+
+  it.each([
+    ["spacepenguin.co", "17841458158640250"],
+    ["alligodang.official", "17841444569239069"],
+    ["highscoop.official", "17841416940240854"],
+    ["fryday.official.kr", "17841474286823201"],
+  ])("confirms %s only after exact direct identity and publishing access using the injected transport", async (username, id) => {
+    const injectedFetch = vi.fn().mockResolvedValueOnce(response({ data: [] }))
+      .mockResolvedValueOnce(response({ id, username }))
+      .mockResolvedValueOnce(response(quota));
+    expect(await accountIdentity(token, "facebook", ` @${username.toUpperCase()} `, injectedFetch)).toEqual({ ok: true, userId: id, username });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(injectedFetch.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
+      "/v26.0/me/assigned_instagram_accounts", `/v26.0/${id}`, `/v26.0/${id}/content_publishing_limit`,
+    ]);
+    for (const [url, init] of injectedFetch.mock.calls) {
+      expect(new URL(url).origin).toBe("https://graph.facebook.com");
+      expect(new URL(url).searchParams.get("access_token")).toBeNull();
+      expect(init).toMatchObject({ method: "GET", redirect: "error", headers: { authorization: `Bearer ${token}` } });
+    }
+    expect(new URL(injectedFetch.mock.calls[1][0]).searchParams.get("fields")).toBe("id,username");
+    expect(new URL(injectedFetch.mock.calls[2][0]).searchParams.get("fields")).toBe("quota_usage,config");
+  });
+
+  it.each([
+    ["different ID", { id: "99", username: "spacepenguin.co" }, "account_mismatch"],
+    ["different username", { id: penguinId, username: "highscoop.official" }, "account_mismatch"],
+    ["missing identity", {}, "invalid_account_response"],
+    ["unsafe username", { id: penguinId, username: `https://invalid.example/${token}` }, "invalid_account_response"],
+    ["denied profile access", { error: { code: 200, message: `https://invalid.example/${token}` } }, "direct_account_access_failed"],
+  ])("does not check quota or save credentials after a direct profile with %s", async (_name, body, reason) => {
+    fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(body));
+    const { db, transaction } = connectionDatabase();
+    const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+    expect(failure).toMatchObject({ status: 400, extra: { code: reason } });
+    expect(failure.message).not.toContain(token);
+    expect(failure.message).not.toContain("https://");
+    expect(transaction).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.every(([, init]) => init.method === "GET")).toBe(true);
+  });
+
+  it.each([
+    ["permission denial", { error: { code: 200, message: `provider detail ${token}` } }],
+    ["empty response", {}],
+    ["empty data", { data: [] }],
+    ["zero quota total", { data: [{ quota_usage: 0, config: { quota_total: 0 } }] }],
+    ["missing usage", { data: [{ config: { quota_total: 100 } }] }],
+    ["non-array quota data", { data: { 0: { quota_usage: 0, config: { quota_total: 100 } } } }],
+  ])("does not save readable profile credentials after quota %s", async (_name, body) => {
+    fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(profile)).mockResolvedValueOnce(response(body));
+    const { db, transaction } = connectionDatabase();
+    const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+    expect(failure).toMatchObject({ status: 400, extra: { code: "direct_publish_access_failed" } });
+    expect(failure.message).not.toContain(token);
+    expect(transaction).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(new URL(fetcher.mock.calls[2][0]).pathname).toBe(`/v26.0/${penguinId}/content_publishing_limit`);
+    expect(fetcher.mock.calls.every(([, init]) => init.method === "GET")).toBe(true);
+  });
+
+  it.each(["profile", "quota"])("does not save credentials when the direct %s request fails in transit", async stage => {
+    fetcher.mockResolvedValueOnce(response({ data: [] }));
+    if (stage === "quota") fetcher.mockResolvedValueOnce(response(profile));
+    fetcher.mockRejectedValueOnce(new Error(`private transport detail ${token}`));
+    const { db, transaction } = connectionDatabase();
+    const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+    expect(failure).toMatchObject({ status: 400, extra: { code: stage === "profile" ? "direct_account_access_failed" : "direct_publish_access_failed" } });
+    expect(failure.message).not.toContain(token);
+    expect(transaction).not.toHaveBeenCalled();
+    expect(fetcher).toHaveBeenCalledTimes(stage === "profile" ? 2 : 3);
+  });
+
+  it.each(["provider", "network"])("never uses a hint after an assigned-list %s failure", async failure => {
+    if (failure === "network") fetcher.mockRejectedValueOnce(new Error("request failed"));
+    else fetcher.mockResolvedValueOnce(response({ error: { code: 190, message: "expired token" } }));
+    expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([null, "not-an-object", { next: true }, { cursors: "not-an-object" }, { cursors: { after: 123 } }])("never uses a hint after malformed pagination %j", async paging => {
+    fetcher.mockResolvedValueOnce(response({ data: [], paging }));
+    expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false, reason: "invalid_account_response" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an empty list blocked when its next-page cursor is missing", async () => {
+    fetcher.mockResolvedValueOnce(response({ data: [], paging: { next: "https://ignored.example" } }));
+    expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false, reason: "account_list_incomplete" });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an empty list blocked when it still has a next page after ten pages", async () => {
+    let page = 0;
+    fetcher.mockImplementation(async () => response({ data: [], paging: { next: "https://ignored.example", cursors: { after: String(++page) } } }));
+    expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false, reason: "account_list_incomplete" });
+    expect(fetcher).toHaveBeenCalledTimes(10);
+    expect(fetcher.mock.calls.every(([url]) => new URL(url).pathname.endsWith("assigned_instagram_accounts"))).toBe(true);
+  });
+
+  it("does not mistake a partial empty page for a complete empty list", async () => {
+    fetcher.mockResolvedValueOnce(response({ data: [], paging: { next: "https://ignored.example", cursors: { after: "next" } } }))
+      .mockResolvedValueOnce(response({ data: [{ id: "1", username: "highscoop.official" }] }));
+    expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false, reason: "account_mismatch" });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher.mock.calls.every(([url]) => new URL(url).pathname.endsWith("assigned_instagram_accounts"))).toBe(true);
+  });
+
+  it("requires every page to be empty before a direct profile and quota lookup", async () => {
+    fetcher.mockResolvedValueOnce(response({ data: [], paging: { next: "https://ignored.example", cursors: { after: "next" } } }))
+      .mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(profile)).mockResolvedValueOnce(response(quota));
+    expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toEqual({ ok: true, userId: penguinId, username: "spacepenguin.co" });
+    expect(fetcher.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
+      "/v26.0/me/assigned_instagram_accounts", "/v26.0/me/assigned_instagram_accounts", `/v26.0/${penguinId}`, `/v26.0/${penguinId}/content_publishing_limit`,
+    ]);
+  });
+
+  it("never switches a legacy Instagram token to the Facebook host because a target hint exists", async () => {
+    fetcher.mockResolvedValueOnce(response({ data: [] }));
+    expect(await accountIdentity(token, "instagram", "spacepenguin.co")).toMatchObject({ ok: false });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(new URL(fetcher.mock.calls[0][0]).origin).toBe("https://graph.instagram.com");
   });
 });
