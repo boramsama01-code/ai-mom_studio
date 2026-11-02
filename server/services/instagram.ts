@@ -47,7 +47,7 @@ export async function accountIdentity(token: string, authMode: InstagramAuthMode
     let after: string | undefined;
     for (let page = 0; page < 10; page++) {
       const result = await igFetch("me/assigned_instagram_accounts", "GET", { fields: "id,username", limit: "100", ...(after ? { after } : {}) }, token, authMode, fetchImpl);
-      if (!result.ok) return { ok: false as const, error: "Meta 계정 권한을 확인하지 못했습니다. 통합 로그인에서 이 인스타그램 계정을 선택하고 다시 연결하세요." };
+      if (!result.ok) return { ok: false as const, error: "Meta 계정 권한을 확인하지 못했습니다. 통합 로그인에서 이 인스타그램 계정을 선택하고 다시 연결하세요." + lookupFailureDiagnostic("assigned_accounts", result) };
       if (!Array.isArray(result.json.data)) return invalidResponse();
       const paging = result.json.paging;
       if (paging !== undefined && (!paging || typeof paging !== "object" || Array.isArray(paging))) return invalidResponse();
@@ -71,7 +71,7 @@ export async function accountIdentity(token: string, authMode: InstagramAuthMode
       const targetId = normalized ? INSTAGRAM_TARGET_HINTS.get(normalized) : undefined;
       if (!targetId) return { ok: false as const, error: "이 토큰에서 연결 가능한 인스타그램 계정 목록이 비어 있습니다. 토큰을 발급한 Meta 앱과 로그인한 인스타그램 계정을 확인해 주세요.", reason: "no_assigned_accounts" as const };
       const profile = await igFetch(targetId, "GET", { fields: "id,username" }, token, authMode, fetchImpl);
-      if (!profile.ok) return { ok: false as const, error: "Meta 계정 목록은 비어 있고, 이 토큰으로 대상 계정 정보를 직접 조회하지 못했습니다. 토큰을 발급한 Meta 앱과 해당 계정의 접근 권한을 확인해 주세요.", reason: "direct_account_access_failed" as const };
+      if (!profile.ok) return { ok: false as const, error: "Meta 계정 목록은 비어 있고, 이 토큰으로 대상 계정 정보를 직접 조회하지 못했습니다. 토큰을 발급한 Meta 앱과 해당 계정의 접근 권한을 확인해 주세요." + lookupFailureDiagnostic("direct_profile", profile), reason: "direct_account_access_failed" as const };
       const userId = instagramId(profile.json.id), username = profile.json.username;
       if (!userId || typeof username !== "string" || !INSTAGRAM_USERNAME.test(username)) return invalidResponse();
       if (userId !== targetId || username.toLowerCase() !== normalized) return { ok: false as const, error: "Meta에서 직접 확인한 계정이 이 채널의 게시 계정과 일치하지 않습니다. 인스타그램 연결 정보를 확인해 주세요.", reason: "account_mismatch" as const };
@@ -115,6 +115,28 @@ export async function accountIdentity(token: string, authMode: InstagramAuthMode
 }
 
 export type IgError = { kind: "not_configured" | "auth" | "token_expired" | "rate_limit" | "limit_reached" | "terminal" | "transient" | "unknown"; error: string };
+type IgFailureDiagnostic = { httpStatus?: number; graphCode?: number; graphSubcode?: number };
+
+function safeGraphErrorNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/** Only local stage names, HTTP status, numeric provider codes and transport state reach the UI. */
+function lookupFailureDiagnostic(stage: "assigned_accounts" | "direct_profile", failure: { lost: boolean; diagnostic?: IgFailureDiagnostic }) {
+  const { httpStatus, graphCode, graphSubcode } = failure.diagnostic ?? {};
+  return ` [진단: ${stage} / HTTP ${httpStatus ?? "-"} / Graph ${graphCode ?? "-"} / subcode ${graphSubcode ?? "-"} / lost=${failure.lost ? "true" : "false"}]`;
+}
+
+function providerFailureDiagnostic(status: number, body: { error?: unknown }): IgFailureDiagnostic {
+  const e = body.error && typeof body.error === "object" && !Array.isArray(body.error) ? body.error as Record<string, unknown> : {};
+  const graphCode = safeGraphErrorNumber(e.code), graphSubcode = safeGraphErrorNumber(e.error_subcode);
+  // Never copy provider message/type/trace/URLs or arbitrary response fields.
+  return {
+    ...(Number.isInteger(status) && status >= 100 && status <= 599 ? { httpStatus: status } : {}),
+    ...(graphCode !== undefined ? { graphCode } : {}),
+    ...(graphSubcode !== undefined ? { graphSubcode } : {}),
+  };
+}
 
 function classify(status: number, body: { error?: { code?: number; error_subcode?: number; message?: string; type?: string } }): IgError {
   const e = body.error || {};
@@ -146,7 +168,7 @@ async function igFetch(path: string, method: "GET" | "POST", params: Record<stri
   }
   const parsed: unknown = await res.json().catch(() => null);
   const json = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, any> : {};
-  if (!res.ok || json.error) return { ok: false as const, lost: false, err: classify(res.status, json) };
+  if (!res.ok || json.error) return { ok: false as const, lost: false, err: classify(res.status, json), diagnostic: providerFailureDiagnostic(res.status, json) };
   return { ok: true as const, json };
 }
 
