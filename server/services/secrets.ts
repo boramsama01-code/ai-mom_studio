@@ -8,7 +8,7 @@ export function slugToEnvPart(slug: string): string {
 }
 
 export const SECRET_FIELDS: Record<string, string[]> = {
-  instagram: ["accessToken", "userId"],
+  instagram: ["accessToken", "userId", "authMode"],
   telegram_channel: ["chatId"],
 };
 
@@ -32,12 +32,15 @@ export function resolveSecrets(platform: string, slug: string, refs: Record<stri
   const invalid: string[] = [];
   for (const field of SECRET_FIELDS[platform] ?? []) {
     const name = refs[field];
+    // Destinations saved before Unified Login keep their Instagram Login path.
+    if (platform === "instagram" && field === "authMode" && !name) { values.authMode = "instagram"; continue; }
     if (!name || !allowedSecretName(platform, slug, field, name)) {
       invalid.push(field);
       continue;
     }
     const v = process.env[name];
     if (!v) missing.push(name);
+    else if (platform === "instagram" && field === "authMode" && !["instagram", "facebook"].includes(v)) invalid.push(field);
     else values[field] = v;
   }
   return { values, missing, invalid };

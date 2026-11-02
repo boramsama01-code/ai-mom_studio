@@ -27,5 +27,6 @@ it("fryday 브리핑 링크는 아이디어 대신 선택한 날짜와 소분류
     expect(url.searchParams.get("collectedOn")).toBe("2026-11-01");
     expect(url.searchParams.get("subcategory")).toBe("감자튀김 맛집");
     expect((host.querySelector('[aria-label="소분류 필터"]') as HTMLSelectElement).value).toBe("감자튀김 맛집");
+    expect(host.querySelector('[aria-label="수집함 채널"]')).toBeNull();
   } finally { await act(async () => root.unmount()); client.clear(); host.remove(); }
 });

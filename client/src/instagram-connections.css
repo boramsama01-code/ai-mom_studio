@@ -1,0 +1,41 @@
+.instagram-connections-page { max-width: 1180px; margin-inline: auto; gap: 24px; }
+.instagram-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.instagram-section-heading h2 { margin: 0; font-size: 20px; letter-spacing: -.04em; }
+.instagram-section-heading p { margin: 8px 0 0; line-height: 1.65; }
+.instagram-summary { color: #49605a; white-space: nowrap; background: #f0f5f2; border: 1px solid #dce8e2; border-radius: 999px; padding: 7px 12px; font-size: 12px; }
+.instagram-accounts .instagram-account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.instagram-accounts .instagram-account { padding: 20px; background: #fcfdfc; border: 1px solid #e0e8e3; border-radius: 16px; min-width: 0; gap: 12px; }
+.instagram-accounts .instagram-account.is-verified { border-color: #b7d4c7; background: #f8fcfa; }
+.instagram-account-heading { display: flex; gap: 11px; align-items: center; }
+.instagram-channel-mark { display: grid; place-items: center; height: 42px; width: 42px; border-radius: 13px; background: #eaf1ed; color: #356a57; font-size: 18px; font-weight: 700; flex-shrink: 0; }
+.instagram-account-heading > div { flex: 1; min-width: 0; }
+.instagram-account-heading strong { display: block; font-size: 15px; line-height: 1.5; }
+.instagram-account-heading a { display: block; color: #64776f; font-size: 12px; overflow-wrap: anywhere; text-decoration: none; }
+.instagram-state { flex-shrink: 0; white-space: nowrap; background: #f0f1ee; color: #626d63; border-radius: 999px; padding: 5px 9px; font-size: 11px; font-weight: 600; }
+.instagram-state.is-ok { background: #e0f1e8; color: #216449; }
+.instagram-state.is-error { background: #fbe9e5; color: #9b3b2c; }
+.instagram-account p { margin: 0; line-height: 1.7; }
+.instagram-account-status { color: #5b6b62; min-height: 25px; }
+.instagram-account-actions { margin-top: auto; gap: 8px; }
+.instagram-account-actions .btn { flex-grow: 1; justify-content: center; }
+.instagram-account .studio-instagram-connect { border-top: 1px solid #e0e8e3; padding-top: 16px; margin-top: 4px; }
+.instagram-connect-target { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.instagram-token-toggle { justify-content: flex-start; padding-left: 0; }
+.instagram-setup { scroll-margin-top: 100px; }
+.instagram-setup-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); list-style: none; padding: 0; gap: 22px; margin: 10px 0; }
+.instagram-setup-steps li { display: flex; align-items: flex-start; gap: 12px; }
+.instagram-setup-steps li > span { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; color: #356a57; background: #edf4ef; flex-shrink: 0; font-size: 12px; font-weight: 700; }
+.instagram-setup-steps strong { font-size: 14px; }
+.instagram-setup-steps p { margin: 8px 0; font-size: 12px; line-height: 1.8; color: #69766e; }
+.instagram-setup-steps a { font-size: 12px; color: #28694f; }
+.instagram-app-details { border-top: 1px solid #e0e8e3; padding-top: 16px; }
+.instagram-app-details summary { cursor: pointer; font-size: 14px; font-weight: 650; padding-block: 6px 14px; }
+.instagram-app-details form { max-width: 620px; }
+.instagram-connections-page .page-head h1 { margin-bottom: 8px; }
+@media (max-width: 720px) {
+  .instagram-accounts .instagram-account-grid { grid-template-columns: 1fr; }
+  .instagram-accounts .instagram-account { padding: 16px; }
+  .instagram-section-heading { gap: 10px; flex-wrap: wrap; }
+  .instagram-setup-steps { grid-template-columns: 1fr; gap: 20px; }
+  .instagram-connections-page { gap: 18px; }
+}

@@ -9,7 +9,7 @@ import { aiProviders } from "../../shared/aiProviders";
  */
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, notExists, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
 import {
@@ -38,6 +38,8 @@ import { extractForItem } from "../worker/collect";
 import { LlmBudget } from "../services/llm";
 import { generateDialogueDraft } from "../worker/generate";
 import { approveItem, cancelApproval, renderCardForItem, retryDelivery, sourceOrgFor } from "../worker/publish";
+import { kickInlinePublish } from "../worker/inlinePublish";
+import { publicationReadiness } from "../services/publishReadiness";
 import { buildCaptions } from "../services/cardModel";
 import { matchOfficialSource } from "../worker/evidence";
 import { collectionDateSchema, collectionDayRange } from "../../shared/collection";
@@ -46,6 +48,7 @@ import { noticeIntentSql } from "../services/noticeIntent";
 import { itemPrimarySource, itemSourceIdSql } from "../services/itemSources";
 import { sha256 } from "../services/text";
 import { SOURCE_TEXT_LIMIT, SOURCE_QUOTE_LIMIT, SOURCE_QUOTE_COUNT, suggestSourceQuotes } from "../../shared/sourceText";
+import type { PublicationOrphan } from "../../shared/publicationReadiness";
 
 export const itemRoutes = Router();
 
@@ -180,7 +183,7 @@ itemRoutes.get(
             .limit(5)
         : [];
     const defaultCaptions = current ? buildCaptions({ kind: item.kind, payload: current.payload, sourceUrl: primary?.originalUrl ?? null, sourceOrg: await sourceOrgFor(db, item, current.payload) }) : null;
-    res.json({ item, primary, linked, revisions, current, cards, approvals: aps, deliveries: dels, similar, defaultCaptions, imageAiAvailable: studioAiStatus().image });
+    res.json({ item, primary, linked, revisions, current, cards, approvals: aps, deliveries: dels, similar, defaultCaptions, imageAiAvailable: studioAiStatus().image, publicationReadiness: await publicationReadiness(db, ch.id) });
   }),
 );
 
@@ -485,7 +488,8 @@ itemRoutes.post(
     );
     const r = await approveItem(getDb(), { itemId: item.id, revisionId: body.revisionId, mediaAssetId: body.mediaAssetId, altTextVersion:body.altTextVersion, captions: body.captions, scheduledAt: new Date(body.scheduledAt), actor: actorOf(req) });
     if (!r.ok) throw new HttpError(400, r.error);
-    res.status(201).json(r);
+    const workerStarted = kickInlinePublish(getDb());
+    res.status(201).json({ ...r, workerStarted });
   }),
 );
 
@@ -513,6 +517,20 @@ itemRoutes.post(
     res.json(r);
   }),
 );
+
+/** Read historical approvals which never acquired a destination delivery. */
+itemRoutes.get("/publication-orphans", ah(async (req, res) => {
+  const q = parse(z.object({ channelId: z.union([z.literal("all"), z.coerce.number().int().positive()]) }), req.query);
+  const db = getDb();
+  const rows = await db.select({
+    ap: { id: approvals.id, scheduledAt: approvals.scheduledAt, status: approvals.status, revisionId: approvals.revisionId },
+    item: { id: contentItems.id, title: contentItems.title, channelId: contentItems.channelId },
+  }).from(approvals).innerJoin(contentItems, eq(contentItems.id, approvals.contentItemId))
+    .where(and(eq(approvals.status, "active"), q.channelId === "all" ? undefined : eq(approvals.channelId, q.channelId), notExists(db.select({ id: deliveries.id }).from(deliveries).where(eq(deliveries.approvalId, approvals.id)))))
+    .orderBy(desc(approvals.scheduledAt), desc(approvals.id)).limit(100);
+  const result: PublicationOrphan[] = rows.map(row => ({ ...row, ap: { ...row.ap, scheduledAt: row.ap.scheduledAt.toISOString() }, reason: "승인은 저장됐지만 전송 예약이 없습니다. 게시 계정을 연결한 뒤 원고에서 다시 승인하세요." }));
+  res.json(result);
+}));
 
 /** 발행함 */
 itemRoutes.get(
@@ -564,4 +582,3 @@ itemRoutes.post(
 
 import { altTextError, altTextFile } from "../../shared/altText";
 import { cardAltTextState } from "../services/cardAccessibility";
-

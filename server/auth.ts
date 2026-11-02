@@ -30,6 +30,7 @@ declare module "express-session" {
     demo?: boolean;
     privateLinkHash?: string;
     credentialVersion?: number;
+    instagramOauth?: import("./services/instagramOAuth").PendingInstagramOAuth;
   }
 }
 
@@ -223,6 +224,3 @@ export function installAuthRoutes(app: Express) {
 export function actorOf(req: Request) {
   return req.session?.user ?? "unknown";
 }
-
-
-
