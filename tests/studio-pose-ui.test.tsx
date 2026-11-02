@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { StudioCharacterArchive, StudioPosePicker } from "../client/src/pages/StudioPosePicker";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StudioCharacterArchive, StudioPosePicker, StudioRegisteredCharacters } from "../client/src/pages/StudioPosePicker";
 import { studioContentSchema, type StudioContent } from "../shared/studio";
-import { STUDIO_CHARACTERS, poseImageUrl, poseLabel, poseSheetUrl } from "../shared/studioCharacters";
+import { STUDIO_CHARACTERS, STUDIO_FAMILY_REFERENCE_URL, poseImageUrl, poseLabel, poseSheetUrl } from "../shared/studioCharacters";
 import { studioChatGptImagePrompt } from "../shared/studioImageImport";
 
 let container: HTMLDivElement;
@@ -32,7 +32,7 @@ function Harness({ disabled = false }: { disabled?: boolean }) {
 describe("studio pose picker", () => {
   it("previews before applying, persists the exact cell, and includes it in the copied guide", async () => {
     await act(async () => root.render(<Harness />));
-    await click(button("포즈 선택"));
+    expect(button("목록 접기")?.getAttribute("aria-expanded")).toBe("true");
     expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(100);
     await click(ariaButton(`${poseLabel("pengpeng", 41)} 미리보기`));
     expect(container.querySelectorAll(".studio-pose-selection")).toHaveLength(0);
@@ -49,7 +49,6 @@ describe("studio pose picker", () => {
 
   it("replaces only the current character's reference and allows removing it", async () => {
     await act(async () => root.render(<Harness />));
-    await click(button("포즈 선택"));
     await click(button("이 컷에 적용"));
     await click(Array.from(container.querySelectorAll(".studio-pose-character-tabs button")).find(element => element.textContent?.includes("펨펨")));
     await click(ariaButton(`${poseLabel("pempem", 100)} 미리보기`));
@@ -65,12 +64,11 @@ describe("studio pose picker", () => {
 
   it("renders category filters with ten lazy thumbnails from the measured-crop endpoint", async () => {
     await act(async () => root.render(<Harness />));
-    await click(button("포즈 선택"));
     const select = container.querySelector<HTMLSelectElement>("select")!;
     await act(async () => { select.value = "9"; select.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(10);
     const last = ariaButton(`${poseLabel("pengpeng", 100)} 미리보기`)!;
-    const thumbnail = last.querySelector<HTMLImageElement>("img.studio-pose-thumbnail")!;
+    const thumbnail = last.querySelector<HTMLImageElement>(".studio-pose-thumbnail img")!;
     expect(thumbnail.getAttribute("src")).toBe(poseImageUrl("pengpeng", 100));
     expect(thumbnail.getAttribute("loading")).toBe("lazy");
     expect(thumbnail.style.backgroundImage).toBe("");
@@ -78,9 +76,40 @@ describe("studio pose picker", () => {
 
   it("does not change references while the editor is busy", async () => {
     await act(async () => root.render(<Harness disabled />));
+    expect(button("목록 접기")?.disabled).toBe(true);
+    expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(100);
+    expect([...container.querySelectorAll<HTMLButtonElement>(".studio-pose-tile")].every(tile => tile.disabled)).toBe(true);
+    expect(button("이 컷에 적용")?.disabled).toBe(true);
+    await click(button("이 컷에 적용"));
+    expect(container.querySelectorAll(".studio-pose-selection")).toHaveLength(0);
+  });
+
+  it("shows no-cast guidance without selecting anyone and opens when a cast is supplied", async () => {
+    const onChange = vi.fn();
+    await act(async () => root.render(<StudioPosePicker cast={[]} value={[]} onChange={onChange} disabled={false} panelIndex={0} imageMode="chatgpt" />));
+    expect(container.textContent).toContain("위에서 등장인물을 먼저 선택해 주세요.");
+    expect(button("포즈 선택")?.getAttribute("aria-expanded")).toBe("false");
     expect(button("포즈 선택")?.disabled).toBe(true);
-    await click(button("포즈 선택"));
     expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(0);
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => root.render(<StudioPosePicker cast={["pengki"]} value={[]} onChange={onChange} disabled={false} panelIndex={0} imageMode="chatgpt" />));
+    expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(100);
+    expect(container.querySelector<HTMLImageElement>(".studio-pose-tile img")?.getAttribute("src")).toBe(poseImageUrl("pengki", 1));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("reports image failures and retries without choosing or applying a pose", async () => {
+    await act(async () => root.render(<Harness />));
+    const image = container.querySelector<HTMLImageElement>(".studio-pose-tile img")!;
+    await act(async () => image.dispatchEvent(new Event("error")));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("그림을 불러오지 못했어요.");
+    expect(image.hidden).toBe(true);
+    expect(container.querySelectorAll(".studio-pose-selection")).toHaveLength(0);
+    await click(button("그림 다시 불러오기"));
+    expect(image.getAttribute("src")).toBe(`${poseImageUrl("pengpeng", 1)}?retry=1`);
+    expect(image.hidden).toBe(false);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelectorAll(".studio-pose-selection")).toHaveLength(0);
   });
 
   it("registers all four sheets in age order with the current names", async () => {
@@ -90,5 +119,60 @@ describe("studio pose picker", () => {
     expect(container.querySelectorAll(".studio-pose-sheet-link")).toHaveLength(4);
     for (const character of STUDIO_CHARACTERS) expect(container.querySelector(`a[download="${character.name}-100포즈.png"]`)?.getAttribute("href")).toBe(poseSheetUrl(character.id));
     expect(container.textContent).not.toContain("식품공학 대학원생");
+  });
+});
+
+describe("registered characters in the authoring page", () => {
+  it("shows all four real portraits in age order and preserves the explicit cast selection", async () => {
+    const onChange = vi.fn(), onChoosePoses = vi.fn();
+    await act(async () => root.render(<StudioRegisteredCharacters cast={["pengki"]} onChange={onChange} disabled={false} onChoosePoses={onChoosePoses} />));
+    const panel = container.querySelector('[data-testid="studio-registered-characters"]')!;
+    expect(panel.closest("[hidden]")).toBeNull();
+    expect([...panel.querySelectorAll(".studio-registered-name")].map(name => name.textContent)).toEqual(["펭펭40살100포즈", "펨펨37살100포즈", "김펭긴13살100포즈", "김펭키12살100포즈"]);
+    const portraits = [...panel.querySelectorAll<HTMLImageElement>(".studio-character-portrait img")];
+    expect(portraits).toHaveLength(4);
+    expect(portraits.every(image => image.getAttribute("src") === STUDIO_FAMILY_REFERENCE_URL && !image.hidden)).toBe(true);
+    const choices = [...panel.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    expect(choices.map(choice => choice.checked)).toEqual([false, false, false, true]);
+    expect(choices.map(choice => choice.getAttribute("aria-label"))).toEqual(STUDIO_CHARACTERS.map(character => `${character.name} 등장인물 선택`));
+    expect(onChange).not.toHaveBeenCalled();
+    await click(button("포즈 고르기"));
+    expect(onChoosePoses).toHaveBeenCalledOnce();
+    expect(onChange).not.toHaveBeenCalled();
+    await click(choices[0]);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("pengpeng", true);
+  });
+
+  it("keeps portraits visible with no cast or while editing is disabled", async () => {
+    const onChange = vi.fn(), onChoosePoses = vi.fn();
+    await act(async () => root.render(<StudioRegisteredCharacters cast={[]} onChange={onChange} disabled={false} onChoosePoses={onChoosePoses} />));
+    expect(container.textContent).toContain("등장인물을 먼저 선택하면 포즈를 고를 수 있어요.");
+    expect(button("포즈 고르기")?.disabled).toBe(true);
+    expect(container.querySelectorAll(".studio-character-portrait img")).toHaveLength(4);
+    await act(async () => root.render(<StudioRegisteredCharacters cast={["pengpeng"]} onChange={onChange} disabled onChoosePoses={onChoosePoses} />));
+    expect(container.querySelector<HTMLFieldSetElement>("fieldset")?.disabled).toBe(true);
+    expect(button("포즈 고르기")?.disabled).toBe(true);
+    await click(container.querySelector('input[aria-label="펨펨 등장인물 선택"]'));
+    await click(button("포즈 고르기"));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onChoosePoses).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed portrait without activating its checkbox or the pose chooser", async () => {
+    const onChange = vi.fn(), onChoosePoses = vi.fn();
+    await act(async () => root.render(<StudioRegisteredCharacters cast={["pempem"]} onChange={onChange} disabled={false} onChoosePoses={onChoosePoses} />));
+    const image = container.querySelector<HTMLImageElement>('.studio-character-portrait img')!;
+    await act(async () => image.dispatchEvent(new Event("error")));
+    expect(image.hidden).toBe(true);
+    expect(container.textContent).toContain("그림 로딩 실패");
+    const retry = button("그림 다시 불러오기")!;
+    expect(retry.closest("label")).toBeNull();
+    await click(retry);
+    expect(image.getAttribute("src")).toBe(`${STUDIO_FAMILY_REFERENCE_URL}?retry=1`);
+    expect(image.hidden).toBe(false);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect([...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].map(input => input.checked)).toEqual([false, true, false, false]);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onChoosePoses).not.toHaveBeenCalled();
   });
 });

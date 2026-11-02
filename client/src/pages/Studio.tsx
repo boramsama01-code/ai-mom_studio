@@ -23,7 +23,7 @@ import { studioCaptionDraft } from "@shared/studioWorkflow";
 import type { StudioGeneration } from "@shared/studio";
 import { StudioExport, StudioQuickExport } from "./StudioExport";
 import { StudioPanelImport } from "./StudioPanelImport";
-import { CharacterPortrait, StudioCharacterArchive, StudioPosePicker } from "./StudioPosePicker";
+import { StudioCharacterArchive, StudioPosePicker, StudioRegisteredCharacters } from "./StudioPosePicker";
 import { STUDIO_CHARACTERS, STUDIO_FAMILY_REFERENCE_URL } from "@shared/studioCharacters";
 import { StudioPromptCopy, StudioTextImport } from "./StudioTextImport";
 import { studioChatGptCaptionPrompt } from "@shared/studioTextImport";
@@ -206,6 +206,13 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const [textMode, setTextMode] = useState<"chatgpt" | "api">("api");
   const [editorStep, setEditorStep] = useState<"story" | "images" | "finish">(() => data.card.stage === "done" || data.card.stage === "review" ? "finish" : data.card.stage === "making" ? "images" : "story");
   const [selectedPanel, setSelectedPanel] = useState(0);
+  const [posePickerRequest, setPosePickerRequest] = useState(0);
+  const posePickerTarget = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!posePickerRequest) return;
+    posePickerTarget.current?.scrollIntoView?.({ block: "start" });
+    posePickerTarget.current?.focus({ preventScroll: true });
+  }, [posePickerRequest]);
   const [uploading, setUploading] = useState<number | null>(null);
   const uploadingRef = useRef(false);
   const [provider, setProvider] = useState<AiProvider>("openai");
@@ -316,6 +323,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
     {latestJob?.status === "succeeded" && latestJob.result?.applied === true && Array.isArray(latestJob.result.changedFields) && latestJob.result.changedFields.length > 0 && <p className="notice ok small" role="status">작성 완료: {latestJob.result.changedFields.filter((f): f is string => typeof f === "string").join(" · ")}</p>}
     {tab === "content" ? <div className="studio-editor-layout studio-guided-editor">
       <nav className="studio-editor-steps" aria-label="제작 순서">{([['story','01','이야기'],['images','02','그림'],['finish','03','완성']] as const).map(([id, number, label]) => <button key={id} aria-current={editorStep === id ? "step" : undefined} onClick={() => setEditorStep(id)}><span>{number}</span><strong>{label}</strong></button>)}</nav>
+      <StudioRegisteredCharacters cast={form.characters} onChange={changeCast} disabled={busy || working || newer} onChoosePoses={() => { setEditorStep("images"); setPosePickerRequest(current => current + 1); }} />
       <section className="panel stack" id="studio-story" hidden={editorStep !== "story"}>
         <div className="studio-section-heading"><div><h2>어떤 이야기를 만들까요?</h2></div><span className="small muted">API로 자동 작성하거나 ChatGPT 초안을 가져오세요.</span></div>
         <label className="field">제목<input id="studio-title" disabled={busy} value={form.title} maxLength={160} onChange={e => change("title", e.target.value)} /></label>
@@ -345,7 +353,6 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         <div className="studio-section-heading"><div><span className="studio-step">02 · 그림 제작</span><h2>{form.format === "카드뉴스" ? "본문 4장" : "네컷 구성"}</h2></div><span className="small muted">{form.panels.filter(p => p.imageId).length} / 4 그림</span></div>
         <div className="studio-image-mode" role="group" aria-label="그림 제작 방법"><button aria-pressed={imageMode === "chatgpt"} disabled={busy} onClick={() => guard.confirmLeave(() => setImageMode("chatgpt"))}>ChatGPT로 만들기</button><button aria-pressed={imageMode === "api"} disabled={busy} onClick={() => guard.confirmLeave(() => setImageMode("api"))}>API로 자동 생성</button></div>
         <p className="small muted">{imageMode === "chatgpt" ? "프롬프트 복사 → ChatGPT에서 이미지 생성 → 해당 컷에 붙여넣기. 스튜디오 API 사용료 없이 저장합니다." : "장면·대사를 사용해 한 번에 한 컷을 생성합니다. 이미지 API 사용료가 발생합니다."}</p>
-        <fieldset className="studio-cast"><legend>등장인물 · 나이순</legend><div className="studio-character-picks">{characters.map(c => <label key={c.id} className={form.characters.includes(c.id) ? "selected" : ""}><input type="checkbox" disabled={busy} checked={form.characters.includes(c.id)} onChange={e => changeCast(c.id, e.target.checked)} /><CharacterPortrait character={c.id} /><span>{c.name}<small>{c.age}살</small></span></label>)}</div></fieldset>
         {imageMode === "chatgpt" && form.characters.length > 0 && <div className="studio-reference-downloads"><span className="small muted">가족 기준 그림과 이 컷에서 고른 포즈 이미지를 ChatGPT에 함께 첨부하세요.</span><div className="row"><a className="btn sm" href={STUDIO_FAMILY_REFERENCE_URL} download="우주펭귄상회-가족-기준그림.png">가족 기준 그림 ↓</a></div></div>}
         {imageMode === "api" && settings.data?.ai.image === false && <p className="notice warn small">API 자동 생성에는 OpenAI 키가 필요합니다. <GuardedLink href="/connections?service=openai">OpenAI 키 입력 →</GuardedLink></p>}
         {form.imagePath && <details className="studio-original"><summary>이전 웹툰 시안 보기</summary><img src={form.imagePath} alt="이전 네컷 웹툰 시안" /></details>}
@@ -354,7 +361,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
           <div className="row between"><h3>{i + 1}{form.format === "카드뉴스" ? "번째 본문" : "컷"}</h3><span className="small muted">{p.imageId ? "그림 있음" : "구성 중"}</span></div>
           <label className="field small">장면<textarea disabled={busy} aria-label={panelLabel(i, "장면")} rows={3} value={p.scene} maxLength={4000} onChange={e => changePanel(i, "scene", e.target.value)} placeholder="등장인물, 표정, 배경, 소품" /></label>
           <label className="field small">{form.format === "카드뉴스" ? "본문" : "대사"}<textarea id={panelField(i)} disabled={busy} aria-label={panelLabel(i, "대사")} rows={2} value={p.dialogue} maxLength={3000} onChange={e => changePanel(i, "dialogue", e.target.value)} placeholder="그림 아래에 표시할 글" /></label>
-          <StudioPosePicker cast={form.characters} value={p.poseRefs ?? []} onChange={poseRefs => change("panels", form.panels.map((panel, index) => index === i ? { ...panel, poseRefs } : panel))} disabled={busy || working || newer} panelIndex={i} imageMode={imageMode} />
+          {editorStep === "images" && selectedPanel === i && <div ref={posePickerTarget} tabIndex={-1} aria-label="현재 컷의 포즈 선택"><StudioPosePicker key={`${i}:${posePickerRequest}`} cast={form.characters} value={p.poseRefs ?? []} onChange={poseRefs => change("panels", form.panels.map((panel, index) => index === i ? { ...panel, poseRefs } : panel))} disabled={busy || working || newer} panelIndex={i} imageMode={imageMode} /></div>}
           {imageMode === "chatgpt" ? <StudioPanelImport content={form} index={i} channelName={channelName(form.channel)} instruction={panelInstructions[i]} disabled={busy || working || newer || !form.title.trim()} upload={uploadImage} /> : <>
             <div className="studio-panel-picture">{p.imageId ? <a href={imageUrl(p.imageId)} target="_blank" rel="noopener noreferrer"><img src={imageUrl(p.imageId)} alt={panelLabel(i, "그림")} /></a> : <div className="studio-picture-empty">{i + 1}<span>위에 쓴 내용이 그림으로 이어집니다.</span></div>}</div>
             <button className="btn primary" aria-label={panelLabel(i, p.imageId ? "다시 그리기" : "그리기")} disabled={!canDraw || (!p.scene.trim() && !p.dialogue.trim() && !panelInstructions[i].trim())} onClick={() => run({ kind: "image", panelIndex: i, instruction: panelInstructions[i] })}>{generate.isPending && generate.variables?.kind === "image" && generate.variables.panelIndex === i ? "요청 중…" : p.imageId ? "이 컷 다시 그리기" : "이 컷 그리기"}</button>

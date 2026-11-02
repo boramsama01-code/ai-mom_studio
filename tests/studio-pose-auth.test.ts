@@ -81,3 +81,27 @@ it("normalizes only the private pose asset subtree and decodes once", () => {
     expect(isPrivateStudioAssetPath(pathname), pathname).toBe(false);
   }
 });
+
+it("serves the registered family and actual pose PNGs through authenticated image routes", async () => {
+  const sharp = (await import("sharp")).default;
+  const app = createApp();
+  const operator = request.agent(app);
+  expect((await operator.post("/test-only/session")).status).toBe(200);
+  const family = await operator.get("/api/studio/characters/reference");
+  expect(family.status).toBe(200);
+  expect(family.headers["content-type"]).toContain("image/png");
+  expect((await sharp(family.body).metadata()).width).toBe(1942);
+  for (const character of ["pengpeng", "pempem", "penguin", "pengki"]) {
+    for (const pose of [1, 100]) {
+      const resource = `/api/studio/characters/${character}/poses/${pose}`;
+      expect((await request(app).get(resource)).status).toBe(401);
+      const response = await operator.get(resource);
+      expect(response.status, resource).toBe(200);
+      expect(response.headers["content-type"], resource).toContain("image/png");
+      const image = await sharp(response.body).metadata();
+      expect(image.format).toBe("png");
+      expect(image.width).toBeGreaterThan(0);
+      expect(image.height).toBeGreaterThan(0);
+    }
+  }
+});
