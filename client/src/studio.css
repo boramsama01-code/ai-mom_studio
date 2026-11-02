@@ -1,7 +1,34 @@
 .studio { --accent: #2563eb; --accent-weak: #edf4ff; }
 
 /* Character references retain the accepted family art; pose numbers use the UI font. */
-.studio-character-portrait { display:block; width:60px; height:100px; flex:0 0 auto; background-repeat:no-repeat; background-size:400% 100%; background-color:#fff; border-radius:8px; }
+.studio-character-portrait { display:block; position:relative; width:60px; height:100px; flex:0 0 auto; overflow:hidden; background-color:#fff; border-radius:8px; }
+.studio-character-portrait > img { position:absolute; top:0; width:400%; max-width:none; height:100%; object-fit:fill; margin:0; }
+.studio-character-portrait > img[hidden],.studio-pose-thumbnail > img[hidden],.studio-registered-artwork > img[hidden] { display:none; }
+.studio-registered-artwork { display:block; width:100%; }
+.studio-registered-artwork .studio-artwork-missing { min-height:100px; }
+.studio-artwork-missing { display:flex; width:100%; height:100%; align-items:center; justify-content:center; padding:4px; color:#805336; background:#fff5e9; text-align:center; font-size:10px; line-height:1.5; white-space:normal; }
+.studio-reference-error { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; margin-bottom:12px; border:1px solid #e8c89f; border-radius:9px; background:#fff7eb; color:#714a2d; font-size:12px; line-height:1.6; }
+.studio-reference-error .btn { flex-shrink:0; }
+.studio-registered-characters,.studio-guided-editor .panel.studio-registered-characters { margin:0; padding:18px; min-width:0; }
+.studio-registered-heading { display:flex; align-items:center; justify-content:space-between; gap:15px; margin-bottom:12px; }
+.studio-registered-heading h2,.studio-guided-editor .panel.studio-registered-characters h2 { margin:0; font-size:16px; line-height:1.5; }
+.studio-registered-heading p { margin:4px 0 0; color:#60756d; font-size:12px; line-height:1.6; }
+.studio-registered-heading .btn { flex-shrink:0; }
+.studio-registered-cast { min-width:0; margin:0; padding:0; border:0; }
+.studio-registered-cast legend { margin-bottom:8px; color:#60756d; font-size:11px; }
+.studio-registered-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.studio-registered-choice { position:relative; display:flex; align-items:center; justify-content:center; gap:10px; min-width:0; padding:12px 10px; border:1px solid #dfe8e3; border-radius:11px; background:#fff; cursor:pointer; }
+.studio-registered-choice.selected { border-color:#5e907b; background:#eef7f0; box-shadow:inset 0 0 0 1px #5e907b; }
+.studio-registered-choice > input { position:absolute; top:8px; left:8px; width:15px; height:15px; min-height:15px; margin:0; accent-color:#38785d; }
+.studio-registered-choice .studio-character-portrait { width:50px; height:84px; }
+.studio-registered-name { display:flex; flex-direction:column; align-items:flex-start; gap:4px; min-width:0; padding-top:5px; }
+.studio-registered-name strong { font-size:13px; white-space:nowrap; }
+.studio-registered-name small { font-size:11px; color:#63776d; }
+.studio-registered-name .studio-pose-count { margin-top:3px; padding:3px 7px; }
+.studio-registered-cast:disabled .studio-registered-choice { cursor:default; }
+.studio-registered-footer { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px 15px; margin-top:12px; color:#60756d; font-size:11px; line-height:1.6; }
+.studio-registered-footer a { color:#346c53; text-underline-offset:3px; }
+.studio-registered-choice:focus-within { outline:3px solid #34795f; outline-offset:2px; }
 .studio-character-picks .studio-character-portrait { width:46px; height:77px; margin:0 auto 6px; }
 .studio-character-picks span small { display:block; margin-top:2px; font-size:10px; font-weight:400; color:#657c80; }
 .studio-pose-picker { border:1px solid #d9e5e1; border-radius:12px; background:#f8fbfa; padding:14px; min-width:0; }
@@ -23,7 +50,8 @@
 .studio-pose-tile { display:flex; flex-direction:column; align-items:stretch; min-width:0; min-height:44px; padding:3px; border:1px solid #e0e7e3; border-radius:8px; background:#fff; color:#50645b; cursor:pointer; overflow:hidden; }
 .studio-pose-tile[aria-pressed="true"] { border-color:#2f7861; box-shadow:0 0 0 2px #2f7861; }
 .studio-pose-tile.applied { background:#e8f3eb; }
-.studio-pose-thumbnail { display:block; width:100%; aspect-ratio:1; object-fit:contain; background-color:#fff; border-radius:5px; flex:0 0 auto; }
+.studio-pose-thumbnail { display:block; position:relative; width:100%; aspect-ratio:1; overflow:hidden; background-color:#fff; border-radius:5px; flex:0 0 auto; }
+.studio-pose-thumbnail > img { display:block; width:100%; height:100%; object-fit:contain; }
 .studio-pose-number { display:block; min-height:22px; padding:3px 0 1px; text-align:center; font-size:11px; font-variant-numeric:tabular-nums; line-height:1.5; }
 .studio-pose-preview { display:flex; flex-direction:column; gap:8px; min-width:0; padding:10px; border:1px solid #e0e8e3; border-radius:10px; background:#fff; }
 .studio-pose-preview > strong { font-size:13px; }
@@ -58,9 +86,19 @@
 .studio-pose-archive-card > .row { gap:5px; }
 .studio-pose-archive-card > .row .btn { font-size:11px; }
 @media (max-width:1000px) {
+  .studio-registered-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .studio-character-archive:has(.studio-pose-archive-card) { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 @media (max-width:640px) {
+  .studio-registered-characters,.studio-guided-editor .panel.studio-registered-characters { padding:13px; }
+  .studio-registered-heading { gap:10px; align-items:flex-start; }
+  .studio-registered-heading h2,.studio-guided-editor .panel.studio-registered-characters h2 { font-size:15px; }
+  .studio-registered-heading p { font-size:11px; }
+  .studio-registered-heading .btn { padding:7px 10px; font-size:11px; }
+  .studio-registered-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .studio-registered-choice { padding:10px; }
+  .studio-registered-choice .studio-character-portrait { width:45px; height:75px; }
+  .studio-reference-error { align-items:flex-start; flex-direction:column; }
   .studio-pose-picker { padding:11px; }
   .studio-pose-picker-heading { align-items:flex-start; gap:8px; }
   .studio-pose-picker-heading .small { font-size:10px; }

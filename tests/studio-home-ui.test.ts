@@ -112,6 +112,48 @@ describe("홈과 단계별 제작 화면", () => {
     expect(title.value).toBe("직접 수정한 제목");
     expect(mocks.api.mock.calls.some(([path]) => String(path).includes("generate"))).toBe(false);
   });
+  it("이야기부터 등록 그림을 보여주고 바로 연 포즈를 해당 컷에만 저장한다", async () => {
+    cards[0] = { ...cards[0], characters: ["pengpeng"] };
+    await render(createElement(StudioPage, { cardId: 1 }));
+    const registered = host.querySelector('[data-testid="studio-registered-characters"]')!;
+    expect(registered).not.toBeNull();
+    expect(registered.closest("[hidden]")).toBeNull();
+    for (const name of ["펭펭", "펨펨", "김펭긴", "김펭키"]) expect(registered.textContent).toContain(name);
+    expect(registered.querySelectorAll("img").length).toBeGreaterThanOrEqual(4);
+    expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(0);
+    await input(host.querySelector("#studio-title") as HTMLInputElement, "포즈를 고른 웹툰");
+    await click("포즈 고르기");
+    expect(host.querySelector("#studio-composition")?.hasAttribute("hidden")).toBe(false);
+    expect(host.querySelectorAll(".studio-pose-picker")).toHaveLength(1);
+    expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(100);
+    await act(async () => host.querySelector<HTMLButtonElement>('.studio-pose-tile:nth-child(41)')!.click());
+    await click("이 컷에 적용");
+    await click("목록 접기");
+    await click("포즈 고르기");
+    expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(100);
+    expect(host.querySelector(".studio-pose-selection a")?.getAttribute("href")).toBe("/api/studio/characters/pengpeng/poses/41");
+    await act(async () => host.querySelector<HTMLButtonElement>('.studio-panel-selector button:nth-child(2)')!.click());
+    expect(host.querySelectorAll(".studio-pose-picker")).toHaveLength(1);
+    expect(host.querySelectorAll(".studio-pose-selection")).toHaveLength(0);
+    await act(async () => host.querySelector<HTMLButtonElement>('.page-head button.btn.primary')!.click()); await settle();
+    expect(cards[0].title).toBe("포즈를 고른 웹툰");
+    expect(cards[0].panels[0].poseRefs).toEqual([{ character: "pengpeng", pose: 41 }]);
+    expect(cards[0].panels.slice(1).every(panel => !panel.poseRefs?.length)).toBe(true);
+    expect(mocks.api.mock.calls.some(([path]) => /publish|generate|deliver/.test(String(path)))).toBe(false);
+  });
+  it("완성 단계에서도 등록 그림과 선택한 캐릭터를 유지한다", async () => {
+    cards[0] = { ...cards[0], stage: "done", characters: ["pempem"] };
+    await render(createElement(StudioPage, { cardId: 1 }));
+    const registered = host.querySelector('[data-testid="studio-registered-characters"]')!;
+    expect(registered.closest("[hidden]")).toBeNull();
+    expect(registered.querySelectorAll('input[type="checkbox"]:checked')).toHaveLength(1);
+    expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(0);
+    await click("포즈 고르기");
+    expect(host.querySelector(".studio-pose-character-tabs")?.textContent).toContain("펨펨");
+    expect(host.querySelector(".studio-pose-tile img")?.getAttribute("src")).toBe("/api/studio/characters/pempem/poses/1");
+    expect(cards[0].stage).toBe("done");
+    expect(mocks.api.mock.calls.some(([, options]) => options?.method === "PATCH")).toBe(false);
+  });
   it("붙여넣기만으로는 반영하지 않으며 검토 후 빈칸에만 적용한다", async () => {
     const apply = vi.fn(); const original = { ...cards[0], script: "이미 쓴 원고" };
     await render(createElement(StudioTextImport, { content: original, channelName: "내 채널", disabled: false, apply }));
