@@ -18,3 +18,6 @@ const target = resolve(root, "client/public/studio-assets/webtoon-01.png");
 await mkdir(dirname(target), { recursive: true });
 await writeFile(target, bytes);
 console.log("Studio sample image restored and verified.");
+
+await import("./restore-studio-pose-assets.mjs");
+

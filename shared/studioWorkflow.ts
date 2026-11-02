@@ -1,4 +1,5 @@
 import { studioContentSchema, type StudioContent, type StudioGeneration } from "./studio";
+import { studioPoseGuide } from "./studioCharacters";
 
 /** Local, free proposal. Copy only user-authored publishing text, never private planning notes. */
 export function studioCaptionDraft(content: Pick<StudioContent, "title" | "script" | "panels">): string {
@@ -36,6 +37,7 @@ export function applyStudioText(content: StudioContent, generated: TextDraft, ta
     panels: generated.panels.map((p, i) => ({
       scene: choose(content.panels[i].scene, p.scene), dialogue: choose(content.panels[i].dialogue, p.dialogue),
       imageId: fill || content.panels[i].scene === p.scene ? content.panels[i].imageId : null,
+      poseRefs: content.panels[i].poseRefs ?? [],
     })),
   });
 }
@@ -43,5 +45,6 @@ export function applyStudioText(content: StudioContent, generated: TextDraft, ta
 /** Keep context bounded so four long scenes cannot prevent image generation. */
 export function studioImageContext(content: StudioContent, panelIndex: number): string {
   const panel = content.panels[panelIndex];
-  return `제목: ${content.title}\n전체 흐름:\n${content.panels.map((p, i) => `${i + 1}컷: ${p.scene.slice(0, 700)} / 대사: ${p.dialogue.slice(0, 300)}`).join("\n")}\n이번에는 ${panelIndex + 1}번째 한 컷만 그린다.\n이번 컷 장면: ${panel.scene}\n이번 컷 대사(표정·상황 참고용, 그림에 글자로 넣지 않음): ${panel.dialogue}`;
+  return `제목: ${content.title}\n전체 흐름:\n${content.panels.map((p, i) => `${i + 1}컷: ${p.scene.slice(0, 700)} / 대사: ${p.dialogue.slice(0, 300)}`).join("\n")}\n이번에는 ${panelIndex + 1}번째 한 컷만 그린다.\n이번 컷 장면: ${panel.scene}\n이번 컷 대사(표정·상황 참고용, 그림에 글자로 넣지 않음): ${panel.dialogue}\n${studioPoseGuide(panel)}`;
 }
+

@@ -27,9 +27,9 @@ describe("작성에서 제작으로 이어지는 작업 흐름", () => {
     expect(result.script).toBe(original.script);
     expect(result.caption).toBe(original.caption);
     expect(result.panels[0]).toEqual(original.panels[0]);
-    expect(result.panels[1]).toEqual({ scene: "새 장면 1", dialogue: "내가 쓴 두 번째 대사", imageId: 43 });
-    expect(result.panels[2]).toEqual({ scene: "세 번째 장면", dialogue: "새 대사 2", imageId: null });
-    expect(result.panels[3]).toEqual({ ...draft.panels[3], imageId: null });
+    expect(result.panels[1]).toEqual({ scene: "새 장면 1", dialogue: "내가 쓴 두 번째 대사", imageId: 43, poseRefs: [] });
+    expect(result.panels[2]).toEqual({ scene: "세 번째 장면", dialogue: "새 대사 2", imageId: null, poseRefs: [] });
+    expect(result.panels[3]).toEqual({ ...draft.panels[3], imageId: null, poseRefs: [] });
     expect(result.memo).toBe(original.memo);
     expect(original.panels[1].scene).toBe("");
   });
@@ -57,3 +57,4 @@ describe("작성에서 제작으로 이어지는 작업 흐름", () => {
     expect(studioImageContext(long, 3).length + 8000 + 1500).toBeLessThan(25000);
   });
 });
+

@@ -10,7 +10,7 @@ import { z } from "zod";
 import { getDb } from "../db";
 import { actorOf } from "../auth";
 import { channels, jobs, studioCards, studioImages, studioRevisions, studioMedia } from "../../shared/schema";
-import { studioContentSchema, studioCreateSchema, studioGenerationSchema, studioPatchSchema } from "../../shared/studio";
+import { studioCharacters, studioContentSchema, studioCreateSchema, studioGenerationSchema, studioPatchSchema } from "../../shared/studio";
 import { ah, HttpError, intParam, parse } from "./util";
 import { setStudioTrash, createStudioCard, importStudioBoard, loadStudioNotes, queueStudioGeneration, saveStudioCard, saveStudioNotes, studioCardDto, studioCardsWithOutput, studioDetail, studioImportSchema, studioJobDto } from "../services/studio";
 import { studioAiStatus } from "../services/studioAi";
@@ -22,10 +22,28 @@ import sharp from "sharp";
 import { cardDesign } from "../../shared/cardDesigns";
 import { renderCollectionPreview } from "../services/cardDesignSamples";
 import { zipImportRoutes } from "./zipImport";
+import { studioFamilyReference, studioPoseReference } from "../services/studioCharacters";
+import { STUDIO_CHARACTERS } from "../../shared/studioCharacters";
 
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
 studioRoutes.use(zipImportRoutes);
+// Mounted behind the same operator-session middleware as all studio routes.
+studioRoutes.get("/studio/characters", (_req, res) => { res.json({ characters: STUDIO_CHARACTERS, poseCount: 100 }); });
+studioRoutes.get("/studio/characters/reference", ah(async (req, res) => {
+  const image = await studioFamilyReference();
+  res.type("image/png").set("X-Content-Type-Options", "nosniff").set("Cache-Control", "private, max-age=300");
+  if (req.query.download === "1") res.set("Content-Disposition", 'attachment; filename="spacepenguin-family-v2.png"');
+  res.send(image);
+}));
+studioRoutes.get("/studio/characters/:character/poses/:pose", ah(async (req, res) => {
+  const character = parse(z.enum(studioCharacters), req.params.character);
+  const pose = parse(z.coerce.number().int().min(1).max(100), req.params.pose);
+  const image = await studioPoseReference(character, pose);
+  res.type("image/png").set("X-Content-Type-Options", "nosniff").set("Cache-Control", "private, max-age=300");
+  if (req.query.download === "1") res.set("Content-Disposition", `attachment; filename="${character}-pose-${String(pose).padStart(3, "0")}.png"`);
+  res.send(image);
+}));
 studioRoutes.get("/studio/instagram/accounts", ah(async (_req, res) => { res.json(await instagramAccounts(getDb())); }));
 studioRoutes.get("/studio/cards", ah(async (req, res) => {
   const db = getDb();
@@ -181,4 +199,5 @@ studioRoutes.post("/studio/instagram/:cid/check", ah(async (req, res) => {
   const { destinationId } = parse(z.object({ destinationId: z.number().int().positive() }).strict(), req.body);
   res.json(await checkInstagramConnection(getDb(), intParam(req.params.cid), destinationId));
 }));
+
 

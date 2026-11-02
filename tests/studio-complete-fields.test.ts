@@ -9,7 +9,7 @@ describe("complete webtoon AI fields", () => {
     const parsed = studioTextOutputSchema("웹툰").parse(output);
     const after = applyStudioText(before, parsed, "fill");
     expect(after).toMatchObject({ title: before.title, memo: before.memo, channel: before.channel, dueDate: before.dueDate, script: output.script, caption: output.caption });
-    expect(after.panels).toEqual(output.panels.map(p => ({ ...p, imageId: 21 })));
+    expect(after.panels).toEqual(output.panels.map(p => ({ ...p, imageId: 21, poseRefs: [] })));
     expect(studioChangedTextFields(before, after)).toEqual(["전체 원고", "게시용 캡션", "1컷 장면", "1컷 대사", "2컷 장면", "2컷 대사", "3컷 장면", "3컷 대사", "4컷 장면", "4컷 대사"]);
   });
   it("rejects caption-only success and any missing scene or dialogue", () => {
@@ -23,3 +23,4 @@ describe("complete webtoon AI fields", () => {
     expect(studioTextOutputSchema("릴스").safeParse({ ...output, panels: output.panels.map(() => ({ scene: "", dialogue: "" })) }).success).toBe(true);
   });
 });
+

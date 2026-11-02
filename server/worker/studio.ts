@@ -1,7 +1,5 @@
 import { generateExperience } from "../services/experienceAi";
 import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
 import sharp from "sharp";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -16,18 +14,10 @@ import { loadStoredSecrets } from "../secretStore";
 import { env } from "../env";
 import { AiServiceError } from "../services/llm";
 import { getSetting } from "../seed";
+import { STUDIO_CHARACTER_GUIDE, studioCharacterById } from "../../shared/studioCharacters";
+import { studioPanelReferences } from "../services/studioCharacters";
 
 const payloadSchema = studioGenerationSchema.safeExtend({ cardId: z.number().int().positive(), snapshot: studioContentSchema });
-const characterGuide = `우주펭귄상회 가족의 고향은 남극성-09. 펭펭은 Alligodang의 지구 특파원, 펨펨은 전 우주기관 연구원으로 고입 전문 Highscoop를 안내한다. 김펭귄은 식품공학 대학원생으로 Fryday에서 감자튀김을 연구한다. 김펭키는 행성 탐사 과학자를 꿈꾸는 학생이다. 둥근 우주 헬멧, 옆모습, 뾰족한 검은 부리, 작은 흰 점 눈, 길고 가느다란 흑백 몸, 일정한 선 두께를 유지한다. Highscoop는 특목고 중심 고입 채널이며 입시 사실은 제공한 근거에서만 사용한다.`;
-
-async function canonicalReference(character: string) {
-  const candidates = [path.resolve("dist/public/studio-assets", `${character}.png`), path.resolve("client/public/studio-assets", `${character}.png`)];
-  let bytes: Buffer | null = null;
-  for (const file of candidates) { try { bytes = await fs.readFile(file); break; } catch { /* next packaged asset location */ } }
-  if (!bytes) throw new Error("캐릭터 기준 이미지가 없습니다. 배포 파일을 확인하세요.");
-  const png = await sharp(bytes).resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true }).png().toBuffer();
-  return `data:image/png;base64,${png.toString("base64")}`;
-}
 
 /** A paid request is attempted once. Lease expiry marks it failed instead of charging again. */
 export async function processStudioJob(db: DB, job: Job, workerId: string): Promise<boolean> {
@@ -52,7 +42,7 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
       const options = {
         provider: payload.provider, directive: instruction,
         content: { title: content.title, channel: content.channel, format: content.format, brief: content.memo, script: content.script, caption: content.caption, panels: content.panels.map(p => ({ scene: p.scene, dialogue: p.dialogue })) },
-        referenceText: characterGuide,
+        referenceText: STUDIO_CHARACTER_GUIDE,
       };
       if (payload.textTarget === "experience") {
         const generated=await generateExperience(db,card.id,content,payload.instruction);
@@ -69,14 +59,18 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
     } else {
       const panelIndex = payload.panelIndex!;
       const panel = content.panels[panelIndex];
-      const refs = await Promise.all([...new Set(content.characters)].map(canonicalReference));
+      const refs = content.characters.length ? await studioPanelReferences(panel) : [];
       if (panel.imageId) {
         const [existing] = await db.select().from(studioImages).where(and(eq(studioImages.id, panel.imageId), eq(studioImages.cardId, card.id)));
         if (existing) refs.push(`data:${existing.mimeType};base64,${existing.bytes.toString("base64")}`);
       }
       if (await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태로 생성을 실행하지 않았습니다.");
+      const referenceGuide = content.characters.length
+        ? "첨부 첫 이미지는 가족 외형 기준이며 네 명 모두를 그리라는 뜻이 아니다. 그 다음 이미지는 선택한 포즈 순서의 개별 참조다. 기존 컷이 있으면 마지막 이미지로 첨부된다. 장면에 필요한 선택된 등장인물만 그린다. 캐릭터 기준 이미지와 기존 컷의 외형을 유지한다."
+        : refs.length ? "첨부 이미지는 기존 컷이다. 기존 컷의 외형과 요청한 장면을 유지하며 지정하지 않은 펭귄 마스코트를 추가하지 않는다."
+          : "첨부된 참조 이미지는 없다. 요청한 장면만 그리고 지정하지 않은 펭귄 마스코트를 추가하지 않는다.";
       image = await generateStudioImage({
-        prompt: `${characterGuide}\n${studioImageContext(content, panelIndex)}\n수정 지시: ${instruction}\n첨부 캐릭터 기준 이미지와 기존 컷의 외형을 유지한다. 패널 하나만, 말풍선·글자·자막 없이 그린다. 대사는 별도로 편집한다.`,
+        prompt: `${content.characters.length ? STUDIO_CHARACTER_GUIDE : ""}\n이번 콘텐츠의 선택된 등장인물: ${content.characters.map(id => studioCharacterById(id).name).join(", ") || "없음"}\n${studioImageContext(content, panelIndex)}\n수정 지시: ${instruction}\n${referenceGuide} 패널 하나만, 말풍선·글자·자막 없이 그린다. 대사는 별도로 편집한다.`,
         referenceImages: refs,
       });
       if (image.bytes.length > 20 * 1024 * 1024) throw new Error("생성 이미지가 저장 한도를 초과했습니다.");
@@ -131,4 +125,5 @@ export function kickInlineStudio(db: DB): boolean {
   return true;
 }
 export async function waitStudioIdle() { while (running) await running; }
+
 

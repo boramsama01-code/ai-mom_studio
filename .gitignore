@@ -1,4 +1,5 @@
 node_modules/
+client/public/studio-assets/poses-v2/
 dist/
 .env
 .env.*
@@ -14,5 +15,6 @@ tmp/
 
 # Restored byte-for-byte from assets/studio-comic during development and build.
 /client/public/studio-assets/webtoon-01.png
+
 
 

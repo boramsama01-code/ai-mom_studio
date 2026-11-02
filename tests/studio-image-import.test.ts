@@ -8,9 +8,9 @@ describe("ChatGPT 이미지 가져오기", () => {
   it("실제 채널·컷·캐릭터·추가 요청을 복사하며 비공개 메모는 제외한다", () => {
     const content = studioContentSchema.parse({ title: "감자 연구", memo: "비공개 메모", characters: ["penguin"], panels: Array.from({ length: 4 }, (_, i) => ({ scene: `내 장면 ${i + 1}`, dialogue: `대사 ${i + 1}` })) });
     const prompt = studioChatGptImagePrompt(content, 2, "내가 바꾼 채널명", "배경은 연구실");
-    for (const phrase of ["내가 바꾼 채널명", "3번째 한 컷만", "내 장면 3", "대사 3", "김펭귄", "배경은 연구실", "4:3", "말풍선·대사·자막", "원본 첨부를 요청"]) expect(prompt).toContain(phrase);
+    for (const phrase of ["내가 바꾼 채널명", "3번째 한 컷만", "내 장면 3", "대사 3", "김펭긴", "배경은 연구실", "4:3", "말풍선·대사·자막", "원본 첨부를 요청"]) expect(prompt).toContain(phrase);
     expect(prompt).not.toContain("비공개 메모");
-    expect(studioChatGptImagePrompt({ ...content, characters: [] }, 0, "채널")).not.toContain("김펭귄");
+    expect(studioChatGptImagePrompt({ ...content, characters: [] }, 0, "채널")).not.toContain("김펭긴");
     expect(() => studioChatGptImagePrompt(content, 4, "채널")).toThrow();
   });
   it("빈 파일·비이미지·용량 초과를 업로드 전에 안내한다", () => {
@@ -37,3 +37,4 @@ describe("ChatGPT 이미지 가져오기", () => {
     await expect(normalizeStudioImage(Buffer.alloc(STUDIO_IMAGE_MAX_BYTES + 1))).rejects.toMatchObject({ status: 413 });
   });
 });
+
