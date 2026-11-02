@@ -41,6 +41,7 @@ beforeEach(() => {
     if (path === "/channels/2/discovery") return { discovery: settings };
     if (path === "/status") return { integrations: { aiConfigured: false } };
     if (path === "/studio/instagram/accounts") return { accounts };
+    if (path === "/studio/instagram/oauth/config") return { configured: true, missing: [], appId: "123456", redirectUri: "https://studio.example/api/studio/instagram/oauth/callback" };
     if (path === "/studio/instagram/2/check") return { username: "highscoop.official", checkedAt: "2026-11-02T00:00:00Z" };
     if (path === "/studio/cards/8/publication") return { channelId: 2, channelName: "하이스쿱", expectedUsername: "highscoop.official", ready: true, blockers: [], dailyLimit: 3, dryRun: false, autoPublish: false, destinations: accounts[1].destinations, deliveries: [] };
     throw new Error(`Unexpected API call: ${path}`);
@@ -120,7 +121,10 @@ describe("비공개 작업실의 사용 가능한 동작", () => {
     expect(host.querySelector(".studio-publication")).not.toBeNull();
     expect(button("저장하고 발행 미리보기")).toBeDefined();
     await render(createElement(InstagramAccounts, { channelId: 2 }));
-    await act(async () => button("연결 정보 확인·갱신").click());
+    await act(async () => button("연결 정보 확인·갱신").click()); await settle();
+    expect(button("Instagram으로 연결")).toBeDefined();
+    expect(host.querySelector('input[type="password"]')).toBeNull();
+    await act(async () => button("이미 발급한 토큰으로 연결").click());
     expect(host.querySelector('input[type="password"]')).not.toBeNull();
     expect(button("계정 확인하고 연결")).toBeDefined(); expect(writes()).toEqual([]);
   });

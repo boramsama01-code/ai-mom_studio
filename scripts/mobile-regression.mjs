@@ -10,7 +10,7 @@ const browser = await webkit.launch();
 await mkdir("test-results/mobile", { recursive: true });
 const channels = [
   { id: 1, slug: "opportunities", name: "Highscoop", handle: "highscoop.official" },
-  { id: 3, slug: "current-dialogue", name: "Alligodang", handle: "allligodang.official" },
+  { id: 3, slug: "current-dialogue", name: "Alligodang", handle: "alligodang.official" },
   { id: 106, slug: "penguin", name: "우주펭귄상회", handle: "spacepenguin.co" },
   { id: 107, slug: "fryday", name: "Fryday", handle: "fryday.official.kr" },
 ].map(c => ({ ...c, active: true, version: 1, accentColor: "#2563eb", contentType: "manual", budget: {} }));
@@ -38,6 +38,7 @@ try {
       else if (path === "/api/settings/auto-collect") { autoCollect = req.postDataJSON().enabled; data = { ok: true }; }
       else if (path === "/api/collection/collect") data = { inline: true, requested: [{ channelId: req.postDataJSON().channelId }] };
       else if (path === "/api/studio/instagram/accounts") data = { accounts: channels.map(c => ({ channelId: c.id, channelName: c.name, expectedUsername: c.handle, destinations: [] })) };
+      else if (path === "/api/studio/instagram/oauth/config") data = { configured: true, missing: [], appId: "123456", redirectUri: "https://studio.example/api/studio/instagram/oauth/callback" };
       else { errors.push(`Unexpected API: ${path}`); return route.fulfill({ status: 404, json: { error: path } }); }
       await route.fulfill({ json: data });
     });
@@ -65,8 +66,9 @@ try {
       await page.locator(".instagram-account").first().waitFor();
       assert.equal(await page.locator(".instagram-account").count(), 4);
       for (const c of channels) assert.equal(await page.locator(`.instagram-account a[href="https://www.instagram.com/${c.handle}/"]`).count(), 1);
-      assert.equal(await page.getByText("발행 권한 연결 필요", { exact: true }).count(), 4);
+      assert.equal(await page.getByText("연결 전", { exact: true }).count(), 4);
       await page.getByRole("button", { name: "이 계정 연결하기", exact: true }).first().click();
+      await page.getByRole("button", { name: "이미 발급한 토큰으로 연결", exact: true }).click();
       assert.equal(await page.getByLabel("게시할 계정").inputValue(), "highscoop.official");
       assert.equal(await page.getByLabel("게시할 계정").getAttribute("readonly"), "");
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `settings overflow at ${width}px`);

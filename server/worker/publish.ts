@@ -348,8 +348,9 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
     const invalidAltPage = ap.captions.altTexts?.findIndex(value => !!altTextError(value)) ?? -1;
     if (invalidAltPage >= 0) return block(`${invalidAltPage + 1}페이지 대체텍스트가 125자·2문장 기준을 초과해 게시를 중단했습니다. 다시 검토·승인해 주세요.`);
     const token = sec.values.accessToken, userId = sec.values.userId;
+    const authMode = (sec.values.authMode ?? "instagram") as ig.InstagramAuthMode;
     if (expectedInstagramUsername(ch.slug)) {
-      const identity = await ig.accountIdentity(token);
+      const identity = await ig.accountIdentity(token, authMode, expectedInstagramUsername(ch.slug) ?? undefined);
       if (!identity.ok) { await finish(db, d, { status: "failed", errorKind: "auth", lastError: identity.error }); return "failed"; }
       if (identity.userId !== userId) return block("저장된 게시 계정과 토큰의 계정이 다릅니다.");
       const mismatch = instagramAccountMismatch(ch.slug, identity.username);
@@ -372,7 +373,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
         await finish(db, d, { status: "failed", errorKind: "transient", lastError: `이미지 업로드 실패: ${(e as Error).message}` });
         return "failed";
       }
-      const c = urls.length > 1 ? await ig.createCarouselContainer(userId, token, urls, ap.captions.instagram, ap.captions.altTexts) : await ig.createContainer(userId, token, urls[0], ap.captions.instagram, ap.captions.altTexts?.[0]);
+      const c = urls.length > 1 ? await ig.createCarouselContainer(userId, token, urls, ap.captions.instagram, ap.captions.altTexts, authMode) : await ig.createContainer(userId, token, urls[0], ap.captions.instagram, ap.captions.altTexts?.[0], authMode);
       if (!c.ok) {
         // 컨테이너 생성 응답 유실은 게시가 아니므로(발행 전 단계) 실패로 기록
         await finish(db, d, { status: "failed", errorKind: c.err.kind, lastError: c.err.error });
@@ -381,7 +382,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
       containerId = c.containerId;
       await db.update(deliveries).set({ externalContainerId: containerId, updatedAt: new Date() }).where(eq(deliveries.id, d.id));
     }
-    const w = await ig.waitForContainer(containerId, token);
+    const w = await ig.waitForContainer(containerId, token, 90_000, authMode);
     if (w.state === "IN_PROGRESS") {
       await db.update(deliveries).set({ lastError: "인스타그램 이미지 처리 중 — 다음 실행에서 이어서 확인", updatedAt: new Date() }).where(eq(deliveries.id, d.id));
       return "skipped";
@@ -394,7 +395,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
       await finish(db, d, { status: "failed", errorKind: w.err?.kind ?? "terminal", lastError: w.err?.error ?? `컨테이너 상태 ${w.state} ${w.detail ?? ""}` });
       return "failed";
     }
-    const p = await ig.publishContainer(userId, token, containerId);
+    const p = await ig.publishContainer(userId, token, containerId, authMode);
     if (!p.ok) {
       if (p.lost) {
         await finish(db, d, { status: "unknown", errorKind: "unknown", lastError: "게시 요청 응답 유실 — 계정에서 게시 여부 확인 필요" });
@@ -403,7 +404,7 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
       await finish(db, d, { status: "failed", errorKind: p.err.kind, lastError: p.err.error });
       return "failed";
     }
-    const link = await ig.mediaPermalink(p.mediaId, token);
+    const link = await ig.mediaPermalink(p.mediaId, token, authMode);
     await finish(db, d, { status: "succeeded", externalId: p.mediaId, externalUrl: link, completedAt: new Date(), lastError: null });
     return "succeeded";
   }
@@ -423,4 +424,3 @@ export async function retryDelivery(db: DB, deliveryId: number, actor: string, c
   await audit(db, { actor, action: "retry_delivery", entity: "delivery", entityId: d.id, channelId: d.channelId, detail: { from: d.status, confirmNotPosted } });
   return { ok: true as const };
 }
-

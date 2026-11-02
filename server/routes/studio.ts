@@ -24,10 +24,12 @@ import { renderCollectionPreview } from "../services/cardDesignSamples";
 import { zipImportRoutes } from "./zipImport";
 import { studioFamilyReference, studioPoseReference } from "../services/studioCharacters";
 import { STUDIO_CHARACTERS } from "../../shared/studioCharacters";
+import { instagramOAuthRoutes } from "./instagramOAuth";
 
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
 studioRoutes.use(zipImportRoutes);
+studioRoutes.use(instagramOAuthRoutes);
 // Mounted behind the same operator-session middleware as all studio routes.
 studioRoutes.get("/studio/characters", (_req, res) => { res.json({ characters: STUDIO_CHARACTERS, poseCount: 100 }); });
 studioRoutes.get("/studio/characters/reference", ah(async (req, res) => {
@@ -192,12 +194,10 @@ studioRoutes.post("/studio/cards/:id/publication/approve", ah(async (req, res) =
   res.status(201).json(result);
 }));
 studioRoutes.post("/studio/instagram/:cid/connect", ah(async (req, res) => {
-  const input = parse(z.object({ token: z.string().trim().min(20).max(4000).regex(/^[^\r\n\s]+$/), username: z.string().trim().regex(/^@?[a-zA-Z0-9._]{1,30}$/), dailyLimit: z.number().int().min(1).max(25) }).strict(), req.body);
+  const input = parse(z.object({ token: z.string().trim().min(20).max(4000).regex(/^[^\r\n\s]+$/), username: z.string().trim().regex(/^@?[a-zA-Z0-9._]{1,30}$/), dailyLimit: z.number().int().min(1).max(25), authMode: z.enum(["instagram", "facebook"]).default("instagram") }).strict(), req.body);
   res.json(await connectInstagram(getDb(), intParam(req.params.cid), input, actorOf(req)));
 }));
 studioRoutes.post("/studio/instagram/:cid/check", ah(async (req, res) => {
   const { destinationId } = parse(z.object({ destinationId: z.number().int().positive() }).strict(), req.body);
   res.json(await checkInstagramConnection(getDb(), intParam(req.params.cid), destinationId));
 }));
-
-

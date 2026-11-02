@@ -95,10 +95,22 @@ export const SECRET_GROUPS: SecretGroup[] = [
   {
     id: "instagram",
     title: "인스타그램 API 버전",
-    description: "Instagram API with Instagram Login 문서에서 확인한 버전(예: vNN.0). 계정별 토큰은 아래 '게시 목적지'에서 입력합니다.",
+    description: "인스타그램 연결 화면에서 네 계정을 연결하고 확인하세요. API 버전은 Meta 앱에서 지원하는 버전으로 설정합니다.",
     docs: "https://developers.facebook.com/docs/instagram-platform/content-publishing/",
     testable: false,
     fields: [{ key: "INSTAGRAM_API_VERSION", label: "API 버전", secret: false, placeholder: "예: v25.0", hint: "Meta Graph API 버전 번호. 공식 버전 표(developers.facebook.com/docs/graph-api/changelog/versions)에서 만료일이 먼 버전을 넣습니다." }],
+  },
+  {
+    id: "meta-instagram",
+    title: "Instagram 로그인 연결",
+    description: "Meta 통합 로그인에 사용하는 앱 설정입니다. 한 번 준비하면 각 계정 카드에서 로그인하여 연결할 수 있습니다.",
+    docs: "https://developers.facebook.com/apps/",
+    testable: false,
+    fields: [
+      { key: "META_APP_ID", label: "Meta 앱 ID", secret: false, hint: "Meta 앱 대시보드의 앱 ID입니다." },
+      { key: "META_APP_SECRET", label: "Meta 앱 시크릿", secret: true, hint: "서버에 암호화해 저장하며 저장 후에는 다시 표시하지 않습니다." },
+      { key: "META_INSTAGRAM_CONFIG_ID", label: "통합 로그인 구성 ID", secret: false, hint: "Facebook Login for Business에서 Instagram 자산으로 만든 구성 ID입니다." },
+    ],
   },
 ];
 
@@ -118,5 +130,3 @@ export function isSecretKey(key: string): boolean {
   for (const g of SECRET_GROUPS) for (const f of g.fields) if (f.key === key) return f.secret;
   return destinationKeyIsSecret(key);
 }
-
-

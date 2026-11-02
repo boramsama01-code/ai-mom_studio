@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { api, setCsrf } from "./api";
 import { enterFromPrivateLink } from "./privateLink";
 import type { Channel } from "@shared/schema";
@@ -26,6 +27,7 @@ type ChannelCtx = {
   allChannels: Channel[];
   selected: "all" | number;
   current: Channel | null; // '전체'면 null
+  isLoading: boolean;
   select: (v: "all" | number) => void;
 };
 const Ctx = createContext<ChannelCtx | null>(null);
@@ -46,17 +48,19 @@ function readStored(): "all" | number | null {
 }
 
 export function ChannelProvider({ children }: { children: ReactNode }) {
-  const { data: allChannels = [] } = useQuery({ queryKey: ["channels"], queryFn: () => api<Channel[]>("/channels") });
+  const { data: allChannels = [], isLoading } = useQuery({ queryKey: ["channels"], queryFn: () => api<Channel[]>("/channels") });
   const channels = useMemo(() => allChannels.filter(c => c.active), [allChannels]);
   const [stored, setSelected] = useState<"all" | number | null>(readStored);
   const guard = useDirtyGuard();
   const qc = useQueryClient();
-  // 저장된 선택이 없거나 없어진 채널이면 첫 채널(쓰기 작업은 채널 하나가 필요)
+  const [path] = useLocation();
+  // 목록의 조회 범위는 모든 화면에서 공유한다. 새 콘텐츠의 채널은 작성 폼에서 정한다.
   const selected: "all" | number =
-    stored === "all" ? "all" : stored !== null && channels.some((c) => c.id === stored) ? stored : channels[0]?.id ?? "all";
+    stored !== null && stored !== "all" && channels.some((c) => c.id === stored) ? stored : "all";
   const select = useCallback(
     (v: "all" | number) => {
-      guard.confirmLeave(() => {
+      if (v === selected || (v !== "all" && !channels.some(c => c.id === v))) return;
+      const applySelection = () => {
         // 이전 채널 데이터가 잠깐 보이지 않도록 채널 범위 쿼리를 비움
         qc.removeQueries({ predicate: (q) => q.queryKey[0] === "ch" });
         setSelected(v);
@@ -65,16 +69,20 @@ export function ChannelProvider({ children }: { children: ReactNode }) {
         } catch {
           /* 저장 불가 환경 무시 */
         }
-      });
+      };
+      // Detail routes own their channel. Changing the list scope does not leave or
+      // retarget that editor, so its unsaved-edit guard must stay registered.
+      if (/^\/(?:studio\/\d+|items\/\d+\/\d+)\/?$/.test(path)) applySelection();
+      else guard.confirmLeave(applySelection);
     },
-    [guard, qc],
+    [guard, qc, selected, channels, path],
   );
   const current = selected === "all" ? null : channels.find((c) => c.id === selected) ?? null;
   useEffect(() => {
-    document.documentElement.style.setProperty("--channel-accent", current?.accentColor ?? "#2563eb");
-    document.documentElement.style.setProperty("--channel-tint", hexA(current?.accentColor ?? "#2563eb", 0.1));
+    document.documentElement.style.setProperty("--channel-accent", current?.accentColor ?? "#287b76");
+    document.documentElement.style.setProperty("--channel-tint", hexA(current?.accentColor ?? "#287b76", 0.1));
   }, [current]);
-  const value = useMemo(() => ({ channels, allChannels, selected, current, select }), [channels, allChannels, selected, current, select]);
+  const value = useMemo(() => ({ channels, allChannels, selected, current, isLoading, select }), [channels, allChannels, selected, current, isLoading, select]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
@@ -146,5 +154,3 @@ export function useDirtyGuard() {
   if (!g) throw new Error("DirtyGuardProvider 필요");
   return g;
 }
-
-

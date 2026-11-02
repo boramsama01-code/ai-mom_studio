@@ -78,7 +78,7 @@ describe("완성 이미지 → 제작보드 → 인스타그램", () => {
     expect((await agent.post(path).set(headers).send(input)).status).toBe(409);
     const published = await publishDue(getDb()); expect(published.succeeded).toBeGreaterThanOrEqual(1);
     expect(mocks.upload.mock.calls.map(call => call[0])).toEqual(bytes);
-    expect(mocks.carousel).toHaveBeenCalledWith("12345", "test-only-token", expect.any(Array), card.caption, expect.arrayContaining([expect.any(String)]));
+    expect(mocks.carousel).toHaveBeenCalledWith("12345", "test-only-token", expect.any(Array), card.caption, expect.arrayContaining([expect.any(String)]), "instagram");
     const status = (await agent.get(`/api/studio/cards/${card.id}/publication`)).body;
     expect(status.deliveries).toHaveLength(1); expect(status.deliveries[0]).toMatchObject({ status: "succeeded", externalUrl: "https://www.instagram.com/p/test/" });
   });
@@ -120,7 +120,7 @@ describe("완성 이미지 → 제작보드 → 인스타그램", () => {
     expect((await request(app).get("/api/studio/instagram/accounts")).status).toBe(401);
     const accounts = await agent.get("/api/studio/instagram/accounts");
     expect(accounts.status).toBe(200);
-    expect(accounts.body.accounts.map((a: any) => a.expectedUsername).sort()).toEqual(["allligodang.official", "fryday.official.kr", "highscoop.official", "spacepenguin.co"]);
+    expect(accounts.body.accounts.map((a: any) => a.expectedUsername).sort()).toEqual(["alligodang.official", "fryday.official.kr", "highscoop.official", "spacepenguin.co"]);
     expect(JSON.stringify(accounts.body)).not.toContain("test-only-token");
     expect(JSON.stringify(accounts.body)).not.toContain("secretRefs");
     mocks.identity.mockResolvedValue({ ok: true, userId: "12345", username: "highscoop.official" });
@@ -147,4 +147,3 @@ describe("완성 이미지 → 제작보드 → 인스타그램", () => {
     expect(status.deliveries[0].lastError).toContain("spacepenguin.co");
   });
 });
-

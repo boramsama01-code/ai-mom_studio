@@ -9,6 +9,9 @@ import { ah, HttpError, parse } from "./util";
 import { actorOf } from "../auth";
 import { audit } from "../audit";
 import { SECRET_GROUPS, isAllowedSecretKey, isSecretKey } from "../../shared/secretsCatalog";
+import { expectedInstagramUsername, normalizeInstagramUsername } from "../../shared/channelInstagram";
+import { resolveSecrets } from "../services/secrets";
+import type { InstagramAuthMode } from "../services/instagram";
 import { deleteSecret, saveSecret, secretStatuses, SecretKeyMissing } from "../secretStore";
 import { testGemini, testOpenai, testAnthropic, testCloudinary, testInstagram, testNaver, testTelegram, type TestResult } from "../services/connectionTest";
 
@@ -53,6 +56,7 @@ secretRoutes.put(
     if (!isAllowedSecretKey(key, await slugs())) throw new HttpError(400, "입력할 수 없는 항목입니다.");
     const { value } = parse(putSchema, req.body);
     if (key === "AI_PROVIDER" && !["auto", "gemini", "openai", "anthropic"].includes(value)) throw new HttpError(400, "AI는 auto, gemini, openai, anthropic 중에서 선택하세요.");
+    if (["META_APP_ID", "META_INSTAGRAM_CONFIG_ID"].includes(key) && !/^\d{5,40}$/.test(value)) throw new HttpError(400, "Meta에서 발급한 숫자 ID를 입력하세요.");
     if (key === "GEMINI_MODEL" && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,119}$/.test(value)) throw new HttpError(400, "Gemini 모델 ID 형식이 올바르지 않습니다.");
     if (["OPENAI_MODEL", "OPENAI_IMAGE_MODEL", "ANTHROPIC_MODEL"].includes(key) && !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{1,119}$/.test(value)) throw new HttpError(400, "모델 ID 형식이 올바르지 않습니다.");
     if (/[\r\n]/.test(value)) throw new HttpError(400, "값에 줄바꿈이 들어 있습니다. 한 줄로 붙여 넣으세요.");
@@ -98,7 +102,15 @@ secretRoutes.post(
     else if (service.startsWith("instagram:")) {
       const tokenKey = service.slice(10);
       if (!/_ACCESS_TOKEN$/.test(tokenKey) || !isAllowedSecretKey(tokenKey, await slugs())) throw new HttpError(400, "알 수 없는 항목");
-      r = await testInstagram(tokenKey);
+      const rows = await getDb().select().from(destinations);
+      const destination = rows.find(d => d.platform === "instagram" && d.secretRefs.accessToken === tokenKey);
+      if (destination) {
+        const channel = (await getDb().select().from(channels)).find(ch => ch.id === destination.channelId);
+        if (!channel) throw new HttpError(400, "연결된 채널을 찾을 수 없습니다.");
+        const secret = resolveSecrets(destination.platform, channel.slug, destination.secretRefs);
+        if (secret.invalid.length || secret.missing.length) throw new HttpError(409, "계정 연결 설정을 먼저 확인해 주세요.");
+        r = await testInstagram(tokenKey, fetch, { authMode: (secret.values.authMode ?? "instagram") as InstagramAuthMode, expectedUsername: expectedInstagramUsername(channel.slug) ?? normalizeInstagramUsername(destination.label) });
+      } else r = await testInstagram(tokenKey);
     } else throw new HttpError(400, "알 수 없는 서비스");
     const db = getDb();
     await db
@@ -109,5 +121,3 @@ secretRoutes.post(
     res.json(r);
   }),
 );
-
-

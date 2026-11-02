@@ -8,6 +8,7 @@ import { getClient } from "./llm";
 import { ensureCloudinary, CloudinaryNotConfigured } from "./cloudinary";
 import { openaiFailureMessage } from "./openaiError";
 import { geminiFailureMessage, geminiModelUrl } from "./gemini";
+import { accountIdentity, type InstagramAuthMode } from "./instagram";
 
 export type TestResult = { ok: boolean; message: string };
 
@@ -105,20 +106,16 @@ export async function testCloudinary(): Promise<TestResult> {
   }
 }
 
-export async function testInstagram(tokenKey: string, fetchImpl: typeof fetch = fetch): Promise<TestResult> {
+export async function testInstagram(tokenKey: string, fetchImpl: typeof fetch = fetch, options: { authMode?: InstagramAuthMode; expectedUsername?: string } = {}): Promise<TestResult> {
   const token = process.env[tokenKey];
   if (!env.instagramApiVersion) return { ok: false, message: "인스타그램 API 버전을 먼저 입력하세요." };
   if (!token) return { ok: false, message: "액세스 토큰이 없습니다." };
   try {
-    const url = new URL(`https://graph.instagram.com/${env.instagramApiVersion}/me`);
-    url.searchParams.set("fields", "user_id,username");
-    url.searchParams.set("access_token", token);
-    const r = await fetchImpl(url, { signal: AbortSignal.timeout(10_000) });
-    const j = (await r.json()) as { username?: string; user_id?: string; error?: { message?: string; code?: number } };
-    if (!r.ok || j.error) return { ok: false, message: j.error?.code === 190 ? "토큰이 만료되었거나 올바르지 않습니다." : `확인 실패: ${j.error?.message ?? r.status}` };
-    return { ok: true, message: `계정 @${j.username} 확인 (user_id ${j.user_id})` };
+    const identity = await accountIdentity(token, options.authMode ?? "instagram", options.expectedUsername, fetchImpl);
+    if (!identity.ok) return { ok: false, message: identity.error };
+    if (options.expectedUsername && identity.username.toLowerCase() !== options.expectedUsername.replace(/^@/, "").toLowerCase()) return { ok: false, message: "지정한 채널과 토큰의 인스타그램 계정이 다릅니다." };
+    return { ok: true, message: `계정 @${identity.username} 확인` };
   } catch {
     return { ok: false, message: "인스타그램에 연결할 수 없습니다." };
   }
 }
-

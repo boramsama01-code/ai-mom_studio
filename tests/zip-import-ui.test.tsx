@@ -44,3 +44,18 @@ it("leaves upload disabled when the archive is unreadable", async () => {
   expect([...host.querySelectorAll("button")].find(b => b.textContent?.includes("검토함에 가져오기"))?.disabled).toBe(true);
   expect(mocks.upload).not.toHaveBeenCalled();
 });
+it("previews an archive in all-channel mode but only uploads after choosing its destination inline", async () => {
+  await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(StudioZipImport, { key: "all", channels: [{ id: "penguin", name: "우주펭귄상회" }, { id: "fryday", name: "fryday" }], initialChannel: "", onClose: mocks.close }))));
+  const channel = host.querySelector<HTMLSelectElement>('[aria-label="저장할 채널"]')!;
+  expect(channel.value).toBe("");
+  const file = await select(zipSync({ "감자 이야기/1.png": new Uint8Array([1]) }));
+  expect(host.textContent).toContain("1건 · 총 1장");
+  const uploadButton = [...host.querySelectorAll("button")].find(b => b.textContent === "1건 검토함에 가져오기")!;
+  expect(uploadButton.disabled).toBe(true);
+  expect(mocks.upload).not.toHaveBeenCalled();
+  await act(async () => { channel.value = "fryday"; channel.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(uploadButton.disabled).toBe(false);
+  mocks.upload.mockResolvedValue({ imported: 1, skipped: 0, pageCount: 1, cards: [{ id: 31, title: "감자 이야기", pages: 1, duplicate: false, trashed: false }] });
+  await act(async () => uploadButton.click()); await settle();
+  expect(mocks.upload).toHaveBeenCalledWith("/studio/import-zip?channel=fryday", file);
+});

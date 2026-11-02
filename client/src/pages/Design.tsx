@@ -74,7 +74,7 @@ export function DesignPage() {
     return (
       <>
         <h1>수집 카드 디자인</h1>
-        <Empty>수집함에서 만드는 카드의 디자인입니다. 채널을 하나 선택하세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>
+        <Empty>수집함에서 만드는 카드의 디자인입니다. 오른쪽 위 ‘보기 채널’에서 설정할 채널을 선택해 주세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>
       </>
     );
   return (
@@ -376,5 +376,3 @@ function BulkSection({ cid, kind }: { cid: number; kind: string }) {
     </section>
   );
 }
-
-
