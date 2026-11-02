@@ -18,6 +18,7 @@ const profile = { label: "과학·시사", count: 2, missing: 0, active: 1, paus
   { query: "과학 뉴스", endpoint: "news", state: "active" }, { query: "인공지능", endpoint: "news", state: "paused" },
 ] };
 const row = { ...channels[1], queries: 1, discoveryQueries: 0, boards: 0, budget: 12, profile, newItems: 128, pending: 128, fetched: 0, jobs: [], lastRun: null };
+const orphanApproval = { ap: { id: 5, revisionId: 2, scheduledAt: "2026-11-02T07:38:00.000Z", status: "active" }, item: { id: 12174, title: "승인은 저장됐지만 전송 예약이 없는 콘텐츠", channelId: 3 }, reason: "활성 게시 목적지가 없어 전송 예약이 만들어지지 않았습니다. 계정을 연결한 뒤 해당 콘텐츠에서 다시 승인해 주세요." };
 const overlap = (a, b) => Math.min(a.x + a.width, b.x + b.width) > Math.max(a.x, b.x) + 1 && Math.min(a.y + a.height, b.y + b.height) > Math.max(a.y, b.y) + 1;
 try {
   for (const width of [320, 393, 430, 768]) {
@@ -33,7 +34,9 @@ try {
       if (path === "/api/auth/me") data = { user: "test", demo: false, csrf: "fixture", authConfigured: true, demoAllowed: false };
       else if (path === "/api/channels") data = channels;
       else if (/\/channels\/\d+\/today$/.test(path)) data = { counts: { pendingReview: 128, draftsReady: 0 } };
-      else if (path === "/api/status") data = { globalStop: false, workerConnected: true, integrations: { flags: {} } };
+      else if (path === "/api/status") data = { globalStop: false, workerConnected: true, integrations: { flags: { dryRun: false, autoPublish: true } } };
+      else if (path === "/api/deliveries") data = [];
+      else if (path === "/api/publication-orphans") data = [orphanApproval];
       else if (path === "/api/collection/overview") data = { date: url.searchParams.get("date"), timezone: "Asia/Seoul", autoCollect, globalStop: false, searchReady: true, naverReady: false, sourceMode: "public_rss", publicFeeds: ["테스트신문"], inlineWorker: true, nextAt: "2026-11-02T20:13:00Z", lastScheduledAt: null, channels: [row] };
       else if (path === "/api/settings/auto-collect") { autoCollect = req.postDataJSON().enabled; data = { ok: true }; }
       else if (path === "/api/collection/collect") data = { inline: true, requested: [{ channelId: req.postDataJSON().channelId }] };
@@ -73,8 +76,18 @@ try {
       assert.equal(await page.getByLabel("게시할 계정").getAttribute("readonly"), "");
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `settings overflow at ${width}px`);
       await page.screenshot({ path: `test-results/mobile/accounts-${width}.png`, fullPage: true });
+      const writesBeforePublication = writes.length;
+      await page.goto("http://127.0.0.1:4173/publish");
+      await page.getByText("승인 저장됨 · 전송 예약 없음", { exact: true }).waitFor();
+      assert.equal(await page.getByRole("tab", { name: "목록", exact: true }).getAttribute("aria-selected"), "true");
+      assert.equal(await page.getByRole("link", { name: orphanApproval.item.title, exact: true }).getAttribute("href"), "/items/3/12174?tab=delivery");
+      assert.equal(await page.getByText(orphanApproval.reason, { exact: true }).count(), 1);
+      assert.equal(await page.getByText("선택한 채널에 전송 예약이 없습니다.", { exact: false }).count(), 0);
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `publication overflow at ${width}px`);
+      assert.equal(writes.length, writesBeforePublication, "viewing publication history must not create approvals, retries, or social posts");
+      await page.screenshot({ path: `test-results/mobile/publication-${width}.png`, fullPage: true });
       assert.deepEqual(errors, []);
-      console.log(`WebKit ${width}px: date/buttons, checkbox tap, channel collection, four account routes passed`);
+      console.log(`WebKit ${width}px: date/buttons, checkbox tap, channel collection, four account routes, zero-delivery approval history passed`);
     } catch (e) {
       console.error(JSON.stringify({ width, errors, writes, controls: await page.locator('.collection-toolbar, .collection-summary input[type="checkbox"]').evaluateAll(nodes => nodes.map(n => ({ tag: n.tagName, checked: n.checked, rect: n.getBoundingClientRect().toJSON() }))) }));
       await page.screenshot({ path: `test-results/mobile/failure-${width}.png`, fullPage: true });

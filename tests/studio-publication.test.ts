@@ -9,8 +9,8 @@ vi.mock("../server/services/cloudinary", () => ({ uploadCard: mocks.upload, ensu
 vi.mock("../server/services/instagram", () => ({ accountIdentity: mocks.identity, publishingLimit: mocks.quota, createCarouselContainer: mocks.carousel, createContainer: mocks.carousel, waitForContainer: async () => ({ state: "FINISHED" }), publishContainer: mocks.publish, mediaPermalink: async () => "https://www.instagram.com/p/test/" }));
 const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
-const { channels, destinations, deliveries, storedSecrets, approvals, studioCards } = await import("../shared/schema");
-const { eq } = await import("drizzle-orm");
+const { channels, destinations, deliveries, storedSecrets, approvals, studioCards, contentItems } = await import("../shared/schema");
+const { and, eq } = await import("drizzle-orm");
 const { publishDue } = await import("../server/worker/publish");
 const { __setOriginalEnvForTest } = await import("../server/secretStore");
 let app: ReturnType<typeof createApp>;
@@ -145,5 +145,26 @@ describe("완성 이미지 → 제작보드 → 인스타그램", () => {
     const status = (await agent.get(`/api/studio/cards/${card.id}/publication`)).body;
     expect(status.deliveries[0]).toMatchObject({ status: "cancelled" });
     expect(status.deliveries[0].lastError).toContain("spacepenguin.co");
+  });
+  it("validates only the selected platforms' captions while preserving the original approval snapshot", async () => {
+    const { agent, headers, card, ch } = await setup(1), db = getDb();
+    await db.update(destinations).set({ enabled: false }).where(and(eq(destinations.channelId, ch.id), eq(destinations.platform, "telegram_channel")));
+    const preview = (await agent.post(`/api/studio/cards/${card.id}/publication/prepare`).set(headers).send({ version: card.version })).body;
+    await db.update(contentItems).set({ reviewStatus: "reviewed" }).where(eq(contentItems.id, preview.itemId));
+    const captions = { instagram: "게시할 인스타그램 캡션", telegram: "가".repeat(1100) };
+    const body = { revisionId: preview.revisionId, mediaAssetId: preview.assetId, captions, scheduledAt: new Date(Date.now() + 3600_000).toISOString() };
+    const path = `/api/channels/${ch.id}/items/${preview.itemId}/approve`;
+    const approved = await agent.post(path).set(headers).send(body);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(201);
+    expect(approved.body.approval.captions).toMatchObject(captions);
+    process.env.TELEGRAM_BOT_TOKEN = "test-only-bot-token";
+    process.env.TG_PENGUIN_CHAT_ID = "@test_channel";
+    const [telegram] = await db.insert(destinations).values({ channelId: ch.id, platform: "telegram_channel", label: "selected caption fixture", enabled: true, secretRefs: { chatId: "TG_PENGUIN_CHAT_ID" } }).returning();
+    const rejected = await agent.post(path).set(headers).send(body);
+    expect(rejected.status).toBe(400); expect(rejected.body.error).toContain("텔레그램 사진 캡션");
+    expect(await db.select().from(approvals).where(eq(approvals.contentItemId, preview.itemId))).toHaveLength(1);
+    await db.update(destinations).set({ enabled: false }).where(eq(destinations.id, telegram.id));
+    expect((await agent.post(path).set(headers).send({ ...body, captions: { instagram: "", telegram: "미사용 캡션" } })).status).toBe(400);
+    expect(mocks.upload).not.toHaveBeenCalled(); expect(mocks.publish).not.toHaveBeenCalled();
   });
 });

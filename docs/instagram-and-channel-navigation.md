@@ -44,3 +44,17 @@ OAuth starts only from an authenticated, CSRF-protected operator request. The ca
 | fryday | fryday.official.kr |
 
 Handles alone never establish API authorization. On 2026-11-02 the Meta app showed all four tester invitations as pending. Live credential exchange and publication were not performed as implementation tests.
+
+## Approval and delivery reliability
+
+The production review found an active approval with zero destination deliveries. The generic item approval path previously accepted an empty destination list, while the publishing inbox queried delivery rows only. The scheduler therefore had nothing to send, and the approval disappeared from the inbox. Its success text also said that a worker would publish it regardless of the actual runtime configuration.
+
+The corrected path checks active channel/destinations, credential presence, actual publishing mode, global stop, daily limit, Instagram API version and image hosting before accepting an approval. Instagram approvals additionally check account identity and publishing API access without creating media. Caption validation applies to the selected delivery platforms. The saved approval snapshot still preserves the submitted captions and accessibility text.
+
+The item detail now exposes safe publication readiness and a dedicated delivery tab. `/publication-orphans` is a read-only diagnostic endpoint for historical active approvals without delivery rows; it leaves the existing `/deliveries` contract unchanged and never creates, cancels or retries a delivery. Existing orphan approvals require a deliberate new approval after their prerequisites are fixed.
+
+The inbox shows older unfinished records in its default list view. Pending deliveries refresh every five seconds. Dry runs, delayed starts, errors, uncertain outcomes and successful posts have distinct messages. A successful approval immediately opens its delivery history and wakes the existing inline worker when enabled. The persisted queue and atomic worker claims remain responsible for delivery.
+
+The review also reproduced a blank screen when a long-open tab requested an old JavaScript chunk after a deployment. A route-level error boundary now preserves navigation and offers an explicit reload instead of silently clearing the app or reloading unsaved work.
+
+Verification covers rejected approvals with zero destinations or missing keys, a valid approval remaining unsent before its schedule and reaching a mocked publisher after its schedule, read-only orphan diagnostics, dedicated status navigation, runtime messages, and mobile publishing-inbox layout. Production account authentication and an actual Instagram upload remain separate checks; automated tests do not post to a real account.

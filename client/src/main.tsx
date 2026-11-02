@@ -9,11 +9,12 @@ import "./channel-navigation.css";
 import { Icon, type IconName } from "./icons";
 import { useFocusScope } from "./useFocusScope";
 import { api } from "./api";
-import { ChannelProvider, DirtyGuardProvider, useChannel, useMe } from "./state";
+import { ChannelProvider, DirtyGuardProvider, useChannel, useDirtyGuard, useMe } from "./state";
 import { DirtyModal, ErrorBox, GuardedLink, Loading } from "./ui";
 import { ToastProvider, useToast } from "./toast";
 import { CommandPalette } from "./palette";
 import { GlobalChannelSelect } from "./GlobalChannelSelect";
+import { ScreenErrorBoundary } from "./ScreenErrorBoundary";
 import { LoginPage } from "./pages/Login";
 import { AccountPage, PasswordSetupPage } from "./pages/Password";
 const TodayPage = lazy(() => import("./pages/Today").then(m => ({ default: m.TodayPage })));
@@ -69,6 +70,7 @@ const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigat
 
 function Shell() {
   const [loc] = useLocation();
+  const guard = useDirtyGuard();
   const [open, setOpen] = useState(false);
   const [palette, setPalette] = useState(false);
   const sidebar = useRef<HTMLElement>(null);
@@ -189,6 +191,7 @@ function Shell() {
         </div>
       </header>
       <main className="main" id="main" tabIndex={-1} data-section={sectionName}>
+        <ScreenErrorBoundary key={loc} onReload={() => guard.confirmLeave(() => window.location.reload())}>
         <Suspense fallback={<Loading label="화면 불러오는 중" />}><Switch>
           <Route path="/"><StudioPage /></Route>
           <Route path="/studio/:id">{(p) => <StudioPage cardId={Number(p.id)} />}</Route>
@@ -208,6 +211,7 @@ function Shell() {
             <Redirect to="/" />
           </Route>
         </Switch></Suspense>
+        </ScreenErrorBoundary>
       </main>
       </div>
       <nav className="mobile-nav" aria-label="빠른 메뉴">{NAV.flatMap(g => g.items).filter(n => ["/", "/inbox", "/drafts"].includes(n.href)).map(n => <GuardedLink key={n.href} href={n.href} ariaCurrent={isActive(n.href)}><Icon name={n.icon} size={20} /><span>{n.label}</span></GuardedLink>)}<button aria-label="전체 메뉴 열기" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" size={20} /><span>전체 메뉴</span></button></nav>

@@ -34,6 +34,7 @@ import { computeScheduleStatus, kstToday, KST_OFFSET_MIN } from "../services/dat
 import { env } from "../env";
 import { getSetting } from "../seed";
 import { resolveSecrets } from "../services/secrets";
+import { loadPublicationReadiness, verifyInstagramPublicationAccess } from "../services/publishReadiness";
 import { uploadCard } from "../services/cloudinary";
 import { sendPhotoToChannel, sendAlbumToChannel, telegramPostUrl } from "../services/telegram";
 import * as ig from "../services/instagram";
@@ -169,11 +170,15 @@ export async function approveItem(
     const st = computeScheduleStatus((rev.payload as any).schedules, now);
     if (st === "closed") return { ok: false as const, error: "접수가 마감된 공고는 승인할 수 없습니다." };
   }
-  const capErr = validateCaptions(a.captions);
+  const { channel, selected: dests, readiness } = await loadPublicationReadiness(db, item.channelId, a.destinationIds);
+  if (!readiness.ready || !channel) return { ok: false as const, error: readiness.blockers.join(" "), publicationReadiness: readiness };
+  const capErr = validateCaptions({
+    instagram: dests.some(destination => destination.platform === "instagram") ? a.captions.instagram : "",
+    telegram: dests.some(destination => destination.platform === "telegram_channel") ? a.captions.telegram : "",
+  });
   if (capErr.length) return { ok: false as const, error: capErr.join(" ") };
-  const dests = await db.select().from(destinations).where(and(eq(destinations.channelId, item.channelId), eq(destinations.enabled, true), a.destinationIds ? inArray(destinations.id, a.destinationIds) : undefined));
-
-  if (a.destinationIds && dests.length !== a.destinationIds.length) return { ok: false as const, error: "게시 목적지가 변경됐습니다. 계정을 다시 확인하세요." };
+  const accessError = await verifyInstagramPublicationAccess(channel, dests);
+  if (accessError) return { ok: false as const, error: accessError };
   const approval = await db.transaction(async (tx) => {
     const [freshItem] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
     if (freshItem.currentRevisionId !== rev.id || freshItem.reviewStatus !== "reviewed" || freshItem.excluded) throw new HttpError(409, "승인 전에 콘텐츠가 변경됐습니다. 다시 확인하세요.");
@@ -199,7 +204,7 @@ export async function approveItem(
     await audit(tx, { actor: a.actor, action: "approve", entity: "content_item", entityId: item.id, channelId: item.channelId, detail: { approvalId: ap.id, revisionId: rev.id, cardSha256: approvedHash, destinations: dests.map((d) => d.id), scheduledAt: a.scheduledAt } });
     return ap;
   });
-  return { ok: true as const, approval, destinations: dests.length };
+  return { ok: true as const, approval, destinations: dests.length, publicationReadiness: readiness };
 }
 
 export async function cancelApproval(db: DB, approvalId: number, actor: string) {
