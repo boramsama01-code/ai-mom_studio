@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { env } from "../env";
+import { instagramProviderDiagnostic, type InstagramDiagnostic } from "../../shared/instagramOAuthDiagnostics";
 
 /** Meta Unified Login uses the configured system-user flow, not Instagram's legacy OAuth scopes. */
 export const INSTAGRAM_OAUTH_TTL_MS = 10 * 60_000;
@@ -46,18 +47,29 @@ export function validateInstagramOAuthState(pending: PendingInstagramOAuth | und
 }
 
 /** Tokens are returned to server callers only. No raw provider response is included in errors. */
+export class InstagramOAuthError extends Error {
+  constructor(public reason: "configuration" | "exchange_failed", public diagnostic: InstagramDiagnostic) {
+    super(reason);
+    this.name = "InstagramOAuthError";
+  }
+}
+
 export async function exchangeUnifiedInstagramCode(code: string, pending: PendingInstagramOAuth, fetchImpl: typeof fetch = fetch) {
   const current = instagramOAuthConfig();
-  if (!current.configured || current.appId !== pending.appId || process.env.META_INSTAGRAM_CONFIG_ID?.trim() !== pending.configId || current.redirectUri !== pending.redirectUri) throw new Error("configuration");
+  if (!current.configured || current.appId !== pending.appId || process.env.META_INSTAGRAM_CONFIG_ID?.trim() !== pending.configId || current.redirectUri !== pending.redirectUri) throw new InstagramOAuthError("configuration", { stage: "configuration" });
   const url = new URL(`https://graph.facebook.com/${env.instagramApiVersion}/oauth/access_token`);
   url.search = new URLSearchParams({ client_id: pending.appId, client_secret: process.env.META_APP_SECRET!, redirect_uri: pending.redirectUri, code }).toString();
+  let response: Response;
   try {
-    const response = await fetchImpl(url, { method: "GET", redirect: "error", signal: AbortSignal.timeout(15_000) });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok || body.error || typeof body.access_token !== "string" || !/^[^\s]{20,4000}$/.test(body.access_token)) throw new Error("exchange_failed");
-    const seconds = body.expires_in;
-    // A missing or zero lifetime is unknown here; do not invent a 60-day expiry.
-    const expiresAt = Number.isSafeInteger(seconds) && seconds > 0 && seconds < 10 * 365 * 86400 ? new Date(Date.now() + seconds * 1000).toISOString() : null;
-    return { token: body.access_token as string, expiresAt };
-  } catch { throw new Error("exchange_failed"); }
+    response = await fetchImpl(url, { method: "GET", redirect: "error", signal: AbortSignal.timeout(15_000) });
+  } catch { throw new InstagramOAuthError("exchange_failed", { stage: "token_exchange", lost: true }); }
+  const parsed: unknown = await response.json().catch(() => null);
+  const body = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  if (!response.ok || body.error || typeof body.access_token !== "string" || !/^[^\s]{20,4000}$/.test(body.access_token)) {
+    throw new InstagramOAuthError("exchange_failed", instagramProviderDiagnostic("token_exchange", response.status, body));
+  }
+  const seconds = body.expires_in;
+  // A missing or zero lifetime is unknown here; do not invent a 60-day expiry.
+  const expiresAt = typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds > 0 && seconds < 10 * 365 * 86400 ? new Date(Date.now() + seconds * 1000).toISOString() : null;
+  return { token: body.access_token, expiresAt };
 }

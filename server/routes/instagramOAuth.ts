@@ -6,8 +6,9 @@ import { actorOf } from "../auth";
 import { channels } from "../../shared/schema";
 import { expectedInstagramUsername } from "../../shared/channelInstagram";
 import { connectInstagram } from "../services/instagramConnection";
-import { exchangeUnifiedInstagramCode, instagramAuthorizationUrl, instagramOAuthConfig, newInstagramOAuth, validateInstagramOAuthState } from "../services/instagramOAuth";
+import { exchangeUnifiedInstagramCode, InstagramOAuthError, instagramAuthorizationUrl, instagramOAuthConfig, newInstagramOAuth, validateInstagramOAuthState } from "../services/instagramOAuth";
 import { ah, HttpError, intParam, parse } from "./util";
+import { instagramOAuthFailureUrl, sanitizeInstagramDiagnostic } from "../../shared/instagramOAuthDiagnostics";
 
 /** Mounted behind the existing operator + CSRF middleware; callback GET still requires that session. */
 export const instagramOAuthRoutes = Router();
@@ -30,25 +31,27 @@ instagramOAuthRoutes.post("/studio/instagram/:cid/oauth/start", ah(async (req, r
 }));
 
 instagramOAuthRoutes.get("/studio/instagram/oauth/callback", ah(async (req, res) => {
-  const back = (reason?: string) => res.redirect(reason ? `/instagram?instagram=error&reason=${reason}` : "/instagram?instagram=connected");
+  const back = (reason: unknown, diagnostic?: unknown) => res.redirect(instagramOAuthFailureUrl(reason, diagnostic));
   const pending = req.session.instagramOauth;
   const state = validateInstagramOAuthState(pending, req.query.state);
-  if (state === "state" || !pending) return back("state");
+  if (state === "state" || !pending) return back("state", { stage: "callback" });
   // Persist consumption before exchanging a one-use code, including denial/error callbacks.
   delete req.session.instagramOauth;
   await new Promise<void>((resolve, reject) => req.session.save(error => error ? reject(error) : resolve()));
-  if (state === "expired") return back("expired");
-  if (req.query.error) return back("denied");
+  if (state === "expired") return back("expired", { stage: "callback" });
+  if (req.query.error) return back("denied", { stage: "callback" });
   const code = req.query.code;
-  if (typeof code !== "string" || !code || code.length > 4000 || /[\r\n]/.test(code)) return back("invalid_request");
+  if (typeof code !== "string" || !code || code.length > 4000 || /[\r\n]/.test(code)) return back("invalid_request", { stage: "callback" });
   let credential;
   try { credential = await exchangeUnifiedInstagramCode(code, pending); }
-  catch (error) { return back((error as Error).message === "configuration" ? "configuration" : "exchange_failed"); }
+  catch (error) {
+    return error instanceof InstagramOAuthError ? back(error.reason, error.diagnostic) : back("exchange_failed", { stage: "token_exchange" });
+  }
   try {
     await connectInstagram(getDb(), pending.channelId, { token: credential.token, expiresAt: credential.expiresAt, username: pending.username, dailyLimit: pending.dailyLimit, authMode: "facebook" }, actorOf(req));
   } catch (error) {
-    const code = error instanceof HttpError ? error.extra?.code : null;
-    return back(code === "account_mismatch" ? "account_mismatch" : code === "publishing_permission" ? "publishing_permission" : "connect_failed");
+    const extra = error instanceof HttpError ? error.extra : undefined;
+    return back(extra?.code ?? "connect_failed", sanitizeInstagramDiagnostic(extra?.diagnostic) ?? { stage: "connection_validation" });
   }
-  return back();
+  return res.redirect("/instagram?instagram=connected");
 }));

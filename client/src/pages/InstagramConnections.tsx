@@ -8,6 +8,7 @@ import { api } from "../api";
 import { useDirtyGuard } from "../state";
 import { ErrorBox, Loading } from "../ui";
 import { isPrivateWorkroom } from "../workroom";
+import { readInstagramOAuthFailure, type InstagramOAuthFailure } from "@shared/instagramOAuthDiagnostics";
 
 const oauthMessages: Record<string, string> = {
   state: "이 브라우저에서 시작한 로그인 요청을 확인할 수 없습니다. 계정 카드에서 다시 연결해 주세요.",
@@ -15,7 +16,18 @@ const oauthMessages: Record<string, string> = {
   configuration: "로그인 버튼 설정이 아직 끝나지 않았습니다. 발급한 토큰으로 직접 연결하거나 아래 ‘로그인 버튼 설정 (선택)’을 확인해 주세요.",
   publishing_permission: "계정은 확인했지만 게시 권한을 확인하지 못했습니다. Meta 구성의 콘텐츠 게시 권한을 확인해 주세요.",
   exchange_failed: "Meta 로그인 응답을 확인하지 못했습니다. 앱 시크릿과 복귀 주소를 확인해 주세요.",
-  denied: "계정 연결이 취소됐습니다. 준비되면 다시 연결해 주세요.",
+  denied: "Meta에서 로그인 승인을 완료하지 못했습니다. Meta 로그인 화면의 안내와 선택한 계정을 확인해 주세요.",
+  invalid_request: "Meta에서 유효한 로그인 코드를 받지 못했습니다. 계정 카드에서 새로 연결해 주세요.",
+  connect_failed: "계정 검증 또는 연결 정보 저장을 완료하지 못했습니다. 아래 진단에서 실패 단계를 확인해 주세요.",
+  instagram_identity_failed: "Meta 계정 조회 요청을 완료하지 못했습니다. 아래 진단에서 실패 단계와 응답 코드를 확인해 주세요.",
+  invalid_account_response: "Meta에서 받은 계정 정보가 완전하지 않거나 서로 일치하지 않습니다. 아래 진단의 확인 단계를 살펴봐 주세요.",
+  account_identity_incomplete: "Meta 계정 목록의 일부 사용자명을 확인하지 못했습니다. 연결할 계정만 선택해 다시 로그인해 주세요.",
+  account_list_incomplete: "Meta 계정 목록을 끝까지 확인하지 못했습니다. 연결할 계정만 선택해 다시 로그인해 주세요.",
+  no_assigned_accounts: "Meta가 연결할 Instagram 계정 목록을 반환하지 않았습니다. 로그인에서 선택한 계정을 확인해 주세요.",
+  direct_account_access_failed: "Meta 토큰은 발급됐지만 선택한 계정 정보를 조회하지 못했습니다. 아래 진단에서 실패 단계와 응답 코드를 확인해 주세요.",
+  direct_publish_access_failed: "계정 정보는 확인했지만 게시 API 접근을 확인하지 못했습니다. Meta 구성의 콘텐츠 게시 권한을 확인해 주세요.",
+  ambiguous_account: "Meta가 같은 대상에 여러 계정 ID를 반환해 게시 계정을 확정하지 못했습니다. 연결할 계정을 확인해 주세요.",
+  persistence_failed: "계정 검증 후 연결 정보를 저장하지 못했습니다. 잠시 후 다시 연결해 주세요.",
   cancelled: "계정 연결이 취소됐습니다. 준비되면 다시 연결해 주세요.",
   invalid_state: "로그인 확인 시간이 지났거나 이 브라우저에서 시작한 요청이 아닙니다. 계정 카드에서 다시 연결해 주세요.",
   expired_state: "로그인 확인 시간이 지났습니다. 계정 카드에서 다시 연결해 주세요.",
@@ -25,16 +37,19 @@ const oauthMessages: Record<string, string> = {
 
 export function InstagramConnectionsPage() {
   const workroom = isPrivateWorkroom();
-  const [notice, setNotice] = useState(() => {
+  const [notice, setNotice] = useState<{ ok: boolean; text: string; failure?: InstagramOAuthFailure } | null>(() => {
     const q = new URLSearchParams(window.location.search);
-    return q.get("instagram") === "connected" ? { ok: true, text: "선택한 채널의 Instagram 계정과 게시 권한을 확인해 연결했습니다." } : q.get("instagram") === "error" ? { ok: false, text: oauthMessages[q.get("reason") ?? ""] ?? "Instagram 연결을 완료하지 못했습니다. 연결 설정과 선택한 계정을 확인하고 다시 시도해 주세요." } : null;
+    if (q.get("instagram") === "connected") return { ok: true, text: "선택한 채널의 Instagram 계정과 게시 권한을 확인해 연결했습니다." };
+    if (q.get("instagram") !== "error") return null;
+    const failure = readInstagramOAuthFailure(q);
+    return { ok: false, text: oauthMessages[failure.reason], failure };
   });
   const [, navigate] = useLocation();
   const guard = useDirtyGuard();
   useEffect(() => { if (new URLSearchParams(window.location.search).has("instagram")) window.history.replaceState(null, "", window.location.pathname); }, []);
   return <div className="instagram-connections-page stack">
     <header className="page-head"><div><span className="studio-eyebrow">CONNECTED ACCOUNTS</span><h1>인스타그램 연결</h1><p className="muted">네 채널의 계정과 연결 상태를 한곳에서 관리하세요.</p></div><button className="btn ghost" onClick={() => guard.confirmLeave(() => navigate("/"))}>내 콘텐츠로 돌아가기</button></header>
-    {notice && <div className={`notice ${notice.ok ? "ok" : "warn"} row between`} role="status"><span>{notice.text}</span><button className="btn ghost sm" aria-label="연결 결과 닫기" onClick={() => setNotice(null)}>닫기</button></div>}
+    {notice && <div className={`notice ${notice.ok ? "ok" : "warn"} row between`} role="status"><div><span>{notice.text}</span>{notice.failure && <p className="small" data-testid="instagram-oauth-diagnostic">진단: {notice.failure.reason}{notice.failure.diagnostic && <> / 단계: {notice.failure.diagnostic.stage}{notice.failure.diagnostic.httpStatus !== undefined && <> / HTTP {notice.failure.diagnostic.httpStatus}</>}{notice.failure.diagnostic.graphCode !== undefined && <> / Graph {notice.failure.diagnostic.graphCode}</>}{notice.failure.diagnostic.graphSubcode !== undefined && <> / subcode {notice.failure.diagnostic.graphSubcode}</>}{notice.failure.diagnostic.lost !== undefined && <> / lost={String(notice.failure.diagnostic.lost)}</>}</>}</p>}</div><button className="btn ghost sm" aria-label="연결 결과 닫기" onClick={() => setNotice(null)}>닫기</button></div>}
     <InstagramAccounts />
     {workroom ? <p className="small muted">계정 연결은 <a href="https://spacepenguin.onrender.com/instagram" target="_blank" rel="noreferrer">운영 스튜디오의 인스타그램 연결</a>에서 진행하세요.</p> : <MetaConnectionSetup />}
   </div>;

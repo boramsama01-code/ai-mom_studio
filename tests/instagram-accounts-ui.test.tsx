@@ -25,6 +25,7 @@ let host: HTMLDivElement, root: Root, client: QueryClient, oauthConfigured: bool
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, "", "/instagram");
   oauthConfigured = true;
   mocks.check.mockResolvedValue(success);
   mocks.connect.mockResolvedValue({ ok: true, username: "spacepenguin.co" });
@@ -67,6 +68,41 @@ async function openTokenForm() {
 }
 
 describe("Instagram account connection states", () => {
+  it("keeps sanitized OAuth diagnostics visible after removing the query string", async () => {
+    window.history.replaceState(null, "", "/instagram?instagram=error&reason=direct_account_access_failed&stage=business_asset&http_status=400&graph_code=100&graph_subcode=33&lost=false&code=PRIVATE_CODE&state=PRIVATE_STATE");
+    await render(<InstagramConnectionsPage />);
+    expect(window.location.search).toBe("");
+    expect(host.querySelector('[data-testid="instagram-oauth-diagnostic"]')?.textContent).toBe("진단: direct_account_access_failed / 단계: business_asset / HTTP 400 / Graph 100 / subcode 33 / lost=false");
+    expect(host.textContent).toContain("선택한 계정 정보를 조회하지 못했습니다");
+    expect(host.innerHTML).not.toContain("PRIVATE");
+    await act(async () => { await client.invalidateQueries({ queryKey: ["instagram-oauth-config"] }); }); await settle();
+    expect(host.querySelector('[data-testid="instagram-oauth-diagnostic"]')?.textContent).toContain("business_asset / HTTP 400 / Graph 100 / subcode 33");
+  });
+
+  it.each([
+    ["invalid_request", "callback", "유효한 로그인 코드를 받지 못했습니다"],
+    ["exchange_failed", "token_exchange", "Meta 로그인 응답을 확인하지 못했습니다"],
+    ["direct_publish_access_failed", "quota", "게시 API 접근을 확인하지 못했습니다"],
+    ["persistence_failed", "persistence", "연결 정보를 저장하지 못했습니다"],
+    ["denied", "callback", "Meta에서 로그인 승인을 완료하지 못했습니다"],
+  ])("shows a distinct safe notice for %s", async (reason, stage, message) => {
+    window.history.replaceState(null, "", `/instagram?instagram=error&reason=${reason}&stage=${stage}`);
+    await render(<InstagramConnectionsPage />);
+    expect(host.textContent).toContain(message);
+    expect(host.querySelector('[data-testid="instagram-oauth-diagnostic"]')?.textContent).toBe(`진단: ${reason} / 단계: ${stage}`);
+    expect(window.location.search).toBe("");
+  });
+
+  it("does not reflect unknown labels, secret-bearing fields or malformed numeric query values", async () => {
+    const query = new URLSearchParams({ instagram: "error", reason: "PRIVATE_TOKEN<script>", stage: "PRIVATE_STATE", http_status: "PRIVATE_SECRET", graph_code: "1e2", graph_subcode: "PRIVATE_CODE", lost: "PRIVATE", access_token: "PRIVATE_ACCESS_TOKEN", error_description: "PRIVATE_PROVIDER_MESSAGE", stack: "PRIVATE_SQL" });
+    window.history.replaceState(null, "", `/instagram?${query}`);
+    await render(<InstagramConnectionsPage />);
+    expect(host.querySelector('[data-testid="instagram-oauth-diagnostic"]')?.textContent).toBe("진단: connect_failed");
+    expect(host.innerHTML).not.toContain("PRIVATE");
+    expect(host.innerHTML).not.toContain("<script>");
+    expect(window.location.search).toBe("");
+  });
+
   it("shows all four exact account targets without treating saved credentials as a verified connection", async () => {
     await render();
     expect(host.querySelectorAll("article.instagram-account")).toHaveLength(4);
