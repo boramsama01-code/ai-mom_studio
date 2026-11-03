@@ -782,7 +782,7 @@ function ItemDeliveryPanel({ d, cid, runtime, runtimeError, refresh, refreshing 
           {a.invalidatedReason && <p className="small muted">{a.invalidatedReason}</p>}
           {!deliveries.length && (a.status === "active" ? <div className="notice warn"><strong>전송 예약이 없습니다</strong><p className="small">승인 기록에 연결된 전송 건이 없습니다. 게시 계정·목적지를 확인한 뒤 위의 게시 준비에서 다시 승인해 주세요.</p><GuardedLink href="/instagram">게시 계정 연결 확인 →</GuardedLink></div> : <p className="small muted">이전 승인에 연결된 전송 내역이 없습니다.</p>)}
           {deliveries.map(({ d: delivery, dest }) => {
-            const state = deliveryState(delivery.status, a.scheduledAt, Date.now(), delivery.outcomeSource);
+            const state = deliveryState(delivery.status, a.scheduledAt, Date.now(), delivery.outcomeSource, delivery.needsReconciliation);
             return <div key={delivery.id} className={`notice ${state.tone}`}>
               <div className="row between"><strong>{dest.label}</strong><Badge kind={state.tone}>{state.label}</Badge></div>
               <p className="small">{state.detail}</p>

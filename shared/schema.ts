@@ -418,7 +418,7 @@ export const publisherHeartbeats = pgTable("publisher_heartbeats", {
   heartbeatAt: ts("heartbeat_at").notNull(),
   lastSweepAt: ts("last_sweep_at"),
   lastError: text("last_error"),
-  startedAt: createdAt(),
+  startedAt: ts("started_at").notNull().defaultNow(),
 });
 
 /* ───────────── 작업 큐(워커가 한 번 실행하고 종료) ───────────── */

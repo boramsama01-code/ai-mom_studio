@@ -209,6 +209,40 @@ describe("승인 저장과 실제 전송의 구분", () => {
 });
 
 describe("발행함과 제작 보드의 전송 상태", () => {
+  it("keeps week navigation usable on an empty or failed week and resets the visible filters", async () => {
+    detail.deliveries = [];
+    const fallback = mocks.api.getMockImplementation()!;
+    let failRange = false;
+    mocks.api.mockImplementation(async (path, options) => {
+      if (failRange && path.startsWith("/deliveries?") && new URL(path, "https://fixture.invalid").searchParams.has("from")) throw new Error("해당 주 전송 목록을 불러오지 못했습니다.");
+      return fallback(path, options);
+    });
+    await render(createElement(PublishPage)); await click("주간 달력");
+    expect(host.textContent).toContain("선택한 조건에 맞는 전송이 없습니다.");
+    const week = () => host.querySelector('[aria-label="발행 주간 이동"] strong')!.textContent;
+    const initialWeek = week();
+    await click("다음 주 →"); expect(week()).not.toBe(initialWeek);
+    await click("← 이전 주"); expect(week()).toBe(initialWeek);
+    failRange = true; await click("← 이전 주");
+    expect(host.textContent).toContain("해당 주 전송 목록을 불러오지 못했습니다.");
+    expect(button("다음 주 →").disabled).toBe(false);
+    failRange = false; await click("다음 주 →");
+    expect(week()).toBe(initialWeek); await click("필터 초기화");
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("목록");
+    expect(host.querySelector('[aria-label="발행 주간 이동"]')).toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="전송 상태 필터"]')!.value).toBe("");
+    expect(writes()).toEqual([]);
+  });
+  it.each(["publish", "item", "studio"])("shows a flagged late result and disables reconciliation during processing in %s", async screen => {
+    detail.deliveries[0].d = { ...detail.deliveries[0].d, status: "processing", needsReconciliation: true };
+    studioStatus.deliveries = [{ ...detail.deliveries[0].d, scheduledAt: past, approvalStatus: "active" }];
+    await render(screen === "publish" ? createElement(PublishPage) : screen === "item" ? createElement(ItemDetailPage, { cid: 2, id: 9 }) : createElement(StudioPublish, { base: card, dirty: false, busy: false, save: vi.fn().mockResolvedValue(card) }));
+    expect([...host.querySelectorAll(".badge")].map(node => node.textContent)).toContain("전송 중 · 이전 결과 확인 필요");
+    expect(host.textContent).toContain("현재 전송 종료 후 확인이 필요합니다.");
+    expect(button("게시 결과 다시 확인").disabled).toBe(true);
+    if (screen === "publish") expect(host.textContent).toContain("확인하거나 복구할 전송이 1건 있습니다.");
+    expect(writes()).toEqual([]);
+  });
   it("uses server totals and status pagination to find an old unresolved delivery beyond the first hundred", async () => {
     const fallback = mocks.api.getMockImplementation()!;
     const rows = Array.from({ length: 125 }, (_, index) => ({

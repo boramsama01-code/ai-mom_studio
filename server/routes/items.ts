@@ -809,7 +809,7 @@ itemRoutes.get(
     const q = parse(publicationListQuery, req.query);
     const db = getDb();
     const base = and(q.channelId === "all" ? undefined : eq(deliveries.channelId, q.channelId), ...publicationDateConditions(q));
-    const where = and(base, q.status ? inArray(deliveries.status, q.status) : undefined);
+    const where = and(base, q.status ? or(inArray(deliveries.status, q.status), q.status.includes("unknown") ? eq(deliveries.needsReconciliation, true) : undefined) : undefined);
     const page = q.page ?? 1, pageSize = q.pageSize ?? 30;
     const paged = q.page !== undefined || q.pageSize !== undefined;
     const rows = await db
@@ -831,10 +831,13 @@ itemRoutes.get(
     if (!paged) return res.json(rows);
     const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId)).where(where);
     const grouped = await db.select({ status: deliveries.status, count: sql<number>`count(*)::int` }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId)).where(base).groupBy(deliveries.status);
-    const [{ overdue }] = await db.select({ overdue: sql<number>`count(*)::int` }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId)).where(and(base, eq(deliveries.status, "scheduled"), lt(approvals.scheduledAt, new Date(Date.now() - 60_000))));
+    const [{ overdue, needsAttention }] = await db.select({
+      overdue: sql<number>`count(*) filter (where ${deliveries.status} = 'scheduled' and ${approvals.scheduledAt} < now() - interval '1 minute')::int`,
+      needsAttention: sql<number>`count(*) filter (where ${deliveries.status} in ('failed','unknown','dry_run') or ${deliveries.needsReconciliation} = true)::int`,
+    }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId)).where(base);
     const counts: Record<string, number> = Object.fromEntries(grouped.map(row => [row.status, row.count]));
     counts.overdue = overdue;
-    counts.needsAttention = (counts.failed ?? 0) + (counts.unknown ?? 0) + (counts.dry_run ?? 0);
+    counts.needsAttention = needsAttention;
     res.json({ items: rows, total, page, pageSize, counts });
   }),
 );

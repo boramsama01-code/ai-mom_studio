@@ -38,7 +38,9 @@ export function PublicationRuntimeNotice({ runtime, error, retry }: { runtime?: 
   return <div className={`notice ${mode.tone}`} role="status"><strong>{mode.title}</strong><p className="small" style={{ marginBottom: 0 }}>{mode.detail}</p>{health && <p className="small muted">최근 발행기 동작 {health.lastSeenAt ? fmtDate(health.lastSeenAt) : "아직 확인되지 않음"} · 예약 지연 {health.overdueCount}건 · 결과 확인 필요 {health.unknownCount}건{health.oldestPendingAt && <> · 가장 오래된 대기 {fmtDate(health.oldestPendingAt)}</>}</p>}{runtime?.inlinePublishing && <p className="small muted">예약 시각 이후 처리됩니다. 서버 휴면·재시작 시 지연될 수 있으며 발행함에서 실제 결과를 확인하세요.</p>}{runtime?.workerConnected === false && <GuardedLink className="small" href="/runs">실행 기록 확인 →</GuardedLink>}</div>;
 }
 
-export function deliveryState(status: string, scheduledAt?: string | Date | null, now = Date.now(), outcomeSource?: string | null): { label: string; detail: string; tone: "" | "ok" | "warn" | "err" } {
+export function deliveryState(status: string, scheduledAt?: string | Date | null, now = Date.now(), outcomeSource?: string | null, needsReconciliation = false): { label: string; detail: string; tone: "" | "ok" | "warn" | "err" } {
+  if (needsReconciliation && status === "processing") return { label: "전송 중 · 이전 결과 확인 필요", detail: "이전 시도의 늦은 결과가 있어 현재 전송 종료 후 확인이 필요합니다. 현재 전송이 끝나면 상태를 새로고침한 뒤 게시 결과를 확인해 주세요.", tone: "warn" };
+  if (needsReconciliation && status !== "unknown") return { label: "이전 게시 결과 확인 필요", detail: "이전 시도의 늦은 결과가 있어 이 전송의 결과를 확정할 수 없습니다. 전송 상태를 새로고침하고 결과 확인이 가능한 상태인지 확인해 주세요.", tone: "warn" };
   if (status === "succeeded" && outcomeSource === "operator_confirmed") return { label: "게시됨 · 운영자 확인", detail: "운영자가 실제 계정의 게시물을 확인해 기록했습니다. 외부 API의 완료 응답으로 확인한 결과와 구분됩니다.", tone: "ok" };
   if (status === "succeeded") return { label: "게시 성공", detail: "목적지에서 게시 완료 응답을 받았습니다.", tone: "ok" };
   if (status === "dry_run") return { label: "모의 실행 완료 · 실제 게시 안 함", detail: "검사만 실행한 기록입니다. Instagram 게시물은 생성되지 않았습니다.", tone: "warn" };

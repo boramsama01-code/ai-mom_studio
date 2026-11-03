@@ -18,8 +18,8 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); });
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); }
-async function render(status: string, approvalStatus = "active", id = 44) {
-  await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(DeliveryActions, { channelId: 3, approvalId: 21, approvalStatus, delivery: { id, status }, onChanged: mocks.changed }))));
+async function render(status: string, approvalStatus = "active", id = 44, needsReconciliation = false) {
+  await act(async () => root.render(createElement(QueryClientProvider, { client }, createElement(DeliveryActions, { channelId: 3, approvalId: 21, approvalStatus, delivery: { id, status, needsReconciliation }, onChanged: mocks.changed }))));
   await settle();
 }
 async function click() { await act(async () => host.querySelector("button")!.click()); await settle(); }
@@ -52,6 +52,7 @@ describe("shared publication actions", () => {
   });
   it("records a manually verified published URL through a separate action without retrying", async () => {
     await render("unknown");
+    expect([...host.querySelectorAll("label")].find(label => label.textContent?.startsWith("확인 메모"))?.querySelector("input")?.maxLength).toBe(500);
     const url = host.querySelector<HTMLInputElement>('input[type="url"]')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(url, "https://www.instagram.com/p/verified/");
@@ -60,6 +61,23 @@ describe("shared publication actions", () => {
     await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "이미 게시됨으로 기록")!.click()); await settle();
     expect(mocks.api).toHaveBeenCalledWith("/channels/3/deliveries/44/confirm-posted", { method: "POST", body: { externalUrl: "https://www.instagram.com/p/verified/", note: undefined } });
     expect(mocks.api.mock.calls.some(([path]) => path.endsWith("/retry"))).toBe(false);
+  });
+  it("waits for the active transmission to finish before reconciling a flagged late result", async () => {
+    await render("processing", "active", 44, true);
+    expect(host.textContent).toContain("이전 시도의 늦은 결과가 있어 현재 전송 종료 후 확인이 필요합니다.");
+    const byText = (text: string) => [...host.querySelectorAll("button")].find(button => button.textContent === text)!;
+    for (const label of ["게시 결과 다시 확인", "이미 게시됨으로 기록", "미게시 확인 기록"]) {
+      expect(byText(label).disabled).toBe(true);
+      await act(async () => byText(label).click());
+    }
+    expect([...host.querySelectorAll("input")].every(input => input.disabled)).toBe(true);
+    expect(mocks.api).not.toHaveBeenCalled();
+    await render("unknown", "active", 44, true);
+    expect(host.textContent).not.toContain("현재 전송 종료 후 확인이 필요합니다.");
+    expect(byText("게시 결과 다시 확인").disabled).toBe(false);
+    expect(host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(false);
+    await click();
+    expect(mocks.api).toHaveBeenCalledWith("/channels/3/deliveries/44/reconcile", { method: "POST", body: {} });
   });
   it.each(["processing", "succeeded", "cancelled"])("does not offer a mutation for %s", async status => {
     await render(status); expect(host.querySelector("button")).toBeNull(); expect(mocks.api).not.toHaveBeenCalled();

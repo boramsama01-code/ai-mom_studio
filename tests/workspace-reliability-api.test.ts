@@ -154,4 +154,14 @@ describe("publication list contracts", () => {
     expect(response.body.items.every((row: any) => row.d.status === "failed")).toBe(true);
     expect((await f.agent.get("/api/deliveries").query({ channelId: 2, page: 1, from: "2026-11-05", to: "2026-11-04" })).status).toBe(400);
   });
+
+  it("includes late-result reconciliation flags in attention filters while the current attempt is still processing", async () => {
+    const f = await fixture(), pending = await scheduled(f, "늦은 응답");
+    await getDb().update(approvals).set({ scheduledAt: new Date("2026-11-08T00:00:00Z") }).where(eq(approvals.id, pending.approval.id));
+    await getDb().update(deliveries).set({ status: "processing", needsReconciliation: true }).where(eq(deliveries.id, pending.delivery.id));
+    const result = await f.agent.get("/api/deliveries").query({ channelId: 2, page: 1, status: "unknown", from: "2026-11-08", to: "2026-11-08" });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ total: 1, counts: { processing: 1, needsAttention: 1 } });
+    expect(result.body.items[0].d).toMatchObject({ id: pending.delivery.id, status: "processing", needsReconciliation: true });
+  });
 });

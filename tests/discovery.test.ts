@@ -149,7 +149,9 @@ describe("수집 실행 안의 자동 발굴", () => {
   it("Claude 연결 시: 선정 이유·질문 저장, 초안 자동 생성", async () => {
     // 앞 테스트에서 저장한 과학 채널 항목 지우기(세션 테이블은 유지)
     const { getPool } = await import("../server/db");
-    await getPool().query(`delete from content_sources where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+    await getPool().query(`delete from studio_revisions where card_id in (select id from studio_cards where source_item_id in (select id from content_items where channel_id = ${SCIENCE}));
+      delete from studio_cards where source_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from content_sources where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_revisions where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_items where channel_id = ${SCIENCE};`);
     process.env.ANTHROPIC_API_KEY = "k";
@@ -192,7 +194,9 @@ describe("수집 실행 안의 자동 발굴", () => {
 
   it.each([false, true])("수집 전용=%s에서 AI·알림 호출 없이 자료만 저장한다", async (collectionOnly) => {
     const { getPool } = await import("../server/db");
-    await getPool().query(`delete from content_sources where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+    await getPool().query(`delete from studio_revisions where card_id in (select id from studio_cards where source_item_id in (select id from content_items where channel_id = ${SCIENCE}));
+      delete from studio_cards where source_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from content_sources where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_revisions where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_items where channel_id = ${SCIENCE};`);
     vi.stubEnv("ANTHROPIC_API_KEY", "configured-test-key");
@@ -212,16 +216,20 @@ describe("수집 실행 안의 자동 발굴", () => {
     } finally { vi.unstubAllEnvs(); }
   });
 
-  it("연결 확인은 대기 작업을 실행하지 않고 12시간 수집 간격을 연결 상태로 유지한다", async () => {
+  it("연결 확인은 대기 작업을 실행하지 않으며 수집 연결을 게시 워커 동작으로 표시하지 않는다", async () => {
     const { checkWorkerConnection } = await import("../server/worker/run");
     const r = await checkWorkerConnection();
     expect(r).toMatchObject({ connected: true, collected: 0, published: 0 });
     const db = getDb();
     const { agent } = await login(app);
     await db.update(schema.workerRuns).set({ startedAt: new Date(Date.now() - 12 * 3600_000) }).where(eq(schema.workerRuns.id, r.runId));
-    expect((await agent.get("/api/status")).body.workerConnected).toBe(true);
+    const status = await agent.get("/api/status");
+    expect(status.status).toBe(200);
+    expect(status.body.collectorConnected).toBe(true);
+    expect(status.body.workerConnected).toBe(false);
+    expect(status.body.publisherHealth.connected).toBe(false);
     await db.update(schema.workerRuns).set({ startedAt: new Date(Date.now() - 15 * 3600_000) }).where(eq(schema.workerRuns.id, r.runId));
-    expect((await agent.get("/api/status")).body.workerConnected).toBe(false);
+    expect((await agent.get("/api/status")).body.collectorConnected).toBe(false);
   });
 
   it("발굴 설정 저장·끄기, 끄면 탐색 호출 없음", async () => {

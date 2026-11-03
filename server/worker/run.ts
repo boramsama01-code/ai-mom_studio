@@ -69,6 +69,17 @@ export async function checkWorkerConnection() {
 /** 수집 작업 1건 처리 — 성공 여부 반환(GitHub 워커와 웹 서버 즉시 실행이 함께 씀) */
 export async function processCollectJob(db: DB, job: Job, workerId: string): Promise<boolean> {
   if (!job.channelId) throw new Error("채널 없는 수집 작업");
+  if (env.autoGenerate && job.payload.collectionOnly !== true) {
+    // A collection can call paid curation before it has saved any selected items.
+    // Never replay that ambiguous outcome after a crash, including jobsOnce's catch path.
+    job.maxAttempts = job.attempts;
+    const [reserved] = await db.update(jobs).set({ maxAttempts: job.attempts }).where(and(
+      eq(jobs.id, job.id), eq(jobs.type, "collect"), eq(jobs.status, "running"), eq(jobs.leaseOwner, workerId),
+      eq(jobs.attempts, job.attempts), sql`${jobs.leaseExpiresAt} > clock_timestamp()`,
+    )).returning({ maxAttempts: jobs.maxAttempts });
+    if (!reserved) throw new Error("수집 작업의 실행 권한이 만료되어 조회·AI 요청을 시작하지 않았습니다.");
+    job.maxAttempts = reserved.maxAttempts;
+  }
   const r = await withCollectionControl(db, () => runCollect(db, job.channelId!, { trigger: "worker", collectionOnly: job.payload.collectionOnly === true, subcategory: typeof job.payload.subcategory === "string" ? job.payload.subcategory : undefined, heartbeat: () => heartbeat(db, job.id, workerId) }), { id: job.id, workerId });
   if (r.status === "failed") {
     // 키 미연결·인증 오류 등은 재시도해도 같으므로 재시도하지 않음

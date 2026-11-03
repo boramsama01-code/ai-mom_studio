@@ -113,6 +113,10 @@ describe("source cards automatically reach the board", () => {
   it("persists five ordered images, previews and downloads them, and never duplicates or overwrites board work", async () => {
     const { agent, H, id, endpoint } = await setup();
     const before = (await agent.get(endpoint)).body;
+    const draft = (await agent.get(`/api/studio/cards/${before.canonicalStudioCardId}`)).body.card;
+    expect(draft.stage).toBe("writing");
+    expect(draft.sourceReference).toEqual({ itemId: id, channelId: 2 });
+    expect(draft.sourceOutput).toBeUndefined();
     const generated = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography" });
     expect(generated.status, JSON.stringify(generated.body)).toBe(200);
     const { carousel, studioCardId } = generated.body;
@@ -120,7 +124,9 @@ describe("source cards automatically reach the board", () => {
     const detail = (await agent.get(endpoint)).body;
     expect(detail.cards).toHaveLength(1); expect(detail.current).toEqual(before.current); expect(detail.approvals).toHaveLength(0);
     const board = (await agent.get("/api/studio/cards")).body.cards.find((c: any) => c.id === studioCardId);
-    expect(board.stage).toBe("review"); expect(board.sourceOutput.pages).toHaveLength(5); expect(board.sourceOutput.assetId).toBe(generated.body.id);
+    // Rendering does not mean the operator has completed review.
+    expect(board.id).toBe(draft.id); expect(board.stage).toBe("making");
+    expect(board.sourceOutput.pages).toHaveLength(5); expect(board.sourceOutput.assetId).toBe(generated.body.id);
     for (const page of carousel.pages) expect((await agent.get(`/api/channels/2/media/${page.id}`)).status).toBe(200);
     const zip = await agent.get(`/api/channels/2/media/${generated.body.id}/deck.zip`).buffer(true).parse((res, done) => {
       const chunks: Buffer[] = []; res.on("data", (chunk: Buffer) => chunks.push(chunk)); res.on("end", () => done(null, Buffer.concat(chunks))); res.on("error", done);
@@ -154,13 +160,22 @@ describe("source cards automatically reach the board", () => {
     expect((await agent.get(`/api/channels/2/media/${a.body.id}/deck.zip`)).status).toBe(409);
     delete process.env.OPENAI_API_KEY;
   });
-  it("fails clearly without an image connection or on provider failure, without adding an incomplete board card", async () => {
+  it("keeps the editable draft after an image failure without adding incomplete images or duplicate board cards", async () => {
     const { agent, H, id, endpoint } = await setup();
+    const before = (await agent.get(endpoint)).body;
     expect((await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "ai" })).body.code).toBe("ai_not_configured");
     process.env.OPENAI_API_KEY = "test-key"; makeImage.mockRejectedValueOnce(new Error("image provider failed"));
     const response = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "ai" });
     expect(response.status).toBe(500); expect(response.body.error).toContain("image provider failed");
-    expect(await getDb().select().from(studioCards).where(eq(studioCards.sourceItemId, id))).toHaveLength(0);
+    const rows = await getDb().select().from(studioCards).where(eq(studioCards.sourceItemId, id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(before.canonicalStudioCardId);
+    expect(await getDb().select().from(mediaAssets).where(eq(mediaAssets.contentItemId, id))).toHaveLength(0);
+    const after = (await agent.get(endpoint)).body;
+    expect(after.current).toEqual(before.current);
+    const draft = (await agent.get(`/api/studio/cards/${rows[0].id}`)).body.card;
+    expect(draft).toMatchObject({ stage: "writing", sourceReference: { itemId: id, channelId: 2 } });
+    expect(draft.sourceOutput).toBeUndefined();
     delete process.env.OPENAI_API_KEY;
   });
 });

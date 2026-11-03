@@ -25,7 +25,7 @@ function kstYmd(d: Date) {
   return new Date(d.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
 }
 function rowState(row: Row) {
-  if (row.d) return deliveryState(row.d.status, row.ap.scheduledAt, Date.now(), row.d.outcomeSource);
+  if (row.d) return deliveryState(row.d.status, row.ap.scheduledAt, Date.now(), row.d.outcomeSource, row.d.needsReconciliation);
   return row.ap.status === "active"
     ? { label: "승인 저장됨 · 전송 예약 없음", detail: row.reason ?? "게시 계정·목적지 없이 승인만 저장된 기록입니다. 계정을 연결한 뒤 해당 콘텐츠에서 다시 승인해야 합니다.", tone: "warn" as const }
     : { label: row.ap.status === "cancelled" ? "승인 취소됨 · 전송 내역 없음" : "이전 승인 · 전송 내역 없음", detail: "이 승인에는 연결된 전송 기록이 없습니다. 현재 승인 상태는 콘텐츠의 전송 내역에서 확인하세요.", tone: "" as const };
@@ -50,11 +50,13 @@ export function PublishPage() {
   const orphans = useQuery({ queryKey: ["ch", selected, "publication-orphans", range.from, range.to, statusFilter === "orphan" ? page : 1], queryFn: async () => pageResult(await api<Page<Orphan> | Orphan[]>(`/publication-orphans?${qs({ channelId: selected, page: statusFilter === "orphan" ? page : 1, pageSize: PAGE_SIZE, ...range })}`)) });
   const rows = useMemo<Row[]>(() => statusFilter === "orphan" ? (orphans.data?.items ?? []).map(row => ({ ...row, d: null, dest: null })) : q.data?.items ?? [], [statusFilter, q.data, orphans.data]);
   const overdue = q.data?.counts?.overdue ?? q.data?.items.filter(r => r.d.status === "scheduled" && new Date(r.ap.scheduledAt).getTime() < Date.now() - 60_000).length ?? 0;
-  const needsAttention = q.data?.counts?.needsAttention ?? q.data?.items.filter(r => ["failed", "unknown", "dry_run"].includes(r.d.status)).length ?? 0;
+  const needsAttention = q.data?.counts?.needsAttention ?? q.data?.items.filter(r => r.d.needsReconciliation || ["failed", "unknown", "dry_run"].includes(r.d.status)).length ?? 0;
   const orphanCount = orphans.data?.total ?? 0;
   const total = statusFilter === "orphan" ? orphanCount : q.data?.total ?? 0;
   const refreshing = q.isFetching || orphans.isFetching || status.isFetching;
   const refresh = () => { q.refetch(); orphans.refetch(); status.refetch(); };
+  const hasFilters = !!statusFilter || !!from || !!to || view === "calendar";
+  const resetFilters = () => { setView("list"); setStatusFilter(""); setFrom(""); setTo(""); setWeekOffset(0); setPage(1); };
 
   const today = kstYmd(new Date());
   const byDay = useMemo(() => {
@@ -91,27 +93,22 @@ export function PublishPage() {
         {orphanCount > 0 && <div className="notice warn"><strong>승인만 저장되고 전송 예약이 없는 콘텐츠가 {orphanCount}건 있습니다.</strong><p className="small">예약 시간이 지나도 자동 게시되지 않습니다. 게시 계정을 연결하고 해당 콘텐츠에서 다시 승인해 주세요.</p><GuardedLink href="/instagram">인스타그램 연결 확인 →</GuardedLink><button className="btn sm" onClick={() => { setView("list"); setStatusFilter("orphan"); setPage(1); }}>승인만 저장된 기록 보기</button></div>}
         {overdue > 0 && <div className="notice warn"><strong>예약 시각이 지났지만 아직 전송하지 않은 건이 {overdue}건 있습니다.</strong><p className="small">예약 시간이 지났다는 이유만으로 게시 완료가 되지 않습니다. 전송 상태에서 계정·권한 오류와 실행 상황을 확인하세요.</p><button className="btn sm" onClick={() => { setView("list"); setStatusFilter("scheduled"); setTo(today); setFrom(""); setPage(1); }}>지난 예약을 포함한 목록 보기</button></div>}
       </div>
+      {view === "calendar" && <div className="row between" aria-label="발행 주간 이동" style={{ marginBottom: 12 }}>
+        <button className="btn sm" onClick={() => setWeekOffset(w => w - 1)}>← 이전 주</button>
+        <strong className="small">{days[0]} ~ {days[6]}</strong>
+        <button className="btn sm" onClick={() => setWeekOffset(w => w + 1)}>다음 주 →</button>
+      </div>}
       {q.isLoading || orphans.isLoading ? (
         <Loading />
       ) : q.error ? (
         <ErrorBox error={q.error} retry={() => q.refetch()} />
       ) : !rows.length ? (
         <Empty>
-          {orphans.error ? "전송 내역은 없으며, 승인만 저장된 기록은 아직 확인하지 못했습니다." : "선택한 채널에 전송 예약이 없습니다."} 게시 후 결과와 예약은 여기에 표시됩니다. 게시 계정은 <GuardedLink href="/instagram">인스타그램 연결</GuardedLink>에서 확인할 수 있습니다.
+          {orphans.error ? "전송 내역은 없으며, 승인만 저장된 기록은 아직 확인하지 못했습니다." : hasFilters ? "선택한 조건에 맞는 전송이 없습니다." : "선택한 채널에 전송 예약이 없습니다."} 게시 후 결과와 예약은 여기에 표시됩니다. 게시 계정은 <GuardedLink href="/instagram">인스타그램 연결</GuardedLink>에서 확인할 수 있습니다.
+          {hasFilters && <div><button className="btn sm" onClick={resetFilters}>필터 초기화</button></div>}
         </Empty>
       ) : view === "calendar" ? (
         <div className="stack">
-          <div className="row between">
-            <button className="btn sm" onClick={() => setWeekOffset((w) => w - 1)}>
-              ← 이전 주
-            </button>
-            <strong className="small">
-              {days[0]} ~ {days[6]}
-            </strong>
-            <button className="btn sm" onClick={() => setWeekOffset((w) => w + 1)}>
-              다음 주 →
-            </button>
-          </div>
           <div className="cal">
             {days.map((day) => {
               const rows = byDay.get(day) ?? [];

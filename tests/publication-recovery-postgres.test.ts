@@ -20,7 +20,7 @@ const account = (token: string) => ({ ok: true as const, ...publicationAccounts.
 beforeAll(resetDb);
 afterAll(closeDb);
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   for (const [key, value] of Object.entries({ AUTO_PUBLISH: "true", DRY_RUN: "false", INLINE_WORKER: "false", INSTAGRAM_API_VERSION: "v26.0", CLOUDINARY_CLOUD_NAME: "fixture", CLOUDINARY_API_KEY: "fixture", CLOUDINARY_API_SECRET: "fixture", TELEGRAM_BOT_TOKEN: "test-only-bot-token" })) vi.stubEnv(key, value);
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("All publication providers must be mocked"); }));
   mocks.identity.mockImplementation(async (token: string) => account(token));
@@ -68,12 +68,18 @@ describe("PostgreSQL publication safety and recovery", () => {
     const started = new Promise<void>(resolve => { entered = resolve; });
     mocks.identity.mockImplementationOnce(async (token: string) => { entered(); await blocked; return account(token); });
     const work = publishDue(f.db, { deliveryId: f.delivery.id });
-    await started;
-    await f.db.transaction(async tx => {
-      await tx.update(contentItems).set({ reviewStatus: "held" }).where(eq(contentItems.id, f.item.id));
-      await revokePublicationEligibility(tx as never, f.item.id, "운영자 검토 보류", "test");
-    });
-    release(); await work;
+    try {
+      // Surface an early SQL/worker error instead of waiting 30s for a barrier
+      // that the worker never reached. The safety assertions remain unchanged.
+      await Promise.race([started, work.then(() => { throw new Error("Worker ended before the preparation barrier"); })]);
+      await f.db.transaction(async tx => {
+        await tx.update(contentItems).set({ reviewStatus: "held" }).where(eq(contentItems.id, f.item.id));
+        await revokePublicationEligibility(tx as never, f.item.id, "운영자 검토 보류", "test");
+      });
+    } finally {
+      release();
+      await work;
+    }
     expect(await f.read()).toMatchObject({ status: "cancelled" });
     expect(mocks.publish).not.toHaveBeenCalled();
     expect((await f.db.select().from(approvals).where(eq(approvals.id, f.approval.id)))[0].status).toBe("invalidated");

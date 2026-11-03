@@ -444,8 +444,8 @@ describe("카드·승인·게시", () => {
 describe("작업 큐", () => {
   it("중복 요청 방지, lease 만료 복구", async () => {
     const db = getDb();
-    const a = await enqueueJob(db, { type: "collect", channelId: 2, dedupeKey: "collect:2" });
-    const b = await enqueueJob(db, { type: "collect", channelId: 2, dedupeKey: "collect:2" });
+    const a = await enqueueJob(db, { type: "collect", channelId: 2, dedupeKey: "collect:2", payload: { collectionOnly: true } });
+    const b = await enqueueJob(db, { type: "collect", channelId: 2, dedupeKey: "collect:2", payload: { collectionOnly: true } });
     expect(b.duplicate).toBe(true);
     expect(b.job.id).toBe(a.job.id);
     const claimed = await claimJob(db, "w1", ["collect"]);

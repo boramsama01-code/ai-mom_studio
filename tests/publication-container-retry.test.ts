@@ -14,7 +14,7 @@ const { closeDb } = await import("../server/db");
 beforeAll(resetDb);
 afterAll(closeDb);
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   vi.stubEnv("DRY_RUN", "false"); vi.stubEnv("AUTO_PUBLISH", "true");
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("No network request is allowed in this worker test"); }));
   mocks.identity.mockImplementation(async (token: string) => ({ ok: true, ...publicationAccounts.get(token) }));
