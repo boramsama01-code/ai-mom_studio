@@ -22,11 +22,13 @@ const MAX_IDENTITY_LOOKUPS = 10;
  * https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/get-started/
  * https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/content_publishing_limit
  */
-const INSTAGRAM_TARGET_HINTS = new Map<string, string>([
-  ["spacepenguin.co", "17841458158640250"],
-  ["alligodang.official", "17841444569239069"],
-  ["highscoop.official", "17841416940240854"],
-  ["fryday.official.kr", "17841474286823201"],
+const INSTAGRAM_TARGET_HINTS = new Map<string, { primaryId: string; alternateObservedId?: string }>([
+  // The second ID was also observed for spacepenguin.co in Meta OAuth/Business
+  // UI on 2026-11-03. It is a candidate, not a proven alias or an access grant.
+  ["spacepenguin.co", { primaryId: "17841458158640250", alternateObservedId: "1445218102004133" }],
+  ["alligodang.official", { primaryId: "17841444569239069" }],
+  ["highscoop.official", { primaryId: "17841416940240854" }],
+  ["fryday.official.kr", { primaryId: "17841474286823201" }],
 ]);
 
 function instagramId(value: unknown): string | undefined {
@@ -68,10 +70,19 @@ export async function accountIdentity(token: string, authMode: InstagramAuthMode
       after = next;
     }
     if (accounts.size === 0) {
-      const targetId = normalized ? INSTAGRAM_TARGET_HINTS.get(normalized) : undefined;
-      if (!targetId) return { ok: false as const, error: "이 토큰에서 연결 가능한 인스타그램 계정 목록이 비어 있습니다. 토큰을 발급한 Meta 앱과 로그인한 인스타그램 계정을 확인해 주세요.", reason: "no_assigned_accounts" as const };
-      const profile = await igFetch(targetId, "GET", { fields: "id,username" }, token, authMode, fetchImpl);
-      if (!profile.ok) return { ok: false as const, error: "Meta 계정 목록은 비어 있고, 이 토큰으로 대상 계정 정보를 직접 조회하지 못했습니다. 토큰을 발급한 Meta 앱과 해당 계정의 접근 권한을 확인해 주세요." + lookupFailureDiagnostic("direct_profile", profile), reason: "direct_account_access_failed" as const };
+      const hint = normalized ? INSTAGRAM_TARGET_HINTS.get(normalized) : undefined;
+      if (!hint) return { ok: false as const, error: "이 토큰에서 연결 가능한 인스타그램 계정 목록이 비어 있습니다. 토큰을 발급한 Meta 앱과 로그인한 인스타그램 계정을 확인해 주세요.", reason: "no_assigned_accounts" as const };
+      let targetId = hint.primaryId;
+      let profileStage: "direct_profile" | "alternate_profile" = "direct_profile";
+      let profile = await igFetch(targetId, "GET", { fields: "id,username" }, token, authMode, fetchImpl);
+      if (!profile.ok && hint.alternateObservedId && isObjectLookupFailure(profile)) {
+        // One observed candidate only, after the exact provider object error.
+        // Its ID, username and protected quota must still pass the checks below.
+        targetId = hint.alternateObservedId;
+        profileStage = "alternate_profile";
+        profile = await igFetch(targetId, "GET", { fields: "id,username" }, token, authMode, fetchImpl);
+      }
+      if (!profile.ok) return { ok: false as const, error: "Meta 계정 목록은 비어 있고, 이 토큰으로 대상 계정 정보를 직접 조회하지 못했습니다. 토큰을 발급한 Meta 앱과 해당 계정의 접근 권한을 확인해 주세요." + lookupFailureDiagnostic(profileStage, profile), reason: "direct_account_access_failed" as const };
       const userId = instagramId(profile.json.id), username = profile.json.username;
       if (!userId || typeof username !== "string" || !INSTAGRAM_USERNAME.test(username)) return invalidResponse();
       if (userId !== targetId || username.toLowerCase() !== normalized) return { ok: false as const, error: "Meta에서 직접 확인한 계정이 이 채널의 게시 계정과 일치하지 않습니다. 인스타그램 연결 정보를 확인해 주세요.", reason: "account_mismatch" as const };
@@ -121,8 +132,12 @@ function safeGraphErrorNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
+function isObjectLookupFailure(failure: { lost: boolean; diagnostic?: IgFailureDiagnostic }): boolean {
+  return !failure.lost && failure.diagnostic?.httpStatus === 400 && failure.diagnostic.graphCode === 100 && failure.diagnostic.graphSubcode === 33;
+}
+
 /** Only local stage names, HTTP status, numeric provider codes and transport state reach the UI. */
-function lookupFailureDiagnostic(stage: "assigned_accounts" | "direct_profile", failure: { lost: boolean; diagnostic?: IgFailureDiagnostic }) {
+function lookupFailureDiagnostic(stage: "assigned_accounts" | "direct_profile" | "alternate_profile", failure: { lost: boolean; diagnostic?: IgFailureDiagnostic }) {
   const { httpStatus, graphCode, graphSubcode } = failure.diagnostic ?? {};
   return ` [진단: ${stage} / HTTP ${httpStatus ?? "-"} / Graph ${graphCode ?? "-"} / subcode ${graphSubcode ?? "-"} / lost=${failure.lost ? "true" : "false"}]`;
 }

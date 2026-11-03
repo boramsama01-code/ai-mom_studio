@@ -332,6 +332,101 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
     expect(new URL(fetcher.mock.calls[0][0]).origin).toBe("https://graph.instagram.com");
   });
 
+  describe("one additional operator-observed ID after an exact object lookup error", () => {
+    const alternateId = "1445218102004133";
+    const alternateProfile = { id: alternateId, username: "spacepenguin.co" };
+    const objectError = { error: { code: 100, error_subcode: 33, message: `private provider detail ${token}` } };
+
+    it("accepts the observed candidate only after its exact profile and protected quota both pass", async () => {
+      const injectedFetch = vi.fn().mockResolvedValueOnce(response({ data: [] }))
+        .mockResolvedValueOnce(response(objectError, 400))
+        .mockResolvedValueOnce(response(alternateProfile)).mockResolvedValueOnce(response(quota));
+      expect(await accountIdentity(token, "facebook", "@SPACEPENGUIN.CO", injectedFetch)).toEqual({ ok: true, userId: alternateId, username: "spacepenguin.co" });
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(injectedFetch.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
+        "/v26.0/me/assigned_instagram_accounts", `/v26.0/${penguinId}`, `/v26.0/${alternateId}`, `/v26.0/${alternateId}/content_publishing_limit`,
+      ]);
+      for (const [url, init] of injectedFetch.mock.calls) {
+        expect(new URL(url).origin).toBe("https://graph.facebook.com");
+        expect(new URL(url).searchParams.get("access_token")).toBeNull();
+        expect(init).toMatchObject({ method: "GET", redirect: "error", headers: { authorization: `Bearer ${token}` } });
+      }
+    });
+
+    it.each([
+      [403, 100, 33], [200, 100, 33], [400, 100, 34],
+      [400, 200, 33], [400, 190, 463], [429, 100, 33],
+      [400, 100, undefined], [400, 100, "33"],
+    ])("does not try the candidate after HTTP %s / Graph %s / subcode %s", async (status, code, subcode) => {
+      fetcher.mockResolvedValueOnce(response({ data: [] }))
+        .mockResolvedValueOnce(response({ error: { code, error_subcode: subcode, message: "provider detail" } }, status));
+      expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false, reason: "direct_account_access_failed" });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(["alligodang.official", "highscoop.official", "fryday.official.kr"])("does not reuse another channel's candidate for %s", async username => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400));
+      expect(await accountIdentity(token, "facebook", username)).toMatchObject({ ok: false, reason: "direct_account_access_failed" });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher.mock.calls.every(([url]) => !new URL(url).pathname.includes(alternateId))).toBe(true);
+    });
+
+    it("never uses the candidate to recover a nonempty assigned-list profile error", async () => {
+      fetcher.mockResolvedValueOnce(response({ data: [{ id: penguinId }] })).mockResolvedValueOnce(response(objectError, 400));
+      expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false, reason: "account_identity_incomplete" });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not try another ID after an exact primary profile's quota is denied", async () => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(profile)).mockResolvedValueOnce(response(objectError, 400));
+      const { db, transaction } = connectionDatabase();
+      await expect(connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test"))
+        .rejects.toMatchObject({ status: 400, extra: { code: "direct_publish_access_failed" } });
+      expect(transaction).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(fetcher.mock.calls.every(([url]) => !new URL(url).pathname.includes(alternateId))).toBe(true);
+    });
+
+    it.each([
+      ["the primary ID instead of the requested candidate", profile, "account_mismatch"],
+      ["a different account", { id: alternateId, username: "highscoop.official" }, "account_mismatch"],
+      ["missing identity", {}, "invalid_account_response"],
+      ["an unsafe username", { id: alternateId, username: `https://private.example/${token}` }, "invalid_account_response"],
+    ])("does not save a candidate profile with %s", async (_name, body, reason) => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400)).mockResolvedValueOnce(response(body));
+      const { db, transaction } = connectionDatabase();
+      const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+      expect(failure).toMatchObject({ status: 400, extra: { code: reason } });
+      expect(failure.message).not.toContain(token);
+      expect(failure.message).not.toContain("https://");
+      expect(transaction).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledTimes(3);
+    });
+
+    it.each(["denied", "malformed", "transport failure"])("does not save the candidate when its quota has %s", async failureKind => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400)).mockResolvedValueOnce(response(alternateProfile));
+      if (failureKind === "transport failure") fetcher.mockRejectedValueOnce(new Error(`private failure ${token}`));
+      else fetcher.mockResolvedValueOnce(failureKind === "denied" ? response({ error: { code: 200, message: `private failure ${token}` } }, 403) : response({ data: [] }));
+      const { db, transaction } = connectionDatabase();
+      const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_publish_access_failed" } });
+      expect(failure.message).not.toContain(token);
+      expect(transaction).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledTimes(4);
+      expect(new URL(fetcher.mock.calls[3][0]).pathname).toBe(`/v26.0/${alternateId}/content_publishing_limit`);
+    });
+
+    it("stops after one candidate request if that request fails in transit", async () => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400)).mockRejectedValueOnce(new Error(`private failure ${token}`));
+      const { db, transaction } = connectionDatabase();
+      const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_account_access_failed" }, message: expect.stringContaining("[진단: alternate_profile / HTTP - / Graph - / subcode - / lost=true]") });
+      expect(failure.message).not.toContain(token);
+      expect(transaction).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledTimes(3);
+    });
+  });
+
   describe("safe lookup failure diagnostics", () => {
     const privateText = `provider-secret=${token}; https://private.example/?access_token=${token}`;
 
@@ -340,15 +435,18 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
       [400, 190, 463],
       [403, 200, undefined],
     ])("shows only HTTP %s and numeric Graph %s/%s for a failed direct profile", async (status, code, subcode) => {
-      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response({
+      const providerError = {
         error: { code, error_subcode: subcode, message: privateText, type: "PRIVATE_PROVIDER_TYPE", fbtrace_id: "PRIVATE_TRACE", error_data: { access_token: token }, httpStatus: 299, lost: true },
         access_token: token, url: privateText,
-      }, status));
+      };
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(providerError, status));
+      const usesAlternate = status === 400 && code === 100 && subcode === 33;
+      if (usesAlternate) fetcher.mockResolvedValueOnce(response(providerError, status));
       const result = await accountIdentity(token, "facebook", "spacepenguin.co");
-      expect(result).toMatchObject({ ok: false, reason: "direct_account_access_failed", error: expect.stringContaining(`[진단: direct_profile / HTTP ${status} / Graph ${code} / subcode ${subcode ?? "-"} / lost=false]`) });
+      expect(result).toMatchObject({ ok: false, reason: "direct_account_access_failed", error: expect.stringContaining(`[진단: ${usesAlternate ? "alternate_profile" : "direct_profile"} / HTTP ${status} / Graph ${code} / subcode ${subcode ?? "-"} / lost=false]`) });
       const shown = JSON.stringify(result);
       for (const forbidden of [token, "https://", "PRIVATE_PROVIDER_TYPE", "PRIVATE_TRACE", "error_data", "299"]) expect(shown).not.toContain(forbidden);
-      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher).toHaveBeenCalledTimes(usesAlternate ? 3 : 2);
       expect(fetcher.mock.calls.every(([, init]) => init.method === "GET")).toBe(true);
     });
 
@@ -385,16 +483,17 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
     });
 
     it("propagates only the safe diagnostic in the existing connection error without saving", async () => {
-      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response({ error: { code: 100, error_subcode: 33, message: privateText, fbtrace_id: "PRIVATE_TRACE" } }, 400));
+      const providerError = { error: { code: 100, error_subcode: 33, message: privateText, fbtrace_id: "PRIVATE_TRACE" } };
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(providerError, 400)).mockResolvedValueOnce(response(providerError, 400));
       const { db, transaction } = connectionDatabase();
       const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
-      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_account_access_failed" }, message: expect.stringContaining("[진단: direct_profile / HTTP 400 / Graph 100 / subcode 33 / lost=false]") });
+      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_account_access_failed" }, message: expect.stringContaining("[진단: alternate_profile / HTTP 400 / Graph 100 / subcode 33 / lost=false]") });
       expect(failure.message).not.toContain(token);
       expect(failure.message).not.toContain("https://");
       expect(failure.message).not.toContain("PRIVATE_TRACE");
       expect(failure.extra).toEqual({ code: "direct_account_access_failed" });
       expect(transaction).not.toHaveBeenCalled();
-      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(fetcher).toHaveBeenCalledTimes(3);
     });
   });
 });
