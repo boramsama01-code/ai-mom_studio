@@ -38,6 +38,7 @@ function itemFixture() {
     cards: [{ id: 40, revisionId: 4, sha256: "test", createdAt: past, cloudinaryUrl: null }],
     approvals: [{ id: 10, revisionId: 4, scheduledAt: past, status: "active" }],
     deliveries: [{ d: { id: 100, approvalId: 10, status: "scheduled", lastError: null, externalUrl: null, completedAt: null }, dest: { label: "@highscoop.official", platform: "instagram" } }],
+    publicationDraft: { version: 1, captions: { instagram: "확인한 캡션", telegram: "" } },
     similar: [], defaultCaptions: { instagram: "확인한 캡션", telegram: "" },
     publicationReadiness: { ready: true, blockers: [], dryRun: false, autoPublish: true, dailyLimit: 3, expectedUsername: "highscoop.official", destinations: [{ id: 20, label: "@highscoop.official", platform: "instagram", configured: true }] },
   };
@@ -64,8 +65,8 @@ beforeEach(() => {
       detail = { ...detail, approvals: [{ id: 11, revisionId: 4, scheduledAt: options.body?.timing === "later" ? options.body.scheduledAt : new Date().toISOString(), status: "active" }], deliveries: [{ d: { id: 101, approvalId: 11, status: "scheduled", lastError: null, externalUrl: null, completedAt: null }, dest: { label: "@highscoop.official", platform: "instagram" } }] };
       return { ok: true, destinations: 1, approval: detail.approvals[0], timing: options.body?.timing, workerStarted: options.body?.timing === "now" };
     }
-    if (path === "/deliveries?channelId=all") return detail.deliveries.map((row: any) => ({ ...structuredClone(row), ap: detail.approvals.find((a: any) => a.id === row.d.approvalId), item: detail.item }));
-    if (path === "/publication-orphans?channelId=all") return structuredClone(orphanRows);
+    if (path.startsWith("/deliveries?")) return detail.deliveries.map((row: any) => ({ ...structuredClone(row), ap: detail.approvals.find((a: any) => a.id === row.d.approvalId), item: detail.item }));
+    if (path.startsWith("/publication-orphans?")) return structuredClone(orphanRows);
     if (path === "/studio/cards/8/publication") return structuredClone(studioStatus);
     throw new Error(`Unexpected API call: ${path}`);
   });
@@ -208,6 +209,35 @@ describe("승인 저장과 실제 전송의 구분", () => {
 });
 
 describe("발행함과 제작 보드의 전송 상태", () => {
+  it("uses server totals and status pagination to find an old unresolved delivery beyond the first hundred", async () => {
+    const fallback = mocks.api.getMockImplementation()!;
+    const rows = Array.from({ length: 125 }, (_, index) => ({
+      ...structuredClone(detail.deliveries[0]),
+      d: { ...structuredClone(detail.deliveries[0].d), id: 1000 + index, status: index === 124 ? "unknown" : "scheduled" },
+      ap: detail.approvals[0], item: { ...detail.item, title: index === 124 ? "오래된 결과 미확정 콘텐츠" : `예약 ${index + 1}` },
+      canonicalStudioCardId: index === 124 ? 88 : null,
+    }));
+    mocks.api.mockImplementation(async (path, options) => {
+      if (path.startsWith("/deliveries?")) {
+        const query = new URL(path, "https://fixture.invalid").searchParams;
+        const page = Number(query.get("page")); const size = Number(query.get("pageSize"));
+        const states = query.get("status")?.split(",");
+        const filtered = rows.filter(row => !states || states.includes(row.d.status));
+        return { items: filtered.slice((page - 1) * size, page * size), total: filtered.length, page, pageSize: size, counts: { unknown: 1, scheduled: 124, needsAttention: 1, overdue: 124 } };
+      }
+      return fallback(path, options);
+    });
+    await render(createElement(PublishPage));
+    expect(host.textContent).toContain("조회 결과 총 125건 · 이 페이지 30건");
+    expect(host.textContent).not.toContain("오래된 결과 미확정 콘텐츠");
+    await click("다음");
+    expect(mocks.api.mock.calls.some(([path]) => path.startsWith("/deliveries?") && path.includes("page=2"))).toBe(true);
+    await click("실패·확인 필요부터 보기");
+    expect(host.textContent).toContain("조회 결과 총 1건 · 이 페이지 1건");
+    expect(host.textContent).toContain("오래된 결과 미확정 콘텐츠");
+    expect(host.querySelector('a.title')?.getAttribute("href")).toBe("/studio/88?tab=delivery");
+    expect(writes()).toEqual([]);
+  });
   it("shows overdue records immediately and links to the record tab instead of the source editor", async () => {
     await render(createElement(PublishPage));
     expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("목록");
@@ -224,11 +254,13 @@ describe("발행함과 제작 보드의 전송 상태", () => {
     detail.deliveries = [];
     orphanRows = [{ ap: detail.approvals[0], item: detail.item, reason: "활성 게시 목적지가 없어 전송 예약이 만들어지지 않았습니다." }];
     await render(createElement(PublishPage));
+    expect(host.textContent).toContain("전송 예약 없음 1건");
+    await click("승인만 저장된 기록 보기");
     expect(host.textContent).toContain("승인 저장됨 · 전송 예약 없음");
     expect(host.textContent).toContain("활성 게시 목적지가 없어 전송 예약이 만들어지지 않았습니다.");
     expect(host.textContent).not.toContain("선택한 채널에 전송 예약이 없습니다.");
     expect(host.querySelector('a.title')?.getAttribute("href")).toBe("/items/2/9?tab=delivery");
-    expect(mocks.api).toHaveBeenCalledWith("/publication-orphans?channelId=all");
+    expect(mocks.api.mock.calls.some(([path]) => path.startsWith("/publication-orphans?channelId=all") && path.includes("page=1") && path.includes("pageSize=30"))).toBe(true);
     expect(writes()).toEqual([]);
   });
 

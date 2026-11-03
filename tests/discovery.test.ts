@@ -160,9 +160,14 @@ describe("수집 실행 안의 자동 발굴", () => {
       const fossil = args.candidates.find((c) => c.titles[0].includes("공룡"))!;
       return { ok: true, model: "m", usage: { inputTokens: 100, outputTokens: 50 }, droppedEvidence: 0, data: { picks: [{ candidate_id: fossil.id, reason: "화석으로 과거를 추론하는 과정을 이야기하기 좋음", angle: "뼈 몇 조각으로 어떻게 새 종이라고 알 수 있을까?" }] } };
     });
-    fakeScience.mockResolvedValue({
+    fakeScience.mockImplementation(async (args: { budget: { take(): boolean; inputTokens: number; outputTokens: number } }) => {
+      if (!args.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달" };
+      args.budget.inputTokens += 1000;
+      args.budget.outputTokens += 500;
+      return {
       ok: true, model: "m", usage: { inputTokens: 1000, outputTokens: 500 }, droppedEvidence: 0,
       data: { topic: "공룡 화석", age_band: "중1~3", key_question: "뼈 몇 조각으로 새 종을 알 수 있을까?", background: ["a", "b", "c"], discussion_questions: ["1", "2", "3"], scientific_basis: "x", misconceptions: [], parent_hints: [], safe_activity: null, sources: [], evidence: [], cardCopy: cardCopyFixture() },
+      };
     });
     try {
       const db = getDb();

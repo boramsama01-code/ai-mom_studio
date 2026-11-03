@@ -13,8 +13,8 @@ function fixture(status = "failed") {
   const stamp = new Date("2026-11-03T10:00:00Z");
   const item = { id: 1, currentRevisionId: 7, reviewStatus: "reviewed", relevance: "relevant", excluded: false, publishStatus: status };
   const approval = { id: 21, contentItemId: 1, revisionId: 7, channelId: 3, status: "active", scheduledAt: stamp };
-  const delivery = { id: 44, approvalId: 21, channelId: 3, destinationId: 90, status, updatedAt: stamp, externalId: null as string | null, externalUrl: null, externalContainerId: "container", completedAt: stamp, requestStartedAt: stamp, attempts: 2, lastError: "fixture", errorKind: "transient" };
-  const rows: Record<string, Array<Record<string, any>>> = { content_items: [item], approvals: [approval], deliveries: [delivery], audit_logs: [] };
+  const delivery = { id: 44, approvalId: 21, channelId: 3, destinationId: 90, status, destinationSnapshot: { version: 1, accountId: "123" }, phase: "finished", needsReconciliation: false, updatedAt: stamp, externalId: null as string | null, externalUrl: null, externalContainerId: "container", completedAt: stamp, requestStartedAt: stamp, attempts: 2, lastError: "fixture", errorKind: "transient" };
+  const rows: Record<string, Array<Record<string, any>>> = { content_items: [item], approvals: [approval], deliveries: [delivery], audit_logs: [], delivery_attempt_events: [], publisher_heartbeats: [] };
   const predicates: Array<{ sql: string; params: unknown[] }> = [];
   const locked: string[] = [];
   let onLock: ((name: string) => void) | undefined;
@@ -60,7 +60,10 @@ function fixture(status = "failed") {
     return query;
   }
   let serial = Promise.resolve<unknown>(undefined);
-  const db = { select, update, insert: (table: any) => ({ values: async (value: unknown) => { rows[getTableName(table)].push(value as any); } }),
+  const db = { select, update, insert: (table: any) => ({ values: (value: unknown) => {
+    const apply = () => { rows[getTableName(table)].push(value as any); };
+    return { then(resolve: (value: unknown) => unknown) { apply(); return Promise.resolve(undefined).then(resolve); }, onConflictDoUpdate() { apply(); return Promise.resolve(); } };
+  } }),
     transaction: vi.fn((callback: (tx: DB) => Promise<unknown>) => { const result = serial.then(() => callback(db as unknown as DB)); serial = result.catch(() => undefined); return result; }),
   };
   return { db: db as unknown as DB, item, approval, delivery, rows, predicates, locked,

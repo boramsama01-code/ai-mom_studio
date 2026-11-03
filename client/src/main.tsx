@@ -11,6 +11,7 @@ import { Icon, type IconName } from "./icons";
 import { useFocusScope } from "./useFocusScope";
 import { api } from "./api";
 import { ChannelProvider, DirtyGuardProvider, useChannel, useDirtyGuard, useMe } from "./state";
+import { GuardedRouter } from "./GuardedRouter";
 import { DirtyModal, ErrorBox, GuardedLink, Loading } from "./ui";
 import { ToastProvider, useToast } from "./toast";
 import { CommandPalette } from "./palette";
@@ -21,7 +22,6 @@ import { AccountPage, PasswordSetupPage } from "./pages/Password";
 const TodayPage = lazy(() => import("./pages/Today").then(m => ({ default: m.TodayPage })));
 const InboxPage = lazy(() => import("./pages/Inbox").then(m => ({ default: m.InboxPage })));
 const ItemDetailPage = lazy(() => import("./pages/ItemDetail").then(m => ({ default: m.ItemDetailPage })));
-const DraftsPage = lazy(() => import("./pages/Drafts").then(m => ({ default: m.DraftsPage })));
 const RulesPage = lazy(() => import("./pages/Rules").then(m => ({ default: m.RulesPage })));
 const PublishPage = lazy(() => import("./pages/Publish").then(m => ({ default: m.PublishPage })));
 const ChannelSettingsPage = lazy(() => import("./pages/ChannelSettings").then(m => ({ default: m.ChannelSettingsPage })));
@@ -49,7 +49,6 @@ const NAV: Array<{ group: string; collapsible?: boolean; items: Array<{ href: st
     collapsible: true,
     items: [
       { href: "/today", label: "아침 수집 브리핑", icon: "sun" },
-      { href: "/drafts", label: "콘텐츠 초안", icon: "pen" },
     ],
   },
   {
@@ -93,12 +92,23 @@ function Shell() {
     refetchInterval: 120_000,
   });
   const inStudio = loc === "/" || loc.startsWith("/studio");
+  const editingContent = /^\/(?:studio\/\d+|items\/\d+\/\d+)\/?$/.test(loc);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const update = () => setKeyboardOpen(window.innerHeight - viewport.height > 150);
+    update();
+    viewport.addEventListener("resize", update);
+    return () => viewport.removeEventListener("resize", update);
+  }, []);
   const isActive = (href: string) => (href === "/" ? inStudio : loc.startsWith(href) || (href === "/inbox" && loc.startsWith("/items")));
-  const logout = async () => {
-    await api("/auth/logout", { method: "POST" });
-    qc.clear();
-    location.href = "/";
-  };
+  const logout = () => guard.confirmLeave(() => {
+    void api("/auth/logout", { method: "POST" }).then(() => {
+      qc.clear();
+      location.href = "/";
+    }).catch(error => toast("err", (error as Error).message));
+  });
   const collect = useCallback(async () => {
     try {
       const r = await api<{ inline: boolean }>("/collection/collect", { method: "POST", body: { channelId: selected } });
@@ -133,7 +143,7 @@ function Shell() {
   const activeNav = NAV.flatMap(g => g.items).find(n => isActive(n.href));
   const sectionName = NAV.find(g => g.items.some(n => isActive(n.href)))?.group ?? "스튜디오";
   return (
-    <div className="shell">
+    <div className={`shell${editingContent ? " is-content-editor" : ""}${keyboardOpen ? " keyboard-open" : ""}`}>
       <a href="#main" className="skip-link">
         본문으로 건너뛰기
       </a>
@@ -203,7 +213,7 @@ function Shell() {
           <Route path="/today" component={TodayPage} />
           <Route path="/inbox" component={InboxPage} />
           <Route path="/items/:cid/:id">{(p) => <ItemDetailPage cid={Number(p.cid)} id={Number(p.id)} />}</Route>
-          <Route path="/drafts" component={DraftsPage} />
+          <Route path="/drafts"><Redirect to="/" replace /></Route>
           <Route path="/rules" component={RulesPage} />
           <Route path="/design" component={DesignPage} />
           <Route path="/publish" component={PublishPage} />
@@ -248,11 +258,9 @@ function AuthenticatedRoot() {
     );
   if (!me.data?.user) return <LoginPage me={me.data!} />;
   return (
-    <DirtyGuardProvider>
-      <ChannelProvider>
-        <Shell />
-      </ChannelProvider>
-    </DirtyGuardProvider>
+    <ChannelProvider>
+      <Shell />
+    </ChannelProvider>
   );
 }
 
@@ -260,7 +268,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <Root />
+        <DirtyGuardProvider><GuardedRouter><Root /></GuardedRouter></DirtyGuardProvider>
       </ToastProvider>
     </QueryClientProvider>
   </StrictMode>,

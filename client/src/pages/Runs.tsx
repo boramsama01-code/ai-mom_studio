@@ -5,12 +5,14 @@ import { Badge, Empty, ErrorBox, fmtDate, Loading, StatusBadge } from "../ui";
 import type { Job, Run } from "@shared/schema";
 
 type WorkerRun = { id: number; workerId: string; command: string; status: string; processed: number; failed: number; note: string; startedAt: string; finishedAt: string | null };
+const jobLabels: Record<string, string> = { collect: "자료 수집", publish: "게시", studio_generate: "콘텐츠 AI 작성", source_generate: "원문 초안 AI 작성", card_copy_generate: "카드 문구 AI 제안" };
+const cancellableRunningJobs = new Set(["studio_generate", "source_generate", "card_copy_generate"]);
 
 export function RunsPage() {
   const { selected, channels } = useChannel();
   const qc = useQueryClient();
   const runs = useQuery({ queryKey: ["ch", selected, "runs"], queryFn: () => api<{ runs: Run[]; workers: WorkerRun[] }>(`/runs?${qs({ channelId: selected })}`) });
-  const jobs = useQuery({ queryKey: ["ch", selected, "jobs"], queryFn: () => api<Job[]>(`/jobs?${qs({ channelId: selected })}`) });
+  const jobs = useQuery({ queryKey: ["ch", selected, "jobs"], queryFn: () => api<Job[]>(`/jobs?${qs({ channelId: selected })}`), refetchInterval: query => query.state.data?.some(job => job.status === "running" || job.status === "queued") ? 5000 : false });
   const cancel = useMutation({ mutationFn: (id: number) => api(`/jobs/${id}/cancel`, { method: "POST", body: {} }), onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", selected] }) });
   const chName = (id: number | null) => channels.find((c) => c.id === id)?.name ?? "—";
   const current = channels.find((c) => c.id === selected);
@@ -72,11 +74,11 @@ export function RunsPage() {
               {jobs.data!.map((j) => (
                 <tr key={j.id}>
                   <td>{j.id}</td>
-                  <td>{j.type === "collect" ? "수집" : j.type === "publish" ? "게시" : j.type}{selected === "all" && <div className="small muted">{chName(j.channelId)}</div>}</td>
+                  <td>{jobLabels[j.type] ?? j.type}{selected === "all" && <div className="small muted">{chName(j.channelId)}</div>}</td>
                   <td><StatusBadge type="job" value={j.status} />{j.attempts > 0 && <div className="small muted">시도 {j.attempts}회</div>}</td>
                   <td className="small">{fmtDate(j.createdAt as unknown as string)}</td>
                   <td className="small">{j.lastError ?? (j.status === "queued" ? "워커 실행을 기다리는 중" : "")}</td>
-                  <td>{j.status === "queued" && <button className="btn sm" onClick={() => cancel.mutate(j.id)}>취소</button>}</td>
+                  <td>{(j.status === "queued" || (j.status === "running" && cancellableRunningJobs.has(j.type))) && <button className="btn sm" disabled={cancel.isPending} onClick={() => cancel.mutate(j.id)}>{cancel.isPending && cancel.variables === j.id ? "중단 확인 중…" : j.status === "running" ? "AI 작업 중단" : "취소"}</button>}</td>
                 </tr>
               ))}
             </tbody>

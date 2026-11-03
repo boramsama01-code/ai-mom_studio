@@ -17,3 +17,20 @@
 .source-board-notes { max-width: 1120px; margin: 18px auto 0; }
 .inbox-collection-options .collection-compact-head { flex-wrap: wrap; }
 .inbox-collection-options .collection-panel { min-width: 0; }
+.publication-destinations{border:1px solid var(--border);border-radius:12px;padding:14px;min-width:0}
+.publication-destinations legend{font-weight:700;padding:0 6px}.publication-destinations .check{overflow-wrap:anywhere}
+.publication-draft-save{justify-content:space-between;gap:12px;padding:10px 0}
+.card-copy-compare pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:320px;overflow:auto}
+@media(max-width:900px){
+  /* Editing has one bottom action region. The header menu still exposes the
+     three destinations; it no longer covers the save/render controls. */
+  .is-content-editor .mobile-nav{display:none}
+  .is-content-editor .main{padding-bottom:calc(30px + env(safe-area-inset-bottom))}
+  .is-content-editor .card-copy-savebar{position:sticky;bottom:0;z-index:10;padding:12px 0 max(12px,env(safe-area-inset-bottom));border-top:1px solid var(--border)}
+  .is-content-editor .content-drawer .savebar{position:static}
+  .keyboard-open .card-copy-savebar{position:static}
+  body:has(.is-content-editor) .toasts{top:calc(76px + env(safe-area-inset-top));bottom:auto;pointer-events:none}
+  body:has(.is-content-editor) .toast{pointer-events:auto}
+  .publication-draft-save>.btn{min-height:44px}
+  .content-workspace input[type=datetime-local]{min-width:0;max-width:100%;width:100%}
+}

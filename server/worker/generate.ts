@@ -9,8 +9,9 @@ import { draftCurrent, draftScience, LlmBudget, PROMPT_VERSION, type LlmSource, 
 import { createRevision } from "../content";
 import { itemPrimarySource } from "../services/itemSources";
 import { preserveCardCopy } from "../../shared/cardCopy";
+import { assertGenerationActive, completeGenerationResult } from "../services/generationContext";
 
-export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider, templateKey?: string) {
+export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider, templateKey?: string, options: { budget?: LlmBudget } = {}) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
   if (!item) return { ok: false as const, error: "항목 없음" };
   if (item.kind !== "science_dialogue" && item.kind !== "current_dialogue")
@@ -33,7 +34,7 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   if (item.kind === "current_dialogue" && !sources.length)
     return { ok: false as const, error: "시사 대화는 원문이 확보된 자료가 있어야 생성합니다(제목만으로 생성하지 않음)." };
 
-  const budget = new LlmBudget(2); // 한 항목: 본 호출 1 + 형식 수정 재시도 1
+  const budget = options.budget ?? new LlmBudget(2); // 자동 수집은 실행 전체의 동일 예산을 전달한다.
   const r =
     item.kind === "science_dialogue"
       ? await draftScience({ topic: item.topicKey || item.title, sources, now, budget, provider, templateKey: selectedTemplate })
@@ -47,6 +48,7 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
 
   const rev = await db.transaction(async (tx) => {
     const [locked] = await tx.select().from(contentItems).where(eq(contentItems.id, itemId)).for("update");
+    await assertGenerationActive(tx as unknown as DB);
     if (!locked || locked.version !== item.version || locked.currentRevisionId !== item.currentRevisionId) return null;
     const [previous] = locked.currentRevisionId ? await tx.select({ payload: contentRevisions.payload }).from(contentRevisions).where(eq(contentRevisions.id, locked.currentRevisionId)) : [];
     const savedPayload = preserveCardCopy(payload, previous?.payload);
@@ -75,6 +77,8 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
         updatedAt: now,
       })
       .where(eq(contentItems.id, itemId));
+    const [freshItem] = await tx.select().from(contentItems).where(eq(contentItems.id, itemId));
+    await completeGenerationResult(tx as unknown as DB, freshItem);
     return rev;
   });
   if (!rev) return { ok: false as const, error: "생성 중 원고가 변경되었습니다. 새 편집본을 유지했습니다. 새로고침 후 다시 생성해 주세요." };

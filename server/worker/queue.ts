@@ -78,7 +78,7 @@ export async function claimJob(db: DB, workerId: string, types: string[]): Promi
 export async function heartbeat(db: DB, jobId: number, workerId: string): Promise<boolean> {
   const r = await db.execute(sql`
     update jobs set heartbeat_at = now(), lease_expires_at = now() + (${LEASE_MS} || ' milliseconds')::interval
-    where id = ${jobId} and lease_owner = ${workerId} and status = 'running'
+    where id = ${jobId} and lease_owner = ${workerId} and status = 'running' and lease_expires_at > clock_timestamp()
   `);
   return (r.rowCount ?? 0) > 0;
 }

@@ -5,7 +5,7 @@ import { Router } from "express";
 import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
-import { appSettings, auditLogs, contentItems, jobs, runs, workerRuns } from "../../shared/schema";
+import { appSettings, approvals, auditLogs, contentItems, deliveries, jobs, runs, workerRuns } from "../../shared/schema";
 import { ah, HttpError, intParam, loadChannel, parse } from "./util";
 import { actorOf } from "../auth";
 import { audit } from "../audit";
@@ -13,6 +13,9 @@ import { enqueueJob } from "../worker/queue";
 import { env, integrationStatus } from "../env";
 import { kickInlineCollect } from "../worker/inline";
 import { resolveDiscovery } from "../../shared/domain";
+import { getPublisherHealth } from "../services/publicationHealth";
+import { cancelGeneration, stopActiveGenerations } from "../services/sourceGeneration";
+import { stopActiveCollections } from "../worker/run";
 
 export const opsRoutes = Router();
 
@@ -24,15 +27,23 @@ opsRoutes.get(
     const [{ queued }] = (await db.select({ queued: sql<number>`count(*)::int` }).from(jobs).where(eq(jobs.status, "queued"))) as Array<{ queued: number }>;
     const [gs] = await db.select().from(appSettings).where(eq(appSettings.key, "global_stop"));
     const [ac] = await db.select().from(appSettings).where(eq(appSettings.key, "auto_collect"));
+    const publisher = await getPublisherHealth(db);
+    const [publicationCounts] = await db.select({
+      overdueCount: sql<number>`count(*) filter (where ${deliveries.status} = 'scheduled' and ${approvals.scheduledAt} < now() - interval '1 minute')::int`,
+      unknownCount: sql<number>`count(*) filter (where ${deliveries.status} = 'unknown' or ${deliveries.needsReconciliation} = true)::int`,
+      processingCount: sql<number>`count(*) filter (where ${deliveries.status} = 'processing')::int`,
+      oldestPendingAt: sql<string | null>`min(${approvals.scheduledAt}) filter (where ${deliveries.status} = 'scheduled')`,
+    }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId));
     res.json({
       autoCollect: env.autoCollect || ac?.value === true,
       autoCollectFromEnv: env.autoCollect,
       inlineWorker: env.inlineWorker,
       integrations: integrationStatus(),
       worker: lastWorker ?? null,
-      // 하루 두 번(12시간 간격) 수집 + GitHub 예약 지연 여유 2시간
       inlinePublishing: env.inlineWorker && env.autoPublish && !env.dryRun && !env.canonicalRedirectUrl,
-      workerConnected: (env.inlineWorker && env.autoPublish && !env.dryRun && !env.canonicalRedirectUrl) || !!lastWorker && Date.now() - new Date(lastWorker.startedAt).getTime() < 14 * 3600_000,
+      workerConnected: publisher.connected,
+      publisherHealth: { ...publisher, ...publicationCounts },
+      collectorConnected: !!lastWorker && Date.now() - new Date(lastWorker.startedAt).getTime() < 14 * 3600_000,
       queuedJobs: queued,
       globalStop: gs ? gs.value === true : false,
     });
@@ -120,10 +131,9 @@ opsRoutes.post(
   ah(async (req, res) => {
     const id = intParam(req.params.id);
     const db = getDb();
-    const upd = await db.update(jobs).set({ status: "cancelled", finishedAt: new Date() }).where(and(eq(jobs.id, id), eq(jobs.status, "queued"))).returning();
-    if (!upd.length) throw new HttpError(400, "처리 시작 전 작업만 취소할 수 있습니다.");
-    await audit(db, { actor: actorOf(req), action: "cancel", entity: "job", entityId: id, channelId: upd[0].channelId });
-    res.json(upd[0]);
+    const result = await cancelGeneration(db, id, actorOf(req));
+    if (!result.cancelled) throw new HttpError(409, "이미 완료된 작업입니다. 결과를 확인하세요.");
+    res.json(result.job);
   }),
 );
 
@@ -137,7 +147,9 @@ opsRoutes.put(
       .values({ key: "global_stop", value: body.stop })
       .onConflictDoUpdate({ target: appSettings.key, set: { value: body.stop, updatedAt: new Date() } });
     await audit(db, { actor: actorOf(req), action: body.stop ? "global_stop_on" : "global_stop_off", entity: "settings" });
-    res.json({ globalStop: body.stop });
+    if (body.stop) stopActiveCollections();
+    const cancelledGenerations = body.stop ? await stopActiveGenerations(db, actorOf(req)) : 0;
+    res.json({ globalStop: body.stop, cancelledGenerations });
   }),
 );
 

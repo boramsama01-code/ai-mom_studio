@@ -30,6 +30,10 @@ import { actorOf } from "../auth";
 import { audit } from "../audit";
 import { emptyPayload, payloadSchemaFor } from "../../shared/payloads";
 import { createRevision } from "../content";
+import { ensureSourceWorkspace } from "../services/sourceWorkspace";
+import { persistSourceFetchAttempt } from "../services/sourceFetchPersistence";
+import { cancelSourceGenerationRequest, runSourceGeneration } from "../services/sourceGeneration";
+import { revokePublicationEligibility } from "../services/publicationState";
 import { computeScheduleStatus, kstToday } from "../services/dates";
 import { fetchPublisherArticle as fetchAndExtract } from "../services/publisherLookup";
 import { sourceFetchUrl } from "../services/sourceFetchUrl";
@@ -37,7 +41,7 @@ import { normalizeUrl } from "../services/url";
 import { extractForItem } from "../worker/collect";
 import { generateCardCopy, LlmBudget, type LlmSource } from "../services/llm";
 import { generateDialogueDraft } from "../worker/generate";
-import { approveItem, cancelApproval, findReusableCardCover, renderCardForItem, retryDelivery, sourceOrgFor } from "../worker/publish";
+import { approveItem, cancelApproval, findReusableCardCover, renderCardForItem, retryDelivery, sourceOrgFor, reconcileDelivery, confirmDeliveryPosted, confirmDeliveryNotPosted } from "../worker/publish";
 import { kickInlinePublish } from "../worker/inlinePublish";
 import { publicationReadiness } from "../services/publishReadiness";
 import { buildCaptions } from "../services/cardModel";
@@ -173,7 +177,13 @@ itemRoutes.get(
       .where(and(eq(mediaAssets.contentItemId, item.id), eq(mediaAssets.kind, "card")))
       .orderBy(desc(mediaAssets.id))
       .limit(5);
-    const aps = await db.select().from(approvals).where(eq(approvals.contentItemId, item.id)).orderBy(desc(approvals.id)).limit(5);
+    const recentApprovals = await db.select().from(approvals).where(eq(approvals.contentItemId, item.id)).orderBy(desc(approvals.id)).limit(5);
+    // Older unresolved attempts must remain visible even after several revisions.
+    const unresolvedApprovals = await db.select().from(approvals).where(and(eq(approvals.contentItemId, item.id), or(
+      eq(approvals.status, "active"),
+      inArray(approvals.id, db.select({ id: deliveries.approvalId }).from(deliveries).where(or(inArray(deliveries.status, ["processing", "unknown"]), eq(deliveries.needsReconciliation, true)))),
+    )));
+    const aps = [...new Map([...recentApprovals, ...unresolvedApprovals].map(row => [row.id, row])).values()].sort((a, b) => b.id - a.id);
     const dels = aps.length
       ? await db
           .select({ d: deliveries, dest: { label: destinations.label, platform: destinations.platform } })
@@ -192,7 +202,9 @@ itemRoutes.get(
             .limit(5)
         : [];
     const defaultCaptions = current ? buildCaptions({ kind: item.kind, payload: current.payload, sourceUrl: primary?.originalUrl ?? null, sourceOrg: await sourceOrgFor(db, item, current.payload) }) : null;
-    res.json({ item, primary, linked, revisions, current, cards, approvals: aps, deliveries: dels, similar, defaultCaptions, imageAiAvailable: studioAiStatus().image, publicationReadiness: await publicationReadiness(db, ch.id) });
+    const publicationDraft = item.publicationDraft ?? { version: 0, captions: defaultCaptions ?? { instagram: "", telegram: "" } };
+    const [workspace] = await db.select({ id: studioCards.id }).from(studioCards).where(eq(studioCards.sourceItemId, item.id));
+    res.json({ item, primary, linked, revisions, current, cards, approvals: aps, deliveries: dels, similar, defaultCaptions, publicationDraft, canonicalStudioCardId: workspace?.id ?? null, imageAiAvailable: studioAiStatus().image, publicationReadiness: await publicationReadiness(db, ch.id) });
   }),
 );
 
@@ -235,6 +247,44 @@ const editSchema = z.object({
   note: z.string().max(300).optional(),
 });
 
+/** Start manual work after a failed AI request without replacing any saved revision. */
+itemRoutes.post("/channels/:cid/items/:id/draft", ah(async (req, res) => {
+  const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  const body = parse(z.object({ version: zVersion.optional() }).strict(), req.body ?? {});
+  const db = getDb();
+  const result = await db.transaction(async tx => {
+    const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+    if (fresh.currentRevisionId) {
+      await ensureSourceWorkspace(tx, fresh.id);
+      return { item: fresh, revisionId: fresh.currentRevisionId, created: false };
+    }
+    if (body.version !== undefined && fresh.version !== body.version) conflict(fresh);
+    const revision = await createRevision(tx, { contentItemId: item.id, author: "operator", payload: emptyPayload(item.kind, fresh.title), note: "직접 초안 작성 시작" });
+    const [saved] = await tx.update(contentItems).set({ version: fresh.version + 1, reviewStatus: "pending", updatedAt: new Date() }).where(eq(contentItems.id, item.id)).returning();
+    await audit(tx, { actor: actorOf(req), action: "start_manual_draft", entity: "content_item", entityId: item.id, channelId: ch.id });
+    return { item: saved, revisionId: revision.id, created: true };
+  });
+  res.status(result.created ? 201 : 200).json(result);
+}));
+
+/** Publication copy has its own CAS version and can be saved without approving a post. */
+itemRoutes.patch("/channels/:cid/items/:id/publication-draft", ah(async (req, res) => {
+  const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  const body = parse(z.object({ version: z.number().int().min(0), captions: z.object({ instagram: z.string().max(5000), telegram: z.string().max(5000) }).strict() }).strict(), req.body);
+  const result = await getDb().transaction(async tx => {
+    const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+    const version = fresh.publicationDraft?.version ?? 0;
+    if (version !== body.version) conflict({ publicationDraft: fresh.publicationDraft });
+    if (fresh.publicationDraft && JSON.stringify(fresh.publicationDraft.captions) === JSON.stringify(body.captions)) return fresh.publicationDraft;
+    await revokePublicationEligibility(tx as unknown as ReturnType<typeof getDb>, item.id, "게시물 캡션 변경 — 다시 확인 후 승인해 주세요.", actorOf(req));
+    const publicationDraft = { version: version + 1, captions: body.captions };
+    await tx.update(contentItems).set({ publicationDraft, updatedAt: new Date() }).where(eq(contentItems.id, item.id));
+    await audit(tx, { actor: actorOf(req), action: "save_publication_draft", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { version: publicationDraft.version } });
+    return publicationDraft;
+  });
+  res.json(result);
+}));
+
 /** 운영자 편집 — 새 버전 생성, 기존 승인 무효화 */
 itemRoutes.patch(
   "/channels/:cid/items/:id",
@@ -249,10 +299,14 @@ itemRoutes.patch(
     }
     const db = getDb();
     const out = await db.transaction(async (tx) => {
+      const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+      if (fresh.version !== body.version) conflict(fresh);
       // Older editors/imports only know source fields. Omission is not a request
       // to erase the separately edited words already used by a card.
-      if (payload && payload.cardCopy === undefined && item.currentRevisionId) {
-        const [previous] = await tx.select({ payload: contentRevisions.payload }).from(contentRevisions).where(eq(contentRevisions.id, item.currentRevisionId));
+      if (payload) {
+        const { cardCopy: _unownedCopy, ...ownedFields } = payload;
+        payload = ownedFields;
+        const [previous] = fresh.currentRevisionId ? await tx.select({ payload: contentRevisions.payload }).from(contentRevisions).where(eq(contentRevisions.id, fresh.currentRevisionId)) : [];
         const savedCopy = cardCopySchema.safeParse(previous?.payload.cardCopy);
         if (savedCopy.success) payload = { ...payload, cardCopy: savedCopy.data };
       }
@@ -261,9 +315,9 @@ itemRoutes.patch(
         .set({
           ...(body.title ? { title: body.title } : {}),
           ...(body.category !== undefined ? { category: body.category } : {}),
-          ...(payload && item.kind === "notice" ? { scheduleStatus: computeScheduleStatus((payload as any).schedules), category: (payload as any).category ?? body.category ?? item.category, schoolType: (payload as any).school_type ?? item.schoolType, relevance: (payload as any).relevance } : {}),
-          ...(payload && item.reviewStatus === "reviewed" ? { reviewStatus: "pending" } : {}),
-          edited: payload ?? item.edited,
+          ...(payload && fresh.kind === "notice" ? { scheduleStatus: computeScheduleStatus((payload as any).schedules), category: (payload as any).category ?? body.category ?? fresh.category, schoolType: (payload as any).school_type ?? fresh.schoolType, relevance: (payload as any).relevance } : {}),
+          ...(payload && fresh.reviewStatus === "reviewed" ? { reviewStatus: "pending" } : {}),
+          edited: payload ?? fresh.edited,
           version: sql`${contentItems.version} + 1`,
           updatedAt: new Date(),
         })
@@ -272,8 +326,8 @@ itemRoutes.patch(
       if (!upd.length) conflict(item);
       if (payload) await createRevision(tx, { contentItemId: item.id, author: "operator", payload, note: body.note ?? "운영자 편집" });
       await audit(tx, { actor: actorOf(req), action: "edit", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { fields: Object.keys(body).filter((k) => k !== "version") } });
-      const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id));
-      return fresh;
+      const [saved] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id));
+      return saved;
     });
     res.json(out);
   }),
@@ -285,19 +339,21 @@ itemRoutes.post(
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
     const body = parse(z.object({ version: zVersion, status: z.enum(["pending", "reviewed", "held", "rejected"]), reason: z.string().max(300).optional() }), req.body);
-    if (body.status === "reviewed") {
-      if (!item.currentRevisionId) throw new HttpError(400, "초안이 없어 검토 완료로 표시할 수 없습니다.");
-      if (item.relevance === "irrelevant") throw new HttpError(400, "'관련 없음' 항목은 검토 완료할 수 없습니다. 제외하거나 관련성을 수정하세요.");
-    }
     const db = getDb();
-    const upd = await db
-      .update(contentItems)
-      .set({ reviewStatus: body.status, version: sql`${contentItems.version} + 1`, updatedAt: new Date() })
-      .where(and(eq(contentItems.id, item.id), eq(contentItems.version, body.version)))
-      .returning();
-    if (!upd.length) conflict(item);
-    await audit(db, { actor: actorOf(req), action: `review:${body.status}`, entity: "content_item", entityId: item.id, channelId: ch.id, detail: { reason: body.reason ?? null } });
-    res.json(upd[0]);
+    const saved = await db.transaction(async tx => {
+      const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+      if (fresh.version !== body.version) conflict(fresh);
+      if (body.status === "reviewed") {
+        if (!fresh.currentRevisionId) throw new HttpError(400, "초안이 없어 검토 완료로 표시할 수 없습니다.");
+        if (fresh.relevance === "irrelevant" || fresh.excluded) throw new HttpError(400, "관련 없음 또는 제외 항목은 검토 완료할 수 없습니다.");
+      }
+      const [row] = await tx.update(contentItems).set({ reviewStatus: body.status, version: fresh.version + 1, updatedAt: new Date() }).where(eq(contentItems.id, item.id)).returning();
+      if (body.status !== "reviewed") await revokePublicationEligibility(tx as unknown as ReturnType<typeof getDb>, item.id, `검토 상태 변경(${body.status}) — 대기 게시 취소`, actorOf(req));
+      await audit(tx, { actor: actorOf(req), action: `review:${body.status}`, entity: "content_item", entityId: item.id, channelId: ch.id, detail: { reason: body.reason ?? null } });
+      const [result] = await tx.select().from(contentItems).where(eq(contentItems.id, row.id));
+      return result;
+    });
+    res.json(saved);
   }),
 );
 
@@ -308,14 +364,17 @@ itemRoutes.post(
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
     const body = parse(z.object({ version: zVersion, excluded: z.boolean(), reason: z.string().max(300).optional() }), req.body);
     const db = getDb();
-    const upd = await db
-      .update(contentItems)
-      .set({ excluded: body.excluded, excludedReason: body.excluded ? body.reason ?? "운영자 제외" : null, version: sql`${contentItems.version} + 1`, updatedAt: new Date() })
-      .where(and(eq(contentItems.id, item.id), eq(contentItems.version, body.version)))
-      .returning();
-    if (!upd.length) conflict(item);
-    await audit(db, { actor: actorOf(req), action: body.excluded ? "exclude" : "unexclude", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { reason: body.reason ?? null } });
-    res.json(upd[0]);
+    const saved = await db.transaction(async tx => {
+      const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+      if (fresh.version !== body.version) conflict(fresh);
+      await tx.update(contentItems).set({ excluded: body.excluded, excludedReason: body.excluded ? body.reason ?? "운영자 제외" : null, version: fresh.version + 1, updatedAt: new Date() }).where(eq(contentItems.id, item.id));
+      if (body.excluded) await revokePublicationEligibility(tx as unknown as ReturnType<typeof getDb>, item.id, body.reason ?? "운영자가 콘텐츠를 제외해 대기 게시를 취소했습니다.", actorOf(req));
+      else await ensureSourceWorkspace(tx, item.id);
+      await audit(tx, { actor: actorOf(req), action: body.excluded ? "exclude" : "unexclude", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { reason: body.reason ?? null } });
+      const [result] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id));
+      return result;
+    });
+    res.json(saved);
   }),
 );
 
@@ -357,25 +416,29 @@ itemRoutes.post(
     const doc = await itemPrimarySource(db, item);
     if (!doc) throw new HttpError(400, "연결된 원문이 없습니다.");
     if (doc.kind === "manual_text") throw new HttpError(409, "직접 저장한 본문을 사용 중입니다. 본문 붙여넣기에서 수정해 주세요.");
+    const attemptStartedAt = new Date();
     const r = await fetchAndExtract(sourceFetchUrl(doc), undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined });
     const now = new Date();
+    const saved = await db.transaction(async tx => {
+      const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+      const result = await persistSourceFetchAttempt(tx as unknown as ReturnType<typeof getDb>, doc.id, r, { attemptStartedAt, attemptedAt: now });
+      const currentSource = await itemPrimarySource(tx as unknown as ReturnType<typeof getDb>, fresh);
+      if (currentSource?.id === doc.id && !result.staleAttempt) {
+        const evidenceStatus = result.hasUsableBody ? fresh.evidenceStatus === "fetch_failed" ? "needs_review" : fresh.evidenceStatus : "fetch_failed";
+        const needsReview = result.changed && fresh.reviewStatus === "reviewed";
+        if (needsReview || evidenceStatus !== fresh.evidenceStatus) {
+          await tx.update(contentItems).set({ evidenceStatus, ...(needsReview ? { reviewStatus: "review_required" } : {}), version: fresh.version + 1, updatedAt: now }).where(eq(contentItems.id, item.id));
+          if (needsReview) await revokePublicationEligibility(tx as unknown as ReturnType<typeof getDb>, item.id, "원문 본문이 변경돼 다시 검토해야 합니다.", actorOf(req));
+        }
+      }
+      return result;
+    });
     if (!r.ok) {
-      // A failed refresh must not invalidate a previously acquired, usable source snapshot.
-      const preservedBody = doc.fetchStatus === "ok" && !!doc.fetchedText?.trim() && !!doc.contentHash;
-      const failureMeta = { ...doc.meta, lastFetchFailure: { status: r.status, error: r.error, attemptedAt: now.toISOString(), sourceUrl: r.finalUrl || sourceFetchUrl(doc) } };
-      await db.update(sourceDocuments).set(preservedBody ? { meta: failureMeta }
-        : { fetchStatus: r.status, fetchError: r.error, attachments: r.attachments ?? doc.attachments, lastFetchedAt: now, meta: failureMeta }).where(eq(sourceDocuments.id, doc.id));
-      if (!preservedBody) await db.update(contentItems).set({ evidenceStatus: "fetch_failed", updatedAt: now }).where(eq(contentItems.id, item.id));
-      const recovery = sourceRecovery({ ...doc, fetchStatus: r.status, fetchError: r.error, meta: { ...failureMeta, ...(!doc.fetchedText && r.finalUrl ? { finalUrl: r.finalUrl } : {}) } });
-      await audit(db, { actor: actorOf(req), action: "fetch_failed", entity: "source_document", entityId: doc.id, channelId: ch.id, detail: { error: r.error, preservedBody } });
-      return res.status(502).json({ error: r.error, status: r.status, recovery, sourceUrl: recovery.links[0]?.url ?? null, preservedBody });
+      const recovery = sourceRecovery({ ...saved.document, fetchStatus: r.status, fetchError: r.error });
+      await audit(db, { actor: actorOf(req), action: "fetch_failed", entity: "source_document", entityId: doc.id, channelId: ch.id, detail: { error: r.error, preservedBody: saved.preservedBody, staleAttempt: saved.staleAttempt } });
+      return res.status(502).json({ error: r.error, status: r.status, recovery, sourceUrl: recovery.links[0]?.url ?? null, preservedBody: saved.preservedBody, staleAttempt: saved.staleAttempt });
     }
-    const changed = doc.contentHash && doc.contentHash !== r.hash;
-    const { lastFetchFailure: _lastFetchFailure, ...sourceMeta } = doc.meta;
-    await db.update(sourceDocuments).set({ fetchStatus: "ok", fetchError: null, fetchedText: r.text, contentHash: r.hash, attachments: r.attachments, lastFetchedAt: now, meta: { ...sourceMeta, finalUrl: r.finalUrl, pageTitle: r.title } }).where(eq(sourceDocuments.id, doc.id));
-    if (item.evidenceStatus === "fetch_failed") await db.update(contentItems).set({ evidenceStatus: "needs_review", updatedAt: now }).where(eq(contentItems.id, item.id));
-    if (changed && item.reviewStatus === "reviewed") await db.update(contentItems).set({ reviewStatus: "review_required", updatedAt: now }).where(eq(contentItems.id, item.id));
-    res.json({ ok: true, changed: !!changed, length: r.text.length });
+    res.json({ ok: true, changed: saved.changed, length: saved.document.fetchedText?.length ?? 0, staleAttempt: saved.staleAttempt });
   }),
 );
 
@@ -408,20 +471,30 @@ itemRoutes.post(
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
     const db = getDb();
-    const { provider, templateKey } = parse(z.object({ provider: z.enum(aiProviders).optional(), templateKey: z.string().min(1).max(40).optional() }).strict(), req.body ?? {});
+    const { provider, templateKey, version, requestId } = parse(z.object({ version: zVersion.optional(), requestId: z.string().uuid().optional(), provider: z.enum(aiProviders).optional(), templateKey: z.string().min(1).max(40).optional() }).strict(), req.body ?? {});
     if (templateKey) await resolveCardCopyStyle(templateKey, ch.id);
-    if (item.kind === "notice") {
-      const r = await extractForItem(db, item.id, new LlmBudget(2), new Date(), undefined, provider, templateKey);
-      if (!r.ok) throw new HttpError(r.kind === "not_configured" ? 503 : 400, r.error);
-    } else {
-      const r = await generateDialogueDraft(db, item.id, new Date(), provider, templateKey);
-      if (!r.ok) throw new HttpError(400, r.error);
-    }
-    await audit(db, { actor: actorOf(req), action: "generate", entity: "content_item", entityId: item.id, channelId: ch.id });
-    const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id));
-    res.json(fresh);
+    const result = await runSourceGeneration(db, { type: "source_generate", itemId: item.id, channelId: ch.id, version: version ?? item.version, requestId, intent: { provider: provider ?? null, templateKey: templateKey ?? null }, actor: actorOf(req) }, async () => {
+      if (item.kind === "notice") {
+        const r = await extractForItem(db, item.id, new LlmBudget(2), new Date(), undefined, provider, templateKey);
+        if (!r.ok) throw new HttpError(r.kind === "not_configured" ? 503 : 400, r.error);
+      } else {
+        const r = await generateDialogueDraft(db, item.id, new Date(), provider, templateKey);
+        if (!r.ok) throw new HttpError(400, r.error);
+      }
+      await audit(db, { actor: actorOf(req), action: "generate", entity: "content_item", entityId: item.id, channelId: ch.id });
+      const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id));
+      return fresh;
+    });
+    res.json(result);
   }),
 );
+
+itemRoutes.post("/channels/:cid/items/:id/generation-cancel", ah(async (req, res) => {
+  const { item } = await loadItem(req.params.cid, req.params.id);
+  const { requestId } = parse(z.object({ requestId: z.string().uuid() }).strict(), req.body);
+  const result = await cancelSourceGenerationRequest(getDb(), item.id, requestId, actorOf(req));
+  res.json({ cancelled: result.cancelled, jobId: result.job.id, jobStatus: result.job.status });
+}));
 
 /* ───────────── 카드 ───────────── */
 async function resolveCardCopyStyle(key: string, channelId: number) {
@@ -499,9 +572,9 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
 /** Explicit AI action returns a proposal; it never overwrites saved/operator copy. */
 itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
-  const body = parse(z.object({ version: zVersion, templateKey: z.string().min(1).max(40), provider: z.enum(aiProviders).optional() }).strict(), req.body);
-  if (item.version !== body.version) conflict(item);
+  const body = parse(z.object({ version: zVersion, requestId: z.string().uuid().optional(), templateKey: z.string().min(1).max(40), provider: z.enum(aiProviders).optional() }).strict(), req.body);
   const db = getDb();
+  const result = await runSourceGeneration(db, { type: "card_copy_generate", channelId: ch.id, itemId: item.id, version: body.version, requestId: body.requestId, intent: { templateKey: body.templateKey, provider: body.provider ?? null }, actor: actorOf(req) }, async () => {
   await resolveCardCopyStyle(body.templateKey, ch.id);
   const revision = await cardCopyRevision(item);
   const [board] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
@@ -519,7 +592,9 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
   const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id));
   if (fresh.version !== body.version || fresh.currentRevisionId !== revision.id) throw new HttpError(409, "AI 작성 중 원고가 변경됐습니다. 입력 내용은 유지했습니다. 최신 원고를 확인해 주세요.");
   await audit(db, { actor: actorOf(req), action: "propose_card_copy", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { templateKey: body.templateKey, model: generated.model, pages: generated.data.pages.length + 1 } });
-  res.json({ version: item.version, revisionId: revision.id, copy: generated.data, model: generated.model });
+  return { version: item.version, revisionId: revision.id, copy: generated.data, model: generated.model };
+  });
+  res.json(result);
 }));
 
 /** Same layout/fonts as final JPEG; no source writes or image-generation calls. */
@@ -593,7 +668,7 @@ itemRoutes.get("/channels/:cid/media/:mid/deck.zip", ah(async (req, res) => {
   const [revision] = await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, cover.revisionId));
   const [item] = await getDb().select().from(contentItems).where(eq(contentItems.id, cover.contentItemId));
   const primary = await itemPrimarySource(getDb(), item);
-  const captions = buildCaptions({ kind: item.kind, payload: revision.payload, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), sourceUrl: primary?.originalUrl ?? null });
+  const captions = item.publicationDraft?.captions ?? buildCaptions({ kind: item.kind, payload: revision.payload, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), sourceUrl: primary?.originalUrl ?? null });
   const files = pages.map((page, i) => ({ name: `page-${String(i + 1).padStart(2, "0")}.jpg`, bytes: page.bytes }));
   const descriptions = cardAltTextState(cover, item.title).values;
   const invalidPage = descriptions.findIndex(value => !!altTextError(value));
@@ -625,6 +700,9 @@ itemRoutes.post(
         revisionId: z.number().int(),
         mediaAssetId: z.number().int(),
         altTextVersion: z.number().int().min(0).optional(),
+        publicationDraftVersion: z.number().int().min(0).optional(),
+        requestId: z.string().uuid().optional(),
+        destinationIds: z.array(z.number().int().positive()).min(1).max(20).refine(ids => new Set(ids).size === ids.length, "게시 계정은 중복 선택할 수 없습니다.").optional(),
         captions: z.object({ instagram: z.string().max(5000), telegram: z.string().max(5000) }),
         timing: z.enum(["now", "later"]).optional(),
         scheduledAt: z.string().datetime({ offset: true }).optional(),
@@ -633,7 +711,7 @@ itemRoutes.post(
     );
     const timing = resolvePublicationTiming(body);
     if (!timing.ok) throw new HttpError(400, timing.error);
-    const r = await approveItem(getDb(), { itemId: item.id, revisionId: body.revisionId, mediaAssetId: body.mediaAssetId, altTextVersion:body.altTextVersion, captions: body.captions, scheduledAt: timing.scheduledAt, actor: actorOf(req) });
+    const r = await approveItem(getDb(), { itemId: item.id, revisionId: body.revisionId, mediaAssetId: body.mediaAssetId, altTextVersion:body.altTextVersion, publicationDraftVersion: body.publicationDraftVersion, requestId: body.requestId, timing: timing.timing, destinationIds: body.destinationIds, captions: body.captions, scheduledAt: timing.scheduledAt, actor: actorOf(req) });
     if (!r.ok) throw new HttpError(400, r.error);
     const workerStarted = timing.timing === "now" && kickInlinePublish(getDb(), { approvalId: r.approval.id });
     res.status(201).json({ ...r, timing: timing.timing, workerStarted });
@@ -666,41 +744,98 @@ itemRoutes.post(
   }),
 );
 
+/** Resolve uncertainty without resending. Channel ownership is checked before any provider lookup. */
+for (const action of ["reconcile", "confirm-posted", "confirm-not-posted"] as const) {
+  itemRoutes.post(`/channels/:cid/deliveries/:did/${action}`, ah(async (req, res) => {
+    const ch = await loadChannel(req.params.cid);
+    const db = getDb();
+    const [delivery] = await db.select().from(deliveries).where(and(eq(deliveries.id, intParam(req.params.did)), eq(deliveries.channelId, ch.id)));
+    if (!delivery) throw new HttpError(404, "전송 기록 없음");
+    const body = parse(z.object({
+      externalId: z.string().trim().min(1).max(200).optional(),
+      externalUrl: z.string().url().max(2000).refine(url => new URL(url).protocol === "https:", "https 게시물 주소를 입력하세요.").optional(),
+      note: z.string().trim().max(500).optional(),
+    }).strict(), req.body ?? {});
+    if (action === "confirm-posted" && !body.externalId && !body.externalUrl) throw new HttpError(400, "게시물 주소 또는 게시물 ID를 입력하세요.");
+    const result = action === "reconcile" ? await reconcileDelivery(db, delivery.id, actorOf(req))
+      : action === "confirm-posted" ? await confirmDeliveryPosted(db, delivery.id, actorOf(req), { ...body, note: body.note || "운영자가 게시 계정에서 게시물을 확인했습니다." })
+      : await confirmDeliveryNotPosted(db, delivery.id, actorOf(req), body.note);
+    if (!result.ok) throw new HttpError(409, result.error);
+    res.json(result);
+  }));
+}
+
+const publicationListQuery = z.object({
+  channelId: z.union([z.literal("all"), z.coerce.number().int().positive()]),
+  page: z.coerce.number().int().min(1).max(100000).optional(),
+  pageSize: z.coerce.number().int().min(5).max(100).optional(),
+  status: z.string().max(150).transform(value => value.split(",")).pipe(z.array(z.enum(["waiting", "scheduled", "processing", "succeeded", "failed", "unknown", "cancelled", "dry_run"])).min(1)).optional(),
+  from: collectionDateSchema.optional(),
+  to: collectionDateSchema.optional(),
+});
+
+function publicationDateConditions(q: z.infer<typeof publicationListQuery>): SQL[] {
+  if (q.from && q.to && q.from > q.to) throw new HttpError(400, "조회 시작일은 종료일보다 늦을 수 없습니다.");
+  return [
+    ...(q.from ? [gte(approvals.scheduledAt, collectionDayRange(q.from).start)] : []),
+    ...(q.to ? [lt(approvals.scheduledAt, collectionDayRange(q.to).end)] : []),
+  ];
+}
+
 /** Read historical approvals which never acquired a destination delivery. */
 itemRoutes.get("/publication-orphans", ah(async (req, res) => {
-  const q = parse(z.object({ channelId: z.union([z.literal("all"), z.coerce.number().int().positive()]) }), req.query);
+  const q = parse(publicationListQuery, req.query);
   const db = getDb();
+  const where = and(eq(approvals.status, "active"), q.channelId === "all" ? undefined : eq(approvals.channelId, q.channelId), ...publicationDateConditions(q), notExists(db.select({ id: deliveries.id }).from(deliveries).where(eq(deliveries.approvalId, approvals.id))));
+  const page = q.page ?? 1, pageSize = q.pageSize ?? 30;
+  const paged = q.page !== undefined || q.pageSize !== undefined;
   const rows = await db.select({
     ap: { id: approvals.id, scheduledAt: approvals.scheduledAt, status: approvals.status, revisionId: approvals.revisionId },
     item: { id: contentItems.id, title: contentItems.title, channelId: contentItems.channelId },
+    canonicalStudioCardId: studioCards.id,
   }).from(approvals).innerJoin(contentItems, eq(contentItems.id, approvals.contentItemId))
-    .where(and(eq(approvals.status, "active"), q.channelId === "all" ? undefined : eq(approvals.channelId, q.channelId), notExists(db.select({ id: deliveries.id }).from(deliveries).where(eq(deliveries.approvalId, approvals.id)))))
-    .orderBy(desc(approvals.scheduledAt), desc(approvals.id)).limit(100);
+    .leftJoin(studioCards, eq(studioCards.sourceItemId, contentItems.id))
+    .where(where).orderBy(desc(approvals.scheduledAt), desc(approvals.id)).limit(paged ? pageSize : 100).offset(paged ? (page - 1) * pageSize : 0);
   const result: PublicationOrphan[] = rows.map(row => ({ ...row, ap: { ...row.ap, scheduledAt: row.ap.scheduledAt.toISOString() }, reason: "승인은 저장됐지만 전송 예약이 없습니다. 게시 계정을 연결한 뒤 원고에서 다시 승인하세요." }));
-  res.json(result);
+  if (!paged) return res.json(result);
+  const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(approvals).innerJoin(contentItems, eq(contentItems.id, approvals.contentItemId)).where(where);
+  res.json({ items: result, total, page, pageSize });
 }));
 
 /** 발행함 */
 itemRoutes.get(
   "/deliveries",
   ah(async (req, res) => {
-    const q = parse(z.object({ channelId: z.union([z.literal("all"), z.coerce.number().int().positive()]) }), req.query);
+    const q = parse(publicationListQuery, req.query);
     const db = getDb();
+    const base = and(q.channelId === "all" ? undefined : eq(deliveries.channelId, q.channelId), ...publicationDateConditions(q));
+    const where = and(base, q.status ? inArray(deliveries.status, q.status) : undefined);
+    const page = q.page ?? 1, pageSize = q.pageSize ?? 30;
+    const paged = q.page !== undefined || q.pageSize !== undefined;
     const rows = await db
       .select({
         d: deliveries,
         dest: { label: destinations.label, platform: destinations.platform },
         ap: { id: approvals.id, scheduledAt: approvals.scheduledAt, status: approvals.status, revisionId: approvals.revisionId },
         item: { id: contentItems.id, title: contentItems.title, channelId: contentItems.channelId },
+        canonicalStudioCardId: studioCards.id,
       })
       .from(deliveries)
       .innerJoin(destinations, eq(destinations.id, deliveries.destinationId))
       .innerJoin(approvals, eq(approvals.id, deliveries.approvalId))
       .innerJoin(contentItems, eq(contentItems.id, approvals.contentItemId))
-      .where(q.channelId === "all" ? undefined : eq(deliveries.channelId, q.channelId))
+      .leftJoin(studioCards, eq(studioCards.sourceItemId, contentItems.id))
+      .where(where)
       .orderBy(desc(approvals.scheduledAt), asc(deliveries.id))
-      .limit(100);
-    res.json(rows);
+      .limit(paged ? pageSize : 100).offset(paged ? (page - 1) * pageSize : 0);
+    if (!paged) return res.json(rows);
+    const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId)).where(where);
+    const grouped = await db.select({ status: deliveries.status, count: sql<number>`count(*)::int` }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId)).where(base).groupBy(deliveries.status);
+    const [{ overdue }] = await db.select({ overdue: sql<number>`count(*)::int` }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId)).where(and(base, eq(deliveries.status, "scheduled"), lt(approvals.scheduledAt, new Date(Date.now() - 60_000))));
+    const counts: Record<string, number> = Object.fromEntries(grouped.map(row => [row.status, row.count]));
+    counts.overdue = overdue;
+    counts.needsAttention = (counts.failed ?? 0) + (counts.unknown ?? 0) + (counts.dry_run ?? 0);
+    res.json({ items: rows, total, page, pageSize, counts });
   }),
 );
 
@@ -717,12 +852,17 @@ itemRoutes.post(
       body.action === "unexclude" ? { excluded: false, excludedReason: null } :
       body.action === "hold" ? { reviewStatus: "held" } :
       { reviewStatus: "pending" };
-    const upd = await db
-      .update(contentItems)
-      .set({ ...set, version: sql`${contentItems.version} + 1`, updatedAt: new Date() })
-      .where(and(eq(contentItems.channelId, ch.id), inArray(contentItems.id, body.ids)))
-      .returning({ id: contentItems.id });
-    await audit(db, { actor: actorOf(req), action: `bulk:${body.action}`, entity: "content_item", channelId: ch.id, detail: { ids: upd.map((u) => u.id) } });
+    const upd = await db.transaction(async tx => {
+      const items = await tx.select({ id: contentItems.id }).from(contentItems).where(and(eq(contentItems.channelId, ch.id), inArray(contentItems.id, body.ids))).orderBy(contentItems.id).for("update");
+      if (!items.length) return [];
+      const saved = await tx.update(contentItems).set({ ...set, version: sql`${contentItems.version} + 1`, updatedAt: new Date() }).where(inArray(contentItems.id, items.map(row => row.id))).returning({ id: contentItems.id });
+      for (const row of saved) {
+        if (body.action !== "unexclude") await revokePublicationEligibility(tx as unknown as ReturnType<typeof getDb>, row.id, `일괄 ${body.action} — 대기 게시 취소`, actorOf(req));
+        else await ensureSourceWorkspace(tx, row.id);
+      }
+      await audit(tx, { actor: actorOf(req), action: `bulk:${body.action}`, entity: "content_item", channelId: ch.id, detail: { ids: saved.map(u => u.id) } });
+      return saved;
+    });
     res.json({ updated: upd.length });
   }),
 );

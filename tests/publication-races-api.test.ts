@@ -18,7 +18,8 @@ async function fixture(status: string) {
   const [asset] = await db.insert(mediaAssets).values({ channelId: 1, contentItemId: item.id, revisionId: rev.id, sha256: `race-${item.id}`, width: 1, height: 1, bytes: Buffer.from("test-only") }).returning();
   const [approval] = await db.insert(approvals).values({ channelId: 1, contentItemId: item.id, revisionId: rev.id, mediaAssetId: asset.id, cardSha256: asset.sha256, captions: { instagram: "test", telegram: "test" }, scheduledAt: new Date(Date.now() - 1000), approvedBy: "test" }).returning();
   const [destination] = await db.insert(destinations).values({ channelId: 1, platform: "instagram", label: `test-${item.id}`, enabled: false }).returning();
-  const [delivery] = await db.insert(deliveries).values({ channelId: 1, approvalId: approval.id, destinationId: destination.id, status, lastError: "test failure", attempts: 1 }).returning();
+  const [delivery] = await db.insert(deliveries).values({ channelId: 1, approvalId: approval.id, destinationId: destination.id, status, lastError: "test failure", attempts: 1,
+    destinationSnapshot: { version: 1, destinationId: destination.id, destinationVersion: 1, platform: "instagram", label: destination.label, accountId: "123", username: "test", authMode: "instagram", verifiedAt: new Date().toISOString() } }).returning();
   return { db, item, approval, delivery };
 }
 

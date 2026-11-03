@@ -32,12 +32,34 @@ describe("shared publication actions", () => {
     expect(mocks.changed).toHaveBeenCalledOnce(); expect(mocks.toast).toHaveBeenCalledWith("info", expect.stringContaining("실제 게시 결과"));
   });
   it("requires a not-posted check for unknown results and clears it for another delivery", async () => {
-    await render("unknown"); expect(host.querySelector("button")!.disabled).toBe(true);
+    await render("unknown");
+    const byText = (text: string) => [...host.querySelectorAll("button")].find(button => button.textContent === text)!;
+    expect(byText("게시 결과 다시 확인").disabled).toBe(false);
+    expect(byText("다시 전송")).toBeUndefined();
+    expect(byText("미게시 확인 기록").disabled).toBe(true);
     await act(async () => host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
-    expect(host.querySelector("button")!.disabled).toBe(false);
+    expect(byText("미게시 확인 기록").disabled).toBe(false);
+    await act(async () => byText("미게시 확인 기록").click()); await settle();
+    expect(mocks.api).toHaveBeenCalledWith("/channels/3/deliveries/44/confirm-not-posted", { method: "POST", body: { note: undefined } });
+    expect(mocks.api.mock.calls.some(([path]) => path.endsWith("/retry"))).toBe(false);
+    await render("unknown", "active", 45); expect(host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(false); expect(byText("미게시 확인 기록").disabled).toBe(true);
+  });
+  it("can reconcile an unknown result from an invalidated approval without retransmitting it", async () => {
+    await render("unknown", "invalidated");
     await click();
-    expect(mocks.api).toHaveBeenCalledWith("/channels/3/deliveries/44/retry", { method: "POST", body: { confirmNotPosted: true } });
-    await render("unknown", "active", 45); expect(host.querySelector<HTMLInputElement>("input")!.checked).toBe(false); expect(host.querySelector("button")!.disabled).toBe(true);
+    expect(mocks.api).toHaveBeenCalledWith("/channels/3/deliveries/44/reconcile", { method: "POST", body: {} });
+    expect(host.textContent).not.toContain("다시 전송");
+  });
+  it("records a manually verified published URL through a separate action without retrying", async () => {
+    await render("unknown");
+    const url = host.querySelector<HTMLInputElement>('input[type="url"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(url, "https://www.instagram.com/p/verified/");
+      url.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "이미 게시됨으로 기록")!.click()); await settle();
+    expect(mocks.api).toHaveBeenCalledWith("/channels/3/deliveries/44/confirm-posted", { method: "POST", body: { externalUrl: "https://www.instagram.com/p/verified/", note: undefined } });
+    expect(mocks.api.mock.calls.some(([path]) => path.endsWith("/retry"))).toBe(false);
   });
   it.each(["processing", "succeeded", "cancelled"])("does not offer a mutation for %s", async status => {
     await render(status); expect(host.querySelector("button")).toBeNull(); expect(mocks.api).not.toHaveBeenCalled();

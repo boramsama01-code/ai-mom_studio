@@ -15,21 +15,29 @@ import { enqueueJob } from "../worker/queue";
 import { audit } from "../audit";
 import { renderStudioOutput } from "./studioExport";
 import { getSetting } from "../seed";
+import { revokePublicationEligibility } from "./publicationState";
 
 export const studioCardDto = (row: typeof studioCards.$inferSelect): StudioCard => ({ ...studioContentSchema.parse(row.content), id: row.id, version: row.version, sourceItemId: row.sourceItemId, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(), trashedAt: row.trashedAt?.toISOString() ?? null });
 /** Attach immutable source output without copying rendered pages into the four-panel editor. */
 export async function studioCardsWithOutput(db: DB, rows: Array<typeof studioCards.$inferSelect>): Promise<StudioCard[]> {
   const itemIds = rows.flatMap(row => row.sourceItemId ? [row.sourceItemId] : []);
   if (!itemIds.length) return rows.map(studioCardDto);
+  const sourceItems = await db.select({ id: contentItems.id, channelId: contentItems.channelId, origin: contentItems.origin, title: contentItems.title, reviewStatus: contentItems.reviewStatus, publishStatus: contentItems.publishStatus }).from(contentItems).where(inArray(contentItems.id, itemIds));
   const outputs = await db.select({ id: mediaAssets.id, channelId: mediaAssets.channelId, itemId: mediaAssets.contentItemId, revisionId: mediaAssets.revisionId, carousel: mediaAssets.carousel, currentRevisionId: contentItems.currentRevisionId })
     .from(mediaAssets).innerJoin(contentItems, eq(contentItems.id, mediaAssets.contentItemId))
     .where(and(inArray(mediaAssets.contentItemId, itemIds), eq(mediaAssets.kind, "card"))).orderBy(desc(mediaAssets.id));
   return rows.map(row => {
     const dto = studioCardDto(row);
+    const source = sourceItems.find(item => item.id === row.sourceItemId);
+    if (source && source.origin !== "studio" && !row.importedMeta?.studioPublication) dto.sourceReference = { itemId: source.id, channelId: source.channelId };
     const own = outputs.filter(o => o.itemId === row.sourceItemId);
     const output = own.find(o => o.id === row.importedMeta?.generatedAssetId) ?? own[0];
     if (output) dto.sourceOutput = { assetId: output.id, channelId: output.channelId, itemId: output.itemId, revisionId: output.revisionId, stale: output.revisionId !== output.currentRevisionId || !!(row.importedMeta?.studioPublication && row.importedMeta?.publishedVersion !== row.version),
       pages: output.carousel?.pages.map(p => ({ id: p.id, title: p.title, altText:p.altText })) ?? [{ id: output.id, title: row.content.title }], coverCredit: output.carousel?.cover.credit ?? "" };
+    if (source && row.importedMeta?.sourceWorkspace) {
+      dto.title = source.title.slice(0, 160);
+      dto.stage = source.publishStatus === "succeeded" ? "done" : source.reviewStatus === "reviewed" ? "review" : dto.sourceOutput && !dto.sourceOutput.stale ? "making" : "writing";
+    }
     return dto;
   });
 }
@@ -61,15 +69,11 @@ export async function setStudioTrash(db: DB, cardId: number, version: number, tr
         .where(and(eq(jobs.type, "studio_generate"), sql`${jobs.payload}->>'cardId' = ${String(cardId)}`, inArray(jobs.status, ["queued", "running"]))).returning({ id: jobs.id });
       cancelledJobs = cancelled.length;
       if (current.sourceItemId) {
-        const active = await tx.update(approvals).set({ status: "cancelled", updatedAt: now }).where(and(eq(approvals.contentItemId, current.sourceItemId), eq(approvals.status, "active"))).returning({ id: approvals.id });
-        if (active.length) {
-          const ids = active.map(a => a.id);
-          const stopped = await tx.update(deliveries).set({ status: "cancelled", lastError: "콘텐츠를 휴지통으로 이동해 취소했습니다.", updatedAt: now }).where(and(inArray(deliveries.approvalId, ids), eq(deliveries.status, "scheduled"))).returning({ id: deliveries.id });
-          cancelledDeliveries = stopped.length;
-          const sent = await tx.select({ id: deliveries.id }).from(deliveries).where(and(inArray(deliveries.approvalId, ids), inArray(deliveries.status, ["processing", "succeeded", "unknown"])));
-          alreadyProcessing = sent.length;
-          if (!alreadyProcessing) await tx.update(contentItems).set({ publishStatus: "cancelled" }).where(eq(contentItems.id, current.sourceItemId));
-        }
+        const sent = await tx.select({ id: deliveries.id }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId))
+          .where(and(eq(approvals.contentItemId, current.sourceItemId), inArray(deliveries.status, ["processing", "succeeded", "unknown"])));
+        const revoked = await revokePublicationEligibility(tx as unknown as DB, current.sourceItemId, "콘텐츠를 휴지통으로 이동해 게시 승인을 철회했습니다.", actor, now);
+        cancelledDeliveries = revoked.cancelled;
+        alreadyProcessing = sent.length;
       }
     }
     const [saved] = await tx.update(studioCards).set({ trashedAt: trash ? now : null, version: current.version + 1, updatedAt: now }).where(eq(studioCards.id, cardId)).returning();

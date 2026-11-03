@@ -17,7 +17,7 @@ export function CardCarousel({ channelId, assetId, pages, credit = "", onDirtyCh
   const invalidAltIndex = values.findIndex(value => !!altTextError(value));
   const save=useMutation({mutationFn:()=>api<{version:number;values:string[]}>(path,{method:"PATCH",body:{version:alt.data?.version,values}}),onSuccess:saved=>{qc.setQueryData(["card-alt",assetId],saved);setDraft(null);qc.invalidateQueries({queryKey:["ch",channelId]});qc.invalidateQueries({queryKey:["studio"]});}});
   useEffect(()=>{onDirtyChange?.(dirty||!alt.data||!!alt.error||save.isPending);},[dirty,alt.data,alt.error,save.isPending,onDirtyChange]);
-  useEffect(()=>{guard.setDirty(`card-alt-${assetId}`,dirty,async()=>{try{await save.mutateAsync();return true;}catch{return false;}});return()=>{guard.setDirty(`card-alt-${assetId}`,false);};},[dirty,draft]);
+  useEffect(()=>{guard.setDirty(`card-alt-${assetId}`,dirty || save.isPending,async()=>{try{await save.mutateAsync();return true;}catch{return false;}},()=>{setDraft(null);onDirtyChange?.(false);});return()=>{guard.setDirty(`card-alt-${assetId}`,false);};},[dirty,draft,save.isPending,guard,assetId,onDirtyChange]);
   useEffect(()=>()=>onDirtyChange?.(false),[onDirtyChange]);
   const page = pages[Math.min(index, pages.length - 1)];
   const select = (value: number) => { setIndex(value); setFailed(false); };

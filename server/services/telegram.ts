@@ -6,6 +6,7 @@
  * 문서: https://core.telegram.org/bots/api
  */
 import { env } from "../env";
+import { publicationMessage } from "./publicationState";
 
 export type TgResult =
   | { ok: true; messageId: number; chatUsername?: string }
@@ -30,18 +31,39 @@ async function call(method: string, body: FormData | Record<string, unknown>, to
   try {
     json = await res.json();
   } catch {
-    return { ok: false, kind: res.ok ? "unknown" : "transient", error: `응답 해석 실패(HTTP ${res.status})` };
+    return { ok: false, kind: res.ok || res.status >= 500 ? "unknown" : "transient", error: `응답 해석 실패(HTTP ${res.status})` };
   }
   const message = Array.isArray(json.result) ? json.result[0] : json.result;
-  if (res.ok && json.ok && message?.message_id) {
-    return { ok: true, messageId: message.message_id, chatUsername: message.chat?.username };
+  if (res.ok && json.ok && Number.isSafeInteger(message?.message_id) && message!.message_id! > 0) {
+    return { ok: true, messageId: message!.message_id!, chatUsername: message!.chat?.username };
   }
-  const desc = (json.description || `HTTP ${res.status}`).slice(0, 300);
+  if (res.ok && json.ok !== false) return { ok: false, kind: "unknown", error: "게시 응답에 유효한 메시지 ID가 없습니다. 채널에서 게시 여부를 확인하세요." };
+  const desc = publicationMessage(json.description || `HTTP ${res.status}`).slice(0, 300);
   if (res.status === 401) return { ok: false, kind: "auth", error: `봇 인증 실패: ${desc}` };
   if (res.status === 403) return { ok: false, kind: "auth", error: `권한 없음(봇을 채널 관리자로 추가했는지 확인): ${desc}` };
   if (res.status === 429) return { ok: false, kind: "rate_limit", error: desc, retryAfter: json.parameters?.retry_after };
-  if (res.status >= 500) return { ok: false, kind: "transient", error: desc };
+  if (res.status >= 500) return { ok: false, kind: "unknown", error: "게시 서버 응답 오류 — 채널에서 실제 게시 여부를 확인하세요." };
   return { ok: false, kind: "terminal", error: desc };
+}
+
+/** Read-only getChat resolves mutable @names into the numeric approved target.
+ * Official contract checked 2026-11-03: https://core.telegram.org/bots/api#getchat
+ */
+export async function telegramChatIdentity(chatId: string, token = env.telegramBotToken) {
+  if (!token) return { ok: false as const, error: "텔레그램 봇 토큰을 연결하세요." };
+  try {
+    const url = new URL(`https://api.telegram.org/bot${token}/getChat`);
+    url.searchParams.set("chat_id", chatId);
+    const response = await fetch(url, { method: "GET", signal: AbortSignal.timeout(15_000), redirect: "error" });
+    const json = await response.json() as { ok?: boolean; result?: { id?: unknown; type?: string; username?: string } };
+    const id = json.result?.id;
+    if (!response.ok || !json.ok || typeof id !== "number" || !Number.isSafeInteger(id) || id === 0 || json.result?.type !== "channel") {
+      return { ok: false as const, error: "게시할 텔레그램 채널을 확인할 수 없습니다. 봇 권한과 채널 주소를 확인하세요." };
+    }
+    return { ok: true as const, chatId: String(id), username: typeof json.result.username === "string" ? json.result.username : null };
+  } catch {
+    return { ok: false as const, error: "텔레그램 채널 확인 응답을 받지 못했습니다. 잠시 후 다시 승인하세요." };
+  }
 }
 
 export async function sendReviewMessage(text: string): Promise<TgResult> {

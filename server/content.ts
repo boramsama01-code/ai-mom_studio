@@ -1,9 +1,11 @@
 /**
  * 콘텐츠 버전·승인 무효화 공용 로직
  */
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { DB } from "./db";
-import { approvals, contentItems, contentRevisions, deliveries } from "../shared/schema";
+import { contentItems, contentRevisions } from "../shared/schema";
+import { ensureSourceWorkspace } from "./services/sourceWorkspace";
+import { revokePublicationEligibility } from "./services/publicationState";
 
 type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0] | DB;
 
@@ -20,6 +22,8 @@ export async function createRevision(
     makeCurrent?: boolean;
   },
 ) {
+  // Serialise revision numbering and every publication decision for one item.
+  await tx.select({ id: contentItems.id }).from(contentItems).where(eq(contentItems.id, a.contentItemId)).for("update");
   const [{ next }] = (
     await tx.execute(sql`select coalesce(max(revision_no), 0) + 1 as next from content_revisions where content_item_id = ${a.contentItemId}`)
   ).rows as Array<{ next: number }>;
@@ -37,8 +41,9 @@ export async function createRevision(
     })
     .returning();
   if (a.makeCurrent !== false) {
-    await tx.update(contentItems).set({ currentRevisionId: rev.id, updatedAt: new Date() }).where(eq(contentItems.id, a.contentItemId));
+    await tx.update(contentItems).set({ currentRevisionId: rev.id, publishStatus: "waiting", updatedAt: new Date() }).where(eq(contentItems.id, a.contentItemId));
     await invalidateApprovals(tx, a.contentItemId, "콘텐츠 버전 변경 — 재승인 필요");
+    await ensureSourceWorkspace(tx, a.contentItemId);
   }
   return rev;
 }
@@ -48,20 +53,6 @@ export async function createRevision(
  * 처리 중·완료된 외부 게시는 건드리지 않는다.
  */
 export async function invalidateApprovals(tx: Tx, contentItemId: number, reason: string): Promise<number> {
-  const active = await tx
-    .select({ id: approvals.id })
-    .from(approvals)
-    .where(and(eq(approvals.contentItemId, contentItemId), eq(approvals.status, "active")));
-  if (!active.length) return 0;
-  const ids = active.map((a) => a.id);
-  await tx.update(approvals).set({ status: "invalidated", invalidatedReason: reason, updatedAt: new Date() }).where(inArray(approvals.id, ids));
-  await tx
-    .update(deliveries)
-    .set({ status: "cancelled", lastError: reason, updatedAt: new Date() })
-    .where(and(inArray(deliveries.approvalId, ids), inArray(deliveries.status, ["scheduled", "waiting"])));
-  await tx
-    .update(contentItems)
-    .set({ publishStatus: "waiting" })
-    .where(and(eq(contentItems.id, contentItemId), inArray(contentItems.publishStatus, ["scheduled", "waiting"])));
-  return ids.length;
+  const result = await revokePublicationEligibility(tx as DB, contentItemId, reason);
+  return result.revokedApprovals;
 }

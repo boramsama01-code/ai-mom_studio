@@ -6,6 +6,7 @@ import { api, apiBlob, ApiError } from "./api";
 import { useDirtyGuard } from "./state";
 import { ErrorBox, GuardedLink, Loading } from "./ui";
 import "./cardCopy.css";
+import { useGenerationRequest } from "./useGenerationRequest";
 
 export type CardCopyResponse = { version: number; revisionId: number; copy: CardCopy; hasSavedCopy: boolean; recoveryNotice?: string };
 type AiStatus = { defaultProvider: AiProvider; text: Record<AiProvider, boolean> };
@@ -17,6 +18,7 @@ type Props = {
   templateKey?: string | null;
   coverMode?: "reuse" | "ai" | "typography";
   disabled?: boolean;
+  renderDisabled?: boolean;
   onTemplateChange?: (key: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: (saved: CardCopyResponse) => void;
@@ -31,7 +33,7 @@ const copyText = (copy: CardCopy) => [
 ].join("\n\n");
 
 /** The preview uses the same renderer as the saved images. Caption/alt text are separate. */
-export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, coverMode = "reuse", disabled = false, onTemplateChange, onDirtyChange, onSaved, onSaveAndRender, renderLabel = "카드뉴스 만들기" }: Props) {
+export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, coverMode = "reuse", disabled = false, renderDisabled = false, onTemplateChange, onDirtyChange, onSaved, onSaveAndRender, renderLabel = "카드뉴스 만들기" }: Props) {
   const path = `/channels/${channelId}/items/${itemId}/card-copy`;
   const queryKey = ["card-copy", channelId, itemId];
   const qc = useQueryClient(), guard = useDirtyGuard(), uid = useId();
@@ -50,11 +52,13 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
   const [previewError, setPreviewError] = useState<Error | null>(null), [previewBusy, setPreviewBusy] = useState(false), [previewRetry, setPreviewRetry] = useState(0);
   const serial = useRef<Promise<CardCopyResponse> | null>(null);
   const action = useRef<"generate" | "render" | null>(null);
+  const generation = useGenerationRequest(channelId, itemId, "card-copy");
+  const generationSource = useRef<string | null>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null), subtitleRef = useRef<HTMLTextAreaElement>(null), bodyRef = useRef<HTMLTextAreaElement>(null);
   const dirty = !!copy && !!base && !same(copy, base.copy);
   const valid = copy ? cardCopySchema.safeParse(copy) : null;
   const invalid = valid?.success === false;
-  const busy = disabled || rendering || generating;
+  const busy = disabled || rendering || (generating && !generation.cancelled);
   const locked = busy || saving || conflictLoading;
   const pageIndex = Math.min(selected, copy?.pages.length ?? 0);
   const page = copy ? (pageIndex === 0 ? copy.cover : copy.pages[pageIndex - 1]) : null;
@@ -120,12 +124,12 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
   const saveRef = useRef(saveNow); saveRef.current = saveNow;
   useEffect(() => {
     const key = `card-copy-${channelId}-${itemId}`;
-    guard.setDirty(key, dirty || saving || rendering || generating, async () => {
-      if (rendering || generating || conflicting) return false;
+    guard.setDirty(key, dirty || saving || rendering || (generating && !generation.cancelled), async () => {
+      if (rendering || (generating && !generation.cancelled) || conflicting) return false;
       try { await saveRef.current(); return same(copyRef.current, baseRef.current?.copy); } catch { return false; }
     });
     return () => guard.setDirty(key, false);
-  }, [channelId, itemId, dirty, saving, rendering, generating, conflicting, guard]);
+  }, [channelId, itemId, dirty, saving, rendering, generating, generation.cancelled, conflicting, guard]);
   useEffect(() => { onDirtyChange?.(dirty || locked || !base || invalid || !!conflicting); }, [dirty, locked, base, invalid, conflicting, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
@@ -148,7 +152,7 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
   useEffect(() => () => { if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); }, []);
 
   async function saveAndRender() {
-    if (!onSaveAndRender || locked || conflicting || action.current) return;
+    if (!onSaveAndRender || renderDisabled || locked || conflicting || action.current) return;
     action.current = "render";
     setRendering(true); setSaveError(null);
     try { const saved = await saveNow(); await onSaveAndRender(saved); }
@@ -156,14 +160,17 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
     finally { action.current = null; setRendering(false); }
   }
   async function generate() {
-    if (!aiReady || locked || conflicting || action.current) return;
+    if ((!aiReady && !generation.unresolved) || locked || conflicting || action.current) return;
     action.current = "generate";
     setGenerating(true); setAiError(null); setProposal(null);
     try {
-      const saved = await saveNow();
-      const source = JSON.stringify(saved.copy);
-      const next = await api<Proposal>(`${path}/generate`, { method: "POST", body: { version: saved.version, templateKey: saved.copy.templateKey, provider } });
-      setProposal({ ...next, source });
+      const recovering = generation.unresolved;
+      const saved = recovering ? baseRef.current! : await saveNow();
+      if (!recovering) generationSource.current = JSON.stringify(saved.copy);
+      const next = await generation.run<Proposal>(`${path}/generate`, { version: saved.version, templateKey: saved.copy.templateKey, provider });
+      // The same server version proves the saved baseline on a restored tab;
+      // unsaved local changes still fail canApplyProposal's snapshot comparison.
+      setProposal({ ...next, source: generationSource.current ?? (next.version === saved.version ? JSON.stringify(saved.copy) : "") });
     } catch (error) { setAiError(error as Error); }
     finally { action.current = null; setGenerating(false); }
   }
@@ -190,10 +197,13 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
   return <section className="card-copy-editor stack" aria-labelledby={`${uid}-heading`}>
     <div className="card-copy-heading"><div><h3 id={`${uid}-heading`}>문구·미리보기</h3><p className="small muted">카드를 선택해서 글을 고치세요. 게시물 캡션과 별도로 저장합니다.</p></div><span className={`badge ${dirty ? "warn" : "ok"}`} role="status">{saving ? "문구 저장 중…" : dirty ? "저장하지 않은 수정" : base.hasSavedCopy ? "문구 저장됨" : "원고에서 가져온 문구"}</span></div>
     {base.recoveryNotice && <p className="notice warn small" role="status">{base.recoveryNotice} 문구를 저장하기 전까지 기존 저장 내용은 바뀌지 않습니다.</p>}
-    <details className="card-copy-ai-tools"><summary>AI로 문구 다듬기</summary><div className="card-copy-ai"><label className="field">문구 작성 AI<select value={provider} disabled={locked} onChange={event => setProviderChoice(event.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}{status.data && !status.data.text[p] ? " · 연결 필요" : ""}</option>)}</select></label><div><button className="btn" disabled={locked || !aiReady || invalid || !!conflicting} onClick={() => void generate()}>{generating ? "템플릿에 맞춰 작성 중…" : dirty || !base.hasSavedCopy ? "문구 저장 후 AI 제안받기" : "AI로 템플릿 문구 제안받기"}</button><p className="hint">선택한 템플릿에 맞는 제목·부제·본문을 제안합니다. 확인 후 적용하며, 선택한 AI의 API 요금·한도가 적용됩니다.</p></div></div>
+    <details className="card-copy-ai-tools"><summary>AI로 문구 다듬기</summary><div className="card-copy-ai"><label className="field">문구 작성 AI<select value={provider} disabled={locked || generation.unresolved} onChange={event => setProviderChoice(event.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}{status.data && !status.data.text[p] ? " · 연결 필요" : ""}</option>)}</select></label><div><button className="btn" disabled={generating || locked || (!aiReady && !generation.unresolved) || invalid || !!conflicting} onClick={() => void generate()}>{generating ? "템플릿에 맞춰 작성 중…" : generation.unresolved ? "기존 AI 작업 결과 확인" : dirty || !base.hasSavedCopy ? "문구 저장 후 AI 제안받기" : "AI로 템플릿 문구 제안받기"}</button><p className="hint">선택한 템플릿에 맞는 제목·부제·본문을 제안합니다. 확인 후 적용하며, 선택한 AI의 API 요금·한도가 적용됩니다.</p></div></div>
     {status.error && <ErrorBox error={status.error} retry={() => status.refetch()} />}
     {status.data && !aiReady && <p className="small muted">직접 입력·저장은 바로 사용할 수 있어요. AI 작성은 <GuardedLink href={`/connections?service=${provider}`}>AI 연결 설정</GuardedLink> 후 사용할 수 있습니다.</p>}
     {aiError && <ErrorBox error={aiError} retry={() => void generate()} />}
+    {generation.unresolved && <div className="stack"><p className="small muted">기존 요청의 결과를 확인합니다. 응답이 없어도 새 유료 작업을 자동으로 시작하지 않습니다.</p><div><button className="btn sm" disabled={generation.cancelling} onClick={() => void generation.cancel()}>{generation.cancelling ? "중단 확인 중…" : "AI 요청 중단"}</button></div></div>}
+    {generation.cancelled && <p className="notice small" role="status">AI 요청을 중단했습니다. 직접 편집·저장을 계속할 수 있습니다.</p>}
+    {generation.cancelError && <ErrorBox error={generation.cancelError} />}
     {proposal && <div className="notice card-copy-proposal stack"><strong>AI 문구 제안 · 아직 카드에 반영하지 않았어요</strong><details open><summary>{proposal.copy.pages.length + 1}장 제안 전체 보기</summary><pre>{copyText(proposal.copy)}</pre></details><div className="row"><button className="btn primary sm" disabled={locked || !canApplyProposal} onClick={() => { put(proposal.copy); setProposal(null); setSelected(0); }}>제안 문구로 바꾸기</button><button className="btn ghost sm" onClick={() => setProposal(null)}>제안 닫기</button></div>{!canApplyProposal && <p className="small">제안 이후 문구나 저장 버전이 바뀌었습니다. 현재 입력은 유지되며 새 제안을 받아 적용할 수 있어요.</p>}</div>}
     </details>
     {conflicting && <div className="notice warn stack" role="alert"><strong>다른 곳에서 먼저 저장한 내용이 있어요. 입력한 문구는 유지했습니다.</strong><details><summary>최신 저장본과 현재 입력 비교하기</summary><div className="card-copy-compare"><div><h4>최신 저장본</h4><pre>{copyText(conflicting.copy)}</pre></div><div><h4>현재 입력</h4><pre>{copyText(copy)}</pre></div></div><div className="row"><button className="btn sm" disabled={locked} onClick={() => adopt(conflicting)}>최신 저장본으로 바꾸기</button><button className="btn sm" disabled={locked || invalid} onClick={() => { const latest = conflicting; baseRef.current = latest; setBase(latest); setConflicting(null); void saveNow().catch(() => {}); }}>현재 입력으로 최신 버전에 저장</button></div></details></div>}
@@ -208,6 +218,6 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
     </div>
     {invalid && <p className="notice warn small" role="alert">제목과 본문은 비울 수 없습니다. 제목·부제·본문의 글자 수 안내를 확인한 뒤 저장해 주세요. 입력한 내용은 그대로 유지됩니다.</p>}
     {saveError && <ErrorBox error={saveError} />}
-    <div className="card-copy-savebar"><p className="small muted">{dirty ? "수정 내용을 저장하고 이미지에 반영하세요." : "작성한 글은 이 카드에만 반영돼요."}</p><div className="row"><button className="btn" disabled={locked || invalid || !!conflicting || (!dirty && base.hasSavedCopy)} onClick={() => void saveNow().catch(() => {})}>{saving ? "저장 중…" : "문구 저장"}</button>{onSaveAndRender && <button className="btn primary" disabled={locked || invalid || !!conflicting} onClick={() => void saveAndRender()}>{rendering ? "카드뉴스 만드는 중…" : `${dirty || !base.hasSavedCopy ? "저장하고 " : ""}${renderLabel}`}</button>}</div></div>
+    <div className="card-copy-savebar"><p className="small muted">{dirty ? "수정 내용을 저장하고 이미지에 반영하세요." : "작성한 글은 이 카드에만 반영돼요."}</p><div className="row"><button className="btn" disabled={locked || invalid || !!conflicting || (!dirty && base.hasSavedCopy)} onClick={() => void saveNow().catch(() => {})}>{saving ? "저장 중…" : "문구 저장"}</button>{onSaveAndRender && <button className="btn primary" disabled={generating || renderDisabled || locked || invalid || !!conflicting} onClick={() => void saveAndRender()}>{rendering ? "카드뉴스 만드는 중…" : `${dirty || !base.hasSavedCopy ? "저장하고 " : ""}${renderLabel}`}</button>}</div></div>
   </section>;
 }

@@ -30,7 +30,7 @@ function itemFixture() {
   };
 }
 beforeEach(() => {
-  vi.clearAllMocks(); saved = fresh(); patch = null;
+  vi.clearAllMocks(); sessionStorage.clear(); saved = fresh(); patch = null;
   renderedCards = [{ id: 51, revisionId: 30, templateKey: "set:n01", carousel: { version: 1, cover: { kind: "typography", credit: "저장된 표지" }, pages: Array.from({ length: 5 }, (_, i) => ({ id: 51 + i, title: `완성 ${i}`, sha256: `old-${i}` })) } }];
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:actual-renderer-preview") });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
@@ -130,7 +130,7 @@ describe("card copy editor", () => {
     expect(host.querySelector<HTMLDetailsElement>(".card-copy-ai-tools")?.open).toBe(false); await openDetails("AI로 문구 다듬기");
     await click("AI로 템플릿 문구 제안받기");
     expect(field("title").value).toBe("원고에서 가져온 제목"); expect(host.textContent).toContain("아직 카드에 반영하지 않았어요");
-    expect(mocks.api).toHaveBeenCalledWith(`${path}/generate`, { method: "POST", body: { version: 3, templateKey: "set:n04", provider: "gemini" } });
+    expect(mocks.api).toHaveBeenCalledWith(`${path}/generate`, { method: "POST", body: { version: 3, templateKey: "set:n04", provider: "gemini", requestId: expect.any(String) } });
     await click("제안 문구로 바꾸기"); expect(field("title").value).toBe("AI가 제안한 제목"); expect(field("subtitle").value).toBe("AI가 제안한 부제");
     expect(saved.copy.cover.title).toBe("원고에서 가져온 제목"); await click("문구 저장"); expect(saved.copy.cover.title).toBe("AI가 제안한 제목");
   });
@@ -142,6 +142,64 @@ describe("card copy editor", () => {
     expect(mocks.api.mock.calls.filter(([p]) => p === `${path}/generate`)).toHaveLength(1);
     await act(async () => { const node = button("카드뉴스 만들기"); node.click(); node.click(); }); await settle();
     expect(renderImages).toHaveBeenCalledTimes(1);
+  });
+  it("rechecks a lost AI response with the same request ID without saving or replacing later manual input", async () => {
+    const fallback = mocks.api.getMockImplementation()!;
+    const bodies: any[] = [];
+    mocks.api.mockImplementation(async (request, options) => {
+      if (request === `${path}/generate`) {
+        bodies.push(structuredClone(options.body));
+        if (bodies.length === 1) throw new ApiError(0, "응답을 받지 못했습니다.");
+        return fallback(request, options);
+      }
+      return fallback(request, options);
+    });
+    await render(); await openDetails("AI로 문구 다듬기"); await click("AI로 템플릿 문구 제안받기");
+    await input("title", "응답을 기다리며 직접 작성한 문구");
+    await click("기존 AI 작업 결과 확인");
+    expect(bodies).toHaveLength(2); expect(bodies[1]).toEqual(bodies[0]);
+    expect(field("title").value).toBe("응답을 기다리며 직접 작성한 문구");
+    expect(button("제안 문구로 바꾸기").disabled).toBe(true);
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(0);
+  });
+  it("starts a new explicitly requested AI attempt only after a confirmed terminal failure", async () => {
+    const fallback = mocks.api.getMockImplementation()!;
+    const ids: string[] = [];
+    mocks.api.mockImplementation(async (request, options) => {
+      if (request === `${path}/generate`) {
+        ids.push(options.body.requestId);
+        if (ids.length === 1) throw new ApiError(503, "일시적으로 AI를 사용할 수 없습니다.", { jobId: 12, jobStatus: "failed" });
+      }
+      return fallback(request, options);
+    });
+    await render(); await openDetails("AI로 문구 다듬기"); await click("AI로 템플릿 문구 제안받기");
+    expect(ids).toHaveLength(1); expect(field("title").value).toBe(fresh().copy.cover.title);
+    await click("AI로 템플릿 문구 제안받기");
+    expect(ids).toHaveLength(2); expect(ids[1]).not.toBe(ids[0]);
+  });
+  it("cancels a running AI request, keeps manual saving available, and ignores a late response", async () => {
+    const fallback = mocks.api.getMockImplementation()!;
+    let finish!: (value: any) => void;
+    let requestId = "";
+    mocks.api.mockImplementation(async (request, options) => {
+      if (request === `${path}/generate`) {
+        requestId = options.body.requestId;
+        return new Promise(resolve => { finish = resolve; });
+      }
+      if (request === "/channels/1/items/9/generation-cancel") {
+        expect(options.body).toEqual({ requestId }); return { cancelled: true, jobId: 13 };
+      }
+      return fallback(request, options);
+    });
+    await render(); await openDetails("AI로 문구 다듬기"); await click("AI로 템플릿 문구 제안받기");
+    expect(field("title").disabled).toBe(true);
+    await click("AI 요청 중단"); expect(field("title").disabled).toBe(false);
+    await input("title", "취소 후 직접 저장한 문구"); await click("문구 저장");
+    await act(async () => finish({ version: 3, revisionId: 30, copy: { ...fresh().copy, cover: { title: "늦게 온 AI 문구", subtitle: "" } } })); await settle();
+    expect(saved.copy.cover.title).toBe("취소 후 직접 저장한 문구");
+    expect(field("title").value).toBe("취소 후 직접 저장한 문구");
+    expect(host.textContent).not.toContain("아직 카드에 반영하지 않았어요");
+    expect(host.textContent).toContain("취소한 AI 결과는 현재 입력에 적용하지 않았습니다.");
   });
   it("keeps long Korean input intact, distinguishes recommendations from hard limits, and allows manual editing without AI", async () => {
     await render(); await act(async () => { client.setQueryData(["studio-ai-status"], { defaultProvider: "gemini", text: { gemini: false, openai: false, anthropic: false } }); }); await settle();

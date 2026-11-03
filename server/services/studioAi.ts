@@ -93,7 +93,7 @@ export async function generateStudioCaption(opts: StudioTextInput) {
 }
 
 /** Images are server-read data URLs only. No remote/user URL is fetched here. */
-export async function generateStudioImage(opts: { prompt: string; referenceImages?: string[]; provider?: "openai"; purpose?: "cover" }) {
+export async function generateStudioImage(opts: { prompt: string; referenceImages?: string[]; provider?: "openai"; purpose?: "cover"; signal?: AbortSignal }) {
   if (!opts.prompt.trim() || opts.prompt.length > 25000) throw new AiServiceError("그림 지시는 1~25,000자로 입력하세요.", "parse");
   const references = opts.referenceImages ?? [];
   if (references.length > 8 || references.some((value) => value.length > 12_000_000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value))) {
@@ -111,7 +111,7 @@ export async function generateStudioImage(opts: { prompt: string; referenceImage
     background: "opaque",
     ...(references.length ? { images: references.map((image_url) => ({ image_url })) } : {}),
   };
-  const response = await openaiRequest(references.length ? "/images/edits" : "/images/generations", body, { timeoutMs: 240_000, maxBytes: 22_000_000 });
+  const response = await openaiRequest(references.length ? "/images/edits" : "/images/generations", body, { timeoutMs: 240_000, maxBytes: 22_000_000, signal: opts.signal });
   const b64 = response.data?.[0]?.b64_json;
   if (typeof b64 !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64) || b64.length > 21_000_000) throw new AiServiceError("생성된 그림을 읽을 수 없습니다.", "parse");
   const bytes = Buffer.from(b64, "base64");

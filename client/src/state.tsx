@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { api, setCsrf } from "./api";
 import { enterFromPrivateLink } from "./privateLink";
@@ -52,7 +52,6 @@ export function ChannelProvider({ children }: { children: ReactNode }) {
   const channels = useMemo(() => allChannels.filter(c => c.active), [allChannels]);
   const [stored, setSelected] = useState<"all" | number | null>(readStored);
   const guard = useDirtyGuard();
-  const qc = useQueryClient();
   const [path] = useLocation();
   // 목록의 조회 범위는 모든 화면에서 공유한다. 새 콘텐츠의 채널은 작성 폼에서 정한다.
   const selected: "all" | number =
@@ -61,8 +60,8 @@ export function ChannelProvider({ children }: { children: ReactNode }) {
     (v: "all" | number) => {
       if (v === selected || (v !== "all" && !channels.some(c => c.id === v))) return;
       const applySelection = () => {
-        // 이전 채널 데이터가 잠깐 보이지 않도록 채널 범위 쿼리를 비움
-        qc.removeQueries({ predicate: (q) => q.queryKey[0] === "ch" });
+        // The selected channel scopes list query keys. Evicting active detail
+        // queries here unmounts editors and destroys their unsaved input.
         setSelected(v);
         try {
           localStorage.setItem("spacepenguin.channel", String(v));
@@ -75,7 +74,7 @@ export function ChannelProvider({ children }: { children: ReactNode }) {
       if (/^\/(?:studio\/\d+|items\/\d+\/\d+)\/?$/.test(path)) applySelection();
       else guard.confirmLeave(applySelection);
     },
-    [guard, qc, selected, channels, path],
+    [guard, selected, channels, path],
   );
   const current = selected === "all" ? null : channels.find((c) => c.id === selected) ?? null;
   useEffect(() => {
@@ -99,16 +98,20 @@ export function useChannel() {
 
 /* ───────────── 미저장 편집 보호 ───────────── */
 type Guard = {
-  setDirty: (key: string, dirty: boolean, save?: () => Promise<boolean>) => void;
-  confirmLeave: (proceed: () => void) => void;
-  pending: null | { proceed: () => void };
+  setDirty: (key: string, dirty: boolean, save?: () => Promise<boolean>, discard?: () => void) => void;
+  hasDirty: (keys?: string[]) => boolean;
+  confirmLeave: (proceed: () => void, keys?: string[]) => void;
+  pending: null | { proceed: () => void; keys?: string[] };
+  resolving: boolean;
   resolve: (choice: "save" | "discard" | "cancel") => void;
 };
 const GuardCtx = createContext<Guard | null>(null);
 
 export function DirtyGuardProvider({ children }: { children: ReactNode }) {
-  const dirty = useRef(new Map<string, (() => Promise<boolean>) | undefined>());
-  const [pending, setPending] = useState<null | { proceed: () => void }>(null);
+  const dirty = useRef(new Map<string, { save?: () => Promise<boolean>; discard?: () => void }>());
+  const [pending, setPending] = useState<Guard["pending"]>(null);
+  const [resolving, setResolving] = useState(false);
+  const resolvingRef = useRef(false);
   useEffect(() => {
     const h = (e: BeforeUnloadEvent) => {
       if (dirty.current.size) {
@@ -121,30 +124,49 @@ export function DirtyGuardProvider({ children }: { children: ReactNode }) {
   }, []);
   const value = useMemo<Guard>(
     () => ({
-      setDirty(key, isDirty, save) {
-        if (isDirty) dirty.current.set(key, save);
+      setDirty(key, isDirty, save, discard) {
+        if (isDirty) dirty.current.set(key, { save, discard });
         else dirty.current.delete(key);
       },
-      confirmLeave(proceed) {
-        if (!dirty.current.size) return proceed();
-        setPending({ proceed });
+      hasDirty(keys) {
+        return keys ? keys.some(key => dirty.current.has(key)) : dirty.current.size > 0;
+      },
+      confirmLeave(proceed, keys) {
+        if (!(keys ? keys.some(key => dirty.current.has(key)) : dirty.current.size)) return proceed();
+        setPending(current => current ?? { proceed, keys });
       },
       pending,
+      resolving,
       async resolve(choice) {
         const p = pending;
-        if (!p) return;
+        if (!p || resolvingRef.current) return;
         if (choice === "cancel") return setPending(null);
-        if (choice === "save") {
-          for (const save of dirty.current.values()) {
-            if (save && !(await save())) return setPending(null); // 저장 실패 → 머무름(입력 유지)
+        resolvingRef.current = true;
+        setResolving(true);
+        try {
+          const entries = [...dirty.current].filter(([key]) => !p.keys || p.keys.includes(key));
+          if (choice === "save") {
+            for (const [, entry] of entries) {
+              // A pending job or editor without a save callback must not be
+              // silently discarded by "save and leave".
+              if (!entry.save || !(await entry.save())) return setPending(null);
+            }
+          } else {
+            for (const [, entry] of entries) entry.discard?.();
           }
+          for (const [key] of entries) dirty.current.delete(key);
+          setPending(null);
+          p.proceed();
+        } catch {
+          // The editor displays the save failure and keeps its draft mounted.
+          setPending(null);
+        } finally {
+          resolvingRef.current = false;
+          setResolving(false);
         }
-        dirty.current.clear();
-        setPending(null);
-        p.proceed();
       },
     }),
-    [pending],
+    [pending, resolving],
   );
   return <GuardCtx.Provider value={value}>{children}</GuardCtx.Provider>;
 }

@@ -3,9 +3,10 @@ import * as cheerio from "cheerio";
 import { extractText, getDocumentProxy } from "unpdf";
 import { safeFetch, FetchFailure } from "./safeFetch";
 import { sha256 } from "./text";
-import { articleAccessProblem, decodeGoogleNewsUrl, googleArticleLink, isGoogleNewsUrl, publicArticleAlternate, publisherArticleLink, sameArticleAlternate, structuredArticleBody, type ArticleContext, type PublicArticleAlternate } from "./articleSource";
+import { articleAccessProblem, articleHeadlines, articleHeadlineKey, decodeGoogleNewsUrl, googleArticleLink, isGoogleNewsUrl, matchesPrimaryArticleHeadline, publicArticleAlternate, publisherArticleLink, sameArticleAlternate, structuredArticleBody, type ArticleContext, type PublicArticleAlternate } from "./articleSource";
 import { resolveGoogleNewsArticle } from "./googleNewsResolve";
 import { decodePublicText, isPublicHtmlResponse } from "./publicTextResponse";
+import { currentGenerationSignal } from "./generationContext";
 
 export type Attachment = { url: string; name: string; kind: string; status: string; reason?: string };
 export type ExtractResult =
@@ -38,10 +39,10 @@ function classifyAttachment(href: string, name: string): string | null {
 }
 const cleanText = (s: string) => s.replace(/[ \t\u00a0]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
 
-export function extractHtml(html: string, baseUrl: string): { title: string; text: string; attachments: Attachment[] } {
+export function extractHtml(html: string, baseUrl: string, context: ArticleContext = {}): { title: string; text: string; attachments: Attachment[] } {
   const $ = cheerio.load(html);
-  const structured = structuredArticleBody(html);
-  const title = ($("meta[property='og:title']").attr("content") || structured.title || $("title").first().text() || "").trim();
+  const structured = structuredArticleBody(html, baseUrl, context.title);
+  const title = (articleHeadlines(html, baseUrl)[0] || structured.title || $("title").first().text() || "").trim();
   const attachments: Attachment[] = [];
   if (isGoogleNewsUrl(baseUrl) || articleAccessProblem(html, baseUrl)) return { title, text: "", attachments };
   $("a[href]").each((_, a) => {
@@ -63,11 +64,16 @@ export function extractHtml(html: string, baseUrl: string): { title: string; tex
     "[class*='board_view']", "[class*='bbs_view']", "[class*='view_cont']", "[class*='viewCont']"];
   let text = "";
   for (const selector of selectors) {
-    const choices = $(selector).toArray().map(el => cleanText($(el).text())).filter(t => t.length >= 80);
+    let nodes = $(selector);
+    if (selector === "article" && nodes.length > 1) {
+      nodes = nodes.filter((_, el) => $(el).find("h1,[itemprop='headline']").toArray().some(heading => articleHeadlineKey($(heading).text()) === articleHeadlineKey(title)));
+      if (nodes.length !== 1) continue;
+    }
+    const choices = nodes.toArray().map(el => cleanText($(el).text())).filter(t => t.length >= 80);
     if (choices.length) { text = choices.sort((a, b) => b.length - a.length)[0]; break; }
   }
   if (structured.text.length >= 80 && structured.text.length > text.length) text = structured.text;
-  if (!text) {
+  if (!text && $("article").length <= 1) {
     for (const selector of ["main", "#content", "body"]) {
       const node = $(selector).first();
       const paragraphs = node.find("p").toArray().map(el => cleanText($(el).text())).filter(t => t.length >= 30);
@@ -103,6 +109,7 @@ export async function fetchAndExtract(url: string, fetchImpl = safeFetch, contex
   const visited = new Set<string>(), deadline = Date.now() + 24_000;
   let alternate: PublicArticleAlternate | null = null;
   for (let hop = 0; hop < 3; hop++) {
+    currentGenerationSignal()?.throwIfAborted();
     if (visited.has(target)) return { ok: false, status: "failed", error: "원문 연결이 반복되어 중단했습니다." };
     if (Date.now() >= deadline) return { ok: false, status: "failed", error: "원문 확인 시간 한도를 초과했습니다." };
     if (hop > 0 && context.takeExtraCall && !context.takeExtraCall()) return { ok: false, status: "failed", error: "이번 수집의 원문 호출 한도에 도달했습니다. 원문 다시 확보를 눌러 확인해 주세요." };
@@ -140,7 +147,10 @@ export async function fetchAndExtract(url: string, fetchImpl = safeFetch, contex
       if (original) { target = preferReadableUrl(original); continue; }
       return { ok: false, status: "unsupported", error: "Google 뉴스 중간 링크의 원문 주소 조회를 완료하지 못했습니다. Google 응답 형식 변경 또는 원문 연결 정보 누락 가능성이 있습니다. 다른 기사를 추측하거나 제목·요약을 본문으로 저장하지 않았습니다." };
     }
-    const { title, text, attachments } = extractHtml(html, res.finalUrl);
+    // A known discovery headline must identify the primary article, even for direct/decoded links.
+    if (context.title && articleHeadlines(html, res.finalUrl).length && !matchesPrimaryArticleHeadline(html, context.title, res.finalUrl))
+      return { ok: false, status: "unsupported", error: "원문 페이지의 주기사 제목이 수집 제목과 일치하지 않아 본문을 저장하지 않았습니다. 원문 주소를 확인하거나 본문을 직접 붙여넣어 주세요.", finalUrl: res.finalUrl };
+    const { title, text, attachments } = extractHtml(html, res.finalUrl, context);
     if (text.length < 80) {
       if (!alternate) {
         const advertised = publicArticleAlternate(html, res.finalUrl, context);

@@ -30,11 +30,12 @@ function source(fetchStatus = "not_fetched", fetchedText: string | null = null, 
   return { id: 70, kind: "rss_direct", title: "선택한 원문", originalUrl: "https://example.com/article", meta: {}, fetchStatus, fetchedText, snippet: "목록에서 받은 짧은 요약", attachments: [], isSample, publishedAt: "2026-11-01T00:00:00Z", publishedPrecision: "day", publishedRaw: null, lastFetchedAt: null };
 }
 beforeEach(() => {
-  vi.clearAllMocks(); readError = null; sourceLoad = async () => ({ changed: false });
+  vi.clearAllMocks(); sessionStorage.clear(); readError = null; sourceLoad = async () => ({ changed: false });
   detail = {
     item: { id: 9, channelId: 2, title: "하나의 제작 공간", kind: "science_dialogue", origin: "manual", version: 1, currentRevisionId: 4, reviewStatus: "reviewed", evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: {} },
     primary: null, linked: [], current: { id: 4, revisionNo: 1, author: "operator", payload: { title: "하나의 제작 공간" } }, revisions: [],
     cards: [{ id: 40, revisionId: 4, sha256: "fixture", createdAt: "2026-11-01T00:00:00Z", cloudinaryUrl: null }],
+    publicationDraft: { version: 1, captions: { instagram: "확인할 게시 캡션", telegram: "" } },
     approvals: [], deliveries: [], similar: [], defaultCaptions: { instagram: "확인할 게시 캡션", telegram: "" },
     publicationReadiness: { ready: true, blockers: [], dryRun: false, autoPublish: true, dailyLimit: 3, expectedUsername: "highscoop.official", destinations: [{ id: 20, label: "@highscoop.official", platform: "instagram", configured: true }] },
   };
@@ -46,6 +47,10 @@ beforeEach(() => {
     if (path === "/status") return { integrations: { aiProvider: "gemini", gemini: true, openai: false, anthropic: false, flags: { dryRun: false, autoPublish: true } }, workerConnected: true, globalStop: false };
     if (path === "/studio/ai-status") return { defaultProvider: "gemini", text: { gemini: true, openai: false, anthropic: false } };
     if (path === "/canva/status") return { connected: false };
+    if (path === `${itemPath}/publication-draft` && options?.method === "PATCH") {
+      detail.publicationDraft = { version: options.body.version + 1, captions: structuredClone(options.body.captions) };
+      return structuredClone(detail.publicationDraft);
+    }
     if (path === itemPath) { if (readError) throw readError; return structuredClone(detail); }
     if (path === `${itemPath}/card-copy`) return { version: 1, revisionId: 4, hasSavedCopy: true, copy: structuredClone(copy) };
     if (path === `${itemPath}/fetch` && options?.method === "POST") return sourceLoad();
@@ -190,8 +195,9 @@ describe("단일 콘텐츠 작업 공간", () => {
     await input(caption, "최종 확인한 예약 캡션");
     expect(host.querySelector<HTMLInputElement>(".publish-confirm input")?.checked).toBe(false);
     expect(button("승인하고 예약 게시").disabled).toBe(true); expect(writes()).toEqual([]);
+    await click("캡션 저장");
     await confirm(); await click("승인하고 예약 게시");
     expect(mocks.api).toHaveBeenCalledWith(`${itemPath}/approve`, { method: "POST", body: expect.objectContaining({ timing: "later", scheduledAt: "2099-07-21T16:45:00+09:00", captions: { instagram: "최종 확인한 예약 캡션", telegram: "" } }) });
-    expect(writes()).toHaveLength(1);
+    expect(writes()).toHaveLength(2);
   });
 });

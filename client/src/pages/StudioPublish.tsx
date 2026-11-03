@@ -1,5 +1,5 @@
 import { InstagramAccounts, InstagramConnect } from "./InstagramAccounts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StudioCard } from "@shared/studio";
 import type { StudioPublishPreview, StudioPublishStatus } from "@shared/studioPublish";
@@ -9,6 +9,7 @@ import { useToast } from "../toast";
 import { isPrivateWorkroom } from "../workroom";
 import { deliveryState, publicationMode, PublicationRuntimeNotice, usePublicationRuntime, type PublicationRuntime } from "../publicationStatus";
 import { DeliveryActions } from "../DeliveryActions";
+import { usePublicationRequestId } from "../usePublicationRequestId";
 
 type StudioPublishProps = { base: StudioCard; dirty: boolean; busy: boolean; save: () => Promise<StudioCard> };
 export function StudioPublish(props: StudioPublishProps) {
@@ -25,7 +26,17 @@ function PublicationEditor({ base, dirty, busy, save }: StudioPublishProps) {
   const [reviewed, setReviewed] = useState(false), [schedule, setSchedule] = useState("");
   const [timing, setTiming] = useState<"now" | "later">("now");
   const runtime = usePublicationRuntime();
+  const publicationRequestId = usePublicationRequestId();
   const status = useQuery({ queryKey: ["studio-publication", base.id, base.channel], queryFn: () => api<StudioPublishStatus>(`/studio/cards/${base.id}/publication`), refetchInterval: query => query.state.data?.deliveries.some(d => ["scheduled", "processing"].includes(d.status)) ? 5000 : false });
+  const deliveryRegion = useRef<HTMLDivElement>(null);
+  const openedDeliveryFor = useRef<number | null>(null);
+  const unresolved = status.data?.deliveries.some(delivery => delivery.status === "processing" || delivery.status === "unknown" || delivery.needsReconciliation);
+  useEffect(() => {
+    if (status.data && openedDeliveryFor.current !== base.id && new URLSearchParams(window.location.search).get("tab") === "delivery") {
+      openedDeliveryFor.current = base.id;
+      deliveryRegion.current?.scrollIntoView({ block: "start" });
+    }
+  }, [base.id, status.data]);
   const publicationRuntime: PublicationRuntime | undefined = status.data ? { ...runtime.data, integrations: { flags: { dryRun: status.data.dryRun, autoPublish: status.data.autoPublish } } } : runtime.data;
   useEffect(() => { if (!status.data?.destinations.some(d => d.id === destinationId && d.enabled && d.configured)) setDestinationId(status.data?.destinations.find(d => d.enabled && d.configured)?.id ?? 0); }, [status.data, destinationId]);
   useEffect(() => setReviewed(false), [dirty, base.version, destinationId, timing, schedule]);
@@ -37,10 +48,12 @@ function PublicationEditor({ base, dirty, busy, save }: StudioPublishProps) {
   useEffect(() => { check.reset(); }, [base.channel, destinationId]);
   const approve = useMutation({ mutationFn: async () => {
     if (!preview || dirty || preview.version !== base.version || !reviewed) throw new Error("최신 이미지와 캡션을 확인해 주세요.");
+    if (unresolved) throw new Error("이 콘텐츠의 이전 전송 결과를 먼저 확인해 주세요.");
     // Re-check credentials/identity immediately before creating the approval.
     await check.mutateAsync();
-    return api<{ timing: "now" | "later"; workerStarted: boolean }>(`/studio/cards/${base.id}/publication/approve`, { method: "POST", body: { version: preview.version, assetId: preview.assetId, destinationId, timing, scheduledAt: timing === "later" ? new Date(`${schedule}:00+09:00`).toISOString() : undefined } });
-  }, onSuccess: result => { setReviewed(false); toast("info", result.timing === "later" ? "예약을 저장했습니다. 예약 시각 이후 전송 결과를 확인해 주세요." : result.workerStarted ? "바로 게시를 요청했습니다. 아래에서 실제 게시 결과를 확인해 주세요." : "게시 요청을 저장했습니다. 전송 대기 상태이며 실행기에서 처리한 결과가 아래에 표시됩니다."); status.refetch(); qc.invalidateQueries({ queryKey: ["ch"] }); } });
+    const intent = { version: preview.version, assetId: preview.assetId, destinationId, timing, scheduledAt: timing === "later" ? new Date(`${schedule}:00+09:00`).toISOString() : undefined };
+    return api<{ timing: "now" | "later"; workerStarted: boolean }>(`/studio/cards/${base.id}/publication/approve`, { method: "POST", body: { ...intent, requestId: publicationRequestId({ ...intent, cancelledDeliveries: status.data?.deliveries.filter(delivery => delivery.status === "cancelled").map(delivery => delivery.id).sort((a, b) => a - b) ?? [] }) } });
+  }, onSuccess: result => { publicationRequestId.complete(); setReviewed(false); toast("info", result.timing === "later" ? "예약을 저장했습니다. 예약 시각 이후 전송 결과를 확인해 주세요." : result.workerStarted ? "바로 게시를 요청했습니다. 아래에서 실제 게시 결과를 확인해 주세요." : "게시 요청을 저장했습니다. 전송 대기 상태이며 실행기에서 처리한 결과가 아래에 표시됩니다."); status.refetch(); qc.invalidateQueries({ queryKey: ["ch"] }); } });
   const stale = dirty || preview?.version !== base.version;
   const disabled = busy || prepare.isPending || approve.isPending;
   return <section className="panel stack studio-publication" aria-label="인스타그램 발행">
@@ -63,9 +76,10 @@ function PublicationEditor({ base, dirty, busy, save }: StudioPublishProps) {
       <div className="row" role="group" aria-label="게시 시점"><button type="button" className={`btn${timing === "now" ? " primary" : ""}`} aria-pressed={timing === "now"} disabled={disabled} onClick={() => setTiming("now")}>바로 게시</button><button type="button" className={`btn${timing === "later" ? " primary" : ""}`} aria-pressed={timing === "later"} disabled={disabled} onClick={() => setTiming("later")}>예약 게시</button></div>
       {timing === "later" && <label className="field">예약 시간 (한국 시간)<input type="datetime-local" value={schedule} disabled={disabled} onChange={e => setSchedule(e.target.value)} /><span className="hint">예약 시각 이후 작업 실행 시 발행됩니다. 서버가 쉬는 동안에는 정기 실행 시점까지 늦어질 수 있습니다.</span></label>}
       <label className="check"><input type="checkbox" checked={reviewed} disabled={disabled} onChange={e => setReviewed(e.target.checked)} />{preview.pages.length}장 전체와 순서, 캡션, 게시 계정을 확인했습니다.</label>
-      <button className="btn primary" disabled={disabled || !reviewed || !status.data?.ready || publicationMode(publicationRuntime).blocked || !destinationId || (timing === "later" && !schedule)} onClick={() => approve.mutate()}>{approve.isPending ? "계정 확인·게시 요청 중…" : timing === "later" ? "확인한 내용 예약 게시" : "확인한 내용 바로 게시"}</button>
+      {unresolved && <p className="notice warn">이 콘텐츠의 이전 전송 결과를 먼저 확인해 주세요. 초안은 계속 편집할 수 있습니다.</p>}
+      <button className="btn primary" disabled={disabled || unresolved || !reviewed || !status.data?.ready || publicationMode(publicationRuntime).blocked || !destinationId || (timing === "later" && !schedule)} onClick={() => approve.mutate()}>{approve.isPending ? "계정 확인·게시 요청 중…" : timing === "later" ? "확인한 내용 예약 게시" : "확인한 내용 바로 게시"}</button>
       {approve.error && <ErrorBox error={approve.error} />}
     </>)}
-    <div className="stack" aria-live="polite" aria-label="전송 상태"><div className="row between"><h3>전송 상태</h3><button className="btn sm" disabled={status.isFetching || runtime.isFetching} onClick={() => { status.refetch(); runtime.refetch(); }}>상태 새로고침</button></div>{status.data?.deliveries.length ? status.data.deliveries.map(d => { const state = deliveryState(d.status, d.scheduledAt); return <div className={`notice ${state.tone}`} key={d.id}><Badge kind={state.tone}>{state.label}</Badge><p className="small muted">전송 시각 {fmtDate(d.scheduledAt)} (한국 시간)</p><p className="small">{state.detail}</p>{d.lastError && <p className="small" role={d.status === "failed" ? "alert" : undefined}><strong>처리 사유: </strong>{d.lastError}</p>}{d.externalUrl && <a href={d.externalUrl} target="_blank" rel="noreferrer">인스타그램 게시물 보기 ↗</a>}<DeliveryActions channelId={status.data!.channelId} approvalId={d.approvalId} approvalStatus={d.approvalStatus} delivery={d} canRetry={status.data?.ready && !publicationMode(publicationRuntime).blocked} onChanged={() => status.refetch()} /></div>; }) : <p className="small muted">아직 게시 요청이 없습니다. 바로 게시하거나 예약하면 이곳에서 실제 게시 결과를 확인할 수 있습니다.</p>}<GuardedLink href="/publish">발행함 전체 보기 →</GuardedLink></div>
+    <div className="stack" ref={deliveryRegion} aria-live="polite" aria-label="전송 상태"><div className="row between"><h3>전송 상태</h3><button className="btn sm" disabled={status.isFetching || runtime.isFetching} onClick={() => { status.refetch(); runtime.refetch(); }}>상태 새로고침</button></div>{status.data?.deliveries.length ? status.data.deliveries.map(d => { const state = deliveryState(d.status, d.scheduledAt, Date.now(), d.outcomeSource); return <div className={`notice ${state.tone}`} key={d.id}><Badge kind={state.tone}>{state.label}</Badge><p className="small muted">전송 시각 {fmtDate(d.scheduledAt)} (한국 시간)</p><p className="small">{state.detail}</p>{d.lastError && <p className="small" role={d.status === "failed" ? "alert" : undefined}><strong>처리 사유: </strong>{d.lastError}</p>}{d.externalUrl && <a href={d.externalUrl} target="_blank" rel="noreferrer">인스타그램 게시물 보기 ↗</a>}<DeliveryActions channelId={status.data!.channelId} approvalId={d.approvalId} approvalStatus={d.approvalStatus} delivery={d} contentHref={`/studio/${base.id}`} canRetry={status.data?.ready && !publicationMode(publicationRuntime).blocked} onChanged={() => status.refetch()} /></div>; }) : <p className="small muted">아직 게시 요청이 없습니다. 바로 게시하거나 예약하면 이곳에서 실제 게시 결과를 확인할 수 있습니다.</p>}<GuardedLink href="/publish">발행함 전체 보기 →</GuardedLink></div>
   </section>;
 }

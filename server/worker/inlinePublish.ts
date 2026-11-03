@@ -1,13 +1,17 @@
 import type { DB } from "../db";
 import { env } from "../env";
 import { publishDue, type PublishTarget } from "./publish";
+import { stopPublisherHeartbeat } from "../services/publicationHealth";
 
 let running: Promise<unknown> | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 const pending = new Map<string, { db: DB; target?: PublishTarget }>();
+let stopping = false;
+let publisherDb: DB | null = null;
 
 function enqueue(db: DB, target?: PublishTarget) {
-  if (!env.inlineWorker || !env.autoPublish || env.dryRun || env.canonicalRedirectUrl) return false;
+  if (stopping || !env.inlineWorker || !env.autoPublish || env.dryRun || env.canonicalRedirectUrl) return false;
+  publisherDb = db;
   const key = target?.deliveryId !== undefined ? `delivery:${target.deliveryId}` : target?.approvalId !== undefined ? `approval:${target.approvalId}` : "scheduled";
   pending.set(key, { db, target });
   drain();
@@ -15,7 +19,7 @@ function enqueue(db: DB, target?: PublishTarget) {
 }
 
 function drain() {
-  if (running || !pending.size) return;
+  if (stopping || running || !pending.size) return;
   if (!env.inlineWorker || !env.autoPublish || env.dryRun || env.canonicalRedirectUrl) { pending.clear(); return; }
   const [key, work] = pending.entries().next().value!;
   pending.delete(key);
@@ -32,8 +36,18 @@ export function kickInlinePublish(db: DB, target: PublishTarget) {
   return enqueue(db, target);
 }
 export function startInlinePublish(db: DB) {
-  if (timer || !env.inlineWorker || env.canonicalRedirectUrl) return;
+  if (stopping || timer || !env.inlineWorker || env.canonicalRedirectUrl) return;
   enqueue(db);
   timer = setInterval(() => enqueue(db), 30_000);
   timer.unref();
+}
+
+/** Stop accepting work, then let the current leased attempt persist its result. */
+export async function stopInlinePublish() {
+  stopping = true;
+  if (timer) clearInterval(timer);
+  timer = null;
+  pending.clear();
+  await running;
+  if (publisherDb) await stopPublisherHeartbeat(publisherDb).catch(() => undefined);
 }

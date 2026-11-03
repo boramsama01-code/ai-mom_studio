@@ -53,7 +53,14 @@ describe("source cards automatically reach the board", () => {
     process.env.DRY_RUN = "false"; process.env.AUTO_PUBLISH = "true";
     process.env.TELEGRAM_BOT_TOKEN = "test-only-bot-token"; process.env.TG_SCIENCE_DIALOGUE_CHAT_ID = "@fixture";
     await getDb().insert(destinations).values({ channelId: 2, platform: "telegram_channel", label: "alt-text fixture", enabled: true, secretRefs: { chatId: "TG_SCIENCE_DIALOGUE_CHAT_ID" } });
+    const lookup = vi.fn(async (url: string | URL) => {
+      expect(new URL(String(url)).pathname).toMatch(/\/getChat$/);
+      return new Response(JSON.stringify({ ok: true, result: { id: -1001234, type: "channel", username: "fixture" } }));
+    });
+    vi.stubGlobal("fetch", lookup);
     const approved=await agent.post(`${endpoint}/approve`).set(H).send({...approvalBody,altTextVersion:1});
+    vi.unstubAllGlobals();
+    expect(lookup).toHaveBeenCalledOnce();
     expect(approved.status,JSON.stringify(approved.body)).toBe(201);
     expect(approved.body.approval.captions.altTexts).toEqual(values);
     const updated=values.map((_:string,i:number)=>`새 설명. ${i+1}페이지 확인한 설명.`);
@@ -81,7 +88,7 @@ describe("source cards automatically reach the board", () => {
     expect(restored.status).toBe(200);
     expect((await agent.get(`/api/studio/cards/${cardId}`)).body.card.sourceOutput).toEqual(before.sourceOutput);
     expect((await getDb().select().from(deliveries).where(eq(deliveries.id, delivery.id)))[0].status).toBe("cancelled");
-    expect((await getDb().select().from(approvals).where(eq(approvals.id, approval.id)))[0].status).toBe("cancelled");
+    expect((await getDb().select().from(approvals).where(eq(approvals.id, approval.id)))[0].status).toBe("invalidated");
     expect(await getDb().select().from(studioCards).where(eq(studioCards.sourceItemId, id))).toHaveLength(1);
   });
   it("does not attach a late AI cover after the board is trashed and restored", async () => {

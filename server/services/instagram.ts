@@ -8,6 +8,7 @@ import { altTextError } from "../../shared/altText";
  */
 import { env } from "../env";
 import { instagramDiagnostic, type InstagramDiagnosticStage, type InstagramOAuthReason } from "../../shared/instagramOAuthDiagnostics";
+import { publicationMessage } from "./publicationState";
 
 export type InstagramAuthMode = "instagram" | "facebook";
 const HOSTS: Record<InstagramAuthMode, string> = { instagram: "https://graph.instagram.com", facebook: "https://graph.facebook.com" };
@@ -47,7 +48,7 @@ export function instagramDiagnosticTargetHints(username: string): { primaryId?: 
 function instagramId(value: unknown): string | undefined {
   // Graph normally returns strings. Never turn an already rounded JSON number
   // into a different account ID (Instagram IDs can exceed MAX_SAFE_INTEGER).
-  if (typeof value === "string" && /^\d+$/.test(value)) return value;
+  if (typeof value === "string" && /^[1-9]\d*$/.test(value)) return value;
   if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
   return undefined;
 }
@@ -178,7 +179,7 @@ function providerFailureDiagnostic(status: number, body: { error?: unknown }): I
 
 function classify(status: number, body: { error?: { code?: number; error_subcode?: number; message?: string; type?: string } }): IgError {
   const e = body.error || {};
-  const msg = typeof e.message === "string" && e.message ? e.message.slice(0, 300) : `HTTP ${status}`;
+  const msg = typeof e.message === "string" && e.message ? publicationMessage(e.message).slice(0, 300) : `HTTP ${status}`;
   if (e.code === 190) return { kind: "token_expired", error: `액세스 토큰 만료·무효: ${msg}` };
   if (e.code === 10 || e.code === 200 || status === 403) return { kind: "auth", error: `권한 부족: ${msg}` };
   if (e.code === 4 || e.code === 17 || e.code === 32 || e.code === 613 || status === 429) return { kind: "rate_limit", error: `호출 한도: ${msg}` };
@@ -214,7 +215,9 @@ export async function createContainer(userId: string, token: string, imageUrl: s
   if(altText!==undefined&&!!altTextError(altText))return {ok:false as const,lost:false,err:{kind:"terminal",error:"대체텍스트는 1~2문장, 공백 포함 125자 이내로 작성해 주세요."} as IgError};
   const r = await igFetch(`${userId}/media`, "POST", { image_url: imageUrl, caption, ...(altText?.trim()?{alt_text:altText.trim()}: {}) }, token, authMode);
   if (!r.ok) return r;
-  return { ok: true as const, containerId: String(r.json.id) };
+  const containerId = instagramId(r.json.id);
+  if (!containerId) return { ok: false as const, lost: false, err: { kind: "transient", error: "이미지 컨테이너 ID를 받지 못했습니다. 아직 게시 요청은 하지 않았습니다." } as IgError };
+  return { ok: true as const, containerId };
 }
 
 export async function createCarouselContainer(userId: string, token: string, imageUrls: string[], caption: string, altTexts?: string[], authMode: InstagramAuthMode = "instagram") {
@@ -224,13 +227,15 @@ export async function createCarouselContainer(userId: string, token: string, ima
   for (const [index,image_url] of imageUrls.entries()) {
     const child = await igFetch(`${userId}/media`, "POST", { image_url, is_carousel_item: "true", ...(altTexts?.[index]?.trim()?{alt_text:altTexts[index].trim()}: {}) }, token, authMode);
     if (!child.ok) return child;
-    if (!child.json.id) return { ok: false as const, lost: false, err: { kind: "transient", error: "하위 이미지 컨테이너 ID를 받지 못했습니다." } as IgError };
-    children.push(String(child.json.id));
+    const childId = instagramId(child.json.id);
+    if (!childId) return { ok: false as const, lost: false, err: { kind: "transient", error: "하위 이미지 컨테이너 ID를 받지 못했습니다." } as IgError };
+    children.push(childId);
   }
   const parent = await igFetch(`${userId}/media`, "POST", { media_type: "CAROUSEL", children: children.join(","), caption }, token, authMode);
   if (!parent.ok) return parent;
-  if (!parent.json.id) return { ok: false as const, lost: false, err: { kind: "transient", error: "카드뉴스 컨테이너 ID를 받지 못했습니다." } as IgError };
-  return { ok: true as const, containerId: String(parent.json.id) };
+  const parentId = instagramId(parent.json.id);
+  if (!parentId) return { ok: false as const, lost: false, err: { kind: "transient", error: "카드뉴스 컨테이너 ID를 받지 못했습니다." } as IgError };
+  return { ok: true as const, containerId: parentId };
 }
 
 export async function containerStatus(containerId: string, token: string, authMode: InstagramAuthMode = "instagram") {
@@ -241,8 +246,11 @@ export async function containerStatus(containerId: string, token: string, authMo
 
 export async function publishContainer(userId: string, token: string, containerId: string, authMode: InstagramAuthMode = "instagram") {
   const r = await igFetch(`${userId}/media_publish`, "POST", { creation_id: containerId }, token, authMode);
-  if (!r.ok) return r;
-  return { ok: true as const, mediaId: String(r.json.id) };
+  if (!r.ok) return { ...r, lost: r.lost || (r.diagnostic?.httpStatus ?? 0) >= 500 };
+  const mediaId = instagramId(r.json.id);
+  // A successful HTTP status without a valid post ID is not proof of either outcome.
+  if (!mediaId) return { ok: false as const, lost: true, err: { kind: "unknown", error: "게시 응답에 유효한 게시물 ID가 없습니다. 계정에서 게시 여부를 확인하세요." } as IgError };
+  return { ok: true as const, mediaId };
 }
 
 export async function mediaPermalink(mediaId: string, token: string, authMode: InstagramAuthMode = "instagram"): Promise<string | null> {
