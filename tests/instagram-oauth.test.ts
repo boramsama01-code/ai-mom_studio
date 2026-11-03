@@ -173,6 +173,7 @@ describe("operator-bound Meta Unified Login", () => {
   it("logs only fixed failure diagnostics and never logs OAuth secrets or successful connections", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
+      fetcher.mockImplementation(async () => new Response(JSON.stringify({ access_token: "test-only-system-user-token" }), { headers: { "content-type": "application/json" } }));
       const success = await start();
       await success.agent.get("/api/studio/instagram/oauth/callback").query({ state: success.state, code: "private-success-code" });
       expect(warn).not.toHaveBeenCalled();
