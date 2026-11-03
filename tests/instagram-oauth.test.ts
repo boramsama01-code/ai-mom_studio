@@ -169,4 +169,21 @@ describe("operator-bound Meta Unified Login", () => {
     expect(done.headers.location).toBe("/instagram?instagram=error&reason=connect_failed&stage=connection_validation");
     expect(done.text).not.toContain("PRIVATE");
   });
+
+  it("logs only fixed failure diagnostics and never logs OAuth secrets or successful connections", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const success = await start();
+      await success.agent.get("/api/studio/instagram/oauth/callback").query({ state: success.state, code: "private-success-code" });
+      expect(warn).not.toHaveBeenCalled();
+      const { agent, state } = await start();
+      const privateText = "EAA_PRIVATE_TOKEN https://private.invalid/?access_token=PRIVATE_TOKEN";
+      mocks.connect.mockRejectedValue(new HttpError(400, privateText, { code: "direct_account_access_failed", token: privateText, username: "PRIVATE_USERNAME", diagnostic: { stage: "business_asset", httpStatus: 400, graphCode: 100, graphSubcode: 33, lost: false, provider_message: privateText, state, code: "private-auth-code", stack: "PRIVATE_STACK" } }));
+      await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "private-auth-code", error_description: privateText });
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith("[instagram_oauth]", JSON.stringify({ reason: "direct_account_access_failed", diagnostic: { stage: "business_asset", httpStatus: 400, graphCode: 100, graphSubcode: 33, lost: false } }));
+      const logged = JSON.stringify(warn.mock.calls);
+      for (const secret of ["PRIVATE", "private-auth-code", state, success.state, "test-only-app-secret", "test-only-system-user-token", "https://"]) expect(logged).not.toContain(secret);
+    } finally { warn.mockRestore(); }
+  });
 });

@@ -8,7 +8,7 @@ import { expectedInstagramUsername } from "../../shared/channelInstagram";
 import { connectInstagram } from "../services/instagramConnection";
 import { exchangeUnifiedInstagramCode, InstagramOAuthError, instagramAuthorizationUrl, instagramOAuthConfig, newInstagramOAuth, validateInstagramOAuthState } from "../services/instagramOAuth";
 import { ah, HttpError, intParam, parse } from "./util";
-import { instagramOAuthFailureUrl, sanitizeInstagramDiagnostic } from "../../shared/instagramOAuthDiagnostics";
+import { instagramOAuthFailureUrl, instagramOAuthReason, sanitizeInstagramDiagnostic } from "../../shared/instagramOAuthDiagnostics";
 
 /** Mounted behind the existing operator + CSRF middleware; callback GET still requires that session. */
 export const instagramOAuthRoutes = Router();
@@ -31,7 +31,12 @@ instagramOAuthRoutes.post("/studio/instagram/:cid/oauth/start", ah(async (req, r
 }));
 
 instagramOAuthRoutes.get("/studio/instagram/oauth/callback", ah(async (req, res) => {
-  const back = (reason: unknown, diagnostic?: unknown) => res.redirect(instagramOAuthFailureUrl(reason, diagnostic));
+  const back = (reason: unknown, diagnostic?: unknown) => {
+    const safeReason = instagramOAuthReason(reason);
+    const safeDiagnostic = sanitizeInstagramDiagnostic(diagnostic);
+    console.warn("[instagram_oauth]", JSON.stringify({ reason: safeReason, ...(safeDiagnostic ? { diagnostic: safeDiagnostic } : {}) }));
+    return res.redirect(instagramOAuthFailureUrl(safeReason, safeDiagnostic));
+  };
   const pending = req.session.instagramOauth;
   const state = validateInstagramOAuthState(pending, req.query.state);
   if (state === "state" || !pending) return back("state", { stage: "callback" });
