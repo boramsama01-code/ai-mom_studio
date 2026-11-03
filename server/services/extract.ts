@@ -3,13 +3,14 @@ import * as cheerio from "cheerio";
 import { extractText, getDocumentProxy } from "unpdf";
 import { safeFetch, FetchFailure } from "./safeFetch";
 import { sha256 } from "./text";
-import { articleAccessProblem, decodeGoogleNewsUrl, googleArticleLink, isGoogleNewsUrl, publisherArticleLink, structuredArticleBody, type ArticleContext } from "./articleSource";
+import { articleAccessProblem, decodeGoogleNewsUrl, googleArticleLink, isGoogleNewsUrl, publicArticleAlternate, publisherArticleLink, sameArticleAlternate, structuredArticleBody, type ArticleContext, type PublicArticleAlternate } from "./articleSource";
 import { resolveGoogleNewsArticle } from "./googleNewsResolve";
+import { decodePublicText, isPublicHtmlResponse } from "./publicTextResponse";
 
 export type Attachment = { url: string; name: string; kind: string; status: string; reason?: string };
 export type ExtractResult =
   | { ok: true; finalUrl: string; title: string; text: string; hash: string; attachments: Attachment[]; contentKind: "html" | "pdf" }
-  | { ok: false; status: "failed" | "unsupported" | "blocked"; error: string; attachments?: Attachment[] };
+  | { ok: false; status: "failed" | "unsupported" | "blocked"; error: string; attachments?: Attachment[]; finalUrl?: string };
 const MAX_TEXT = 20_000;
 
 /** Same public Naver blog post, in its readable mobile layout. */
@@ -42,7 +43,7 @@ export function extractHtml(html: string, baseUrl: string): { title: string; tex
   const structured = structuredArticleBody(html);
   const title = ($("meta[property='og:title']").attr("content") || structured.title || $("title").first().text() || "").trim();
   const attachments: Attachment[] = [];
-  if (isGoogleNewsUrl(baseUrl) || articleAccessProblem(html)) return { title, text: "", attachments };
+  if (isGoogleNewsUrl(baseUrl) || articleAccessProblem(html, baseUrl)) return { title, text: "", attachments };
   $("a[href]").each((_, a) => {
     const href = $(a).attr("href") || "", name = $(a).text().trim().slice(0, 200);
     const kind = classifyAttachment(href, name);
@@ -54,11 +55,11 @@ export function extractHtml(html: string, baseUrl: string): { title: string; tex
       status: kind === "pdf" ? "pending" : "manual_check",
       reason: kind === "pdf" ? undefined : `${kind.toUpperCase()} 파일은 자동 추출하지 않음 — 수동 확인 필요` });
   });
-  $("script,style,noscript,iframe,svg,header,footer,nav,form,aside,button").remove();
+  $("script,style,noscript,iframe,svg,header,footer,nav,form,aside,button,[hidden],[aria-hidden='true'],.related-news,.related-articles,.article-tools,.share-buttons,.advertisement").remove();
   $("br").replaceWith("\n");
   $("p,div,section,li,h1,h2,h3,h4,tr").append("\n");
   const selectors = ["#dic_area", "#newsct_article", "#harmonyContainer", "#articletxt", "#cont_newstext", "#news_body_id", "#CmAdContent", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",
-    "#article-view-content-div", "#articleBodyContents", "#articleBody", "#newsEndContents", "section.news_view", ".article-body", ".article_body", ".article_view", ".article_txt", ".article-text", ".news_body", "article",
+    "#article-view-content-div", "#articleBodyContents", "#articleBody", "#article-body", "#article_body", "#article_content", "#articleContent", "#newsEndContents", "#news_content", "#newsContent", "#news_text", "#news_txt", "section.news_view", ".article-body", ".article_body", ".article_view", ".article_txt", ".article-text", ".article-content", ".article__body", ".news-article-body", ".news-text", ".news_body", "article",
     "[class*='board_view']", "[class*='bbs_view']", "[class*='view_cont']", "[class*='viewCont']"];
   let text = "";
   for (const selector of selectors) {
@@ -100,25 +101,30 @@ function failure(e: unknown): ExtractResult {
 export async function fetchAndExtract(url: string, fetchImpl = safeFetch, context: ArticleContext = {}): Promise<ExtractResult> {
   let target = preferReadableUrl(decodeGoogleNewsUrl(url) || url);
   const visited = new Set<string>(), deadline = Date.now() + 24_000;
+  let alternate: PublicArticleAlternate | null = null;
   for (let hop = 0; hop < 3; hop++) {
     if (visited.has(target)) return { ok: false, status: "failed", error: "원문 연결이 반복되어 중단했습니다." };
     if (Date.now() >= deadline) return { ok: false, status: "failed", error: "원문 확인 시간 한도를 초과했습니다." };
     if (hop > 0 && context.takeExtraCall && !context.takeExtraCall()) return { ok: false, status: "failed", error: "이번 수집의 원문 호출 한도에 도달했습니다. 원문 다시 확보를 눌러 확인해 주세요." };
     visited.add(target);
     let res;
-    try { res = await fetchImpl(target, { timeoutMs: Math.min(12_000, deadline - Date.now()) }); }
+    try { res = await fetchImpl(target, { timeoutMs: Math.min(12_000, deadline - Date.now()), ...(alternate ? { allowedHosts: alternate.allowedHosts } : {}) }); }
     catch (e) { return failure(e); }
     const ct = res.contentType.toLowerCase();
     if (ct.includes("pdf") || res.body.subarray(0, 5).toString() === "%PDF-") {
+      if (alternate) return { ok: false, status: "unsupported", error: "공개 대체 페이지가 PDF로 응답해 같은 기사인지 확인하지 못했습니다. 첨부 원문을 직접 확인해 주세요.", finalUrl: url };
       try {
         const text = await extractPdf(res.body);
         if (text.length < 50) return { ok: false, status: "unsupported", error: "텍스트가 없는 PDF(스캔본 가능성) — 수동 확인 필요" };
         return { ok: true, finalUrl: res.finalUrl, title: "", text, hash: sha256(text), attachments: [], contentKind: "pdf" };
       } catch { return { ok: false, status: "unsupported", error: "PDF 텍스트 추출 실패 — 수동 확인 필요" }; }
     }
-    if (!ct.includes("html") && !ct.includes("xml") && ct !== "") return { ok: false, status: "unsupported", error: `지원하지 않는 형식(${ct.split(";")[0]}) — 수동 확인 필요` };
-    const html = decodeHtml(res.body, ct), restriction = articleAccessProblem(html);
-    if (restriction) return { ok: false, status: "blocked", error: restriction };
+    const html = decodePublicText(res.body, ct);
+    if (!isPublicHtmlResponse(ct, html)) return { ok: false, status: "unsupported", error: `지원하지 않는 형식(${ct.split(";")[0]}) — 수동 확인 필요`, finalUrl: res.finalUrl };
+    const restriction = articleAccessProblem(html, res.finalUrl);
+    if (restriction) return { ok: false, status: "blocked", error: restriction, finalUrl: res.finalUrl };
+    if (alternate && !sameArticleAlternate(html, res.finalUrl, alternate)) return { ok: false, status: "unsupported", error: "공개 대체 페이지가 같은 기사인지 확인하지 못해 본문을 저장하지 않았습니다. 원문을 직접 확인하거나 본문을 붙여넣어 주세요.", finalUrl: url };
+    if (/^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<(?:rss|feed|rdf:RDF)(?:\s|>)/i.test(html)) return { ok: false, status: "unsupported", error: "기사 본문 대신 RSS 기사 목록이 응답했습니다. 목록의 제목·요약은 본문으로 사용하지 않습니다. 기사 원문 주소를 확인해 주세요.", finalUrl: res.finalUrl };
     if (isGoogleNewsUrl(res.finalUrl)) {
       let original = googleArticleLink(html, res.finalUrl);
       // Modern opaque IDs need Google's public per-article signature + URL lookup.
@@ -135,14 +141,14 @@ export async function fetchAndExtract(url: string, fetchImpl = safeFetch, contex
       return { ok: false, status: "unsupported", error: "Google 뉴스 중간 링크의 원문 주소 조회를 완료하지 못했습니다. Google 응답 형식 변경 또는 원문 연결 정보 누락 가능성이 있습니다. 다른 기사를 추측하거나 제목·요약을 본문으로 저장하지 않았습니다." };
     }
     const { title, text, attachments } = extractHtml(html, res.finalUrl);
-    if (text.length < 80) return { ok: false, status: "unsupported", error: "공개 HTML·구조화 데이터에서 충분한 본문을 찾지 못했습니다. 자바스크립트로만 표시되는 페이지이거나 본문 형식 확인이 필요합니다. 원문을 직접 열어 확인하거나 본문을 붙여넣어 주세요.", attachments };
+    if (text.length < 80) {
+      if (!alternate) {
+        const advertised = publicArticleAlternate(html, res.finalUrl, context);
+        if (advertised && !visited.has(advertised.url) && hop < 2) { alternate = advertised; target = advertised.url; continue; }
+      }
+      return { ok: false, status: "unsupported", error: `공개 HTML·구조화 데이터${alternate ? "·공식 대체 페이지" : ""}에서 충분한 본문을 찾지 못했습니다. 자바스크립트로만 표시되는 페이지이거나 본문 형식 확인이 필요합니다. 원문을 직접 열어 확인하거나 본문을 붙여넣어 주세요.`, attachments, finalUrl: res.finalUrl };
+    }
     return { ok: true, finalUrl: res.finalUrl, title, text, hash: sha256(text), attachments, contentKind: "html" };
   }
   return { ok: false, status: "failed", error: "원문 연결 단계 한도를 초과했습니다." };
-}
-function decodeHtml(buf: Buffer, contentType: string): string {
-  const m = contentType.match(/charset=([\w-]+)/i) || buf.subarray(0, 2048).toString("latin1").match(/charset=["']?([\w-]+)/i);
-  const cs = (m?.[1] || "utf-8").toLowerCase();
-  try { return new TextDecoder(cs === "ks_c_5601-1987" ? "euc-kr" : cs).decode(buf); }
-  catch { return new TextDecoder("utf-8").decode(buf); }
 }

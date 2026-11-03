@@ -188,10 +188,10 @@ studioRoutes.post("/studio/cards/:id/publication/prepare", ah(async (req, res) =
   res.json(await prepareStudioPublication(getDb(), intParam(req.params.id), version, actorOf(req)));
 }));
 studioRoutes.post("/studio/cards/:id/publication/approve", ah(async (req, res) => {
-  const input = parse(z.object({ version: z.number().int().positive(), assetId: z.number().int().positive(), destinationId: z.number().int().positive(), scheduledAt: z.string().datetime({ offset: true }) }).strict(), req.body);
+  const input = parse(z.object({ version: z.number().int().positive(), assetId: z.number().int().positive(), destinationId: z.number().int().positive(), timing: z.enum(["now", "later"]).optional(), scheduledAt: z.string().datetime({ offset: true }).optional() }).strict(), req.body);
   const result = await approveStudioPublication(getDb(), intParam(req.params.id), input, actorOf(req));
-  kickInlinePublish(getDb());
-  res.status(201).json(result);
+  const workerStarted = result.timing === "now" && kickInlinePublish(getDb(), { approvalId: result.approvalId });
+  res.status(201).json({ ...result, workerStarted });
 }));
 studioRoutes.post("/studio/instagram/:cid/connect", ah(async (req, res) => {
   const input = parse(z.object({ token: z.string().trim().min(20).max(4000).regex(/^[^\r\n\s]+$/), username: z.string().trim().regex(/^@?[a-zA-Z0-9._]{1,30}$/), dailyLimit: z.number().int().min(1).max(25), authMode: z.enum(["instagram", "facebook"]).default("instagram") }).strict(), req.body);

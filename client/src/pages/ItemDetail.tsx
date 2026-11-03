@@ -1,6 +1,8 @@
 import { CategorySelect } from "../CategorySelect";
 import { CardCarousel } from "../CardCarousel";
 import { CardCopyEditor, type CardCopyResponse } from "../CardCopyEditor";
+import { DeliveryActions } from "../DeliveryActions";
+import "../contentWorkspace.css";
 import type { CardCarousel as CarouselData } from "@shared/carousel";
 import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import { AiUsageGuide } from "../AiUsageGuide";
@@ -44,19 +46,28 @@ type Detail = {
 
 const SRC_KIND: Record<string, string> = { naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 직접 RSS", official: "공식 게시물", manual: "직접 추가 자료", manual_text: "직접 붙여넣은 본문 · 내용 확인 필요" };
 type ItemTab = "source" | "edit" | "publish" | "delivery" | "history";
-const entryTab = (search: string): ItemTab => new URLSearchParams(search).get("tab") === "delivery" ? "delivery" : "source";
+const entryTab = (search: string): ItemTab => {
+  const value = new URLSearchParams(search).get("tab");
+  return value && ["source", "edit", "publish", "delivery", "history"].includes(value) ? value as ItemTab : "publish";
+};
 
-export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: number }) {
-  const { selected, allChannels } = useChannel();
+export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { cid: number; id: number; fromStudio?: boolean }) {
+  const { allChannels } = useChannel();
   const q = useQuery({ queryKey: ["ch", requestedCid, "item", id], queryFn: () => api<Detail>(`/channels/${requestedCid}/items/${id}`), refetchInterval: query => query.state.data?.deliveries.some(({ d }) => ["scheduled", "processing"].includes(d.status)) ? 5000 : false });
   const runtime = usePublicationRuntime();
   const cid = q.data?.item.channelId ?? requestedCid;
   const sourceChannel = allChannels.find(ch => ch.id === cid);
   const search = useSearch();
-  const [tab, setTab] = useState<ItemTab>(() => entryTab(search));
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [deliveryOpen, setDeliveryOpen] = useState(() => entryTab(search) === "delivery");
   const [templateChoice, setTemplateChoice] = useState<string | null>(null);
   const [, navigate] = useLocation();
-  useEffect(() => { setTab(entryTab(search)); }, [requestedCid, id, search]);
+  useEffect(() => {
+    const target = entryTab(search);
+    setSourceOpen(target === "source" || target === "edit");
+    setDeliveryOpen(target === "delivery");
+    if (target === "delivery") window.setTimeout(() => document.getElementById("delivery-panel")?.scrollIntoView({ block: "start" }), 100);
+  }, [requestedCid, id, search]);
   useEffect(() => { setTemplateChoice(null); }, [requestedCid, id]);
   useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}${search ? `?${search}` : ""}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, search, navigate]);
   const guard = useDirtyGuard();
@@ -65,56 +76,63 @@ export function ItemDetailPage({ cid: requestedCid, id }: { cid: number; id: num
     mutationFn: (subcategory: string) => api(`/channels/${cid}/items/${id}/subcategory`, { method: "PATCH", body: { version: q.data!.item.version, subcategory: subcategory || null } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["ch"] }); qc.invalidateQueries({ queryKey: ["collection"] }); },
   });
-  const transfer = useMutation({
-    mutationFn: () => {
-      if (!sourceChannel?.active) throw new Error("사용 중인 채널을 확인해 주세요.");
-      return api<{ id: number }>("/studio/cards", { method: "POST", body: { title: q.data!.item.title, channel: studioKey(sourceChannel.slug), format: "카드뉴스", stage: "idea", sourceItemId: id } });
-    },
-    onSuccess: (card) => navigate(`/studio/${card.id}`),
-  });
   if (q.isLoading) return <Loading lines={5} />;
-  if (q.error) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
+  // A failed background refresh must never unmount the editor or lose typed copy.
+  if (!q.data) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   const d = q.data!;
   const idea = readIdea(d.item.edited);
   if (d.item.origin === "idea" && idea && sourceChannel) return <IdeaDetail item={d.item} idea={idea} channel={sourceChannel.slug} />;
-  const go = (t: ItemTab, anchor: string) => guard.confirmLeave(() => { setTab(t); setTimeout(() => { const node = document.getElementById(anchor); node?.scrollIntoView({ behavior: "smooth", block: "start" }); node?.focus({ preventScroll: true }); }, 30); });
-  const tabs: Array<[typeof tab, string]> = [["source", "1 원문 확인"], ["edit", "2 초안 편집"], ["publish", "3 카드·승인"], ["delivery", "전송 상태"], ["history", "이력"]];
+  const go = (t: ItemTab, anchor: string) => {
+    if (t === "source" || t === "edit") setSourceOpen(true);
+    if (t === "delivery") setDeliveryOpen(true);
+    window.setTimeout(() => {
+      const node = document.getElementById(anchor);
+      for (let parent = node?.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
+      if (node instanceof HTMLDetailsElement) node.open = true;
+      node?.scrollIntoView({ behavior: "smooth", block: "start" }); node?.focus({ preventScroll: true });
+    }, 30);
+  };
   return (
-    <>
-      <div className="page-head">
+    <div className="content-workspace">
+      <div className="page-head content-workspace-heading">
         <div style={{ minWidth: 0 }}>
-          <GuardedLink href="/inbox" className="small">
-            ← 수집함
+          <GuardedLink href={fromStudio ? "/" : "/inbox"} className="small">
+            ← {fromStudio ? "내 콘텐츠" : "수집함"}
           </GuardedLink>
           <h1 style={{ overflowWrap: "anywhere" }}>{d.item.title}</h1>
           <div className="row">
             {d.item.isSample && <Badge kind="sample">샘플 모드 · 실제 정보 아님</Badge>}
             <Badge>{CONTENT_KIND_LABEL[d.item.kind as ContentKind]}</Badge>
             <StatusBadge type="review" value={d.item.reviewStatus} />
-            <StatusBadge type="evidence" value={d.item.evidenceStatus} />
-            {d.item.kind === "notice" && <StatusBadge type="schedule" value={d.item.scheduleStatus} />}
-            <StatusBadge type="relevance" value={d.item.relevance} />
-            <StatusBadge type="publish" value={d.item.publishStatus} />
+            {d.item.publishStatus !== "waiting" && <StatusBadge type="publish" value={d.item.publishStatus} />}
             {d.item.excluded && <Badge kind="err">제외됨: {d.item.excludedReason}</Badge>}
           </div>
         </div>
-        <button className="btn" disabled={transfer.isPending || !sourceChannel?.active} onClick={() => guard.confirmLeave(() => transfer.mutate())}>{transfer.isPending ? "가져오는 중…" : "제작 보드로 가져오기"}</button>
       </div>
-      <CategorySelect channel={sourceChannel?.slug ?? ""} value={d.item.subcategory ?? ""} onChange={v => guard.confirmLeave(() => categorize.mutate(v))} disabled={categorize.isPending} />
-      {categorize.error && <ErrorBox error={categorize.error} />}
-      {transfer.error && <ErrorBox error={transfer.error} />}
-      <DiscoveryNote info={d.item.discovery} />
-      <div className="tabs workflow-tabs" role="tablist" aria-label="콘텐츠 제작 단계">
-        {tabs.map(([k, label]) => <button key={k} id={`tab-${k}`} role="tab" aria-selected={tab === k} aria-controls={`step-${k}`} onClick={() => go(k, `step-${k}`)}>{label}</button>)}
-      </div>
-      <div className="item-workspace" role="tabpanel" id={`step-${tab}`} aria-labelledby={`tab-${tab}`} tabIndex={-1}>
-        {tab === "source" && <><SourcePanel d={d} cid={cid} /><Progress d={d} onGo={go} actionsOnly forTab="source" /></>}
-        {tab === "edit" && <><EditPanel d={d} cid={cid} templateKey={templateChoice} onTemplateChange={setTemplateChoice} /><Progress d={d} onGo={go} actionsOnly forTab="edit" /></>}
-        {tab === "publish" && <><ReviewPanel d={d} cid={cid} /><CardApprovePanel d={d} cid={cid} templateChoice={templateChoice} onTemplateChange={setTemplateChoice} onApproved={() => go("delivery", "delivery-panel")} runtime={runtime.data} /><Progress d={d} onGo={go} actionsOnly forTab="publish" /></>}
-        {tab === "delivery" && <ItemDeliveryPanel d={d} cid={cid} runtime={runtime.data} runtimeError={runtime.error} refresh={() => { q.refetch(); runtime.refetch(); }} refreshing={q.isFetching || runtime.isFetching} />}
-        {tab === "history" && <HistoryPanel d={d} />}
-      </div>
-    </>
+      {q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}
+      <nav className="content-workspace-nav" aria-label="현재 콘텐츠 작업">
+        <button className="btn sm" onClick={() => go("publish", "card-panel")} disabled={!d.current}>카드 편집</button>
+        <button className="btn sm" onClick={() => go("source", "source-panel")}>자료·초안</button>
+        <button className="btn sm" onClick={() => go("publish", "publish-options")} disabled={!d.current}>게시 준비</button>
+        <button className="btn sm" onClick={() => go("delivery", "delivery-panel")}>전송 상태</button>
+      </nav>
+      <details className="content-drawer" open={sourceOpen || !d.current} onToggle={event => setSourceOpen(event.currentTarget.open)}>
+        <summary><strong>자료·초안</strong><span>{d.primary?.fetchStatus === "ok" ? "본문 확보됨" : d.primary?.fetchStatus === "not_fetched" ? "본문 불러오기" : d.primary ? "본문 확인 필요" : "직접 작성"}</span></summary>
+        <div className="content-drawer-body stack">
+          <CategorySelect channel={sourceChannel?.slug ?? ""} value={d.item.subcategory ?? ""} onChange={v => guard.confirmLeave(() => categorize.mutate(v))} disabled={categorize.isPending} />
+          {categorize.error && <ErrorBox error={categorize.error} />}
+          <DiscoveryNote info={d.item.discovery} />
+          <SourcePanel key={d.item.id} d={d} cid={cid} />
+          <EditPanel d={d} cid={cid} templateKey={templateChoice} onTemplateChange={setTemplateChoice} />
+        </div>
+      </details>
+      <CardApprovePanel d={d} cid={cid} templateChoice={templateChoice} onTemplateChange={setTemplateChoice} onApproved={() => go("delivery", "delivery-panel")} runtime={runtime.data} />
+      <details className="content-drawer" open={deliveryOpen} onToggle={event => setDeliveryOpen(event.currentTarget.open)}>
+        <summary><strong>전송 내역</strong><span>{d.deliveries.length ? `${d.deliveries.length}건 · 예약 취소·재전송` : "승인 후 상태 확인"}</span></summary>
+        <ItemDeliveryPanel d={d} cid={cid} runtime={runtime.data} runtimeError={runtime.error} refresh={() => { q.refetch(); runtime.refetch(); }} refreshing={q.isFetching || runtime.isFetching} />
+      </details>
+      <details className="content-drawer"><summary><strong>버전 기록</strong><span>{d.revisions.length}개</span></summary><HistoryPanel d={d} /></details>
+    </div>
   );
 }
 
@@ -134,6 +152,12 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
     },
   });
   const p = d.primary;
+  const attempted = useRef<number | null>(null);
+  useEffect(() => {
+    if (!p || p.fetchStatus !== "not_fetched" || p.isSample || attempted.current === p.id) return;
+    attempted.current = p.id;
+    refetch.mutate();
+  }, [p?.id, p?.fetchStatus]);
   const recovery = p ? sourceRecovery(p) : null;
   const sourceUrl = p && typeof p.meta.finalUrl === "string" && /^https?:\/\//.test(p.meta.finalUrl) ? p.meta.finalUrl : p?.originalUrl;
   const evidence: Array<{ field: string; source_id: number; quote: string }> = d.current?.payload?.evidence ?? [];
@@ -162,14 +186,15 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
                 {p.kind === "manual_text" ? "본문 직접 저장됨" : `원문 확보: ${{ ok: "성공", not_fetched: "아직 안 함", failed: "실패", unsupported: "지원 안 되는 형식", blocked: "차단됨" }[p.fetchStatus] ?? p.fetchStatus}`}
               </Badge>
               {p.kind !== "manual_text" && <button className="btn sm" onClick={() => refetch.mutate()} disabled={refetch.isPending}>
-                {refetch.isPending ? "확보 중…" : "원문 다시 확보"}
+                {refetch.isPending ? "본문 불러오는 중…" : p.fetchStatus === "not_fetched" ? "본문 불러오기" : "본문 다시 불러오기"}
               </button>}
             </div>
-            {recovery && p.fetchStatus !== "ok" && <div className="notice warn small" data-testid="source-recovery">
+            {refetch.isPending && <p className="notice small" role="status">선택한 자료의 원문을 불러오고 있어요. 다른 항목의 본문은 요청하지 않습니다.</p>}
+            {!refetch.isPending && recovery && p.fetchStatus !== "ok" && <div className="notice warn small" data-testid="source-recovery">
               <strong>{recovery.label}</strong><p>{recovery.reason}</p><p>{recovery.nextStep}</p>
               <div className="row">{recovery.links.map(link => <a key={link.url} className="btn sm" href={link.url} target="_blank" rel="noopener noreferrer">{link.label} ↗</a>)}</div>
             </div>}
-            {refetch.error && !p.fetchError && p.kind !== "manual_text" && <ErrorBox error={refetch.error} />}
+            {refetch.error && p.kind !== "manual_text" && <ErrorBox error={refetch.error} retry={() => refetch.mutate()} />}
             {refetch.data?.changed && <div className="notice warn small">원문 내용이 이전과 달라졌습니다. 다시 검토하세요.</div>}
             {p.attachments.length > 0 && (
               <div className="stack">
@@ -333,6 +358,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
   const [localTemplate, setLocalTemplate] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
   const draftTemplate = templateKey ?? localTemplate ?? d.current?.payload.cardCopy?.templateKey ?? templates.data?.current ?? "builtin:classic";
+  const sourceReady = !d.primary || (d.primary.fetchStatus === "ok" && !!d.primary.fetchedText?.trim());
   const gen = useMutation({
     mutationFn: () => api(`/channels/${cid}/items/${d.item.id}/generate`, { method: "POST", body: { provider, templateKey: draftTemplate } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
@@ -341,25 +367,26 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
   return (
     <section className="panel stack" id="edit-panel" tabIndex={-1}>
       <div className="row between">
-        <h2 style={{ margin: 0 }}>편집</h2>
+        <h2 style={{ margin: 0 }}>초안 작성</h2>
       </div>
       <details className="studio-more" open><summary>API 자동 작성 · Gemini·GPT</summary>
         <label className="field">작성 AI<select value={provider} disabled={gen.isPending} onChange={e => setProviderChoice(e.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}</option>)}</select></label>
         <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate || t.colors?.some(color => color.key === draftTemplate))?.name ?? "기본"} ▾</button>
         {showTemplates && templates.data && <TemplatePicker cid={cid} value={draftTemplate} items={templates.data.items} disabled={gen.isPending} onChange={key => { setLocalTemplate(key); onTemplateChange?.(key); }} />}
-        <p className="hint">원고를 요약하고 선택한 템플릿에 맞는 제목·부제·본문을 함께 작성합니다. ‘3 카드·승인’에서 실제 카드 모양을 보며 고칠 수 있어요.</p>
+        <p className="hint">원고를 요약하고 선택한 템플릿에 맞는 제목·부제·본문을 함께 작성합니다. 아래 카드 편집기에서 바로 고칠 수 있어요.</p>
         <AiUsageGuide provider={provider} />
         {ai.data?.integrations[provider] === false && <p className="notice warn small">선택한 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
-        <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty || !ai.data?.integrations[provider]} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
+        {!sourceReady && <p className="notice small">먼저 위에서 본문을 불러오거나 직접 붙여넣어 저장해 주세요.</p>}
+        <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty || !sourceReady || !ai.data?.integrations[provider]} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
           {gen.isPending ? "생성 중…" : d.item.kind === "notice" ? `${aiProviderLabels[provider]}로 원문 추출` : `${aiProviderLabels[provider]}로 초안 생성`}
         </button>
       </details>
-      <ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, source: d.primary ? {
+      <details className="content-options"><summary>ChatGPT에서 초안 가져오기</summary><ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, source: d.primary ? {
         title: d.primary.title ?? d.item.title, url: d.primary.originalUrl,
         text: d.primary.fetchStatus === "ok" ? d.primary.fetchedText ?? "" : "", snippet: d.primary.snippet ?? "",
         quotes: Array.isArray(d.primary.meta.quotes) ? d.primary.meta.quotes.filter((q): q is string => typeof q === "string") : [],
       } : null })} />
-      <p className="small muted">저장한 원문·근거로 초안을 요청합니다. 본문을 붙여넣었다면 먼저 저장해 주세요. 받은 초안은 아래 편집 칸에 옮기거나 제작 보드에서 사용할 수 있습니다.</p>
+      <p className="small muted">저장한 원문·근거로 초안을 요청합니다. 받은 초안은 아래 편집 칸에 옮겨 같은 화면에서 계속 작성하세요.</p></details>
       {d.current && (
         <p className="small muted">
           현재 버전 r{d.current.revisionNo} · {d.current.author === "operator" ? "운영자 편집본" : d.current.author === "llm" ? `자동 추출/초안 (${d.current.model ?? ""})` : "시스템"}
@@ -367,10 +394,10 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
         </p>
       )}
       {d.item.version > version && dirty && <div className="notice warn">서버에 새 초안이 있습니다. 직접 입력한 내용은 유지했습니다. <button className="btn sm" onClick={() => guard.confirmLeave(() => { setBase(incoming); setDraft(incoming); setVersion(d.item.version); })}>새 초안 불러오기</button></div>}
-      {gen.error && <ErrorBox error={gen.error} />}
+      {gen.error && <ErrorBox error={gen.error} retry={!dirty && sourceReady && !!ai.data?.integrations[provider] ? () => gen.mutate() : undefined} />}
       {gen.isSuccess && <div className="notice ok small">새 버전을 만들었습니다. 생성 성공은 검토 완료가 아닙니다 — 내용을 확인하세요.</div>}
       {!draft ? (
-        <p className="muted">아직 초안이 없습니다. 위의 API 자동 작성으로 초안을 만들거나 ChatGPT 초안을 가져오세요. 본문을 직접 저장하면 아래에 편집 칸이 생기며, ‘제작 보드로 가져오기’에서도 이어서 작성할 수 있습니다.</p>
+        <p className="muted">아직 초안이 없습니다. 위의 API 자동 작성으로 초안을 만들거나 ChatGPT 초안을 가져오세요. 본문을 직접 저장하면 아래에 편집 칸이 생기며, 이 화면에서 이어서 작성할 수 있습니다.</p>
       ) : (
         <form
           className="stack"
@@ -427,12 +454,14 @@ function ReviewPanel({ d, cid }: { d: Detail; cid: number }) {
   });
   return (
     <section className="panel stack" id="review-panel" tabIndex={-1}>
-      <h2>검토</h2>
+      <h3>내용 확인</h3>
       <p className="small muted">검토 완료는 내용 확인 표시이며, 게시에는 별도의 최종 승인이 필요합니다.</p>
       <div className="row">
-        <button className="btn primary" disabled={m.isPending || d.item.reviewStatus === "reviewed"} onClick={() => m.mutate("reviewed")}>
-          검토 완료
+        <button className="btn" disabled={m.isPending || d.item.reviewStatus === "reviewed"} onClick={() => m.mutate("reviewed")}>
+          {d.item.reviewStatus === "reviewed" ? "내용 검토 완료됨" : "내용 확인 · 검토 완료"}
         </button>
+      </div>
+      <details className="content-options"><summary>검토 상태 변경</summary><div className="row">
         <button className="btn" disabled={m.isPending || d.item.reviewStatus === "held"} onClick={() => m.mutate("held")}>
           보류
         </button>
@@ -442,7 +471,7 @@ function ReviewPanel({ d, cid }: { d: Detail; cid: number }) {
         <button className="btn danger" disabled={ex.isPending} onClick={() => ex.mutate(!d.item.excluded)}>
           {d.item.excluded ? "제외 해제" : "수집함에서 제외"}
         </button>
-      </div>
+      </div></details>
       {(m.error || ex.error) && <ErrorBox error={m.error || ex.error} />}
     </section>
   );
@@ -475,12 +504,15 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
   const previousDefaultCaps = useRef(d.defaultCaptions);
   const captionsEdited = useRef(false);
   const [when, setWhen] = useState(() => toLocalInput(new Date(Date.now() + 3600_000)));
+  const [timing, setTiming] = useState<"now" | "later">("now");
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
   const tpls = useTemplates(cid);
   const [tpl, setTpl] = useState<string | null>(null);
   const templateKey = templateChoice ?? tpl ?? currentCard?.templateKey ?? tpls.data?.current ?? "builtin:classic";
   const chooseTemplate = (key: string) => { setTpl(key); onTemplateChange?.(key); };
   const typographyOnly = templateKey.startsWith("set:") && !collectionUsesArt(templateKey.slice(4));
-  const coverMode = typographyOnly ? "typography" : coverChoice ?? (d.cards.length ? "reuse" : d.imageAiAvailable ? "ai" : "typography");
+  const coverMode = typographyOnly ? "typography" : coverChoice ?? (d.cards.length ? "reuse" : "typography");
   const [showTpl, setShowTpl] = useState(false);
   const canva = useQuery({ queryKey: ["canva-status"], queryFn: () => api<{ connected: boolean }>("/canva/status") });
   const { channels } = useChannel();
@@ -494,7 +526,10 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
     mutationFn: (saved: CardCopyResponse) => api<{ id: number; carousel: CarouselData; studioCardId: number }>(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body: { version: saved.version, templateKey: saved.copy.templateKey, coverMode } }),
     onSuccess: (a) => {
       setPickedCard(a.id);
-      toast("ok", `${a.carousel.pages.length}장 카드뉴스를 만들고 제작 보드에 저장했습니다.`);
+      toast("ok", `${a.carousel.pages.length}장에 수정 내용을 반영했습니다. 아래에서 게시할 글과 시점을 확인하세요.`);
+      setPublishOpen(true);
+      setConfirmed(false);
+      window.setTimeout(() => document.getElementById("publish-options")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
       qc.invalidateQueries({ queryKey: ["studio"] });
       qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
     },
@@ -520,10 +555,10 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
     mutationFn: () =>
       api<{ destinations: number }>(`/channels/${cid}/items/${d.item.id}/approve`, {
         method: "POST",
-        body: { revisionId: d.current!.id, mediaAssetId: currentCard!.id, altTextVersion:qc.getQueryData<{version:number}>(["card-alt",currentCard!.id])?.version, captions: caps, scheduledAt: `${when}:00+09:00` },
+        body: { revisionId: d.current!.id, mediaAssetId: currentCard!.id, altTextVersion:qc.getQueryData<{version:number}>(["card-alt",currentCard!.id])?.version, captions: caps, timing, ...(timing === "later" ? { scheduledAt: `${when}:00+09:00` } : {}) },
       }),
     onSuccess: async (result) => {
-      toast(result.destinations === 0 ? "info" : "ok", result.destinations === 0 ? "승인은 저장됐지만 전송 예약이 없습니다. 게시 계정을 확인하세요." : "승인과 전송 예약을 저장했습니다. 전송 상태에서 실제 게시 결과를 확인하세요.");
+      toast(result.destinations === 0 ? "info" : "ok", result.destinations === 0 ? "전송할 계정을 확인해 주세요." : timing === "later" ? "예약했습니다. 전송 내역에서 취소할 수 있어요." : "바로 게시하도록 요청했습니다. 전송 내역에서 결과를 확인하세요.");
       await qc.invalidateQueries({ queryKey: ["ch", cid] });
       onApproved();
     },
@@ -531,16 +566,17 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
   const len = (s: string) => [...s].length;
   const cd = d.item.canvaDesign;
   const SRC: Record<string, string> = { builtin: "기본 템플릿", custom: "내 배경 템플릿", canva: "Canva" };
+  useEffect(() => { setConfirmed(false); }, [currentCard?.id, d.current?.id, caps, timing, when, copyDirty, altDirty]);
+  const futureSchedule = timing === "now" || (!!when && Number.isFinite(Date.parse(`${when}:00+09:00`)) && Date.parse(`${when}:00+09:00`) > Date.now());
   return (
-    <section className="panel stack" style={{ marginTop: 16 }} id="card-panel" tabIndex={-1}>
-      <h2 style={{ margin: 0 }}>카드뉴스·최종 승인</h2>
+    <section className="stack content-card-editor" id="card-panel" tabIndex={-1}>
       {!d.current ? (
-        <p className="muted">초안이 있어야 카드를 만들 수 있습니다.</p>
+        <p className="notice">위의 자료·초안에서 본문을 확인하고 초안을 만들면 카드 편집기가 열립니다.</p>
       ) : (
         <>
-          <p className="small muted">템플릿을 고르고 페이지마다 들어갈 문구를 편집하세요. 완성된 이미지는 제작 보드에도 자동 저장됩니다.</p>
-          <label className="field">표지 이미지<select value={coverMode} disabled={render.isPending || typographyOnly} onChange={e => setCoverChoice(e.target.value as "reuse" | "ai" | "typography")}><option value="reuse">저장된 표지 그림 유지</option><option value="ai" disabled={!d.imageAiAvailable}>주제에 맞는 AI 일러스트</option><option value="typography">글자 중심 · 선택한 배경 템플릿</option></select><span className="hint">{typographyOnly ? "이 디자인은 타이포그래피 전용입니다. 이미지 생성 비용 없이 만듭니다." : coverMode === "ai" ? "OpenAI 이미지 API 비용이 발생합니다. 같은 원고로 다시 만들면 저장된 표지를 재사용합니다." : coverMode === "reuse" ? "글자만 수정해도 저장된 그림을 유지합니다. 저장된 그림이 없으면 글자 중심으로 만들며 이미지 생성 비용은 발생하지 않습니다." : "이미지 생성 비용 없이 만듭니다."}</span></label>
-          {!d.imageAiAvailable && !typographyOnly && <p className="notice small">AI 표지를 사용하려면 <GuardedLink href="/connections?service=openai">OpenAI 이미지 연결</GuardedLink>을 설정해 주세요.</p>}
+          <div className="content-editor-toolbar"><h2>카드 편집</h2><span className="small muted">문구를 고치고, 디자인을 확인하세요.</span></div>
+          <details className="content-options"><summary>표지·이미지 설정</summary><label className="field">표지 이미지<select value={coverMode} disabled={render.isPending || typographyOnly} onChange={e => setCoverChoice(e.target.value as "reuse" | "ai" | "typography")}><option value="reuse">저장된 표지 그림 유지</option><option value="ai" disabled={!d.imageAiAvailable}>주제에 맞는 AI 일러스트</option><option value="typography">글자 중심 · 선택한 배경 템플릿</option></select><span className="hint">{typographyOnly ? "이 디자인은 타이포그래피 전용입니다. 이미지 생성 비용 없이 만듭니다." : coverMode === "ai" ? "OpenAI 이미지 API 비용이 발생합니다. 같은 원고로 다시 만들면 저장된 표지를 재사용합니다." : coverMode === "reuse" ? "글자만 수정해도 저장된 그림을 유지합니다. 저장된 그림이 없으면 글자 중심으로 만들며 이미지 생성 비용은 발생하지 않습니다." : "이미지 생성 비용 없이 만듭니다."}</span></label>
+          {!d.imageAiAvailable && !typographyOnly && <p className="small muted">AI 표지는 <GuardedLink href="/connections?service=openai">OpenAI 이미지 연결</GuardedLink> 후 선택할 수 있어요.</p>}</details>
           <div className="row">
             <button className="btn" disabled={render.isPending} onClick={() => setShowTpl((v) => !v)} aria-expanded={showTpl}>
               템플릿: {tpls.data?.items.find((t) => t.key === templateKey || t.colors?.some(color => color.key === templateKey))?.name ?? "기본"} ▾
@@ -554,14 +590,13 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
           {showTpl && tpls.data && (
             <TemplatePicker cid={cid} value={templateKey} onChange={chooseTemplate} items={tpls.data.items} version={ch?.accentColor} disabled={render.isPending} />
           )}
-          <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateChoice ?? tpl} onTemplateChange={chooseTemplate} coverMode={coverMode} disabled={render.isPending || altDirty} onDirtyChange={setCopyDirty} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel={d.cards.length ? "카드뉴스 다시 만들기" : "카드뉴스 만들기"} />
+          <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateChoice ?? tpl} onTemplateChange={chooseTemplate} coverMode={coverMode} disabled={render.isPending || altDirty} onDirtyChange={setCopyDirty} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel="게시 준비" />
           {render.isPending && <p className="notice small" role="status">{coverMode === "ai" ? "표지 일러스트와 각 페이지를 만들고 있어요. 몇 분 정도 걸릴 수 있습니다." : "원고를 페이지로 나누고 보드에 저장하고 있어요."}</p>}
           {render.error && <ErrorBox error={render.error} />}
-          {render.data && <div className="notice ok row between" role="status"><span>{render.data.carousel.pages.length}장 모두 제작 보드에 저장됐어요.</span><GuardedLink className="btn sm" href={`/studio/${render.data.studioCardId}`}>보드에서 보기 →</GuardedLink></div>}
+          {render.data && <p className="small muted" role="status">{render.data.carousel.pages.length}장 이미지에 수정 내용을 반영했어요.</p>}
 
           {canva.data?.connected && (
-            <div className="notice stack" style={{ gap: 8 }}>
-              <strong className="small">원문 요약으로 Canva 디자인 만들기</strong>
+            <details className="content-options"><summary>Canva로 작업하기</summary><div className="stack">
               <span className="small muted">Canva 자동 채우기에는 ‘초안 편집’의 원문 요약 필드를 사용합니다.</span>
               {!ch?.canvaBrandTemplateId ? (
                 <span className="small muted">
@@ -585,9 +620,11 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
                 </div>
               )}
               {cd && cd.revisionId !== d.current.id && <span className="small" style={{ color: "var(--warning)" }}>내용이 바뀌어 이전 Canva 디자인은 쓸 수 없습니다. 다시 만드세요.</span>}
-            </div>
+            </div></details>
           )}
 
+          <details className="content-drawer publish-drawer" id="publish-options" open={publishOpen} onToggle={event => setPublishOpen(event.currentTarget.open)}><summary><strong>게시 준비</strong><span>캡션 · 지금 게시 · 예약</span></summary><div className="content-drawer-body stack">
+          <p className="content-destination"><strong>게시 계정</strong> {d.publicationReadiness?.expectedUsername ? `@${d.publicationReadiness.expectedUsername}` : ch?.name ?? "연결 확인 필요"}</p>
           {revCards.length > 1 && (
             <div className="row" role="group" aria-label="승인할 카드 고르기">
               {revCards.map((c, i) => (
@@ -601,7 +638,7 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
           {!currentCard && <p className="small muted">현재 버전(r{d.current.revisionNo})으로 만든 카드가 없습니다.</p>}
 
           {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} onDirtyChange={setAltDirty} downloadDisabled={copyDirty} />}
-          <CopyFields cid={cid} itemId={d.item.id} revisionId={d.current.id} />
+          <details className="content-options"><summary>외부 편집 도구로 문구 복사</summary><CopyFields cid={cid} itemId={d.item.id} revisionId={d.current.id} /></details>
 
           <h3 style={{ margin: "8px 0 0" }}>게시물 캡션 (카드 이미지 밖의 글)</h3>
           <label className="field">
@@ -624,26 +661,30 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
               </div>
             </details>
           )}
-          <label className="field">
+          <details className="content-options"><summary>텔레그램 캡션</summary><label className="field">
             텔레그램 캡션
             <span className="hint">{len(caps.telegram)} / 1024자 (사진 캡션 제한)</span>
             <textarea rows={6} value={caps.telegram} onChange={(e) => { captionsEdited.current = true; setCaps({ ...caps, telegram: e.target.value }); }} />
           </label>
-          <label className="field">
-            예약 시각 (한국 시간)
-            <span className="hint">승인은 전송 예약을 저장합니다. 실제 게시 완료와 오류는 ‘전송 상태’에서 확인하세요.</span>
-            <input type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
-          </label>
+          </details>
+          <fieldset className="publish-timing"><legend>언제 게시할까요?</legend><div className="row">
+            <label className={`publish-timing-option ${timing === "now" ? "selected" : ""}`}><input type="radio" name={`publish-timing-${d.item.id}`} checked={timing === "now"} onChange={() => setTiming("now")} /><span><strong>지금 게시</strong><small>승인하면 바로 전송 요청</small></span></label>
+            <label className={`publish-timing-option ${timing === "later" ? "selected" : ""}`}><input type="radio" name={`publish-timing-${d.item.id}`} checked={timing === "later"} onChange={() => setTiming("later")} /><span><strong>예약 게시</strong><small>원하는 날짜·시간 선택</small></span></label>
+          </div></fieldset>
+          {timing === "later" && <label className="field">예약 시각 (한국 시간)<input type="datetime-local" value={when} min={toLocalInput(new Date())} onChange={e => setWhen(e.target.value)} /><span className="hint">전송을 시작하기 전에는 예약을 취소할 수 있어요.</span>{!futureSchedule && <span className="card-copy-error">현재보다 뒤의 시간을 선택해 주세요.</span>}</label>}
+          <ReviewPanel d={d} cid={cid} />
           <PublicationRuntimeNotice runtime={runtime} />
-          {d.publicationReadiness && !d.publicationReadiness.ready && <div className="notice warn" role="alert"><strong>전송 예약 전에 해결할 항목</strong><ul>{d.publicationReadiness.blockers.map(reason => <li key={reason}>{reason}</li>)}</ul><div className="row"><GuardedLink href="/instagram">인스타그램 연결 확인 →</GuardedLink><GuardedLink href="/connections">API 연결 확인 →</GuardedLink></div></div>}
+          {d.publicationReadiness && !d.publicationReadiness.ready && <div className="notice warn" role="alert"><strong>게시 전에 확인할 항목</strong><ul>{d.publicationReadiness.blockers.map(reason => <li key={reason}>{reason}</li>)}</ul><div className="row"><GuardedLink href="/instagram">인스타그램 연결 확인 →</GuardedLink><GuardedLink href="/connections">API 연결 확인 →</GuardedLink></div></div>}
           {existingDeliveryMessage && <div className="notice warn"><p className="small">{existingDeliveryMessage}</p><button className="btn sm" onClick={onApproved}>전송 상태 확인</button></div>}
+          <label className="check publish-confirm"><input type="checkbox" checked={confirmed} disabled={approve.isPending || !currentCard || copyDirty || altDirty} onChange={event => setConfirmed(event.target.checked)} />이미지 전체·캡션·게시 계정을 확인했습니다.</label>
           <div className="row">
-            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || altDirty || copyDirty || !currentCard || d.item.reviewStatus !== "reviewed" || d.publicationReadiness?.ready === false || !!existingDeliveryState}>
-              {approve.isPending ? "승인·예약 저장 중…" : "이 버전·카드·캡션으로 최종 승인"}
+            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || !confirmed || !futureSchedule || altDirty || copyDirty || !currentCard || d.item.reviewStatus !== "reviewed" || d.publicationReadiness?.ready === false || !!existingDeliveryState}>
+              {approve.isPending ? "전송 요청 중…" : timing === "later" ? "승인하고 예약 게시" : "승인하고 지금 게시"}
             </button>
           </div>
           {d.item.reviewStatus !== "reviewed" && <p className="small muted">먼저 ‘검토 완료’로 표시해야 최종 승인할 수 있습니다.</p>}
           {approve.error && <ErrorBox error={approve.error} />}
+          </div></details>
         </>
       )}
     </section>
@@ -652,14 +693,6 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
 
 function ItemDeliveryPanel({ d, cid, runtime, runtimeError, refresh, refreshing }: { d: Detail; cid: number; runtime?: PublicationRuntime; runtimeError?: unknown; refresh: () => void; refreshing: boolean }) {
   const qc = useQueryClient();
-  const cancel = useMutation({
-    mutationFn: (aid: number) => api(`/channels/${cid}/approvals/${aid}/cancel`, { method: "POST", body: {} }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
-  });
-  const retry = useMutation({
-    mutationFn: (a: { id: number; confirm?: boolean }) => api(`/channels/${cid}/deliveries/${a.id}/retry`, { method: "POST", body: { confirmNotPosted: a.confirm } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
-  });
   return <section className="panel stack" id="delivery-panel" tabIndex={-1} aria-label="전송 상태">
     <div className="row between"><h2 style={{ margin: 0 }}>전송 상태</h2><button className="btn sm" onClick={refresh} disabled={refreshing}>{refreshing ? "상태 확인 중…" : "상태 새로고침"}</button></div>
     <p className="small muted">승인은 이미지·캡션·예약을 저장한 기록입니다. 실제 게시 결과는 아래 목적지별 전송 상태에서 확인하세요. 대기·처리 중인 건은 자동으로 갱신됩니다.</p>
@@ -672,7 +705,7 @@ function ItemDeliveryPanel({ d, cid, runtime, runtimeError, refresh, refreshing 
           <div className="row between"><strong className="small">승인 #{a.id} · r{d.revisions.find(r => r.id === a.revisionId)?.revisionNo ?? "?"}</strong><Badge kind={a.status === "completed" ? "ok" : ""}>{{ active: "승인 저장됨", invalidated: "승인 무효 · 재승인 필요", cancelled: "승인 취소됨", completed: "전송 완료된 승인" }[a.status] ?? a.status}</Badge></div>
           <span className="small muted">예약 {fmtDate(a.scheduledAt as unknown as string)} (한국 시간)</span>
           {a.invalidatedReason && <p className="small muted">{a.invalidatedReason}</p>}
-          {!deliveries.length && (a.status === "active" ? <div className="notice warn"><strong>전송 예약이 없습니다</strong><p className="small">승인 기록에 연결된 전송 건이 없습니다. 게시 계정·목적지를 확인한 뒤 카드·승인 탭에서 다시 승인해 주세요.</p><GuardedLink href="/instagram">게시 계정 연결 확인 →</GuardedLink></div> : <p className="small muted">이전 승인에 연결된 전송 내역이 없습니다.</p>)}
+          {!deliveries.length && (a.status === "active" ? <div className="notice warn"><strong>전송 예약이 없습니다</strong><p className="small">승인 기록에 연결된 전송 건이 없습니다. 게시 계정·목적지를 확인한 뒤 위의 게시 준비에서 다시 승인해 주세요.</p><GuardedLink href="/instagram">게시 계정 연결 확인 →</GuardedLink></div> : <p className="small muted">이전 승인에 연결된 전송 내역이 없습니다.</p>)}
           {deliveries.map(({ d: delivery, dest }) => {
             const state = deliveryState(delivery.status, a.scheduledAt);
             return <div key={delivery.id} className={`notice ${state.tone}`}>
@@ -681,15 +714,13 @@ function ItemDeliveryPanel({ d, cid, runtime, runtimeError, refresh, refreshing 
               {delivery.lastError && <p className="small" role={delivery.status === "failed" ? "alert" : undefined}><strong>처리 사유: </strong>{delivery.lastError}</p>}
               {delivery.completedAt && <p className="small muted">처리 기록 {fmtDate(delivery.completedAt as unknown as string)}</p>}
               {delivery.externalUrl && <a href={delivery.externalUrl} target="_blank" rel="noopener noreferrer">게시물 보기 ↗</a>}
-              {delivery.status === "failed" && a.status === "active" && <button className="btn sm" disabled={retry.isPending || d.publicationReadiness?.ready === false} onClick={() => retry.mutate({ id: delivery.id })}>이 목적지만 재시도</button>}
-              {delivery.status === "unknown" && a.status === "active" && <button className="btn sm" disabled={retry.isPending || d.publicationReadiness?.ready === false} onClick={() => confirm("해당 계정에 실제로 게시되지 않았음을 확인했나요? 중복 게시될 수 있습니다.") && retry.mutate({ id: delivery.id, confirm: true })}>게시 안 됨 확인 후 재시도</button>}
+              <DeliveryActions channelId={cid} approvalId={a.id} approvalStatus={a.status} delivery={delivery} canRetry={d.publicationReadiness?.ready !== false} onChanged={refresh} />
             </div>;
           })}
-          {a.status === "active" && <div><button className="btn sm danger" onClick={() => cancel.mutate(a.id)} disabled={cancel.isPending}>승인 취소(처리 시작 전 전송만)</button></div>}
+          {!deliveries.length && a.status === "active" && <DeliveryActions channelId={cid} approvalId={a.id} approvalStatus={a.status} onChanged={refresh} />}
         </li>;
       })}
     </ul>}
-    {(cancel.error || retry.error) && <ErrorBox error={cancel.error || retry.error} />}
     <div className="row"><GuardedLink href="/publish">발행함 전체 보기 →</GuardedLink><GuardedLink href="/runs">실행 기록 보기 →</GuardedLink></div>
   </section>;
 }

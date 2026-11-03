@@ -174,6 +174,7 @@ export async function callTool<T>(opts: {
   maxTokens?: number;
   provider?: AiProvider;
   maxAttempts?: number;
+  signal?: AbortSignal;
 }): Promise<LlmResult<T>> {
   const provider = opts.provider ?? env.aiProvider;
   const model = provider === "gemini" ? env.geminiModel : provider === "openai" ? env.openaiModel : env.anthropicModel;
@@ -196,7 +197,7 @@ export async function callTool<T>(opts: {
           systemInstruction: { parts: [{ text: `${opts.system}\n${opts.toolDescription}\n요청한 결과를 JSON 객체로만 반환하세요.` }] },
           contents: [{ role: "user", parts: [{ text: opts.user }] }],
           generationConfig: { responseMimeType: "application/json", responseJsonSchema: opts.inputSchema, maxOutputTokens: opts.maxTokens ?? 4000 },
-        });
+        }, { signal: opts.signal, reserveRetry: () => opts.budget.take() });
         responseModel = typeof resp.modelVersion === "string" ? resp.modelVersion : model;
         inputTokens = Number(resp.usageMetadata?.promptTokenCount) || 0;
         outputTokens = (Number(resp.usageMetadata?.candidatesTokenCount) || 0) + (Number(resp.usageMetadata?.thoughtsTokenCount) || 0);

@@ -6,6 +6,7 @@ import { Badge, Empty, ErrorBox, fmtDate, GuardedLink, Loading } from "../ui";
 import type { Delivery } from "@shared/schema";
 import type { PublicationOrphan } from "@shared/publicationReadiness";
 import { deliveryState, PublicationRuntimeNotice, usePublicationRuntime } from "../publicationStatus";
+import { DeliveryActions } from "../DeliveryActions";
 
 type Row = { d: Delivery | null; dest: { label: string; platform: string } | null; ap: { id: number; scheduledAt: string; status: string; revisionId: number }; item: { id: number; title: string; channelId: number }; reason?: string };
 type DeliveryRow = Row & { d: Delivery; dest: { label: string; platform: string } };
@@ -28,7 +29,7 @@ export function PublishPage() {
   const q = useQuery({ queryKey: ["ch", selected, "deliveries"], queryFn: () => api<DeliveryRow[]>(`/deliveries?${qs({ channelId: selected })}`), refetchInterval: query => query.state.data?.some(({ d }) => ["scheduled", "processing"].includes(d.status)) ? 5000 : false });
   const orphans = useQuery({ queryKey: ["ch", selected, "publication-orphans"], queryFn: () => api<PublicationOrphan[]>(`/publication-orphans?${qs({ channelId: selected })}`) });
   const rows = useMemo<Row[]>(() => [...(q.data ?? []), ...(orphans.data ?? []).map(row => ({ ...row, d: null, dest: null }))].sort((a, b) => new Date(b.ap.scheduledAt).getTime() - new Date(a.ap.scheduledAt).getTime()), [q.data, orphans.data]);
-  const overdue = rows.filter(r => r.d?.status === "scheduled" && new Date(r.ap.scheduledAt).getTime() <= Date.now());
+  const overdue = rows.filter(r => r.d?.status === "scheduled" && new Date(r.ap.scheduledAt).getTime() < Date.now() - 60_000);
   const needsAttention = rows.filter(r => r.d && ["failed", "unknown", "dry_run"].includes(r.d.status));
   const withoutDelivery = orphans.data ?? [];
   const refreshing = q.isFetching || orphans.isFetching || status.isFetching;
@@ -53,7 +54,7 @@ export function PublishPage() {
       <div className="page-head">
         <div>
           <h1>발행함</h1>
-          <p className="small muted" style={{ margin: 0 }}>승인 저장과 실제 게시 결과를 구분해 확인하세요. 대기·처리 중인 전송은 자동으로 갱신됩니다.</p>
+          <p className="small muted" style={{ margin: 0 }}>바로 게시·예약 게시의 결과를 확인하고, 대기 건을 취소하거나 실패한 전송을 다시 보낼 수 있어요.</p>
         </div>
         <div className="tabs" role="tablist" style={{ margin: 0, border: 0 }}>
           <button role="tab" aria-selected={view === "calendar"} onClick={() => setView("calendar")}>
@@ -77,7 +78,7 @@ export function PublishPage() {
         <ErrorBox error={q.error} retry={() => q.refetch()} />
       ) : !rows.length ? (
         <Empty>
-          {orphans.error ? "전송 내역은 없으며, 승인만 저장된 기록은 아직 확인하지 못했습니다." : "선택한 채널에 전송 예약이 없습니다."} 승인만 있고 목적지별 전송이 없다면 원고의 ‘전송 상태’ 탭을 확인하세요. 게시 계정은 <GuardedLink href="/instagram">인스타그램 연결</GuardedLink>에서 확인할 수 있습니다.
+          {orphans.error ? "전송 내역은 없으며, 승인만 저장된 기록은 아직 확인하지 못했습니다." : "선택한 채널에 전송 예약이 없습니다."} 게시 후 결과와 예약은 여기에 표시됩니다. 게시 계정은 <GuardedLink href="/instagram">인스타그램 연결</GuardedLink>에서 확인할 수 있습니다.
         </Empty>
       ) : view === "calendar" ? (
         <div className="stack">
@@ -134,7 +135,7 @@ export function PublishPage() {
               <div className="row small">
                 <span>{r.dest?.label ?? "전송 목적지 없음"}</span>
                 <Badge kind={state.tone}>{state.label}</Badge>
-                <span className="muted">예약 {fmtDate(r.ap.scheduledAt)}</span>
+                <span className="muted">전송 시각 {fmtDate(r.ap.scheduledAt)}</span>
                 {r.d?.completedAt && <span className="muted">처리 기록 {fmtDate(r.d.completedAt as unknown as string)}</span>}
                 {r.d?.externalUrl && (
                   <a href={r.d.externalUrl} target="_blank" rel="noopener noreferrer">
@@ -144,6 +145,7 @@ export function PublishPage() {
               </div>
               <p className="small muted">{state.detail}</p>
               {r.d?.lastError && <p className="small" role={r.d.status === "failed" ? "alert" : undefined}><strong>처리 사유: </strong>{r.d.lastError}</p>}
+              <DeliveryActions channelId={r.item.channelId} approvalId={r.ap.id} approvalStatus={r.ap.status} delivery={r.d ?? undefined} onChanged={refresh} />
               <GuardedLink className="small" href={`/items/${r.item.channelId}/${r.item.id}?tab=delivery`}>이 콘텐츠 전송 내역 보기 →</GuardedLink>
             </li>
           ); })}

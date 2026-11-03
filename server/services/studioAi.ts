@@ -2,6 +2,7 @@ import { z } from "zod";
 import { env } from "../env";
 import { AiServiceError, callTool, LlmBudget, openaiRequest, type AiProvider } from "./llm";
 import { STUDIO_CHARACTER_GUIDE } from "../../shared/studioCharacters";
+import { GEMINI_MAX_ATTEMPTS } from "./gemini";
 
 export function studioAiStatus() {
   return {
@@ -35,9 +36,10 @@ export type StudioTextInput = {
     panels?: Array<{ scene: string; dialogue: string }>;
   };
   referenceText?: string;
+  signal?: AbortSignal;
 };
 
-/** One explicit request -> one provider call; comparison never runs implicitly. */
+/** One explicit generation; only rejected transient Gemini requests can be retried. */
 export async function generateStudioText(opts: StudioTextInput) {
   if (!opts.directive.trim() || opts.directive.length > 8000) throw new AiServiceError("수정 지시는 1~8,000자로 입력하세요.", "parse");
   const provider = opts.provider ?? env.aiProvider;
@@ -62,7 +64,8 @@ Highscoop·Alligodang의 날짜, 전형, 수치, 사건은 제공된 자료에�
       required: ["title", "script", "caption", "panels"],
     },
     zod: schema,
-    budget: new LlmBudget(1),
+    budget: new LlmBudget(provider === "gemini" ? GEMINI_MAX_ATTEMPTS : 1),
+    signal: opts.signal,
     maxAttempts: 1,
     maxTokens: 6500,
   });
@@ -83,7 +86,7 @@ export async function generateStudioCaption(opts: StudioTextInput) {
     toolName: "save_studio_caption", toolDescription: "기존 콘텐츠의 게시용 캡션 초안만 반환합니다. 외부 게시 없음.",
     inputSchema: { type: "object", additionalProperties: false, properties: { caption: { type: "string" } }, required: ["caption"] },
     zod: z.object({ caption: z.string().trim().min(1).max(4000) }).strict(),
-    budget: new LlmBudget(1), maxAttempts: 1, maxTokens: 2000,
+    budget: new LlmBudget(provider === "gemini" ? GEMINI_MAX_ATTEMPTS : 1), signal: opts.signal, maxAttempts: 1, maxTokens: 2000,
   });
   if (!result.ok) throw new AiServiceError(result.error, result.kind === "not_configured" ? "not_configured" : result.kind === "parse" ? "parse" : "api");
   return { ...result.data, provider, model: result.model, usage: result.usage };

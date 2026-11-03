@@ -48,6 +48,7 @@ import { noticeIntentSql } from "../services/noticeIntent";
 import { itemPrimarySource, itemSourceIdSql } from "../services/itemSources";
 import { sha256 } from "../services/text";
 import { SOURCE_TEXT_LIMIT, SOURCE_QUOTE_LIMIT, SOURCE_QUOTE_COUNT, suggestSourceQuotes } from "../../shared/sourceText";
+import { sourceRecovery } from "../../shared/sourceRecovery";
 import { cardCopySchema } from "../../shared/cardCopy";
 import { resolveStyle, TemplateNotFound } from "../services/templates";
 import { CardFontError, CardOverflowError, renderCardJpeg } from "../services/card";
@@ -64,6 +65,7 @@ const listQuery = z.object({
   review: z.string().max(40).optional(),
   schedule: z.string().max(40).optional(),
   evidence: z.string().max(40).optional(),
+  fetchStatus: z.string().max(80).transform(value => value.split(",")).pipe(z.array(z.enum(["ok", "not_fetched", "failed", "blocked", "unsupported"])).min(1).max(5)).optional(),
   category: z.string().max(40).optional(),
   subcategory: z.string().max(40).optional(),
   collectedOn: collectionDateSchema.optional(),
@@ -93,6 +95,7 @@ itemRoutes.get(
     if (q.review) conds.push(inArray(contentItems.reviewStatus, q.review.split(",")));
     if (q.schedule) conds.push(inArray(contentItems.scheduleStatus, q.schedule.split(",")));
     if (q.evidence) conds.push(inArray(contentItems.evidenceStatus, q.evidence.split(",")));
+    if (q.fetchStatus) conds.push(inArray(sourceDocuments.fetchStatus, q.fetchStatus));
     if (q.category) conds.push(eq(contentItems.category, q.category));
     if (q.subcategory) conds.push(q.subcategory === "미분류" ? sql`coalesce(${contentItems.subcategory}, '') = ''` : eq(contentItems.subcategory, q.subcategory));
     const intent = noticeIntentSql();
@@ -357,13 +360,19 @@ itemRoutes.post(
     const r = await fetchAndExtract(sourceFetchUrl(doc), undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined });
     const now = new Date();
     if (!r.ok) {
-      await db.update(sourceDocuments).set({ fetchStatus: r.status, fetchError: r.error, attachments: r.attachments ?? doc.attachments, lastFetchedAt: now }).where(eq(sourceDocuments.id, doc.id));
-      await db.update(contentItems).set({ evidenceStatus: "fetch_failed", updatedAt: now }).where(eq(contentItems.id, item.id));
-      await audit(db, { actor: actorOf(req), action: "fetch_failed", entity: "source_document", entityId: doc.id, channelId: ch.id, detail: { error: r.error } });
-      return res.status(502).json({ error: r.error, status: r.status });
+      // A failed refresh must not invalidate a previously acquired, usable source snapshot.
+      const preservedBody = doc.fetchStatus === "ok" && !!doc.fetchedText?.trim() && !!doc.contentHash;
+      const failureMeta = { ...doc.meta, lastFetchFailure: { status: r.status, error: r.error, attemptedAt: now.toISOString(), sourceUrl: r.finalUrl || sourceFetchUrl(doc) } };
+      await db.update(sourceDocuments).set(preservedBody ? { meta: failureMeta }
+        : { fetchStatus: r.status, fetchError: r.error, attachments: r.attachments ?? doc.attachments, lastFetchedAt: now, meta: failureMeta }).where(eq(sourceDocuments.id, doc.id));
+      if (!preservedBody) await db.update(contentItems).set({ evidenceStatus: "fetch_failed", updatedAt: now }).where(eq(contentItems.id, item.id));
+      const recovery = sourceRecovery({ ...doc, fetchStatus: r.status, fetchError: r.error, meta: { ...failureMeta, ...(!doc.fetchedText && r.finalUrl ? { finalUrl: r.finalUrl } : {}) } });
+      await audit(db, { actor: actorOf(req), action: "fetch_failed", entity: "source_document", entityId: doc.id, channelId: ch.id, detail: { error: r.error, preservedBody } });
+      return res.status(502).json({ error: r.error, status: r.status, recovery, sourceUrl: recovery.links[0]?.url ?? null, preservedBody });
     }
     const changed = doc.contentHash && doc.contentHash !== r.hash;
-    await db.update(sourceDocuments).set({ fetchStatus: "ok", fetchError: null, fetchedText: r.text, contentHash: r.hash, attachments: r.attachments, lastFetchedAt: now, meta: { ...(doc.meta as object), finalUrl: r.finalUrl, pageTitle: r.title } }).where(eq(sourceDocuments.id, doc.id));
+    const { lastFetchFailure: _lastFetchFailure, ...sourceMeta } = doc.meta;
+    await db.update(sourceDocuments).set({ fetchStatus: "ok", fetchError: null, fetchedText: r.text, contentHash: r.hash, attachments: r.attachments, lastFetchedAt: now, meta: { ...sourceMeta, finalUrl: r.finalUrl, pageTitle: r.title } }).where(eq(sourceDocuments.id, doc.id));
     if (item.evidenceStatus === "fetch_failed") await db.update(contentItems).set({ evidenceStatus: "needs_review", updatedAt: now }).where(eq(contentItems.id, item.id));
     if (changed && item.reviewStatus === "reviewed") await db.update(contentItems).set({ reviewStatus: "review_required", updatedAt: now }).where(eq(contentItems.id, item.id));
     res.json({ ok: true, changed: !!changed, length: r.text.length });
@@ -617,14 +626,17 @@ itemRoutes.post(
         mediaAssetId: z.number().int(),
         altTextVersion: z.number().int().min(0).optional(),
         captions: z.object({ instagram: z.string().max(5000), telegram: z.string().max(5000) }),
-        scheduledAt: z.string().datetime({ offset: true }),
+        timing: z.enum(["now", "later"]).optional(),
+        scheduledAt: z.string().datetime({ offset: true }).optional(),
       }),
       req.body,
     );
-    const r = await approveItem(getDb(), { itemId: item.id, revisionId: body.revisionId, mediaAssetId: body.mediaAssetId, altTextVersion:body.altTextVersion, captions: body.captions, scheduledAt: new Date(body.scheduledAt), actor: actorOf(req) });
+    const timing = resolvePublicationTiming(body);
+    if (!timing.ok) throw new HttpError(400, timing.error);
+    const r = await approveItem(getDb(), { itemId: item.id, revisionId: body.revisionId, mediaAssetId: body.mediaAssetId, altTextVersion:body.altTextVersion, captions: body.captions, scheduledAt: timing.scheduledAt, actor: actorOf(req) });
     if (!r.ok) throw new HttpError(400, r.error);
-    const workerStarted = kickInlinePublish(getDb());
-    res.status(201).json({ ...r, workerStarted });
+    const workerStarted = timing.timing === "now" && kickInlinePublish(getDb(), { approvalId: r.approval.id });
+    res.status(201).json({ ...r, timing: timing.timing, workerStarted });
   }),
 );
 
@@ -635,7 +647,7 @@ itemRoutes.post(
     const [ap] = await getDb().select().from(approvals).where(and(eq(approvals.id, intParam(req.params.aid)), eq(approvals.channelId, ch.id)));
     if (!ap) throw new HttpError(404, "승인을 찾을 수 없습니다.");
     const r = await cancelApproval(getDb(), ap.id, actorOf(req));
-    if (!r.ok) throw new HttpError(400, r.error);
+    if (!r.ok) throw new HttpError(409, r.error);
     res.json(r);
   }),
 );
@@ -648,8 +660,9 @@ itemRoutes.post(
     if (!d) throw new HttpError(404, "전송 기록 없음");
     const body = parse(z.object({ confirmNotPosted: z.boolean().optional() }), req.body ?? {});
     const r = await retryDelivery(getDb(), d.id, actorOf(req), body.confirmNotPosted);
-    if (!r.ok) throw new HttpError(400, r.error);
-    res.json(r);
+    if (!r.ok) throw new HttpError("code" in r && r.code === "confirmation_required" ? 400 : 409, r.error);
+    const workerStarted = kickInlinePublish(getDb(), { deliveryId: r.deliveryId });
+    res.json({ ...r, workerStarted });
   }),
 );
 
@@ -717,3 +730,4 @@ itemRoutes.post(
 
 import { altTextError, altTextFile } from "../../shared/altText";
 import { cardAltTextState } from "../services/cardAccessibility";
+import { resolvePublicationTiming } from "../../shared/publicationTiming";

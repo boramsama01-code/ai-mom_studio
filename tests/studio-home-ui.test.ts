@@ -8,14 +8,14 @@ import { StudioPage } from "../client/src/pages/Studio";
 import { StudioTextImport } from "../client/src/pages/StudioTextImport";
 import { GlobalChannelSelect } from "../client/src/GlobalChannelSelect";
 
-const mocks = vi.hoisted(() => ({ guard: { setDirty: vi.fn(), confirmLeave: vi.fn((f: () => void) => f()) }, selected: "all" as "all" | number, select: vi.fn(), toast: vi.fn(), navigate: vi.fn(), api: vi.fn(), clipboard: vi.fn() }));
+const mocks = vi.hoisted(() => ({ guard: { setDirty: vi.fn(), confirmLeave: vi.fn((f: () => void) => f()) }, selected: "all" as "all" | number, select: vi.fn(), toast: vi.fn(), navigate: vi.fn(), api: vi.fn(), blob: vi.fn(), clipboard: vi.fn() }));
 vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => {
   const allChannels = [{ id: 1, slug: "penguin", name: "내 채널", active: true, accentColor: "#285f6a" }, { id: 2, slug: "fryday", name: "감자 채널", active: true, accentColor: "#996633" }, { id: 3, slug: "archived", name: "보관 채널", active: false }];
   return { allChannels, channels: allChannels.filter(c => c.active), current: allChannels.find(c => c.id === mocks.selected) ?? null, selected: mocks.selected, isLoading: false, select: mocks.select };
 } }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
-vi.mock("../client/src/api", async importOriginal => ({ ...await importOriginal<object>(), api: mocks.api }));
-vi.mock("wouter", () => ({ useLocation: () => ["/", mocks.navigate] }));
+vi.mock("../client/src/api", async importOriginal => ({ ...await importOriginal<object>(), api: mocks.api, apiBlob: mocks.blob }));
+vi.mock("wouter", () => ({ useLocation: () => ["/", mocks.navigate], useSearch: () => "" }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement; let root: Root; let client: QueryClient; let cards: StudioCard[];
 const draft = { script: "전체 원고 초안", caption: "캡션 초안", panels: Array.from({ length: 4 }, (_, i) => ({ scene: `장면 ${i}`, dialogue: `대사 ${i}` })) };
@@ -27,6 +27,10 @@ beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.setAttribute("open", ""); } });
   Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value() { this.removeAttribute("open"); } });
   Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: mocks.clipboard.mockResolvedValue(undefined) } });
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:studio-card-preview") });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  mocks.blob.mockResolvedValue(new Blob(["fixture-jpeg"], { type: "image/jpeg" }));
   cards = [
     { title: "진행 작업", channel: "penguin", stage: "writing" }, { title: "완료 작업", channel: "penguin", stage: "done" },
     { title: "감자 작업", channel: "fryday", stage: "making" }, { title: "보관 작업", channel: "archived", stage: "idea" },
@@ -48,6 +52,18 @@ beforeEach(() => {
       return { card: cards[0], revisions: [], jobs: [] };
     }
     if (path === "/studio/export-check") return { errors: [{ field: "panels.2.dialogue", message: "3번째 본문에 글이나 그림을 추가하세요." }], warnings: [], pageCount: 6 };
+    if (path === "/status") return { integrations: { aiProvider: "gemini", gemini: false, flags: { dryRun: false, autoPublish: true } }, workerConnected: true };
+    if (path === "/canva/status") return { connected: false };
+    if (path === "/studio/ai-status") return { defaultProvider: "gemini", text: { gemini: false, openai: false, anthropic: false } };
+    if (path === "/channels/2/templates") return { current: "set:n04", items: [{ key: "set:n04", name: "뉴스 브리핑", kind: "builtin" }] };
+    if (path === "/channels/2/items/20/card-copy") return { version: 1, revisionId: 5, hasSavedCopy: true, copy: { version: 1, templateKey: "set:n04", cover: { title: "카드에서 고칠 제목", subtitle: "확인한 원문" }, pages: Array.from({ length: 4 }, (_, i) => ({ id: `body-${i + 1}`, title: `본문 ${i + 1}`, subtitle: "", body: `본문 문구 ${i + 1}` })) } };
+    if (path === "/channels/2/media/51/alt-text") return { version: 1, values: Array.from({ length: 5 }, (_, i) => `설명 ${i + 1}`) };
+    if (path === "/channels/2/items/20") return {
+      item: { id: 20, channelId: 2, title: "수집 원문 제목", kind: "science_dialogue", origin: "manual", version: 1, currentRevisionId: 5, reviewStatus: "reviewed", evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: {} },
+      current: { id: 5, revisionNo: 1, payload: { title: "수집 원문 제목" } }, primary: null, linked: [], revisions: [], approvals: [], deliveries: [], similar: [],
+      cards: [{ id: 51, revisionId: 5, templateKey: "set:n04", carousel: { version: 1, cover: { kind: "typography", credit: "저장한 표지" }, pages: cards[0].sourceOutput?.pages } }],
+      defaultCaptions: { instagram: "원고 캡션", telegram: "" }, publicationReadiness: { ready: true, blockers: [], destinations: [], dryRun: false, autoPublish: true },
+    };
     throw new Error(`Unexpected API call: ${path}`);
   });
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -58,6 +74,12 @@ async function settle() { await act(async () => { await new Promise(resolve => s
 async function render(element: React.ReactNode) { await act(async () => root.render(createElement(QueryClientProvider, { client }, element))); await settle(); }
 function button(text: string) { return [...host.querySelectorAll("button")].find(b => b.textContent?.includes(text) && !b.closest("[hidden]"))!; }
 async function click(text: string) { await act(async () => button(text).click()); await settle(); }
+async function openDetails(text: string) {
+  const summary = [...host.querySelectorAll("summary")].find(node => node.textContent?.includes(text));
+  if (!summary) throw new Error(`Missing details: ${text}`);
+  if (!(summary.parentElement as HTMLDetailsElement).open) await act(async () => summary.click());
+  await settle();
+}
 async function input(element: HTMLTextAreaElement | HTMLInputElement, value: string) {
   await act(async () => { Object.getOwnPropertyDescriptor(element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("input", { bubbles: true })); });
 }
@@ -68,7 +90,7 @@ describe("홈과 단계별 제작 화면", () => {
     await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label="진행 작업 휴지통으로 이동"]')!.click()); await settle();
     expect(host.querySelector(".studio-content-grid")?.textContent).not.toContain("진행 작업");
     expect(mocks.toast).toHaveBeenCalledWith("ok", expect.stringContaining("휴지통"), expect.objectContaining({ label: "실행 취소" }));
-    await click("휴지통");
+    await openDetails("가져오기·관리"); await click("휴지통");
     expect(host.querySelector(".studio-trash-list")?.textContent).toContain("진행 작업");
     await click("복원");
     expect(host.querySelector(".studio-trash-view")?.textContent).toContain("휴지통이 비어 있어요");
@@ -114,7 +136,10 @@ describe("홈과 단계별 제작 화면", () => {
     expect(button("새 콘텐츠 만들기").disabled).toBe(true);
   });
   it("전체 조회의 새 콘텐츠는 작성폼에서 채널을 고른 뒤 그 채널에만 저장한다", async () => {
-    await render(createElement(StudioPage)); await click("새 콘텐츠 만들기");
+    await render(createElement(StudioPage));
+    expect(host.querySelector<HTMLDetailsElement>(".studio-tools-menu")?.open).toBe(false);
+    expect([...host.querySelectorAll<HTMLButtonElement>(".studio-home-actions > button")].map(node => node.textContent)).toEqual(["새 콘텐츠 만들기"]);
+    await click("새 콘텐츠 만들기");
     const channel = host.querySelector('select[aria-label="제작 채널"]') as HTMLSelectElement;
     expect(channel.value).toBe("");
     expect(channel.required).toBe(true);
@@ -161,12 +186,14 @@ describe("홈과 단계별 제작 화면", () => {
     expect(title.value).toBe("직접 수정한 제목");
     expect(mocks.api.mock.calls.some(([path]) => String(path).includes("generate"))).toBe(false);
   });
-  it("이야기부터 등록 그림을 보여주고 바로 연 포즈를 해당 컷에만 저장한다", async () => {
+  it("캐릭터 설정을 접어 두고 명시적으로 연 포즈를 해당 컷에만 저장한다", async () => {
     cards[0] = { ...cards[0], characters: ["pengpeng"] };
     await render(createElement(StudioPage, { cardId: 1 }));
     const registered = host.querySelector('[data-testid="studio-registered-characters"]')!;
     expect(registered).not.toBeNull();
     expect(registered.closest("[hidden]")).toBeNull();
+    expect(registered.closest("details")?.open).toBe(false);
+    await openDetails("캐릭터·포즈 설정");
     for (const name of ["펭펭", "펨펨", "김펭긴", "김펭키"]) expect(registered.textContent).toContain(name);
     expect(registered.querySelectorAll("img").length).toBeGreaterThanOrEqual(4);
     expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(0);
@@ -174,6 +201,7 @@ describe("홈과 단계별 제작 화면", () => {
     await click("포즈 고르기");
     expect(host.querySelector("#studio-composition")?.hasAttribute("hidden")).toBe(false);
     expect(host.querySelectorAll(".studio-pose-picker")).toHaveLength(1);
+    expect(host.querySelector(".studio-pose-picker")?.closest("details")?.open).toBe(true);
     expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(100);
     await act(async () => host.querySelector<HTMLButtonElement>('.studio-pose-tile:nth-child(41)')!.click());
     await click("이 컷에 적용");
@@ -195,6 +223,8 @@ describe("홈과 단계별 제작 화면", () => {
     await render(createElement(StudioPage, { cardId: 1 }));
     const registered = host.querySelector('[data-testid="studio-registered-characters"]')!;
     expect(registered.closest("[hidden]")).toBeNull();
+    expect(registered.closest("details")?.open).toBe(false);
+    await openDetails("캐릭터·포즈 설정");
     expect(registered.querySelectorAll('input[type="checkbox"]:checked')).toHaveLength(1);
     expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(0);
     await click("포즈 고르기");
@@ -238,17 +268,34 @@ describe("수집 카드뉴스 보드 연결", () => {
     expect(host.querySelector('img[src="/api/channels/2/media/51"]')).not.toBeNull();
     expect(host.textContent).toContain("카드뉴스 · 5장"); expect(host.textContent).toContain("5장 ZIP 저장");
   });
-  it("전체 페이지를 순서대로 보여 주고 원고 채널로 바로 이동한다", async () => {
+  it("같은 제작 화면에서 카드 전체와 작업 메모를 편집하며 다른 편집기로 왕복하지 않는다", async () => {
     generated(); await render(createElement(StudioPage, { cardId: 1 }));
+    await settle(); await settle();
+    expect(host.querySelectorAll(".content-workspace")).toHaveLength(1);
+    expect(host.querySelectorAll(".card-copy-editor")).toHaveLength(1);
+    expect(host.querySelector('[role="tablist"]')).toBeNull();
+    expect(mocks.api).toHaveBeenCalledWith("/channels/2/items/20");
+    const editor = host.querySelector(".card-copy-editor");
+    const title = host.querySelector<HTMLTextAreaElement>('.card-copy-editor textarea[id$="-title"]')!;
+    await input(title, "아직 저장하지 않은 카드 제목");
+    await openDetails("게시 준비");
     expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/2/media/51");
-    await click("다음 →"); expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/2/media/52");
+    await act(async () => [...host.querySelectorAll<HTMLButtonElement>(".card-carousel button")].find(node => node.textContent === "다음 →")!.click());
+    expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/2/media/52");
     await act(async () => host.querySelector<HTMLButtonElement>('.card-carousel-thumbs button:last-child')!.click());
     expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/2/media/55");
-    expect(button("다음 →").disabled).toBe(true);
-    await act(async () => [...host.querySelectorAll<HTMLAnchorElement>("a")].find(a => a.textContent === "원문·요약 확인 →")!.click());
-    expect(mocks.navigate).toHaveBeenCalledWith("/items/2/20");
-    mocks.guard.confirmLeave.mockImplementationOnce(() => {});
-    await click("보드 제목·메모 편집"); expect(host.querySelector("#studio-title")).toBeNull();
-    await click("보드 제목·메모 편집"); expect(host.querySelector("#studio-title")).not.toBeNull();
+    expect([...host.querySelectorAll<HTMLButtonElement>(".card-carousel button")].find(node => node.textContent === "다음 →")?.disabled).toBe(true);
+    expect(host.querySelector<HTMLDetailsElement>(".source-board-notes")?.open).toBe(false);
+    await openDetails("작업 메모");
+    await input(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="작업 메모"]')!, "다음 검토에 참고할 메모");
+    await click("메모 저장");
+    expect(mocks.api).toHaveBeenCalledWith("/studio/cards/1", { method: "PATCH", body: { version: 1, memo: "다음 검토에 참고할 메모" } });
+    expect(cards[0].memo).toBe("다음 검토에 참고할 메모");
+    expect(host.querySelector(".card-copy-editor")).toBe(editor);
+    expect(title.value).toBe("아직 저장하지 않은 카드 제목");
+    expect(host.querySelector("#studio-title")).toBeNull();
+    expect(host.textContent).not.toContain("보드 제목·메모 편집");
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(mocks.api.mock.calls.some(([path]) => /generate|approve|publication|deliver/.test(String(path)))).toBe(false);
   });
 });

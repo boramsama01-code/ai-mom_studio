@@ -86,7 +86,7 @@ function StudioBoard({ onTrash }: { onTrash: () => void }) {
   const openHighscoop = () => guard.confirmLeave(() => navigate(`/inbox?subcategory=${encodeURIComponent(subcategory)}`));
   function newCard(stage: Stage = "idea", mode: "choose"|"experience"|"finished" = "choose") { if (archived || !visibleChannels.length) return; setEntryChannel(""); setNewStage(stage); setNewMode(mode); setCreating(true); }
   return <>
-    <header className="studio-home-heading"><div><h1>내 콘텐츠</h1><p>모은 자료와 직접 찍은 순간을 콘텐츠로 완성하세요.</p></div><div className="studio-home-actions"><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => setImportingZip(true)}>카드뉴스 ZIP 가져오기</button><button className="btn ghost" onClick={onTrash}><Icon name="trash" size={17} />휴지통{q.data?.trashCount ? <span className="studio-trash-count">{q.data.trashCount}</span> : null}</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("making","finished")}>완성 이미지 가져오기</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("idea","experience")}>사진·영상 후기</button><button className="btn primary studio-create" disabled={archived || !visibleChannels.length} onClick={() => newCard()}><Icon name="plus" size={18} />새 콘텐츠 만들기</button></div></header>
+    <header className="studio-home-heading"><div><h1>내 콘텐츠</h1><p>모은 자료와 직접 찍은 순간을 콘텐츠로 완성하세요.</p></div><div className="studio-home-actions"><details className="studio-tools-menu"><summary className="btn">가져오기·관리</summary><div className="stack"><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => setImportingZip(true)}>카드뉴스 ZIP 가져오기</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("making","finished")}>완성 이미지 가져오기</button><button className="btn" disabled={archived || !visibleChannels.length} onClick={() => newCard("idea","experience")}>사진·영상 후기</button><button className="btn ghost" onClick={onTrash}><Icon name="trash" size={17} />휴지통{q.data?.trashCount ? <span className="studio-trash-count">{q.data.trashCount}</span> : null}</button></div></details><button className="btn primary studio-create" disabled={archived || !visibleChannels.length} onClick={() => newCard()}><Icon name="plus" size={18} />새 콘텐츠 만들기</button></div></header>
     <div className="studio-overview">
       <section className="studio-resume" aria-label="최근 작업 이어하기">
         <div className="studio-resume-label"><span className="resume-indicator" />{latest ? "이어서 만들어 볼까요?" : "다음 이야기를 기다리는 중"}</div>
@@ -218,18 +218,27 @@ export function StudioImport() {
 }
 
 function StudioDetail({ id }: { id: number }) {
-  const [editBoard, setEditBoard] = useState(false);
-  const guard = useDirtyGuard();
-  useEffect(() => { setEditBoard(false); }, [id]);
   const q = useQuery({ queryKey: ["studio", "card", id], queryFn: () => api<Detail>(`/studio/cards/${id}`), refetchInterval: (query) => query.state.data?.jobs.some(activeJob) ? 3000 : false });
   if (q.isLoading) return <Loading lines={5} />;
   if (!q.data) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   if (q.data.card.trashedAt) return <TrashedStudioDetail card={q.data.card} />;
   if (q.data.card.finishedDeck) return <FinishedDeckEditor key={q.data.card.id} data={q.data} />;
   if (q.data.card.experience) return <ExperienceEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} />;
-  if (!editBoard && q.data.card.sourceOutput && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard key={q.data.card.id} card={q.data.card} /><div className="source-output-detail"><button className="btn ghost sm" onClick={() => guard.confirmLeave(() => setEditBoard(true))}>보드 제목·메모 편집</button></div></>;
+  if (q.data.card.sourceOutput && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard key={q.data.card.id} card={q.data.card} /><SourceBoardNotes card={q.data.card} /></>;
   // A background polling failure must not unmount the editor and discard unsaved work.
   return <>{q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}<StudioEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} /></>;
+}
+
+function SourceBoardNotes({ card }: { card: Card }) {
+  const [memo, setMemo] = useState(card.memo ?? "");
+  const [baseline, setBaseline] = useState(card.memo ?? "");
+  const [version, setVersion] = useState(card.version);
+  const qc = useQueryClient(), guard = useDirtyGuard();
+  const dirty = memo !== baseline;
+  useEffect(() => { if (!dirty && card.version > version) { setMemo(card.memo ?? ""); setBaseline(card.memo ?? ""); setVersion(card.version); } }, [card.version, dirty, version]);
+  const save = useMutation({ mutationFn: () => api<Card>(`/studio/cards/${card.id}`, { method: "PATCH", body: { version, memo } }), onSuccess: result => { setBaseline(result.memo ?? ""); setVersion(result.version); void qc.invalidateQueries({ queryKey: ["studio"] }); } });
+  useEffect(() => { const key = `source-board-note-${card.id}`; guard.setDirty(key, dirty, async () => { try { await save.mutateAsync(); return true; } catch { return false; } }); return () => guard.setDirty(key, false); }, [dirty, memo, version, card.id]);
+  return <details className="content-drawer source-board-notes"><summary><strong>작업 메모</strong><span>{dirty ? "저장 전 변경사항" : "선택"}</span></summary><div className="content-drawer-body stack"><textarea aria-label="작업 메모" rows={3} value={memo} maxLength={12000} disabled={save.isPending} onChange={event => setMemo(event.target.value)} /><div><button className="btn" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>{save.isPending ? "저장 중…" : "메모 저장"}</button></div>{save.error && <ErrorBox error={save.error} />}</div></details>;
 }
 
 type GenerationAction = Pick<StudioGeneration, "kind"> & Partial<Pick<StudioGeneration, "textTarget" | "panelIndex" | "instruction">>;
@@ -251,6 +260,8 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const posePickerTarget = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!posePickerRequest) return;
+    const drawer = posePickerTarget.current?.closest("details");
+    if (drawer) drawer.open = true;
     posePickerTarget.current?.scrollIntoView?.({ block: "start" });
     posePickerTarget.current?.focus({ preventScroll: true });
   }, [posePickerRequest]);
@@ -347,7 +358,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
     </header>
     {newer && dirty && <div className="notice warn row between"><span>서버에 새 버전이 있습니다. 현재 입력은 유지했습니다.</span><button className="btn sm" onClick={() => guard.confirmLeave(() => accept(data.card))}>새 버전 불러오기</button></div>}
     {(save.error || restore.error) && <ErrorBox error={save.error || restore.error} />}
-    {data.card.sourceOutput && <SourceStudioCard key={data.card.id} card={data.card} embedded />}
+    {data.card.sourceOutput && <details className="content-drawer"><summary><strong>자료에서 만든 카드</strong><span>원문·카드 문구 확인</span></summary><SourceStudioCard key={data.card.id} card={data.card} embedded /></details>}
     <div className="tabs" role="tablist" aria-label="콘텐츠 편집">
       <button role="tab" aria-selected={tab === "content"} onClick={() => setTab("content")}>콘텐츠 편집</button>
       <button role="tab" aria-selected={tab === "history"} onClick={() => guard.confirmLeave(() => setTab("history"))}>버전 기록 {data.revisions.length}</button>
@@ -364,7 +375,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
     {latestJob?.status === "succeeded" && latestJob.result?.applied === true && Array.isArray(latestJob.result.changedFields) && latestJob.result.changedFields.length > 0 && <p className="notice ok small" role="status">작성 완료: {latestJob.result.changedFields.filter((f): f is string => typeof f === "string").join(" · ")}</p>}
     {tab === "content" ? <div className="studio-editor-layout studio-guided-editor">
       <nav className="studio-editor-steps" aria-label="제작 순서">{([['story','01','이야기'],['images','02','그림'],['finish','03','완성']] as const).map(([id, number, label]) => <button key={id} aria-current={editorStep === id ? "step" : undefined} onClick={() => setEditorStep(id)}><span>{number}</span><strong>{label}</strong></button>)}</nav>
-      <StudioRegisteredCharacters cast={form.characters} onChange={changeCast} disabled={busy || working || newer} onChoosePoses={() => { setEditorStep("images"); setPosePickerRequest(current => current + 1); }} />
+      <details className="content-options"><summary>캐릭터·포즈 설정</summary><StudioRegisteredCharacters cast={form.characters} onChange={changeCast} disabled={busy || working || newer} onChoosePoses={() => { setEditorStep("images"); setPosePickerRequest(current => current + 1); }} /></details>
       <section className="panel stack" id="studio-story" hidden={editorStep !== "story"}>
         <div className="studio-section-heading"><div><h2>어떤 이야기를 만들까요?</h2></div><span className="small muted">API로 자동 작성하거나 ChatGPT 초안을 가져오세요.</span></div>
         <label className="field">제목<input id="studio-title" disabled={busy} value={form.title} maxLength={160} onChange={e => change("title", e.target.value)} /></label>
@@ -402,7 +413,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
           <div className="row between"><h3>{i + 1}{form.format === "카드뉴스" ? "번째 본문" : "컷"}</h3><span className="small muted">{p.imageId ? "그림 있음" : "구성 중"}</span></div>
           <label className="field small">장면<textarea disabled={busy} aria-label={panelLabel(i, "장면")} rows={3} value={p.scene} maxLength={4000} onChange={e => changePanel(i, "scene", e.target.value)} placeholder="등장인물, 표정, 배경, 소품" /></label>
           <label className="field small">{form.format === "카드뉴스" ? "본문" : "대사"}<textarea id={panelField(i)} disabled={busy} aria-label={panelLabel(i, "대사")} rows={2} value={p.dialogue} maxLength={3000} onChange={e => changePanel(i, "dialogue", e.target.value)} placeholder="그림 아래에 표시할 글" /></label>
-          {editorStep === "images" && selectedPanel === i && <div ref={posePickerTarget} tabIndex={-1} aria-label="현재 컷의 포즈 선택"><StudioPosePicker key={`${i}:${posePickerRequest}`} cast={form.characters} value={p.poseRefs ?? []} onChange={poseRefs => change("panels", form.panels.map((panel, index) => index === i ? { ...panel, poseRefs } : panel))} disabled={busy || working || newer} panelIndex={i} imageMode={imageMode} /></div>}
+          {editorStep === "images" && selectedPanel === i && <details className="content-options"><summary>이 컷의 캐릭터 포즈 · 선택</summary><div ref={posePickerTarget} tabIndex={-1} aria-label="현재 컷의 포즈 선택"><StudioPosePicker key={`${i}:${posePickerRequest}`} cast={form.characters} value={p.poseRefs ?? []} onChange={poseRefs => change("panels", form.panels.map((panel, index) => index === i ? { ...panel, poseRefs } : panel))} disabled={busy || working || newer} panelIndex={i} imageMode={imageMode} /></div></details>}
           {imageMode === "chatgpt" ? <StudioPanelImport content={form} index={i} channelName={channelName(form.channel)} instruction={panelInstructions[i]} disabled={busy || working || newer || !form.title.trim()} upload={uploadImage} /> : <>
             <div className="studio-panel-picture">{p.imageId ? <a href={imageUrl(p.imageId)} target="_blank" rel="noopener noreferrer"><img src={imageUrl(p.imageId)} alt={panelLabel(i, "그림")} /></a> : <div className="studio-picture-empty">{i + 1}<span>위에 쓴 내용이 그림으로 이어집니다.</span></div>}</div>
             <button className="btn primary" aria-label={panelLabel(i, p.imageId ? "다시 그리기" : "그리기")} disabled={!canDraw || (!p.scene.trim() && !p.dialogue.trim() && !panelInstructions[i].trim())} onClick={() => run({ kind: "image", panelIndex: i, instruction: panelInstructions[i] })}>{generate.isPending && generate.variables?.kind === "image" && generate.variables.panelIndex === i ? "요청 중…" : p.imageId ? "이 컷 다시 그리기" : "이 컷 그리기"}</button>

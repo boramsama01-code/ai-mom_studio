@@ -38,10 +38,14 @@ jobs:
         run: npm install --no-save --package-lock=false playwright@1.62.1 && npx playwright install --with-deps webkit
       - name: Verify mobile WebKit layout and channel actions
         run: node scripts/mobile-regression.mjs
+      - name: Verify one-page editing, save/reopen and publication controls
+        run: node scripts/content-workspace-regression.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mobile-webkit-screenshots
-          path: test-results/mobile
+          path: |
+            test-results/mobile
+            test-results/workspace
           if-no-files-found: ignore
 

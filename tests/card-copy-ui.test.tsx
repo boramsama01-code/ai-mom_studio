@@ -12,21 +12,34 @@ const mocks = vi.hoisted(() => ({ api: vi.fn(), blob: vi.fn(), guard: { setDirty
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api, apiBlob: mocks.blob }));
 vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => ({ select: vi.fn(), channels: [], allChannels: [] }) }));
 vi.mock("../client/src/toast", () => ({ useToast: () => vi.fn() }));
-vi.mock("wouter", () => ({ useLocation: () => ["/studio/1", mocks.navigate] }));
+vi.mock("wouter", () => ({ useLocation: () => ["/studio/1", mocks.navigate], useSearch: () => "" }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root, host: HTMLDivElement, client: QueryClient, saved: CardCopyResponse;
 let patch: ((body: { version: number; copy: CardCopyResponse["copy"] }) => Promise<CardCopyResponse>) | null;
+let renderedCards: Array<Record<string, any>>;
 const path = "/channels/1/items/9/card-copy";
 function fresh(): CardCopyResponse {
   return { version: 3, revisionId: 30, hasSavedCopy: true, copy: { version: 1, templateKey: "set:n04", cover: { title: "원고에서 가져온 제목", subtitle: "사실을 확인하는 부제" }, pages: Array.from({ length: 4 }, (_, i) => ({ id: `body-${i + 1}`, title: `본문 제목 ${i + 1}`, subtitle: `본문 부제 ${i + 1}`, body: `원문에 근거한 카드 본문 ${i + 1}` })) } };
 }
+function itemFixture() {
+  return {
+    item: { id: 9, channelId: 1, title: saved.copy.cover.title, kind: "science_dialogue", origin: "manual", version: saved.version, currentRevisionId: saved.revisionId, reviewStatus: "reviewed", evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: {}, canvaDesign: null },
+    current: { id: saved.revisionId, revisionNo: saved.version, author: "operator", payload: { title: saved.copy.cover.title, cardCopy: saved.copy } },
+    primary: null, linked: [], revisions: [], cards: renderedCards, approvals: [], deliveries: [], similar: [], defaultCaptions: { instagram: "확인한 게시 캡션", telegram: "" },
+    publicationReadiness: { ready: true, blockers: [], destinations: [], dryRun: false, autoPublish: true, expectedUsername: "spacepenguin.co" },
+  };
+}
 beforeEach(() => {
   vi.clearAllMocks(); saved = fresh(); patch = null;
+  renderedCards = [{ id: 51, revisionId: 30, templateKey: "set:n01", carousel: { version: 1, cover: { kind: "typography", credit: "저장된 표지" }, pages: Array.from({ length: 5 }, (_, i) => ({ id: 51 + i, title: `완성 ${i}`, sha256: `old-${i}` })) } }];
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:actual-renderer-preview") });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
   Element.prototype.scrollIntoView = vi.fn();
   mocks.blob.mockResolvedValue(new Blob(["renderer-jpeg"], { type: "image/jpeg" }));
   mocks.api.mockImplementation(async (request: string, options?: { method?: string; body?: any }) => {
+    if (request === "/status") return { integrations: { aiProvider: "gemini", gemini: true, flags: { dryRun: false, autoPublish: true } }, workerConnected: true };
+    if (request === "/canva/status") return { connected: false };
+    if (request === "/channels/1/items/9") return structuredClone(itemFixture());
     if (request === "/studio/ai-status") return { defaultProvider: "gemini", text: { gemini: true, openai: false, anthropic: false } };
     if (request === path && options?.method === "PATCH") {
       if (patch) return patch(options.body);
@@ -37,7 +50,10 @@ beforeEach(() => {
     if (request === `${path}/generate`) return { version: saved.version, revisionId: saved.revisionId, copy: { ...structuredClone(saved.copy), cover: { title: "AI가 제안한 제목", subtitle: "AI가 제안한 부제" } }, model: "fixture-model" };
     if (request === "/channels/1/templates") return { current: "set:n04", items: [{ key: "set:n04", name: "뉴스 브리핑", description: "뉴스", kind: "builtin", family: "news", pageCount: 5 }] };
     if (/\/media\/\d+\/alt-text$/.test(request)) return { version: 1, values: Array.from({ length: 5 }, (_, i) => `카드 이미지 설명 ${i + 1}`) };
-    if (request === "/channels/1/items/9/card") return { id: 71, studioCardId: 1, carousel: { version: 1, cover: { kind: "typography", credit: "글자 중심" }, pages: Array.from({ length: 5 }, (_, i) => ({ id: 71 + i, sha256: `sha-${i}`, title: i === 0 ? saved.copy.cover.title : saved.copy.pages[i - 1].title })) } };
+    if (request === "/channels/1/items/9/card") {
+      const generated = { id: 71, studioCardId: 1, revisionId: saved.revisionId, templateKey: saved.copy.templateKey, carousel: { version: 1, cover: { kind: "typography", credit: "저장된 표지" }, pages: Array.from({ length: 5 }, (_, i) => ({ id: 71 + i, sha256: `sha-${i}`, title: i === 0 ? saved.copy.cover.title : saved.copy.pages[i - 1].title })) } };
+      renderedCards = [generated]; return structuredClone(generated);
+    }
     throw new Error(`Unexpected request: ${request}`);
   });
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -48,6 +64,12 @@ async function settle(ms = 25) { await act(async () => { await new Promise(resol
 async function render(element: ReactNode = createElement(CardCopyEditor, { channelId: 1, itemId: 9 })) { await act(async () => root.render(createElement(QueryClientProvider, { client }, element))); await settle(); }
 function button(text: string) { const buttons = [...host.querySelectorAll("button")]; const node = buttons.find(b => b.textContent === text) ?? buttons.find(b => b.textContent?.includes(text)); if (!node) throw new Error(`Button missing: ${text}`); return node; }
 async function click(text: string) { const node = button(text); expect(node.disabled, text).toBe(false); await act(async () => node.click()); await settle(); }
+async function openDetails(text: string) {
+  const summary = [...host.querySelectorAll("summary")].find(node => node.textContent?.includes(text));
+  if (!summary) throw new Error(`Summary missing: ${text}`);
+  if (!(summary.parentElement as HTMLDetailsElement).open) await act(async () => summary.click());
+  await settle();
+}
 function field(suffix: string) { const node = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[id$="-${suffix}"]`); if (!node) throw new Error(`Field missing: ${suffix}`); return node; }
 async function input(suffix: string, value: string) {
   const node = field(suffix);
@@ -99,12 +121,13 @@ describe("card copy editor", () => {
     await click("문구 저장");
     expect(field("title").value).toBe("내가 쓰던 문구"); expect(host.textContent).toContain("최신 저장본과 현재 입력 비교하기");
     expect(button("문구 저장").disabled).toBe(true);
-    patch = null; await click("현재 입력으로 최신 버전에 저장");
+    patch = null; await openDetails("최신 저장본과 현재 입력 비교하기"); await click("현재 입력으로 최신 버전에 저장");
     expect(saved.version).toBe(9); expect(saved.copy.cover.title).toBe("내가 쓰던 문구");
     expect(mocks.api.mock.calls.filter(([, o]) => o?.method === "PATCH").at(-1)?.[1].body.version).toBe(8);
   });
   it("uses explicit AI generation and review before replacing the current image copy", async () => {
     await render(); expect(mocks.api.mock.calls.some(([p]) => p.endsWith("/generate"))).toBe(false);
+    expect(host.querySelector<HTMLDetailsElement>(".card-copy-ai-tools")?.open).toBe(false); await openDetails("AI로 문구 다듬기");
     await click("AI로 템플릿 문구 제안받기");
     expect(field("title").value).toBe("원고에서 가져온 제목"); expect(host.textContent).toContain("아직 카드에 반영하지 않았어요");
     expect(mocks.api).toHaveBeenCalledWith(`${path}/generate`, { method: "POST", body: { version: 3, templateKey: "set:n04", provider: "gemini" } });
@@ -114,6 +137,7 @@ describe("card copy editor", () => {
   it("accepts only one AI or render request when a button is clicked twice before React rerenders", async () => {
     const renderImages = vi.fn().mockResolvedValue(undefined);
     await render(createElement(CardCopyEditor, { channelId: 1, itemId: 9, onSaveAndRender: renderImages }));
+    await openDetails("AI로 문구 다듬기");
     await act(async () => { const node = button("AI로 템플릿 문구 제안받기"); node.click(); node.click(); }); await settle();
     expect(mocks.api.mock.calls.filter(([p]) => p === `${path}/generate`)).toHaveLength(1);
     await act(async () => { const node = button("카드뉴스 만들기"); node.click(); node.click(); }); await settle();
@@ -121,6 +145,7 @@ describe("card copy editor", () => {
   });
   it("keeps long Korean input intact, distinguishes recommendations from hard limits, and allows manual editing without AI", async () => {
     await render(); await act(async () => { client.setQueryData(["studio-ai-status"], { defaultProvider: "gemini", text: { gemini: false, openai: false, anthropic: false } }); }); await settle();
+    await openDetails("AI로 문구 다듬기");
     expect(button("AI로 템플릿 문구 제안받기").disabled).toBe(true);
     await click("다음 →"); const recommendation = "가".repeat(141); await input("body", recommendation);
     expect(field("body").value).toBe(recommendation); expect(host.textContent).toContain("자동으로 자르지 않습니다"); expect(button("문구 저장").disabled).toBe(false);
@@ -129,19 +154,40 @@ describe("card copy editor", () => {
     await input("body", "입력 안내에 맞춰 직접 고친 본문"); await click("문구 저장"); expect(saved.copy.pages[0].body).toBe("입력 안내에 맞춰 직접 고친 본문");
   });
   it("edits board-generated cards directly, blocks stale downloads and regenerates with stored art only", async () => {
+    saved.copy.templateKey = "set:n01";
     const card: StudioCard = { ...studioContentSchema.parse({ title: "제작 보드 카드", format: "카드뉴스", channel: "penguin" }), id: 1, version: 2, sourceItemId: 9, createdAt: "2026-11-01T00:00:00Z", updatedAt: "2026-11-01T00:00:00Z", sourceOutput: { assetId: 51, channelId: 1, itemId: 9, revisionId: 30, stale: false, pages: Array.from({ length: 5 }, (_, i) => ({ id: 51 + i, title: `완성 ${i}` })), coverCredit: "저장된 표지" } };
     await render(createElement(SourceStudioCard, { card })); await settle();
+    expect(host.querySelectorAll(".card-copy-editor")).toHaveLength(1);
+    expect(host.querySelector('[role="tablist"]')).toBeNull();
+    expect(mocks.api).toHaveBeenCalledWith("/channels/1/items/9");
     await input("title", "보드에서 바로 고친 제목");
     expect(button("ZIP 다운로드").disabled).toBe(true); expect(mocks.navigate).not.toHaveBeenCalled();
-    await click("저장하고 카드뉴스 다시 만들기");
+    await click("저장하고 게시 준비");
     expect(saved.copy.cover.title).toBe("보드에서 바로 고친 제목");
-    expect(mocks.api).toHaveBeenCalledWith("/channels/1/items/9/card", { method: "POST", body: { version: 4, templateKey: "set:n04", coverMode: "reuse" } });
+    expect(mocks.api).toHaveBeenCalledWith("/channels/1/items/9/card", { method: "POST", body: { version: 4, templateKey: "set:n01", coverMode: "reuse" } });
     expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/1/media/71");
+    expect(host.querySelector<HTMLDetailsElement>("#publish-options")?.open).toBe(true);
+    expect(button("ZIP 다운로드").disabled).toBe(false);
     expect(mocks.api.mock.calls.some(([p]) => /approve|publish|deliver/.test(p))).toBe(false);
-    const refreshed = { ...card, sourceOutput: { ...card.sourceOutput!, assetId: 71, revisionId: 31, pages: Array.from({ length: 5 }, (_, i) => ({ id: 71 + i, title: `수정 ${i}` })) } };
-    await render(createElement(SourceStudioCard, { card: refreshed }));
-    await render(createElement(SourceStudioCard, { card: { ...refreshed, sourceOutput: { ...refreshed.sourceOutput, stale: true, assetId: 81, pages: [{ id: 81, title: "다른 창의 이미지" }] } } }));
+    renderedCards = [{ ...renderedCards[0], id: 81, carousel: { ...renderedCards[0].carousel, pages: [{ id: 81, title: "다른 창의 이미지" }] } }];
+    await act(async () => { await client.invalidateQueries({ queryKey: ["ch", 1, "item", 9] }); }); await settle();
     expect(host.querySelector(".card-carousel-stage img")?.getAttribute("src")).toBe("/api/channels/1/media/81");
-    expect(button("ZIP 다운로드").disabled).toBe(true);
+    saved = { ...saved, version: 5, revisionId: 32 };
+    await act(async () => { await client.invalidateQueries({ queryKey: ["ch", 1, "item", 9] }); }); await settle();
+    expect(host.querySelector(".card-carousel-stage img")).toBeNull();
+    expect([...host.querySelectorAll("button")].some(node => node.textContent?.includes("ZIP 다운로드"))).toBe(false);
+    expect(host.textContent).toContain("현재 버전(r5)으로 만든 카드가 없습니다.");
+  });
+  it("saves two independently edited cards and restores their exact text when reopened", async () => {
+    await render(); await click("다음 →"); await input("title", "첫 카드에만 저장한 제목"); await input("body", "첫 카드의 본문과 줄바꿈\n저장 후에도 유지합니다.");
+    await click("다음 →"); await input("title", "두 번째 카드 제목"); await input("body", "둘째 카드의 별도 본문입니다."); await click("문구 저장");
+    expect(saved.copy.pages[0]).toMatchObject({ title: "첫 카드에만 저장한 제목", body: "첫 카드의 본문과 줄바꿈\n저장 후에도 유지합니다." });
+    expect(saved.copy.pages[1]).toMatchObject({ title: "두 번째 카드 제목", body: "둘째 카드의 별도 본문입니다." });
+    await render(null); client.clear(); await render(); await click("다음 →");
+    expect(field("title").value).toBe("첫 카드에만 저장한 제목"); expect(field("body").value).toBe("첫 카드의 본문과 줄바꿈\n저장 후에도 유지합니다.");
+    await click("다음 →"); expect(field("title").value).toBe("두 번째 카드 제목"); expect(field("body").value).toBe("둘째 카드의 별도 본문입니다.");
+    expect(button("문구 저장").disabled).toBe(true);
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(1);
+    expect(mocks.api.mock.calls.some(([request]) => /generate|approve|publish/.test(request))).toBe(false);
   });
 });
