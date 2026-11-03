@@ -22,10 +22,12 @@ const MAX_IDENTITY_LOOKUPS = 10;
  * https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/get-started/
  * https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/content_publishing_limit
  */
-const INSTAGRAM_TARGET_HINTS = new Map<string, { primaryId: string; alternateObservedId?: string }>([
-  // The second ID was also observed for spacepenguin.co in Meta OAuth/Business
-  // UI on 2026-11-03. It is a candidate, not a proven alias or an access grant.
-  ["spacepenguin.co", { primaryId: "17841458158640250", alternateObservedId: "1445218102004133" }],
+const INSTAGRAM_TARGET_HINTS = new Map<string, { primaryId: string; businessAssetId?: string }>([
+  // Business Settings identifies this second ID as an InstagramBusinessAsset,
+  // not an IGUser. Resolve its explicit ig_user_id mapping before profile/quota
+  // checks; never save the business asset ID as the publishing account ID.
+  // https://github.com/meta/facebook-python-business-sdk/blob/main/facebook_business/adobjects/instagrambusinessasset.py
+  ["spacepenguin.co", { primaryId: "17841458158640250", businessAssetId: "1445218102004133" }],
   ["alligodang.official", { primaryId: "17841444569239069" }],
   ["highscoop.official", { primaryId: "17841416940240854" }],
   ["fryday.official.kr", { primaryId: "17841474286823201" }],
@@ -73,13 +75,19 @@ export async function accountIdentity(token: string, authMode: InstagramAuthMode
       const hint = normalized ? INSTAGRAM_TARGET_HINTS.get(normalized) : undefined;
       if (!hint) return { ok: false as const, error: "이 토큰에서 연결 가능한 인스타그램 계정 목록이 비어 있습니다. 토큰을 발급한 Meta 앱과 로그인한 인스타그램 계정을 확인해 주세요.", reason: "no_assigned_accounts" as const };
       let targetId = hint.primaryId;
-      let profileStage: "direct_profile" | "alternate_profile" = "direct_profile";
+      let profileStage: "direct_profile" | "mapped_profile" = "direct_profile";
       let profile = await igFetch(targetId, "GET", { fields: "id,username" }, token, authMode, fetchImpl);
-      if (!profile.ok && hint.alternateObservedId && isObjectLookupFailure(profile)) {
-        // One observed candidate only, after the exact provider object error.
-        // Its ID, username and protected quota must still pass the checks below.
-        targetId = hint.alternateObservedId;
-        profileStage = "alternate_profile";
+      if (!profile.ok && hint.businessAssetId && isObjectLookupFailure(profile)) {
+        // One observed asset only, after the exact provider object error. Its
+        // authorized mapping may identify a different canonical IGUser ID, but
+        // both its handle and the freshly fetched IGUser must match this channel.
+        const asset = await igFetch(hint.businessAssetId, "GET", { fields: "id,ig_user_id,ig_username" }, token, authMode, fetchImpl);
+        if (!asset.ok) return { ok: false as const, error: "Meta의 인스타그램 비즈니스 자산 정보를 확인하지 못했습니다. 해당 자산의 접근 권한을 확인해 주세요." + lookupFailureDiagnostic("business_asset", asset), reason: "direct_account_access_failed" as const };
+        const assetId = instagramId(asset.json.id), mappedId = instagramId(asset.json.ig_user_id), assetUsername = asset.json.ig_username;
+        if (!assetId || !mappedId || !/^[1-9]\d{0,39}$/.test(mappedId) || mappedId === assetId || typeof assetUsername !== "string" || !INSTAGRAM_USERNAME.test(assetUsername)) return invalidResponse();
+        if (assetId !== hint.businessAssetId || assetUsername.toLowerCase() !== normalized) return { ok: false as const, error: "Meta 비즈니스 자산의 계정이 이 채널의 게시 계정과 일치하지 않습니다. 인스타그램 연결 정보를 확인해 주세요.", reason: "account_mismatch" as const };
+        targetId = mappedId;
+        profileStage = "mapped_profile";
         profile = await igFetch(targetId, "GET", { fields: "id,username" }, token, authMode, fetchImpl);
       }
       if (!profile.ok) return { ok: false as const, error: "Meta 계정 목록은 비어 있고, 이 토큰으로 대상 계정 정보를 직접 조회하지 못했습니다. 토큰을 발급한 Meta 앱과 해당 계정의 접근 권한을 확인해 주세요." + lookupFailureDiagnostic(profileStage, profile), reason: "direct_account_access_failed" as const };
@@ -137,7 +145,7 @@ function isObjectLookupFailure(failure: { lost: boolean; diagnostic?: IgFailureD
 }
 
 /** Only local stage names, HTTP status, numeric provider codes and transport state reach the UI. */
-function lookupFailureDiagnostic(stage: "assigned_accounts" | "direct_profile" | "alternate_profile", failure: { lost: boolean; diagnostic?: IgFailureDiagnostic }) {
+function lookupFailureDiagnostic(stage: "assigned_accounts" | "direct_profile" | "business_asset" | "mapped_profile", failure: { lost: boolean; diagnostic?: IgFailureDiagnostic }) {
   const { httpStatus, graphCode, graphSubcode } = failure.diagnostic ?? {};
   return ` [진단: ${stage} / HTTP ${httpStatus ?? "-"} / Graph ${graphCode ?? "-"} / subcode ${graphSubcode ?? "-"} / lost=${failure.lost ? "true" : "false"}]`;
 }
