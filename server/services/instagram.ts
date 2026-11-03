@@ -34,6 +34,16 @@ const INSTAGRAM_TARGET_HINTS = new Map<string, { primaryId: string; businessAsse
   ["fryday.official.kr", { primaryId: "17841474286823201" }],
 ]);
 
+/** Read-only diagnostic comparisons. These extra IDs never select account lookup targets. */
+export function instagramDiagnosticTargetHints(username: string): { primaryId?: string; businessAssetId?: string; linkedPageId?: string; businessId?: string } {
+  const normalized = username.trim().replace(/^@/, "").toLowerCase();
+  const hint = INSTAGRAM_TARGET_HINTS.get(normalized);
+  return {
+    ...(hint ? { ...hint } : {}),
+    ...(normalized === "spacepenguin.co" ? { linkedPageId: "1398092400054123", businessId: "28938016352504966" } : {}),
+  };
+}
+
 function instagramId(value: unknown): string | undefined {
   // Graph normally returns strings. Never turn an already rounded JSON number
   // into a different account ID (Instagram IDs can exceed MAX_SAFE_INTEGER).

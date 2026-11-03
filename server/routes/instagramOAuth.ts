@@ -9,6 +9,7 @@ import { connectInstagram } from "../services/instagramConnection";
 import { exchangeUnifiedInstagramCode, InstagramOAuthError, instagramAuthorizationUrl, instagramOAuthConfig, newInstagramOAuth, validateInstagramOAuthState } from "../services/instagramOAuth";
 import { ah, HttpError, intParam, parse } from "./util";
 import { instagramOAuthFailureUrl, instagramOAuthReason, sanitizeInstagramDiagnostic } from "../../shared/instagramOAuthDiagnostics";
+import { inspectInstagramTokenGrants, shouldInspectInstagramToken, type InstagramTokenGrantDiagnostic } from "../services/instagramTokenDiagnostic";
 
 /** Mounted behind the existing operator + CSRF middleware; callback GET still requires that session. */
 export const instagramOAuthRoutes = Router();
@@ -31,10 +32,10 @@ instagramOAuthRoutes.post("/studio/instagram/:cid/oauth/start", ah(async (req, r
 }));
 
 instagramOAuthRoutes.get("/studio/instagram/oauth/callback", ah(async (req, res) => {
-  const back = (reason: unknown, diagnostic?: unknown) => {
+  const back = (reason: unknown, diagnostic?: unknown, tokenDebug?: InstagramTokenGrantDiagnostic) => {
     const safeReason = instagramOAuthReason(reason);
     const safeDiagnostic = sanitizeInstagramDiagnostic(diagnostic);
-    console.warn("[instagram_oauth]", JSON.stringify({ reason: safeReason, ...(safeDiagnostic ? { diagnostic: safeDiagnostic } : {}) }));
+    console.warn("[instagram_oauth]", JSON.stringify({ reason: safeReason, ...(safeDiagnostic ? { diagnostic: safeDiagnostic } : {}), ...(tokenDebug ? { tokenDebug } : {}) }));
     return res.redirect(instagramOAuthFailureUrl(safeReason, safeDiagnostic));
   };
   const pending = req.session.instagramOauth;
@@ -56,7 +57,12 @@ instagramOAuthRoutes.get("/studio/instagram/oauth/callback", ah(async (req, res)
     await connectInstagram(getDb(), pending.channelId, { token: credential.token, expiresAt: credential.expiresAt, username: pending.username, dailyLimit: pending.dailyLimit, authMode: "facebook" }, actorOf(req));
   } catch (error) {
     const extra = error instanceof HttpError ? error.extra : undefined;
-    return back(extra?.code ?? "connect_failed", sanitizeInstagramDiagnostic(extra?.diagnostic) ?? { stage: "connection_validation" });
+    const diagnostic = sanitizeInstagramDiagnostic(extra?.diagnostic) ?? { stage: "connection_validation" as const };
+    // Server log only. Inspection cannot retry connection, change its result or save a failed credential.
+    const tokenDebug = shouldInspectInstagramToken(diagnostic.stage)
+      ? await inspectInstagramTokenGrants(credential.token, pending.appId, pending.username).catch((): InstagramTokenGrantDiagnostic => ({ outcome: "unavailable", lost: true }))
+      : undefined;
+    return back(extra?.code ?? "connect_failed", diagnostic, tokenDebug);
   }
   return res.redirect("/instagram?instagram=connected");
 }));
