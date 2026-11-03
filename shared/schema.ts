@@ -204,6 +204,8 @@ export const contentItems = pgTable(
     // 가장 최근 LLM 추출값(참고용)과 운영자 편집값(우선)은 분리해 보관
     extracted: jsonb("extracted").$type<Record<string, unknown> | null>(),
     edited: jsonb("edited").$type<Record<string, unknown> | null>(),
+    // Saved publication copy is independent from an immutable approval snapshot.
+    publicationDraft: jsonb("publication_draft").$type<{ version: number; captions: { instagram: string; telegram: string } } | null>(),
     currentRevisionId: integer("current_revision_id"),
     nextActionAt: ts("next_action_at"),
     lastUsedAt: ts("last_used_at"),
@@ -303,6 +305,8 @@ export const approvals = pgTable(
     mediaAssetId: integer("media_asset_id").notNull().references(() => mediaAssets.id),
     cardSha256: text("card_sha256").notNull(),
     captions: jsonb("captions").$type<{ instagram: string; telegram: string; altTexts?: string[] }>().notNull(),
+    requestId: text("request_id"),
+    requestHash: text("request_hash"),
     scheduledAt: ts("scheduled_at").notNull(),
     status: text("status").notNull().default("active"), // active | invalidated | cancelled | completed
     invalidatedReason: text("invalidated_reason"),
@@ -310,7 +314,7 @@ export const approvals = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("approvals_content").on(t.contentItemId)],
+  (t) => [index("approvals_content").on(t.contentItemId), uniqueIndex("approvals_request_id").on(t.requestId)],
 );
 
 /* ───────────── 게시 목적지 ───────────── */
@@ -332,6 +336,19 @@ export const destinations = pgTable(
 );
 
 /* ───────────── 목적지별 전송 ───────────── */
+/** Non-secret identity that the operator approved. Token rotation is not an identity change. */
+export type PublicationDestinationSnapshot = {
+  version: 1;
+  destinationId: number;
+  destinationVersion: number;
+  platform: string;
+  label: string;
+  accountId: string;
+  username: string | null;
+  authMode?: "instagram" | "facebook";
+  configuredAddress?: string;
+  verifiedAt: string;
+};
 export const deliveries = pgTable(
   "deliveries",
   {
@@ -342,6 +359,17 @@ export const deliveries = pgTable(
     // waiting | scheduled | processing | succeeded | failed | unknown | cancelled | dry_run
     status: text("status").notNull().default("scheduled"),
     attempts: integer("attempts").notNull().default(0),
+    destinationSnapshot: jsonb("destination_snapshot").$type<PublicationDestinationSnapshot | null>(),
+    // Null is deliberately retained for legacy rows: their dispatch phase is unknown.
+    phase: text("phase"), // queued | preparing | container_wait | dispatching | finished | unknown
+    lastAttemptId: text("last_attempt_id"),
+    leaseToken: text("lease_token"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: ts("lease_expires_at"),
+    dispatchStartedAt: ts("dispatch_started_at"),
+    outcomeSource: text("outcome_source"), // provider_verified | operator_confirmed | operator_not_posted
+    resolutionNote: text("resolution_note"),
+    needsReconciliation: boolean("needs_reconciliation").notNull().default(false),
     externalContainerId: text("external_container_id"),
     externalId: text("external_id"),
     externalUrl: text("external_url"),
@@ -352,8 +380,46 @@ export const deliveries = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex("deliveries_unique").on(t.approvalId, t.destinationId)],
+  (t) => [uniqueIndex("deliveries_unique").on(t.approvalId, t.destinationId), index("deliveries_recovery").on(t.status, t.leaseExpiresAt)],
 );
+
+/** Append-only attempt headers; mutable progress lives on deliveries, never here. */
+export const deliveryAttempts = pgTable("delivery_attempts", {
+  id: text("id").primaryKey(),
+  deliveryId: integer("delivery_id").notNull().references(() => deliveries.id),
+  attemptNo: integer("attempt_no").notNull(),
+  actor: text("actor").notNull(),
+  createdAt: createdAt(),
+}, t => [uniqueIndex("delivery_attempts_number").on(t.deliveryId, t.attemptNo)]);
+
+/** Append-only evidence, including results returned by a worker that lost its lease. */
+export const deliveryAttemptEvents = pgTable("delivery_attempt_events", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  deliveryId: integer("delivery_id").notNull().references(() => deliveries.id),
+  attemptId: text("attempt_id").references(() => deliveryAttempts.id),
+  event: text("event").notNull(),
+  phase: text("phase"),
+  status: text("status"),
+  source: text("source").notNull(),
+  actor: text("actor").notNull(),
+  externalContainerId: text("external_container_id"),
+  externalId: text("external_id"),
+  externalUrl: text("external_url"),
+  errorKind: text("error_kind"),
+  note: text("note").notNull().default(""),
+  createdAt: createdAt(),
+}, t => [index("delivery_attempt_events_delivery").on(t.deliveryId, t.id), index("delivery_attempt_events_attempt").on(t.attemptId, t.id)]);
+
+/** Dedicated publisher liveness: collection/AI workers cannot make this healthy. */
+export const publisherHeartbeats = pgTable("publisher_heartbeats", {
+  workerId: text("worker_id").primaryKey(),
+  mode: text("mode").notNull(),
+  status: text("status").notNull(),
+  heartbeatAt: ts("heartbeat_at").notNull(),
+  lastSweepAt: ts("last_sweep_at"),
+  lastError: text("last_error"),
+  startedAt: ts("started_at").notNull().defaultNow(),
+});
 
 /* ───────────── 작업 큐(워커가 한 번 실행하고 종료) ───────────── */
 export const jobs = pgTable(

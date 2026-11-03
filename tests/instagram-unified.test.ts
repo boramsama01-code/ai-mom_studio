@@ -497,7 +497,9 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
     it("keeps diagnostics separate from the existing error classification", async () => {
       fetcher.mockResolvedValueOnce(response({ error: { code: 190, error_subcode: 463, message: privateText, fbtrace_id: "PRIVATE_TRACE", arbitrary: privateText }, access_token: token }, 400));
       const result = await publishingLimit(penguinId, token, "facebook");
-      expect(result).toMatchObject({ ok: false, lost: false, err: { kind: "token_expired", error: `액세스 토큰 만료·무효: ${privateText}` } });
+      expect(result).toMatchObject({ ok: false, lost: false, err: { kind: "token_expired", error: expect.stringContaining("액세스 토큰 만료·무효") } });
+      expect(JSON.stringify(result)).not.toContain(token);
+      expect(JSON.stringify(result)).not.toContain("private.example");
       expect(result.ok ? null : "diagnostic" in result ? result.diagnostic : null).toEqual({ httpStatus: 400, graphCode: 190, graphSubcode: 463 });
     });
 

@@ -38,6 +38,7 @@ function itemFixture() {
     cards: [{ id: 40, revisionId: 4, sha256: "test", createdAt: past, cloudinaryUrl: null }],
     approvals: [{ id: 10, revisionId: 4, scheduledAt: past, status: "active" }],
     deliveries: [{ d: { id: 100, approvalId: 10, status: "scheduled", lastError: null, externalUrl: null, completedAt: null }, dest: { label: "@highscoop.official", platform: "instagram" } }],
+    publicationDraft: { version: 1, captions: { instagram: "확인한 캡션", telegram: "" } },
     similar: [], defaultCaptions: { instagram: "확인한 캡션", telegram: "" },
     publicationReadiness: { ready: true, blockers: [], dryRun: false, autoPublish: true, dailyLimit: 3, expectedUsername: "highscoop.official", destinations: [{ id: 20, label: "@highscoop.official", platform: "instagram", configured: true }] },
   };
@@ -64,8 +65,8 @@ beforeEach(() => {
       detail = { ...detail, approvals: [{ id: 11, revisionId: 4, scheduledAt: options.body?.timing === "later" ? options.body.scheduledAt : new Date().toISOString(), status: "active" }], deliveries: [{ d: { id: 101, approvalId: 11, status: "scheduled", lastError: null, externalUrl: null, completedAt: null }, dest: { label: "@highscoop.official", platform: "instagram" } }] };
       return { ok: true, destinations: 1, approval: detail.approvals[0], timing: options.body?.timing, workerStarted: options.body?.timing === "now" };
     }
-    if (path === "/deliveries?channelId=all") return detail.deliveries.map((row: any) => ({ ...structuredClone(row), ap: detail.approvals.find((a: any) => a.id === row.d.approvalId), item: detail.item }));
-    if (path === "/publication-orphans?channelId=all") return structuredClone(orphanRows);
+    if (path.startsWith("/deliveries?")) return detail.deliveries.map((row: any) => ({ ...structuredClone(row), ap: detail.approvals.find((a: any) => a.id === row.d.approvalId), item: detail.item }));
+    if (path.startsWith("/publication-orphans?")) return structuredClone(orphanRows);
     if (path === "/studio/cards/8/publication") return structuredClone(studioStatus);
     throw new Error(`Unexpected API call: ${path}`);
   });
@@ -208,6 +209,69 @@ describe("승인 저장과 실제 전송의 구분", () => {
 });
 
 describe("발행함과 제작 보드의 전송 상태", () => {
+  it("keeps week navigation usable on an empty or failed week and resets the visible filters", async () => {
+    detail.deliveries = [];
+    const fallback = mocks.api.getMockImplementation()!;
+    let failRange = false;
+    mocks.api.mockImplementation(async (path, options) => {
+      if (failRange && path.startsWith("/deliveries?") && new URL(path, "https://fixture.invalid").searchParams.has("from")) throw new Error("해당 주 전송 목록을 불러오지 못했습니다.");
+      return fallback(path, options);
+    });
+    await render(createElement(PublishPage)); await click("주간 달력");
+    expect(host.textContent).toContain("선택한 조건에 맞는 전송이 없습니다.");
+    const week = () => host.querySelector('[aria-label="발행 주간 이동"] strong')!.textContent;
+    const initialWeek = week();
+    await click("다음 주 →"); expect(week()).not.toBe(initialWeek);
+    await click("← 이전 주"); expect(week()).toBe(initialWeek);
+    failRange = true; await click("← 이전 주");
+    expect(host.textContent).toContain("해당 주 전송 목록을 불러오지 못했습니다.");
+    expect(button("다음 주 →").disabled).toBe(false);
+    failRange = false; await click("다음 주 →");
+    expect(week()).toBe(initialWeek); await click("필터 초기화");
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("목록");
+    expect(host.querySelector('[aria-label="발행 주간 이동"]')).toBeNull();
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="전송 상태 필터"]')!.value).toBe("");
+    expect(writes()).toEqual([]);
+  });
+  it.each(["publish", "item", "studio"])("shows a flagged late result and disables reconciliation during processing in %s", async screen => {
+    detail.deliveries[0].d = { ...detail.deliveries[0].d, status: "processing", needsReconciliation: true };
+    studioStatus.deliveries = [{ ...detail.deliveries[0].d, scheduledAt: past, approvalStatus: "active" }];
+    await render(screen === "publish" ? createElement(PublishPage) : screen === "item" ? createElement(ItemDetailPage, { cid: 2, id: 9 }) : createElement(StudioPublish, { base: card, dirty: false, busy: false, save: vi.fn().mockResolvedValue(card) }));
+    expect([...host.querySelectorAll(".badge")].map(node => node.textContent)).toContain("전송 중 · 이전 결과 확인 필요");
+    expect(host.textContent).toContain("현재 전송 종료 후 확인이 필요합니다.");
+    expect(button("게시 결과 다시 확인").disabled).toBe(true);
+    if (screen === "publish") expect(host.textContent).toContain("확인하거나 복구할 전송이 1건 있습니다.");
+    expect(writes()).toEqual([]);
+  });
+  it("uses server totals and status pagination to find an old unresolved delivery beyond the first hundred", async () => {
+    const fallback = mocks.api.getMockImplementation()!;
+    const rows = Array.from({ length: 125 }, (_, index) => ({
+      ...structuredClone(detail.deliveries[0]),
+      d: { ...structuredClone(detail.deliveries[0].d), id: 1000 + index, status: index === 124 ? "unknown" : "scheduled" },
+      ap: detail.approvals[0], item: { ...detail.item, title: index === 124 ? "오래된 결과 미확정 콘텐츠" : `예약 ${index + 1}` },
+      canonicalStudioCardId: index === 124 ? 88 : null,
+    }));
+    mocks.api.mockImplementation(async (path, options) => {
+      if (path.startsWith("/deliveries?")) {
+        const query = new URL(path, "https://fixture.invalid").searchParams;
+        const page = Number(query.get("page")); const size = Number(query.get("pageSize"));
+        const states = query.get("status")?.split(",");
+        const filtered = rows.filter(row => !states || states.includes(row.d.status));
+        return { items: filtered.slice((page - 1) * size, page * size), total: filtered.length, page, pageSize: size, counts: { unknown: 1, scheduled: 124, needsAttention: 1, overdue: 124 } };
+      }
+      return fallback(path, options);
+    });
+    await render(createElement(PublishPage));
+    expect(host.textContent).toContain("조회 결과 총 125건 · 이 페이지 30건");
+    expect(host.textContent).not.toContain("오래된 결과 미확정 콘텐츠");
+    await click("다음");
+    expect(mocks.api.mock.calls.some(([path]) => path.startsWith("/deliveries?") && path.includes("page=2"))).toBe(true);
+    await click("실패·확인 필요부터 보기");
+    expect(host.textContent).toContain("조회 결과 총 1건 · 이 페이지 1건");
+    expect(host.textContent).toContain("오래된 결과 미확정 콘텐츠");
+    expect(host.querySelector('a.title')?.getAttribute("href")).toBe("/studio/88?tab=delivery");
+    expect(writes()).toEqual([]);
+  });
   it("shows overdue records immediately and links to the record tab instead of the source editor", async () => {
     await render(createElement(PublishPage));
     expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("목록");
@@ -224,11 +288,13 @@ describe("발행함과 제작 보드의 전송 상태", () => {
     detail.deliveries = [];
     orphanRows = [{ ap: detail.approvals[0], item: detail.item, reason: "활성 게시 목적지가 없어 전송 예약이 만들어지지 않았습니다." }];
     await render(createElement(PublishPage));
+    expect(host.textContent).toContain("전송 예약 없음 1건");
+    await click("승인만 저장된 기록 보기");
     expect(host.textContent).toContain("승인 저장됨 · 전송 예약 없음");
     expect(host.textContent).toContain("활성 게시 목적지가 없어 전송 예약이 만들어지지 않았습니다.");
     expect(host.textContent).not.toContain("선택한 채널에 전송 예약이 없습니다.");
     expect(host.querySelector('a.title')?.getAttribute("href")).toBe("/items/2/9?tab=delivery");
-    expect(mocks.api).toHaveBeenCalledWith("/publication-orphans?channelId=all");
+    expect(mocks.api.mock.calls.some(([path]) => path.startsWith("/publication-orphans?channelId=all") && path.includes("page=1") && path.includes("pageSize=30"))).toBe(true);
     expect(writes()).toEqual([]);
   });
 

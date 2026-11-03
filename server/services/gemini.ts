@@ -1,5 +1,6 @@
 import { env } from "../env";
 import { AiServiceError } from "./llm";
+import { currentGenerationSignal } from "./generationContext";
 
 /** Includes the initial request. A successful or ambiguous request is never replayed. */
 export const GEMINI_MAX_ATTEMPTS = 3;
@@ -126,7 +127,8 @@ export async function geminiRequest(body: Record<string, unknown>, options: {
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(new DOMException("Request timed out", "TimeoutError")), timeoutMs);
   timer.unref?.();
-  const signal = options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal;
+  const cancellation = [options.signal, currentGenerationSignal()].filter((signal): signal is AbortSignal => !!signal);
+  const signal = AbortSignal.any([...cancellation, timeout.signal]);
   try {
     for (let attempt = 1; attempt <= GEMINI_MAX_ATTEMPTS; attempt++) {
       signal.throwIfAborted();
@@ -154,7 +156,7 @@ export async function geminiRequest(body: Record<string, unknown>, options: {
     }
     throw new AiServiceError("Gemini 요청을 완료하지 못했습니다. 잠시 후 다시 시도하거나 직접 편집을 이어가세요.");
   } catch (error) {
-    if (options.signal?.aborted) throw new AiServiceError("Gemini 요청을 취소했습니다. 기존 내용은 유지됩니다.");
+    if (cancellation.some(value => value.aborted)) throw new AiServiceError("Gemini 요청을 취소했습니다. 기존 내용은 유지됩니다. 공급자의 처리·과금 여부는 확인할 수 없어 자동 재호출하지 않았습니다.");
     if (signal.aborted) throw new AiServiceError("Gemini 응답 대기 시간이 초과됐습니다. 처리 여부를 확인할 수 없어 중복 요청을 피하려고 자동 재시도하지 않았습니다. 기존 내용을 확인하거나 직접 편집을 이어가세요.");
     if (error instanceof AiServiceError) throw error;
     throw new AiServiceError("Gemini 연결 오류입니다. 처리 여부를 확인할 수 없어 중복 요청을 피하려고 자동 재시도하지 않았습니다. 기존 내용을 확인하거나 직접 편집을 이어가세요.");

@@ -6,7 +6,7 @@ import { ErrorBox } from "./ui";
 import type { SourceDocument } from "@shared/schema";
 import { SOURCE_QUOTE_COUNT, SOURCE_QUOTE_LIMIT, SOURCE_TEXT_LIMIT, suggestSourceQuotes } from "@shared/sourceText";
 
-export function SourceTextEditor({ cid, itemId, version, source }: { cid: number; itemId: number; version: number; source: SourceDocument | null }) {
+export function SourceTextEditor({ cid, itemId, version, source, onDirtyChange }: { cid: number; itemId: number; version: number; source: SourceDocument | null; onDirtyChange?: (dirty: boolean) => void }) {
   const qc = useQueryClient(), guard = useDirtyGuard();
   const initial = useMemo(() => ({ url: source?.originalUrl ?? "", text: source?.kind === "manual_text" ? source.fetchedText ?? "" : "", quotes: source?.kind === "manual_text" && Array.isArray(source.meta.quotes) ? source.meta.quotes.filter((q): q is string => typeof q === "string") : [] }), [source?.id]);
   const [form, setForm] = useState(initial), [baseline, setBaseline] = useState(JSON.stringify(initial));
@@ -25,6 +25,8 @@ export function SourceTextEditor({ cid, itemId, version, source }: { cid: number
   });
   const doSave = useCallback(async () => { try { await save.mutateAsync(form); return true; } catch { return false; } }, [save.mutateAsync, form]);
   useEffect(() => { guard.setDirty(`source-text-${itemId}`, dirty, doSave); return () => guard.setDirty(`source-text-${itemId}`, false); }, [dirty, doSave, guard, itemId]);
+  useEffect(() => { onDirtyChange?.(dirty || save.isPending); }, [dirty, save.isPending, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
   const updateText = (text: string) => { setForm(f => ({ ...f, text, quotes: suggestSourceQuotes(text) })); setMessage(""); };
   const addSelection = () => {
     const el = textarea.current;

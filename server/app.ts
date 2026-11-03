@@ -40,7 +40,7 @@ export function createApp() {
   // 공개: 헬스체크(비밀값 없음). Resolver version verifies the actual running backend.
   app.get("/api/health", async (_req, res) => {
     const db = await dbHealth();
-    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", sourceResolver: "publisher-direct-v4", studioDrafts: "complete-fields-v2", cardRenderer: "adaptive-body-v1", studioPublishing: "finished-deck-v1", studioPoses: "family-v2-100" });
+    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", revision: process.env.RENDER_GIT_COMMIT?.slice(0, 40) ?? null, sourceResolver: "publisher-identity-v5", studioDrafts: "persistent-workspace-v3", cardRenderer: "adaptive-body-v1", studioPublishing: "durable-attempts-v2", studioPoses: "family-v2-100" });
   });
 
   const sessionOk = env.databaseUrl ? installSession(app) : false;

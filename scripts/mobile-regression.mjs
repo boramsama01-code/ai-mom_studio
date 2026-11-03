@@ -35,8 +35,8 @@ try {
       else if (path === "/api/channels") data = channels;
       else if (/\/channels\/\d+\/today$/.test(path)) data = { counts: { pendingReview: 128, draftsReady: 0 } };
       else if (path === "/api/status") data = { globalStop: false, workerConnected: true, integrations: { flags: { dryRun: false, autoPublish: true } } };
-      else if (path === "/api/deliveries") data = [];
-      else if (path === "/api/publication-orphans") data = [orphanApproval];
+      else if (path === "/api/deliveries") data = { items: [], total: 0, page: Number(url.searchParams.get("page") ?? 1), pageSize: Number(url.searchParams.get("pageSize") ?? 30), counts: { needsAttention: 0, overdue: 0 } };
+      else if (path === "/api/publication-orphans") data = { items: [orphanApproval], total: 1, page: Number(url.searchParams.get("page") ?? 1), pageSize: Number(url.searchParams.get("pageSize") ?? 30) };
       else if (path === "/api/collection/overview") data = { date: url.searchParams.get("date"), timezone: "Asia/Seoul", autoCollect, globalStop: false, searchReady: true, naverReady: false, sourceMode: "public_rss", publicFeeds: ["테스트신문"], inlineWorker: true, nextAt: "2026-11-02T20:13:00Z", lastScheduledAt: null, channels: [row] };
       else if (path === "/api/settings/auto-collect") { autoCollect = req.postDataJSON().enabled; data = { ok: true }; }
       else if (path === "/api/collection/collect") data = { inline: true, requested: [{ channelId: req.postDataJSON().channelId }] };
@@ -78,8 +78,10 @@ try {
       await page.screenshot({ path: `test-results/mobile/accounts-${width}.png`, fullPage: true });
       const writesBeforePublication = writes.length;
       await page.goto("http://127.0.0.1:4173/publish");
+      await page.getByRole("button", { name: "승인만 저장된 기록 보기", exact: true }).click();
       await page.getByText("승인 저장됨 · 전송 예약 없음", { exact: true }).waitFor();
       assert.equal(await page.getByRole("tab", { name: "목록", exact: true }).getAttribute("aria-selected"), "true");
+      assert.equal(await page.getByRole("combobox", { name: "전송 상태 필터", exact: true }).inputValue(), "orphan");
       assert.equal(await page.getByRole("link", { name: orphanApproval.item.title, exact: true }).getAttribute("href"), "/items/3/12174?tab=delivery");
       assert.equal(await page.getByText(orphanApproval.reason, { exact: true }).count(), 1);
       assert.equal(await page.getByText("선택한 채널에 전송 예약이 없습니다.", { exact: false }).count(), 0);

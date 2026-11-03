@@ -37,6 +37,8 @@ import { kstDateStartIso } from "../services/dates";
 import { categoryForSchoolType } from "../../shared/domain";
 import { runDiscovery, upsertNaverDoc } from "./discovery";
 import { generateDialogueDraft } from "./generate";
+import { persistSourceFetchAttempt } from "../services/sourceFetchPersistence";
+import { assertGenerationActive, completeGenerationResult, currentGenerationSignal } from "../services/generationContext";
 import type { NoticePayload } from "../../shared/payloads";
 import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { itemPrimarySource } from "../services/itemSources";
@@ -62,6 +64,7 @@ export type CollectSummary = {
 };
 
 export async function runCollect(db: DB, channelId: number, opts: CollectOptions): Promise<CollectSummary> {
+  currentGenerationSignal()?.throwIfAborted();
   const now = opts.now ?? new Date();
   const [channel] = await db.select().from(channels).where(eq(channels.id, channelId));
   if (!channel) throw new Error("채널 없음");
@@ -109,10 +112,14 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const newItemIds: number[] = [];
   const publicSearch = createNewsSearch({ now, loadXml: opts.rssLoad, recruitment: channel.contentType === "notice" });
   // Existing Naver fixtures exercise the same storage pipeline; production uses public RSS.
-  const search = opts.naverFetch ? ((q: string, e: "news" | "blog", d: number, c: CallCounter) => naverSearch(q, e, d, c, opts.naverFetch)) : publicSearch.search;
+  const selectedSearch = opts.naverFetch ? ((q: string, e: "news" | "blog", d: number, c: CallCounter) => naverSearch(q, e, d, c, opts.naverFetch)) : publicSearch.search;
+  const search: typeof publicSearch.search = (...args) => { currentGenerationSignal()?.throwIfAborted(); return selectedSearch(...args); };
   const llmBudget = new LlmBudget(budget.llmCallsPerRun);
+  let fetchCalls = 0;
 
+  try {
   /* 1-2) 자동 화제 발굴(과학·시사 채널) — 사용자 검색어보다 먼저 */
+  currentGenerationSignal()?.throwIfAborted();
   const disc = opts.subcategory ? null : await runDiscovery(db, channel, run.id, counter, llmBudget, now, search, opts.collectionOnly);
   if (disc) {
     Object.assign(counts, disc.counts);
@@ -123,10 +130,10 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   }
 
   /* 2) 공식 게시판 우선 — 목록 조회도 원문 호출 예산에 포함 */
-  let fetchCalls = 0;
   counts.officialBoards = boards.length;
   counts.officialNew = 0;
   for (const o of boards) {
+    currentGenerationSignal()?.throwIfAborted();
     if (fetchCalls >= budget.fetchCallsPerRun) {
       errors.push({ scope: `official:${o.id}`, message: `${o.name}: 원문 호출 한도 도달 — 게시판 건너뜀` });
       continue;
@@ -139,6 +146,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     }
     if (!r.entries.length) errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판에서 목록을 찾지 못함(선택자 확인 필요)` });
     for (const e of r.entries) {
+      currentGenerationSignal()?.throwIfAborted();
       if (channel.contentType === "notice") {
         const intent = classifyNotice(e.title);
         if (intent === "retrospective" || intent === "off_topic") {
@@ -160,6 +168,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   counts.rulesProcessed = 0;
   counts.rulesSucceeded = 0;
   for (const rule of selected) {
+    currentGenerationSignal()?.throwIfAborted();
     if (searchCalls(counter) >= counter.limit) break;
     if (counts.results >= budget.resultsPerRun) {
       errors.push({ scope: `rule:${rule.id}`, message: "이번 실행 결과 한도 도달 — 남은 검색어 건너뜀" });
@@ -172,12 +181,14 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       items = await search(rule.query, rule.endpoint as "news" | "blog", rule.display, counter);
       counts.rulesSucceeded++;
     } catch (e) {
+      currentGenerationSignal()?.throwIfAborted();
       const ne = e as NaverError;
       errors.push({ scope: `rule:${rule.id}`, message: `${rule.query}(${rule.endpoint}): ${ne.message}` });
       await db.update(searchRules).set({ lastRunAt: now, lastRunStatus: "failed", lastRunError: ne.message, lastRunNewCount: 0 }).where(eq(searchRules.id, rule.id));
       continue;
     }
     for (const it of items) {
+      currentGenerationSignal()?.throwIfAborted();
       if (counts.results >= budget.resultsPerRun) break;
       counts.results++;
       if (channel.contentType === "notice") {
@@ -210,6 +221,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const fetcher = opts.fetchSource ?? fetchAndExtract;
   const fetchedOk: number[] = [];
   for (const itemId of fetchTargets) {
+    currentGenerationSignal()?.throwIfAborted();
     if (fetchCalls >= budget.fetchCallsPerRun) {
       errors.push({ scope: "fetch", message: "원문 호출 한도 도달" });
       break;
@@ -231,6 +243,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   if (disc) {
     for (const itemId of disc.itemIds) {
       for (const docId of (disc.supporting.get(itemId) ?? []).slice(0, 2)) {
+        currentGenerationSignal()?.throwIfAborted();
         if (fetchCalls >= budget.fetchCallsPerRun) break;
         fetchCalls++;
         const r = await fetchDoc(db, docId, fetcher, now, () => false);
@@ -247,6 +260,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       errors.push({ scope: "llm", message: "AI API 미연결 — 구조화 추출 건너뜀(수집함에서 수동 편집 가능)" });
     } else {
       for (const itemId of fetchedOk) {
+        currentGenerationSignal()?.throwIfAborted();
         const r = await extractForItem(db, itemId, llmBudget, now, officials);
         if (r.ok) {
           counts.extracted++;
@@ -272,16 +286,14 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     } else {
       counts.drafted = 0;
       for (const itemId of disc.itemIds) {
+        currentGenerationSignal()?.throwIfAborted();
         if (llmBudget.used >= llmBudget.limit) {
           errors.push({ scope: "llm", message: "AI 호출 한도 도달 — 남은 화제는 초안 없이 저장" });
           break;
         }
-        const r = await generateDialogueDraft(db, itemId, now);
-        llmBudget.used++;
+        const r = await generateDialogueDraft(db, itemId, now, undefined, undefined, { budget: llmBudget });
         if (r.ok) {
           counts.drafted++;
-          llmBudget.inputTokens += r.usage.inputTokens;
-          llmBudget.outputTokens += r.usage.outputTokens;
         } else {
           errors.push({ scope: `item:${itemId}`, message: `초안 생성 실패: ${r.error}` });
           if (/인증|모델|미연결/.test(r.error)) break;
@@ -292,6 +304,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   }
 
   /* 6) 실행 결과 확정 */
+  currentGenerationSignal()?.throwIfAborted();
   counts.rulesDeferred = rules.length - counts.rulesProcessed;
   Object.assign(counts, publicSearch.counts);
   errors.push(...publicSearch.warnings);
@@ -317,6 +330,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   /* 7) 개인 검토 알림 — 실패해도 저장은 유지 */
   if (!opts.collectionOnly && env.collectReviewNotifications && counts.newItems - counts.excluded > 0 && env.telegramReviewChatId) {
+    currentGenerationSignal()?.throwIfAborted();
     const msg = await buildReviewDigest(db, channel, newItemIds);
     const tg = await sendReviewMessage(msg);
     if (!tg.ok) {
@@ -326,6 +340,18 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   }
 
   return { runId: run.id, status, counts, errors };
+  } catch (error) {
+    const cancelled = currentGenerationSignal()?.aborted;
+    errors.push({ scope: cancelled ? "collection_cancelled" : "collection", message: cancelled
+      ? "수집 작업이 중단됐습니다. 이미 확보한 자료는 보존했고 추가 조회·생성을 시작하지 않았습니다."
+      : "수집 처리 중 오류가 발생했습니다. 이미 확보한 자료는 보존했습니다. 실행 기록을 확인해 주세요." });
+    Object.assign(counts, publicSearch.counts);
+    await db.update(runs).set({ status: counts.newItems > 0 ? "partial" : "failed", counts, errors,
+      actualCalls: { naver: counter.naver, rss: publicSearch.counts.rssRequests, search: searchCalls(counter), fetch: fetchCalls, llm: llmBudget.used },
+      llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used }, finishedAt: new Date(),
+    }).where(eq(runs.id, run.id));
+    throw error;
+  }
 }
 
 function ruleSnapshot(r: SearchRule) {
@@ -413,6 +439,7 @@ export async function extractForItem(
   ];
   const [channel] = await db.select({ cardTemplate: channels.cardTemplate }).from(channels).where(eq(channels.id, item.channelId));
   const r = await extractNotice({ sources, sourceHint: item.category, now, budget, provider, templateKey: templateKey ?? channel?.cardTemplate ?? "builtin:classic" });
+  currentGenerationSignal()?.throwIfAborted();
   if (!r.ok) {
     await db.update(contentItems).set({ updatedAt: now }).where(eq(contentItems.id, itemId));
     return r;
@@ -424,6 +451,7 @@ export async function extractForItem(
 
   const applied = await db.transaction(async (tx) => {
     const [locked] = await tx.select().from(contentItems).where(eq(contentItems.id, itemId)).for("update");
+    await assertGenerationActive(tx as unknown as DB);
     if (!locked || locked.version !== item.version || locked.currentRevisionId !== item.currentRevisionId) return false;
     // 현재 버전이 운영자 편집본이면 current를 바꾸지 않고 LLM 결과만 보관
     const [cur] = locked.currentRevisionId ? await tx.select().from(contentRevisions).where(eq(contentRevisions.id, locked.currentRevisionId)) : [];
@@ -456,6 +484,8 @@ export async function extractForItem(
         updatedAt: now,
       })
       .where(eq(contentItems.id, itemId));
+    const [freshItem] = await tx.select().from(contentItems).where(eq(contentItems.id, itemId));
+    await completeGenerationResult(tx as unknown as DB, freshItem);
     return true;
   });
   if (!applied) return { ok: false as const, kind: "conflict", error: "생성 중 원고가 변경되었습니다. 새 편집본을 유지했습니다. 새로고침 후 다시 생성해 주세요." };
@@ -480,21 +510,22 @@ async function buildReviewDigest(db: DB, channel: Channel, itemIds: number[]): P
 
 /** 원문 1건 확보(+텍스트 PDF 첨부 1건). takeExtraCall()이 true일 때만 첨부를 추가로 받는다. */
 async function fetchDoc(db: DB, docId: number, fetcher: typeof fetchAndExtract, now: Date, takeExtraCall: () => boolean): Promise<{ ok: boolean }> {
+  currentGenerationSignal()?.throwIfAborted();
   const [doc] = await db.select().from(sourceDocuments).where(eq(sourceDocuments.id, docId));
   if (!doc) return { ok: false };
   if (doc.fetchStatus === "ok" && doc.fetchedText) return { ok: true }; // 이미 확보(다른 실행·채널)
+  const attemptStartedAt = new Date();
   const r = await fetcher(sourceFetchUrl(doc), undefined, { title: doc.title, publisherUrl: typeof doc.meta.publisherUrl === "string" ? doc.meta.publisherUrl : undefined, takeExtraCall });
+  currentGenerationSignal()?.throwIfAborted();
   if (!r.ok) {
-    await db
-      .update(sourceDocuments)
-      .set({ fetchStatus: r.status, fetchError: r.error, attachments: r.attachments ?? doc.attachments, lastFetchedAt: now, updatedAt: now })
-      .where(eq(sourceDocuments.id, doc.id));
-    return { ok: false };
+    const saved = await persistSourceFetchAttempt(db, doc.id, r, { attemptStartedAt });
+    return { ok: saved.hasUsableBody };
   }
   let text = r.text;
   const attachments = [...r.attachments];
   const pdf = attachments.find((a) => a.kind === "pdf" && a.status === "pending");
   if (pdf && takeExtraCall()) {
+    currentGenerationSignal()?.throwIfAborted();
     try {
       const res = await safeFetch(pdf.url, { maxBytes: 8 * 1024 * 1024, accept: "application/pdf" });
       const t = await extractPdf(res.body);
@@ -510,11 +541,9 @@ async function fetchDoc(db: DB, docId: number, fetcher: typeof fetchAndExtract, 
       pdf.reason = (e as Error).message;
     }
   }
-  await db
-    .update(sourceDocuments)
-    .set({ fetchStatus: "ok", fetchError: null, fetchedText: text, contentHash: sha256(text), attachments, lastFetchedAt: now, updatedAt: now, meta: { ...(doc.meta as object), finalUrl: r.finalUrl, pageTitle: r.title } })
-    .where(eq(sourceDocuments.id, doc.id));
-  return { ok: true };
+  currentGenerationSignal()?.throwIfAborted();
+  const saved = await persistSourceFetchAttempt(db, doc.id, { ...r, text, hash: sha256(text), attachments }, { attemptStartedAt });
+  return { ok: saved.hasUsableBody };
 }
 
 

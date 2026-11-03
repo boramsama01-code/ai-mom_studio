@@ -27,11 +27,16 @@ import { IdeaDetail } from "./IdeaDetail";
 import { collectionUsesArt } from "@shared/cardDesigns";
 import { sourceRecovery } from "@shared/sourceRecovery";
 import type { PublicationReadiness } from "@shared/publicationReadiness";
-import { deliveryState, PublicationRuntimeNotice, usePublicationRuntime, type PublicationRuntime } from "../publicationStatus";
+import { deliveryState, deliverySummary, PublicationRuntimeNotice, usePublicationRuntime, type PublicationRuntime } from "../publicationStatus";
+import { usePublicationDraft, type PublicationDraft } from "../usePublicationDraft";
+import { usePublicationRequestId } from "../usePublicationRequestId";
+import { useGenerationRequest } from "../useGenerationRequest";
 
 type Detail = {
   imageAiAvailable?: boolean;
   publicationReadiness?: PublicationReadiness;
+  publicationDraft?: PublicationDraft;
+  canonicalStudioCardId?: number | null;
   item: ContentItem;
   primary: SourceDocument | null;
   linked: Array<{ link: { role: string }; doc: SourceDocument }>;
@@ -61,6 +66,8 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   const [sourceOpen, setSourceOpen] = useState(false);
   const [deliveryOpen, setDeliveryOpen] = useState(() => entryTab(search) === "delivery");
   const [templateChoice, setTemplateChoice] = useState<string | null>(null);
+  const [sourceDraftDirty, setSourceDraftDirty] = useState(false);
+  const [sourceTextDirty, setSourceTextDirty] = useState(false);
   const [, navigate] = useLocation();
   useEffect(() => {
     const target = entryTab(search);
@@ -70,6 +77,9 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   }, [requestedCid, id, search]);
   useEffect(() => { setTemplateChoice(null); }, [requestedCid, id]);
   useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}${search ? `?${search}` : ""}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, search, navigate]);
+  useEffect(() => {
+    if (!fromStudio && q.data?.item.origin === "studio" && q.data.canonicalStudioCardId) navigate(`/studio/${q.data.canonicalStudioCardId}`, { replace: true });
+  }, [fromStudio, q.data?.item.origin, q.data?.canonicalStudioCardId, navigate]);
   const guard = useDirtyGuard();
   const qc = useQueryClient();
   const categorize = useMutation({
@@ -103,6 +113,7 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
           <div className="row">
             {d.item.isSample && <Badge kind="sample">샘플 모드 · 실제 정보 아님</Badge>}
             <Badge>{CONTENT_KIND_LABEL[d.item.kind as ContentKind]}</Badge>
+            <span className="small muted">{sourceChannel?.name} · 원고 {d.current ? `r${d.current.revisionNo}` : "아직 없음"}</span>
             <StatusBadge type="review" value={d.item.reviewStatus} />
             {d.item.publishStatus !== "waiting" && <StatusBadge type="publish" value={d.item.publishStatus} />}
             {d.item.excluded && <Badge kind="err">제외됨: {d.item.excludedReason}</Badge>}
@@ -117,16 +128,16 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
         <button className="btn sm" onClick={() => go("delivery", "delivery-panel")}>전송 상태</button>
       </nav>
       <details className="content-drawer" open={sourceOpen || !d.current} onToggle={event => setSourceOpen(event.currentTarget.open)}>
-        <summary><strong>자료·초안</strong><span>{d.primary?.fetchStatus === "ok" ? "본문 확보됨" : d.primary?.fetchStatus === "not_fetched" ? "본문 불러오기" : d.primary ? "본문 확인 필요" : "직접 작성"}</span></summary>
+        <summary><strong>자료·초안</strong><span>{sourceDraftDirty || sourceTextDirty ? "저장하지 않은 변경" : d.primary?.fetchStatus === "ok" ? "본문 확보됨" : d.primary?.fetchStatus === "not_fetched" ? "본문 불러오기" : d.primary ? "본문 확인 필요" : "직접 작성"}</span></summary>
         <div className="content-drawer-body stack">
           <CategorySelect channel={sourceChannel?.slug ?? ""} value={d.item.subcategory ?? ""} onChange={v => guard.confirmLeave(() => categorize.mutate(v))} disabled={categorize.isPending} />
           {categorize.error && <ErrorBox error={categorize.error} />}
           <DiscoveryNote info={d.item.discovery} />
-          <SourcePanel key={d.item.id} d={d} cid={cid} />
-          <EditPanel d={d} cid={cid} templateKey={templateChoice} onTemplateChange={setTemplateChoice} />
+          <SourcePanel key={d.item.id} d={d} cid={cid} onDirtyChange={setSourceTextDirty} />
+          <EditPanel key={`${cid}-${d.item.id}`} d={d} cid={cid} templateKey={templateChoice} onTemplateChange={setTemplateChoice} onDirtyChange={setSourceDraftDirty} />
         </div>
       </details>
-      <CardApprovePanel d={d} cid={cid} templateChoice={templateChoice} onTemplateChange={setTemplateChoice} onApproved={() => go("delivery", "delivery-panel")} runtime={runtime.data} />
+      <CardApprovePanel d={d} cid={cid} sourceDirty={sourceDraftDirty || sourceTextDirty} templateChoice={templateChoice} onTemplateChange={setTemplateChoice} onApproved={() => go("delivery", "delivery-panel")} runtime={runtime.data} />
       <details className="content-drawer" open={deliveryOpen} onToggle={event => setDeliveryOpen(event.currentTarget.open)}>
         <summary><strong>전송 내역</strong><span>{d.deliveries.length ? `${d.deliveries.length}건 · 예약 취소·재전송` : "승인 후 상태 확인"}</span></summary>
         <ItemDeliveryPanel d={d} cid={cid} runtime={runtime.data} runtimeError={runtime.error} refresh={() => { q.refetch(); runtime.refetch(); }} refreshing={q.isFetching || runtime.isFetching} />
@@ -137,7 +148,7 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
 }
 
 /* ───────────── 원문·근거 ───────────── */
-function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
+function SourcePanel({ d, cid, onDirtyChange }: { d: Detail; cid: number; onDirtyChange?: (dirty: boolean) => void }) {
   const qc = useQueryClient();
   const [url, setUrl] = useState("");
   const refetch = useMutation({
@@ -222,7 +233,7 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
             )}
           </>
         )}
-        <SourceTextEditor key={d.item.id} cid={cid} itemId={d.item.id} version={d.item.version} source={p} />
+        <SourceTextEditor key={d.item.id} cid={cid} itemId={d.item.id} version={d.item.version} source={p} onDirtyChange={onDirtyChange} />
       </section>
 
       <section className="panel stack">
@@ -301,17 +312,25 @@ function SourcePanel({ d, cid }: { d: Detail; cid: number }) {
 }
 
 /* ───────────── 편집 ───────────── */
-export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail; cid: number; templateKey?: string | null; onTemplateChange?: (key: string) => void }) {
+function sourceFields(payload: Record<string, any> | null | undefined) {
+  if (!payload) return null;
+  const { cardCopy: _cardCopy, ...fields } = payload;
+  return fields;
+}
+
+export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange }: { d: Detail; cid: number; templateKey?: string | null; onTemplateChange?: (key: string) => void; onDirtyChange?: (dirty: boolean) => void }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
-  const incoming = useMemo(() => d.current?.payload ?? null, [d.current]);
+  const incoming = useMemo(() => sourceFields(d.current?.payload), [d.current]);
   const [base, setBase] = useState<Record<string, any> | null>(incoming);
   const submittedDraft = useRef<Record<string, any> | null>(null);
   const [draft, setDraft] = useState<Record<string, any> | null>(base);
   const [version, setVersion] = useState(d.item.version);
   const [conflictMsg, setConflict] = useState<string | null>(null);
+  const [mergeConflict, setMergeConflict] = useState<{ server: Record<string, any>; merged: Record<string, any>; version: number; fields: string[] } | null>(null);
   const [saved, setSaved] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(base);
+  const draftRef = useRef(draft); draftRef.current = draft;
   useEffect(() => {
     // Compare edits with the accepted baseline, never with the newly arrived AI payload.
     if (!dirty && d.item.version >= version) {
@@ -330,6 +349,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
       setBase(submittedDraft.current); // Do not erase edits made while saving.
       setVersion(it.version);
       setConflict(null);
+      setMergeConflict(null);
       setSaved(true);
       await qc.invalidateQueries({ queryKey: ["ch", cid] });
     },
@@ -340,16 +360,48 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
   const doSave = useCallback(async () => {
     try {
       await save.mutateAsync();
-      return true;
+      return JSON.stringify(draftRef.current) === JSON.stringify(submittedDraft.current);
     } catch {
       return false;
     }
   }, [save]);
   useEffect(() => {
-    guard.setDirty(`item-${d.item.id}`, dirty, doSave);
+    guard.setDirty(`item-${d.item.id}`, dirty || save.isPending, doSave, () => { setDraft(base); setConflict(null); setMergeConflict(null); });
     if (dirty) setSaved(false);
     return () => guard.setDirty(`item-${d.item.id}`, false);
-  }, [dirty, doSave, guard, d.item.id]);
+  }, [dirty, save.isPending, doSave, guard, d.item.id, base]);
+  useEffect(() => { onDirtyChange?.(dirty || save.isPending || !!mergeConflict); }, [dirty, save.isPending, mergeConflict, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+
+  const beginDraft = useMutation({
+    mutationFn: () => api(`/channels/${cid}/items/${d.item.id}/draft`, { method: "POST", body: { version: d.item.version } }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
+      void qc.invalidateQueries({ queryKey: ["studio"] });
+    },
+  });
+  async function compareLatest() {
+    try {
+      const fresh = await api<Detail>(`/channels/${cid}/items/${d.item.id}`);
+      const server = sourceFields(fresh.current?.payload);
+      if (!server || !draft || !base) throw new Error("최신 초안을 확인할 수 없습니다. 입력은 유지했습니다.");
+      const changed = [...new Set([...Object.keys(base), ...Object.keys(draft)])].filter(key => JSON.stringify(base[key]) !== JSON.stringify(draft[key]));
+      const conflicting = changed.filter(key => JSON.stringify(base[key]) !== JSON.stringify(server[key]) && JSON.stringify(draft[key]) !== JSON.stringify(server[key]));
+      const merged = { ...server };
+      for (const key of changed) {
+        if (key in draft) merged[key] = draft[key];
+        else delete merged[key];
+      }
+      if (conflicting.length) {
+        setMergeConflict({ server, merged, version: fresh.item.version, fields: conflicting });
+        setConflict("같은 항목이 다른 곳에서도 수정됐습니다. 두 내용을 비교하고 사용할 초안을 선택해 주세요.");
+      } else {
+        setBase(server); setDraft(merged); setVersion(fresh.item.version); setMergeConflict(null);
+        setConflict("서로 다른 필드의 변경을 합쳤습니다. 내 수정과 최신 초안을 확인한 뒤 저장해 주세요. 카드 문구는 변경하지 않습니다.");
+      }
+      qc.setQueryData(["ch", cid, "item", d.item.id], fresh);
+    } catch (error) { setConflict((error as Error).message); }
+  }
 
   const ai = useQuery({ queryKey: ["status"], queryFn: () => api<{ integrations: { aiProvider: AiProvider } & Record<AiProvider, boolean> }>("/status") });
   const [providerChoice, setProviderChoice] = useState<AiProvider | null>(null);
@@ -359,8 +411,9 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
   const [showTemplates, setShowTemplates] = useState(false);
   const draftTemplate = templateKey ?? localTemplate ?? d.current?.payload.cardCopy?.templateKey ?? templates.data?.current ?? "builtin:classic";
   const sourceReady = !d.primary || (d.primary.fetchStatus === "ok" && !!d.primary.fetchedText?.trim());
+  const generation = useGenerationRequest(cid, d.item.id, "draft");
   const gen = useMutation({
-    mutationFn: () => api(`/channels/${cid}/items/${d.item.id}/generate`, { method: "POST", body: { provider, templateKey: draftTemplate } }),
+    mutationFn: () => generation.run(`/channels/${cid}/items/${d.item.id}/generate`, { version: d.item.version, provider, templateKey: draftTemplate }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
   });
 
@@ -370,16 +423,19 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
         <h2 style={{ margin: 0 }}>초안 작성</h2>
       </div>
       <details className="studio-more" open><summary>API 자동 작성 · Gemini·GPT</summary>
-        <label className="field">작성 AI<select value={provider} disabled={gen.isPending} onChange={e => setProviderChoice(e.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}</option>)}</select></label>
+        <label className="field">작성 AI<select value={provider} disabled={gen.isPending || generation.unresolved} onChange={e => setProviderChoice(e.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}</option>)}</select></label>
         <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate || t.colors?.some(color => color.key === draftTemplate))?.name ?? "기본"} ▾</button>
         {showTemplates && templates.data && <TemplatePicker cid={cid} value={draftTemplate} items={templates.data.items} disabled={gen.isPending} onChange={key => { setLocalTemplate(key); onTemplateChange?.(key); }} />}
         <p className="hint">원고를 요약하고 선택한 템플릿에 맞는 제목·부제·본문을 함께 작성합니다. 아래 카드 편집기에서 바로 고칠 수 있어요.</p>
         <AiUsageGuide provider={provider} />
         {ai.data?.integrations[provider] === false && <p className="notice warn small">선택한 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
         {!sourceReady && <p className="notice small">먼저 위에서 본문을 불러오거나 직접 붙여넣어 저장해 주세요.</p>}
-        <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || dirty || !sourceReady || !ai.data?.integrations[provider]} title={dirty ? "저장 후 사용할 수 있습니다" : undefined}>
-          {gen.isPending ? "생성 중…" : d.item.kind === "notice" ? `${aiProviderLabels[provider]}로 원문 추출` : `${aiProviderLabels[provider]}로 초안 생성`}
+        <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || (!generation.unresolved && (dirty || !sourceReady || !ai.data?.integrations[provider]))} title={dirty && !generation.unresolved ? "저장 후 사용할 수 있습니다" : undefined}>
+          {gen.isPending ? "생성 중…" : generation.unresolved ? "기존 AI 작업 결과 확인" : d.item.kind === "notice" ? `${aiProviderLabels[provider]}로 원문 추출` : `${aiProviderLabels[provider]}로 초안 생성`}
         </button>
+        {generation.unresolved && <div className="stack"><p className="small muted">같은 요청의 결과를 확인합니다. 응답이 없어도 새 유료 작업을 자동으로 시작하지 않습니다. 직접 입력은 계속할 수 있습니다.</p><div><button className="btn sm" disabled={generation.cancelling} onClick={() => void generation.cancel()}>{generation.cancelling ? "중단 확인 중…" : "AI 요청 중단"}</button></div></div>}
+        {generation.cancelled && <p className="notice small" role="status">AI 요청을 중단했습니다. 기존 원고를 직접 편집하거나 새로 요청할 수 있습니다.</p>}
+        {generation.cancelError && <ErrorBox error={generation.cancelError} />}
       </details>
       <details className="content-options"><summary>ChatGPT에서 초안 가져오기</summary><ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, source: d.primary ? {
         title: d.primary.title ?? d.item.title, url: d.primary.originalUrl,
@@ -394,16 +450,16 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
         </p>
       )}
       {d.item.version > version && dirty && <div className="notice warn">서버에 새 초안이 있습니다. 직접 입력한 내용은 유지했습니다. <button className="btn sm" onClick={() => guard.confirmLeave(() => { setBase(incoming); setDraft(incoming); setVersion(d.item.version); })}>새 초안 불러오기</button></div>}
-      {gen.error && <ErrorBox error={gen.error} retry={!dirty && sourceReady && !!ai.data?.integrations[provider] ? () => gen.mutate() : undefined} />}
+      {gen.error && <ErrorBox error={gen.error} retry={generation.unresolved || (!dirty && sourceReady && !!ai.data?.integrations[provider]) ? () => gen.mutate() : undefined} />}
       {gen.isSuccess && <div className="notice ok small">새 버전을 만들었습니다. 생성 성공은 검토 완료가 아닙니다 — 내용을 확인하세요.</div>}
       {!draft ? (
-        <p className="muted">아직 초안이 없습니다. 위의 API 자동 작성으로 초안을 만들거나 ChatGPT 초안을 가져오세요. 본문을 직접 저장하면 아래에 편집 칸이 생기며, 이 화면에서 이어서 작성할 수 있습니다.</p>
+        <div className="stack"><p className="muted">AI 없이도 초안을 시작할 수 있습니다. 확보한 원문을 보면서 직접 쓰거나 ChatGPT 초안을 옮겨 적으세요.</p><div><button className="btn primary" disabled={beginDraft.isPending || (gen.isPending && !generation.cancelled)} onClick={() => beginDraft.mutate()}>{beginDraft.isPending ? "초안 여는 중…" : "직접 초안 작성"}</button></div>{beginDraft.error && <ErrorBox error={beginDraft.error} />}</div>
       ) : (
         <form
           className="stack"
           onSubmit={(e) => {
             e.preventDefault();
-            save.mutate();
+            if (!save.isPending && !mergeConflict) save.mutate();
           }}
         >
           <PayloadEditor kind={d.item.kind} value={draft} onChange={setDraft} />
@@ -413,17 +469,14 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
               <button
                 type="button"
                 className="btn sm"
-                onClick={async () => {
-                  await qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
-                  const fresh = await api<Detail>(`/channels/${cid}/items/${d.item.id}`);
-                  setVersion(fresh.item.version);
-                  setConflict("최신 버전 번호를 불러왔습니다. 내 입력을 확인한 뒤 다시 저장하면 새 버전으로 기록됩니다.");
-                }}
+                disabled={save.isPending}
+                onClick={() => void compareLatest()}
               >
                 최신 불러오기
               </button>
             </div>
           )}
+          {mergeConflict && <div className="notice warn stack"><strong>함께 수정된 항목: {mergeConflict.fields.map(key => FIELD_LABEL[key] ?? key).join(", ")}</strong><div className="card-copy-compare"><div><h4>최신 저장본</h4><pre>{JSON.stringify(mergeConflict.server, null, 2)}</pre></div><div><h4>내 변경을 합친 초안</h4><pre>{JSON.stringify(mergeConflict.merged, null, 2)}</pre></div></div><div className="row"><button type="button" className="btn sm" onClick={() => { setBase(mergeConflict.server); setDraft(mergeConflict.server); setVersion(mergeConflict.version); setMergeConflict(null); setConflict(null); }}>최신 초안 사용</button><button type="button" className="btn sm" onClick={() => { setBase(mergeConflict.server); setDraft(mergeConflict.merged); setVersion(mergeConflict.version); setMergeConflict(null); setConflict("내 변경을 합쳤습니다. 확인한 뒤 초안을 저장하세요."); }}>내 변경을 합친 초안 사용</button></div></div>}
           {save.error && !conflictMsg && <ErrorBox error={save.error} />}
           <div className="savebar">
             {saved && !dirty && <span className="small muted" role="status" style={{ marginRight: "auto" }}>저장됨 — 새 버전으로 기록했습니다.</span>}
@@ -431,7 +484,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
             <button type="button" className="btn" disabled={!dirty} onClick={() => setDraft(base)}>
               되돌리기
             </button>
-            <button className="btn primary" disabled={!dirty || save.isPending}>
+            <button className="btn primary" disabled={!dirty || save.isPending || !!mergeConflict}>
               {save.isPending ? "저장 중…" : "새 버전으로 저장"}
             </button>
           </div>
@@ -442,7 +495,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange }: { d: Detail
 }
 
 /* ───────────── 검토 ───────────── */
-function ReviewPanel({ d, cid }: { d: Detail; cid: number }) {
+function ReviewPanel({ d, cid, pendingChanges = false }: { d: Detail; cid: number; pendingChanges?: boolean }) {
   const qc = useQueryClient();
   const m = useMutation({
     mutationFn: (status: string) => api(`/channels/${cid}/items/${d.item.id}/review`, { method: "POST", body: { version: d.item.version, status } }),
@@ -457,7 +510,7 @@ function ReviewPanel({ d, cid }: { d: Detail; cid: number }) {
       <h3>내용 확인</h3>
       <p className="small muted">검토 완료는 내용 확인 표시이며, 게시에는 별도의 최종 승인이 필요합니다.</p>
       <div className="row">
-        <button className="btn" disabled={m.isPending || d.item.reviewStatus === "reviewed"} onClick={() => m.mutate("reviewed")}>
+        <button className="btn" disabled={pendingChanges || m.isPending || d.item.reviewStatus === "reviewed"} onClick={() => m.mutate("reviewed")}>
           {d.item.reviewStatus === "reviewed" ? "내용 검토 완료됨" : "내용 확인 · 검토 완료"}
         </button>
       </div>
@@ -483,26 +536,36 @@ function toLocalInput(date: Date) {
   return k.slice(0, 16);
 }
 
-function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved, runtime }: { d: Detail; cid: number; templateChoice?: string | null; onTemplateChange?: (key: string) => void; onApproved: () => void; runtime?: PublicationRuntime }) {
+function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTemplateChange, onApproved, runtime }: { d: Detail; cid: number; sourceDirty?: boolean; templateChoice?: string | null; onTemplateChange?: (key: string) => void; onApproved: () => void; runtime?: PublicationRuntime }) {
   const qc = useQueryClient();
+  const guard = useDirtyGuard();
   const toast = useToast();
   const [coverChoice, setCoverChoice] = useState<"reuse" | "ai" | "typography" | null>(null);
   const revCards = d.cards.filter((c) => c.revisionId === d.current?.id);
   const [altDirty,setAltDirty]=useState(false);
   const [copyDirty, setCopyDirty] = useState(true);
   const [pickedCard, setPickedCard] = useState<number | null>(null);
-  const currentCard = revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
+  const heldCard = useRef<Detail["cards"][number] | null>(null);
+  const currentCard = altDirty && heldCard.current ? heldCard.current : revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
+  useEffect(() => { heldCard.current = currentCard; }, [currentCard]);
+  const staleArtifact = !!currentCard && currentCard.revisionId !== d.current?.id;
+  const altVersion = useQuery<{ version: number }>({ queryKey: ["card-alt", currentCard?.id], enabled: false }).data?.version;
+  const publicationRequestId = usePublicationRequestId();
   const currentApprovalIds = new Set(d.approvals.filter(approval => approval.revisionId === d.current?.id).map(approval => approval.id));
-  const existingDeliveryState = (["unknown", "processing", "succeeded", "scheduled"] as const).find(status => d.deliveries.some(({ d: delivery }) => currentApprovalIds.has(delivery.approvalId) && delivery.status === status));
+  const existingDeliveryState = d.deliveries.some(({ d: delivery }) => delivery.needsReconciliation) ? "unknown" : (["unknown", "processing", "succeeded", "scheduled"] as const).find(status => d.deliveries.some(({ d: delivery }) => (status === "unknown" || status === "processing" || currentApprovalIds.has(delivery.approvalId)) && delivery.status === status));
   const existingDeliveryMessage = existingDeliveryState ? {
     scheduled: "이미 전송 예약이 있습니다. 예약 변경은 전송 상태에서 기존 예약을 취소한 뒤 다시 승인해 주세요.",
-    processing: "이 버전의 전송을 처리 중입니다. 전송 상태에서 결과를 확인해 주세요.",
+    processing: "이 콘텐츠의 전송을 처리 중입니다. 이전 버전을 포함한 전송 상태에서 결과를 확인해 주세요.",
     succeeded: "이 버전은 이미 게시됐습니다. 전송 상태에서 게시물을 확인해 주세요.",
-    unknown: "이 버전의 게시 여부를 먼저 확인해야 합니다. 전송 상태에서 실제 게시물을 확인해 주세요.",
+    unknown: "이 콘텐츠의 이전 게시 여부를 먼저 확인해야 합니다. 전송 상태에서 실제 게시물을 확인해 주세요.",
   }[existingDeliveryState] : null;
-  const [caps, setCaps] = useState(d.defaultCaptions ?? { instagram: "", telegram: "" });
-  const previousDefaultCaps = useRef(d.defaultCaptions);
-  const captionsEdited = useRef(false);
+  const captionDraft = usePublicationDraft(cid, d.item.id, d.publicationDraft ?? { version: 0, captions: d.defaultCaptions ?? { instagram: "", telegram: "" } });
+  const caps = captionDraft.captions;
+  const destinations = d.publicationReadiness?.destinations ?? [];
+  const [pickedDestinations, setPickedDestinations] = useState<number[] | null>(null);
+  const defaultInstagram = destinations.filter(destination => destination.platform === "instagram" && destination.configured);
+  const destinationIds = (pickedDestinations ?? (defaultInstagram.length === 1 ? [defaultInstagram[0].id] : [])).filter(id => destinations.some(destination => destination.id === id && destination.configured));
+  const destinationsKey = destinationIds.join(",");
   const [when, setWhen] = useState(() => toLocalInput(new Date(Date.now() + 3600_000)));
   const [timing, setTiming] = useState<"now" | "later">("now");
   const [publishOpen, setPublishOpen] = useState(false);
@@ -518,8 +581,6 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
   const { channels } = useChannel();
   const ch = channels.find((c) => c.id === cid);
   useEffect(() => {
-    if (d.defaultCaptions && JSON.stringify(d.defaultCaptions) !== JSON.stringify(previousDefaultCaps.current) && !captionsEdited.current) setCaps(d.defaultCaptions);
-    previousDefaultCaps.current = d.defaultCaptions;
     setPickedCard(null);
   }, [d.current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const render = useMutation({
@@ -552,12 +613,16 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
     onError: (e) => toast("err", (e as Error).message),
   });
   const approve = useMutation({
-    mutationFn: () =>
-      api<{ destinations: number }>(`/channels/${cid}/items/${d.item.id}/approve`, {
+    mutationFn: () => {
+      if (sourceDirty || copyDirty || altDirty || staleArtifact || captionDraft.needsSave || captionDraft.saving || captionDraft.conflict || !destinationIds.length || !confirmed) throw new Error("변경 내용을 저장하고 이미지·캡션·게시 계정을 다시 확인해 주세요.");
+      const intent = { revisionId: d.current!.id, mediaAssetId: currentCard!.id, altTextVersion: altVersion, publicationDraftVersion: captionDraft.version, captions: caps, destinationIds: [...destinationIds].sort((a, b) => a - b), timing, ...(timing === "later" ? { scheduledAt: `${when}:00+09:00` } : {}) };
+      return api<{ destinations: number }>(`/channels/${cid}/items/${d.item.id}/approve`, {
         method: "POST",
-        body: { revisionId: d.current!.id, mediaAssetId: currentCard!.id, altTextVersion:qc.getQueryData<{version:number}>(["card-alt",currentCard!.id])?.version, captions: caps, timing, ...(timing === "later" ? { scheduledAt: `${when}:00+09:00` } : {}) },
-      }),
+        body: { ...intent, requestId: publicationRequestId({ ...intent, cancelledApprovals: d.approvals.filter(approval => approval.status === "cancelled").map(approval => approval.id).sort((a, b) => a - b) }) },
+      });
+    },
     onSuccess: async (result) => {
+      publicationRequestId.complete();
       toast(result.destinations === 0 ? "info" : "ok", result.destinations === 0 ? "전송할 계정을 확인해 주세요." : timing === "later" ? "예약했습니다. 전송 내역에서 취소할 수 있어요." : "바로 게시하도록 요청했습니다. 전송 내역에서 결과를 확인하세요.");
       await qc.invalidateQueries({ queryKey: ["ch", cid] });
       onApproved();
@@ -566,7 +631,8 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
   const len = (s: string) => [...s].length;
   const cd = d.item.canvaDesign;
   const SRC: Record<string, string> = { builtin: "기본 템플릿", custom: "내 배경 템플릿", canva: "Canva" };
-  useEffect(() => { setConfirmed(false); }, [currentCard?.id, d.current?.id, caps, timing, when, copyDirty, altDirty]);
+  const pendingChanges = sourceDirty || copyDirty || altDirty || staleArtifact || captionDraft.needsSave || captionDraft.saving || !!captionDraft.conflict || len(caps.instagram) > 2200 || len(caps.telegram) > 1024;
+  useEffect(() => { setConfirmed(false); }, [currentCard?.id, d.current?.id, caps, timing, when, copyDirty, altDirty, altVersion, sourceDirty, captionDraft.version, destinationsKey]);
   const futureSchedule = timing === "now" || (!!when && Number.isFinite(Date.parse(`${when}:00+09:00`)) && Date.parse(`${when}:00+09:00`) > Date.now());
   return (
     <section className="stack content-card-editor" id="card-panel" tabIndex={-1}>
@@ -590,7 +656,8 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
           {showTpl && tpls.data && (
             <TemplatePicker cid={cid} value={templateKey} onChange={chooseTemplate} items={tpls.data.items} version={ch?.accentColor} disabled={render.isPending} />
           )}
-          <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateChoice ?? tpl} onTemplateChange={chooseTemplate} coverMode={coverMode} disabled={render.isPending || altDirty} onDirtyChange={setCopyDirty} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel="게시 준비" />
+          {sourceDirty && <p className="notice warn small" role="status">자료·초안에 저장하지 않은 변경이 있습니다. 먼저 저장한 뒤 이미지를 갱신하고 게시 준비를 완료해 주세요.</p>}
+          <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateChoice ?? tpl} onTemplateChange={chooseTemplate} coverMode={coverMode} disabled={render.isPending || altDirty} renderDisabled={sourceDirty} onDirtyChange={setCopyDirty} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel="게시 준비" />
           {render.isPending && <p className="notice small" role="status">{coverMode === "ai" ? "표지 일러스트와 각 페이지를 만들고 있어요. 몇 분 정도 걸릴 수 있습니다." : "원고를 페이지로 나누고 보드에 저장하고 있어요."}</p>}
           {render.error && <ErrorBox error={render.error} />}
           {render.data && <p className="small muted" role="status">{render.data.carousel.pages.length}장 이미지에 수정 내용을 반영했어요.</p>}
@@ -624,11 +691,11 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
           )}
 
           <details className="content-drawer publish-drawer" id="publish-options" open={publishOpen} onToggle={event => setPublishOpen(event.currentTarget.open)}><summary><strong>게시 준비</strong><span>캡션 · 지금 게시 · 예약</span></summary><div className="content-drawer-body stack">
-          <p className="content-destination"><strong>게시 계정</strong> {d.publicationReadiness?.expectedUsername ? `@${d.publicationReadiness.expectedUsername}` : ch?.name ?? "연결 확인 필요"}</p>
+          <fieldset className="publication-destinations stack"><legend>게시 계정</legend>{destinations.map(destination => <label className="check" key={destination.id}><input type="checkbox" checked={destinationIds.includes(destination.id)} disabled={!destination.configured || approve.isPending} onChange={event => setPickedDestinations(event.target.checked ? [...destinationIds, destination.id] : destinationIds.filter(id => id !== destination.id))} /><span>{destination.label} · {destination.platform === "instagram" ? "Instagram" : destination.platform === "telegram" ? "Telegram" : destination.platform}{!destination.configured && " · 연결 확인 필요"}</span></label>)}{!destinations.length && <p className="notice warn small">연결한 게시 계정이 없습니다. <GuardedLink href="/instagram">게시 계정 연결</GuardedLink></p>}<p className="small muted">선택한 {destinationIds.length}개 계정에만 전송합니다. {destinations.filter(destination => destinationIds.includes(destination.id)).map(destination => destination.label).join(", ")}</p></fieldset>
           {revCards.length > 1 && (
             <div className="row" role="group" aria-label="승인할 카드 고르기">
               {revCards.map((c, i) => (
-                <button key={c.id} className="tpl" style={{ width: 96, padding: 4 }} aria-pressed={currentCard?.id === c.id} onClick={() => setPickedCard(c.id)}>
+                <button key={c.id} className="tpl" style={{ width: 96, padding: 4 }} aria-pressed={currentCard?.id === c.id} onClick={() => { if (currentCard?.id !== c.id) guard.confirmLeave(() => setPickedCard(c.id), currentCard ? [`card-alt-${currentCard.id}`] : []); }}>
                   <img src={`/api/channels/${cid}/media/${c.id}`} alt={`카드 후보 ${i + 1}`} />
                   <span className="tpl-desc">{SRC[c.source ?? "builtin"] ?? c.source}</span>
                 </button>
@@ -636,8 +703,10 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
             </div>
           )}
           {!currentCard && <p className="small muted">현재 버전(r{d.current.revisionNo})으로 만든 카드가 없습니다.</p>}
+          {currentCard && <p className="small muted">게시 이미지: {staleArtifact ? "이전 원고" : `원고 r${d.current.revisionNo}`} · 이미지 #{currentCard.id}{copyDirty || sourceDirty || staleArtifact ? " · 수정 내용을 저장하고 이미지를 다시 만들어야 합니다" : " · 저장된 원고 반영"}</p>}
+          {staleArtifact && <div className="notice warn small">원고가 다른 곳에서 변경됐습니다. 이전 이미지에 입력한 설명을 보존했습니다. <button className="btn sm" onClick={() => guard.confirmLeave(() => { heldCard.current = null; setAltDirty(false); setPickedCard(null); }, [`card-alt-${currentCard!.id}`])}>설명 정리 후 최신 이미지 보기</button></div>}
 
-          {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} onDirtyChange={setAltDirty} downloadDisabled={copyDirty} />}
+          {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} onDirtyChange={setAltDirty} downloadDisabled={copyDirty || staleArtifact} />}
           <details className="content-options"><summary>외부 편집 도구로 문구 복사</summary><CopyFields cid={cid} itemId={d.item.id} revisionId={d.current.id} /></details>
 
           <h3 style={{ margin: "8px 0 0" }}>게시물 캡션 (카드 이미지 밖의 글)</h3>
@@ -646,7 +715,7 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
             <span className="hint">
               {len(caps.instagram)} / 2200자 · 인스타그램 캡션의 URL은 클릭되는 링크가 아닙니다.
             </span>
-            <textarea rows={8} value={caps.instagram} onChange={(e) => { captionsEdited.current = true; setCaps({ ...caps, instagram: e.target.value }); }} />
+            <textarea rows={8} value={caps.instagram} aria-label="인스타그램 캡션" onChange={(e) => captionDraft.setCaptions({ ...caps, instagram: e.target.value })} />
           </label>
           {currentCard && (
             <details>
@@ -664,21 +733,26 @@ function CardApprovePanel({ d, cid, templateChoice, onTemplateChange, onApproved
           <details className="content-options"><summary>텔레그램 캡션</summary><label className="field">
             텔레그램 캡션
             <span className="hint">{len(caps.telegram)} / 1024자 (사진 캡션 제한)</span>
-            <textarea rows={6} value={caps.telegram} onChange={(e) => { captionsEdited.current = true; setCaps({ ...caps, telegram: e.target.value }); }} />
+            <textarea rows={6} value={caps.telegram} aria-label="텔레그램 캡션" onChange={(e) => captionDraft.setCaptions({ ...caps, telegram: e.target.value })} />
           </label>
           </details>
+          <div className="row publication-draft-save"><span className="small" role="status">{captionDraft.saving ? "캡션 저장 중…" : captionDraft.conflict ? "캡션 저장 충돌 · 입력 유지됨" : captionDraft.error ? "캡션 저장 실패 · 입력 유지됨" : captionDraft.needsSave ? "캡션을 저장해 주세요" : `캡션 저장됨 · v${captionDraft.version}`}</span><button className="btn" disabled={captionDraft.saving || !captionDraft.needsSave || !!captionDraft.conflict || len(caps.instagram) > 2200 || len(caps.telegram) > 1024} onClick={() => { void captionDraft.save().catch(() => {}); }}>캡션 저장</button></div>
+          {(len(caps.instagram) > 2200 || len(caps.telegram) > 1024) && <p className="notice warn small">캡션 글자 수를 줄인 뒤 저장해 주세요.</p>}
+          {captionDraft.error && <ErrorBox error={captionDraft.error} />}
+          {captionDraft.conflict && <div className="notice warn stack"><strong>다른 곳에서 저장한 캡션이 있습니다. 내 입력은 유지했습니다.</strong><details><summary>최신 캡션과 비교</summary><div className="card-copy-compare"><div><h4>최신 저장본</h4><pre>{captionDraft.conflict.captions.instagram}</pre><pre>{captionDraft.conflict.captions.telegram}</pre></div><div><h4>내 입력</h4><pre>{caps.instagram}</pre><pre>{caps.telegram}</pre></div></div><div className="row"><button className="btn sm" disabled={captionDraft.saving} onClick={captionDraft.acceptServer}>최신 캡션 사용</button><button className="btn sm" disabled={captionDraft.saving} onClick={() => { void captionDraft.saveMine().catch(() => {}); }}>내 캡션으로 다시 저장</button></div></details></div>}
           <fieldset className="publish-timing"><legend>언제 게시할까요?</legend><div className="row">
             <label className={`publish-timing-option ${timing === "now" ? "selected" : ""}`}><input type="radio" name={`publish-timing-${d.item.id}`} checked={timing === "now"} onChange={() => setTiming("now")} /><span><strong>지금 게시</strong><small>승인하면 바로 전송 요청</small></span></label>
             <label className={`publish-timing-option ${timing === "later" ? "selected" : ""}`}><input type="radio" name={`publish-timing-${d.item.id}`} checked={timing === "later"} onChange={() => setTiming("later")} /><span><strong>예약 게시</strong><small>원하는 날짜·시간 선택</small></span></label>
           </div></fieldset>
-          {timing === "later" && <label className="field">예약 시각 (한국 시간)<input type="datetime-local" value={when} min={toLocalInput(new Date())} onChange={e => setWhen(e.target.value)} /><span className="hint">전송을 시작하기 전에는 예약을 취소할 수 있어요.</span>{!futureSchedule && <span className="card-copy-error">현재보다 뒤의 시간을 선택해 주세요.</span>}</label>}
-          <ReviewPanel d={d} cid={cid} />
+          {timing === "later" && <label className="field">예약 시각 (한국 시간)<input type="datetime-local" value={when} min={toLocalInput(new Date())} onChange={e => setWhen(e.target.value)} /><span className="hint">전송 시작 전에는 취소할 수 있습니다. 예약 시각 이후 처리되며 서버 휴면·재시작 시 지연될 수 있습니다. 발행함에서 실제 결과를 확인하세요.</span>{!futureSchedule && <span className="card-copy-error">현재보다 뒤의 시간을 선택해 주세요.</span>}</label>}
+          <ReviewPanel d={d} cid={cid} pendingChanges={pendingChanges} />
           <PublicationRuntimeNotice runtime={runtime} />
           {d.publicationReadiness && !d.publicationReadiness.ready && <div className="notice warn" role="alert"><strong>게시 전에 확인할 항목</strong><ul>{d.publicationReadiness.blockers.map(reason => <li key={reason}>{reason}</li>)}</ul><div className="row"><GuardedLink href="/instagram">인스타그램 연결 확인 →</GuardedLink><GuardedLink href="/connections">API 연결 확인 →</GuardedLink></div></div>}
           {existingDeliveryMessage && <div className="notice warn"><p className="small">{existingDeliveryMessage}</p><button className="btn sm" onClick={onApproved}>전송 상태 확인</button></div>}
-          <label className="check publish-confirm"><input type="checkbox" checked={confirmed} disabled={approve.isPending || !currentCard || copyDirty || altDirty} onChange={event => setConfirmed(event.target.checked)} />이미지 전체·캡션·게시 계정을 확인했습니다.</label>
+          {pendingChanges && <p className="notice warn small" role="status">저장하지 않은 변경을 먼저 저장해 주세요. 초안·카드 문구를 바꿨다면 게시 이미지도 다시 준비해야 합니다.</p>}
+          <label className="check publish-confirm"><input type="checkbox" checked={confirmed} disabled={approve.isPending || !currentCard || pendingChanges || !destinationIds.length} onChange={event => setConfirmed(event.target.checked)} />이미지 전체·저장된 캡션·선택한 게시 계정을 확인했습니다.</label>
           <div className="row">
-            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || !confirmed || !futureSchedule || altDirty || copyDirty || !currentCard || d.item.reviewStatus !== "reviewed" || d.publicationReadiness?.ready === false || !!existingDeliveryState}>
+            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || !confirmed || !futureSchedule || pendingChanges || !destinationIds.length || !currentCard || d.item.reviewStatus !== "reviewed" || d.publicationReadiness?.ready === false || !!existingDeliveryState}>
               {approve.isPending ? "전송 요청 중…" : timing === "later" ? "승인하고 예약 게시" : "승인하고 지금 게시"}
             </button>
           </div>
@@ -704,17 +778,18 @@ function ItemDeliveryPanel({ d, cid, runtime, runtimeError, refresh, refreshing 
         return <li key={a.id} className="list-item stack">
           <div className="row between"><strong className="small">승인 #{a.id} · r{d.revisions.find(r => r.id === a.revisionId)?.revisionNo ?? "?"}</strong><Badge kind={a.status === "completed" ? "ok" : ""}>{{ active: "승인 저장됨", invalidated: "승인 무효 · 재승인 필요", cancelled: "승인 취소됨", completed: "전송 완료된 승인" }[a.status] ?? a.status}</Badge></div>
           <span className="small muted">예약 {fmtDate(a.scheduledAt as unknown as string)} (한국 시간)</span>
+          {!!deliveries.length && <p className="small" role="status">{deliverySummary(deliveries.map(row => row.d))}</p>}
           {a.invalidatedReason && <p className="small muted">{a.invalidatedReason}</p>}
           {!deliveries.length && (a.status === "active" ? <div className="notice warn"><strong>전송 예약이 없습니다</strong><p className="small">승인 기록에 연결된 전송 건이 없습니다. 게시 계정·목적지를 확인한 뒤 위의 게시 준비에서 다시 승인해 주세요.</p><GuardedLink href="/instagram">게시 계정 연결 확인 →</GuardedLink></div> : <p className="small muted">이전 승인에 연결된 전송 내역이 없습니다.</p>)}
           {deliveries.map(({ d: delivery, dest }) => {
-            const state = deliveryState(delivery.status, a.scheduledAt);
+            const state = deliveryState(delivery.status, a.scheduledAt, Date.now(), delivery.outcomeSource, delivery.needsReconciliation);
             return <div key={delivery.id} className={`notice ${state.tone}`}>
               <div className="row between"><strong>{dest.label}</strong><Badge kind={state.tone}>{state.label}</Badge></div>
               <p className="small">{state.detail}</p>
               {delivery.lastError && <p className="small" role={delivery.status === "failed" ? "alert" : undefined}><strong>처리 사유: </strong>{delivery.lastError}</p>}
               {delivery.completedAt && <p className="small muted">처리 기록 {fmtDate(delivery.completedAt as unknown as string)}</p>}
               {delivery.externalUrl && <a href={delivery.externalUrl} target="_blank" rel="noopener noreferrer">게시물 보기 ↗</a>}
-              <DeliveryActions channelId={cid} approvalId={a.id} approvalStatus={a.status} delivery={delivery} canRetry={d.publicationReadiness?.ready !== false} onChanged={refresh} />
+              <DeliveryActions channelId={cid} approvalId={a.id} approvalStatus={a.status} delivery={delivery} contentHref={d.canonicalStudioCardId ? `/studio/${d.canonicalStudioCardId}` : `/items/${cid}/${d.item.id}?tab=publish`} canRetry={d.publicationReadiness?.ready !== false} onChanged={refresh} />
             </div>;
           })}
           {!deliveries.length && a.status === "active" && <DeliveryActions channelId={cid} approvalId={a.id} approvalStatus={a.status} onChanged={refresh} />}
@@ -807,62 +882,5 @@ function CopyFields({ cid, itemId, revisionId }: { cid: number; itemId: number; 
         </div>
       ) : null}
     </details>
-  );
-}
-
-/* ───────────── 작업 단계 + 다음 할 일 ───────────── */
-function Progress({ d, onGo, actionsOnly = false, forTab }: { d: Detail; onGo?: (tab: ItemTab, anchor: string) => void; actionsOnly?: boolean; forTab?: "source" | "edit" | "publish" }) {
-  const p = d.primary;
-  const curId = d.current?.id;
-  const hasCard = d.cards.some((c) => c.revisionId === curId);
-  const approved = d.approvals.some((a) => a.revisionId === curId && (a.status === "active" || a.status === "completed"));
-  const steps = [
-    { label: "수집", done: true },
-    { label: "원문 확보", done: !p || p.fetchStatus === "ok" },
-    { label: "초안", done: !!d.current },
-    { label: "검토 완료", done: d.item.reviewStatus === "reviewed" },
-    { label: "카드", done: hasCard },
-    { label: "최종 승인", done: approved },
-    { label: "게시", done: d.item.publishStatus === "succeeded" },
-  ];
-  const cur = steps.findIndex((s) => !s.done);
-  const next: { text: string; btn: string; tab: ItemTab; anchor: string } | null = d.item.excluded
-    ? null
-    : cur === 1
-      ? { text: "원문을 확보하지 못했습니다. 다시 시도하거나 공식 원문 주소를 연결하세요.", btn: "원문 확인", tab: "source", anchor: "source-panel" }
-      : cur === 2
-        ? { text: "아직 초안이 없습니다. 원문에서 자동으로 정리하거나 직접 작성하세요.", btn: "편집으로", tab: "edit", anchor: "edit-panel" }
-        : cur === 3
-          ? { text: "초안 내용을 원문과 대조한 뒤 ‘검토 완료’를 누르세요.", btn: "검토하기", tab: "publish", anchor: "review-panel" }
-          : cur === 4
-            ? { text: "검토가 끝났습니다. 템플릿을 골라 카드 이미지를 만드세요.", btn: "카드 만들기", tab: "publish", anchor: "card-panel" }
-            : cur === 5
-              ? { text: "카드와 캡션을 확인하고 예약 시각을 정해 최종 승인하세요.", btn: "승인하기", tab: "publish", anchor: "card-panel" }
-              : cur === 6
-                ? { text: "승인 기록이 저장되었습니다. 전송 대기·모의 실행·실패 여부와 실제 게시 결과를 확인하세요.", btn: "전송 상태", tab: "delivery", anchor: "delivery-panel" }
-                : null;
-  const action = forTab === "source" ? (!d.item.excluded && (!p || p.fetchStatus === "ok") ? { text: "본문을 확인했다면 초안을 작성하고 내용을 다듬어 주세요.", btn: "다음 단계로 · 초안 편집", tab: "edit" as const, anchor: "edit-panel" } : null) : forTab === "edit" ? (d.current && !d.item.excluded ? { text: "초안 내용을 확인한 뒤 검토를 마치고 카드뉴스를 만들어 주세요.", btn: "다음 단계로 · 검토·카드뉴스", tab: "publish" as const, anchor: "review-panel" } : null) : next;
-  return (
-    <>
-      {!actionsOnly && <ol className="stepper" aria-label="작업 단계">
-        {steps.map((s, i) => (
-          <li key={s.label} className={s.done ? "done" : i === cur ? "current" : ""}>
-            {s.label}
-            <span className="sr-only">{s.done ? " 완료" : i === cur ? " 진행 중" : " 대기"}</span>
-          </li>
-        ))}
-      </ol>}
-      {actionsOnly && action && (
-        <div className="next-action next-action-bottom">
-          <span>
-            <strong>다음 할 일 · </strong>
-            {action.text}
-          </span>
-          <button className="btn primary sm" onClick={() => onGo?.(action.tab, action.anchor)}>
-            {action.btn}
-          </button>
-        </div>
-      )}
-    </>
   );
 }

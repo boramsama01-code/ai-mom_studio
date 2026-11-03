@@ -7,6 +7,7 @@ import { StudioPage } from "../client/src/pages/Studio";
 import { EditPanel } from "../client/src/pages/ItemDetail";
 import { studioContentSchema, type StudioCard, type StudioCardDetail } from "../shared/studio";
 import { emptyPayload } from "../shared/payloads";
+import { ApiError } from "../client/src/api";
 const mocks = vi.hoisted(() => ({ api: vi.fn(), toast: vi.fn(), guard: { setDirty: vi.fn(), confirmLeave: (f: () => void) => f() } }));
 vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => ({ allChannels: [{ id: 1, slug: "penguin", name: "웹툰", active: true, accentColor: "#285f6a" }], channels: [], selected: "all", select: vi.fn() }) }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
@@ -22,7 +23,7 @@ function filled(card: StudioCard): StudioCard {
     panels: card.panels.map((p, i) => ({ ...p, scene: p.scene || `${i + 1}컷 장면`, dialogue: p.dialogue || `${i + 1}컷 대사` })) };
 }
 beforeEach(() => {
-  vi.clearAllMocks(); connected = true; failGeneration = false;
+  vi.clearAllMocks(); sessionStorage.clear(); connected = true; failGeneration = false;
   const card: StudioCard = { ...studioContentSchema.parse({ title: "테스트 웹툰", channel: "penguin", format: "웹툰" }), id: 8, version: 1, sourceItemId: null, createdAt: date, updatedAt: date };
   detail = { card, revisions: [], jobs: [] };
   mocks.api.mockImplementation(async (path: string, opts?: { method?: string; body?: any }) => {
@@ -129,7 +130,7 @@ describe("collected-item editor generation regression", () => {
   it("places API before ChatGPT and fills all fields when a new server revision arrives", async () => {
     await render(createElement(EditPanel, { d: itemDetail(), cid: 1 }));
     expect(host.querySelector("details summary")?.textContent).toContain("API 자동 작성"); await click("GPT로 초안 생성");
-    expect(mocks.api).toHaveBeenCalledWith("/channels/1/items/9/generate", { method: "POST", body: { provider: "openai", templateKey: "set:n04" } });
+    expect(mocks.api).toHaveBeenCalledWith("/channels/1/items/9/generate", { method: "POST", body: { version: 1, provider: "openai", templateKey: "set:n04", requestId: expect.any(String) } });
     await render(createElement(EditPanel, { d: itemDetail(science, 2), cid: 1 }));
     expect(field("핵심 질문").value).toBe(science.key_question); expect(field("과학적 근거").value).toBe(science.scientific_basis);
     expect(host.querySelector<HTMLTextAreaElement>('[aria-label="쉬운 배경 (3문장) 1"]')!.value).toBe(science.background[0]);
@@ -146,5 +147,68 @@ describe("collected-item editor generation regression", () => {
     await input(field("핵심 질문"), "저장할 질문"); await click("새 버전으로 저장");
     await render(createElement(EditPanel, { d: itemDetail({ ...emptyPayload("science_dialogue", "과학 주제"), key_question: "저장할 질문" }, 2), cid: 1 }));
     expect(field("핵심 질문").value).toBe("저장할 질문"); expect(button("새 버전으로 저장").disabled).toBe(true);
+  });
+  it("restores an unresolved request after reopening and looks up the original intent while preserving manual changes", async () => {
+    const fallback = mocks.api.getMockImplementation()!;
+    const bodies: any[] = [];
+    mocks.api.mockImplementation(async (path, opts) => {
+      if (path === "/channels/1/items/9/generate") {
+        bodies.push(structuredClone(opts.body));
+        if (bodies.length === 1) throw new ApiError(0, "응답을 받지 못했습니다.");
+        throw new ApiError(409, "기존 AI 작업이 실행 중입니다.", { jobId: 11, jobStatus: "running" });
+      }
+      return fallback(path, opts);
+    });
+    await render(createElement(EditPanel, { d: itemDetail(), cid: 1 })); await click("GPT로 초안 생성");
+    expect(bodies).toHaveLength(1); expect(sessionStorage.length).toBe(1);
+    await render(null); await render(createElement(EditPanel, { d: itemDetail(science, 2), cid: 1 }));
+    await input(field("핵심 질문"), "기다리는 동안 직접 작성한 질문");
+    await click("기존 AI 작업 결과 확인");
+    expect(bodies).toHaveLength(2); expect(bodies[1]).toEqual(bodies[0]); expect(bodies[1].version).toBe(1);
+    expect(field("핵심 질문").value).toBe("기다리는 동안 직접 작성한 질문");
+    expect(host.textContent).toContain("기존 AI 작업이 실행 중입니다.");
+    expect(mocks.api.mock.calls.filter(([, opts]) => opts?.method === "PATCH")).toHaveLength(0);
+  });
+  it("uses a new request ID for an explicit retry after the server reports terminal AI failure", async () => {
+    const fallback = mocks.api.getMockImplementation()!;
+    const ids: string[] = [];
+    mocks.api.mockImplementation(async (path, opts) => {
+      if (path === "/channels/1/items/9/generate") {
+        ids.push(opts.body.requestId);
+        if (ids.length === 1) throw new ApiError(503, "일시적으로 AI를 사용할 수 없습니다.", { jobId: 12, jobStatus: "failed" });
+      }
+      return fallback(path, opts);
+    });
+    await render(createElement(EditPanel, { d: itemDetail(), cid: 1 })); await click("GPT로 초안 생성");
+    expect(ids).toHaveLength(1); expect(sessionStorage.length).toBe(0);
+    await click("GPT로 초안 생성"); expect(ids).toHaveLength(2); expect(ids[1]).not.toBe(ids[0]);
+  });
+  it("cancels a running source AI job by request ID and preserves edits when its response arrives late", async () => {
+    const fallback = mocks.api.getMockImplementation()!;
+    let finish!: (value: unknown) => void;
+    let requestId = "";
+    mocks.api.mockImplementation(async (path, opts) => {
+      if (path === "/channels/1/items/9/generate") {
+        requestId = opts.body.requestId;
+        return new Promise(resolve => { finish = resolve; });
+      }
+      if (path === "/channels/1/items/9/generation-cancel") {
+        expect(opts.body).toEqual({ requestId }); return { cancelled: true, jobId: 13 };
+      }
+      return fallback(path, opts);
+    });
+    await render(createElement(EditPanel, { d: itemDetail(), cid: 1 }));
+    await act(async () => button("GPT로 초안 생성").click());
+    await input(field("핵심 질문"), "작업 중 직접 작성한 질문");
+    await act(async () => button("AI 요청 중단").click());
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(host.textContent).toContain("AI 요청을 중단했습니다.");
+    expect(button("새 버전으로 저장").disabled).toBe(false);
+    await act(async () => finish({ version: 2, jobId: 13 })); await settle();
+    expect(field("핵심 질문").value).toBe("작업 중 직접 작성한 질문");
+    expect(host.textContent).not.toContain("새 버전을 만들었습니다.");
+    await click("새 버전으로 저장");
+    const writes = mocks.api.mock.calls.filter(([path, opts]) => path === "/channels/1/items/9" && opts?.method === "PATCH");
+    expect(writes).toHaveLength(1); expect(writes[0][1].body.payload.key_question).toBe("작업 중 직접 작성한 질문");
   });
 });

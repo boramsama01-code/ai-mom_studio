@@ -74,15 +74,60 @@ export function articleAccessProblem(html: string, pageUrl?: string): string | n
   return null;
 }
 
-/** Headline evidence only; descriptions and search snippets are never body or identity evidence. */
-export function articleHeadlines(html: string): string[] {
+const relatedContent = "aside,nav,footer,[role='navigation'],.related-news,.related-articles,.related,.recommended,.recommendations,.advertisement,[aria-hidden='true'],[hidden]";
+
+/** Only page-level and primary visible headlines can identify an article. */
+function primaryMarkupHeadlines(html: string): string[] {
   const $ = load(html), titles = new Set<string>();
-  $("h1,h2,[itemprop='headline'],meta[property='og:title'],meta[name='twitter:title']").slice(0, 60).each((_, el) => {
-    const title = clean($(el).attr("content") || $(el).text());
-    if (title) titles.add(title);
+  $(relatedContent).remove();
+  // A related-news h2, anchor label or summary cannot override the actual h1.
+  for (const selector of ["article h1", "main h1", "h1", "article [itemprop='headline']", "main [itemprop='headline']"]) {
+    const headings = $(selector).filter((_, el) => !$(el).closest("a").length);
+    if (!headings.length) continue;
+    headings.slice(0, 10).each((_, el) => { const value = clean($(el).text()); if (value) titles.add(value); });
+    break;
+  }
+  $("meta[property='og:title'],meta[name='twitter:title']").slice(0, 10).each((_, el) => {
+    const value = clean($(el).attr("content") || ""); if (value) titles.add(value);
   });
-  for (const article of articleNodes(html)) if (typeof article.headline === "string" && article.headline.trim()) titles.add(clean(article.headline));
   return [...titles];
+}
+
+function articleNodeUrls(article: Record<string, unknown>): string[] {
+  const values = [article.url, article["@id"], article.mainEntityOfPage];
+  return values.flatMap(value => typeof value === "string" ? [value] : value && typeof value === "object" && !Array.isArray(value)
+    ? [String((value as Record<string, unknown>)["@id"] || (value as Record<string, unknown>).url || "")] : []).filter(Boolean);
+}
+
+/** Bind JSON-LD headline and body from one node. Never choose the longest related story. */
+function primaryStructuredArticles(html: string, pageUrl?: string, expectedTitle?: string): Record<string, unknown>[] {
+  const $ = load(html), nodes = articleNodes(html);
+  const titles = primaryMarkupHeadlines(html);
+  if (expectedTitle) titles.push(expectedTitle);
+  const keys = new Set(titles.map(articleHeadlineKey));
+  const matching = keys.size ? nodes.filter(node => typeof node.headline === "string" && keys.has(articleHeadlineKey(node.headline))
+    && (!expectedTitle || articleHeadlineKey(node.headline) === articleHeadlineKey(expectedTitle))) : nodes;
+  const canonical = $("link[rel~='canonical'][href]").attr("href");
+  const page = pageUrl ? publicLink(canonical || pageUrl, pageUrl) : null;
+  const bound = page ? matching.filter(node => articleNodeUrls(node).some(value => {
+    const url = publicLink(value, pageUrl); return url && articleIdentityUrl(url) === articleIdentityUrl(page);
+  })) : [];
+  if (bound.length) return bound;
+  // Without a primary headline or matching canonical, multiple Article nodes are ambiguous.
+  return matching.length === 1 ? matching : [];
+}
+
+/** Descriptions, related headings and unrelated JSON-LD nodes are never identity evidence. */
+export function articleHeadlines(html: string, pageUrl?: string): string[] {
+  const primary = primaryMarkupHeadlines(html);
+  if (primary.length) return primary;
+  return primaryStructuredArticles(html, pageUrl).flatMap(article => typeof article.headline === "string" && article.headline.trim() ? [clean(article.headline)] : []);
+}
+
+export function matchesPrimaryArticleHeadline(html: string, title: string, pageUrl?: string): boolean {
+  const key = articleHeadlineKey(title), primary = articleHeadlines(html, pageUrl);
+  // Conflicting primary metadata is unresolved, even when one metadata entry matches.
+  return !!key && primary.length > 0 && primary.every(value => articleHeadlineKey(value) === key);
 }
 
 export type PublicArticleAlternate = { url: string; canonical: string; titles: string[]; allowedHosts: string[] };
@@ -105,7 +150,7 @@ export function publicArticleAlternate(html: string, base: string, context: Arti
   };
   const canonicalUrls = [...new Set($("link[rel~='canonical'][href]").toArray().map(el => samePublisher($(el).attr("href"))).filter((url): url is string => !!url))];
   const canonical = canonicalUrls.length === 1 ? canonicalUrls[0] : original;
-  const titles = articleHeadlines(html);
+  const titles = articleHeadlines(html, base);
   if (!titles.length && context.title?.trim()) titles.push(context.title);
   for (const selector of ["link[rel~='amphtml'][href]", "link[rel~='alternate'][media][href]:not([hreflang])", "link[rel~='canonical'][href]"]) {
     const urls = [...new Set($(selector).toArray().map(el => samePublisher($(el).attr("href"))).filter((url): url is string => !!url && url !== original))];
@@ -120,9 +165,9 @@ export function sameArticleAlternate(html: string, finalUrl: string, alternate: 
   const url = publicLink(finalUrl);
   if (!url || !alternate.allowedHosts.includes(new URL(url).hostname) || restrictedPage.test(new URL(url).pathname)) return false;
   const expected = new Set(alternate.titles.map(articleHeadlineKey));
-  const titles = articleHeadlines(html);
+  const titles = articleHeadlines(html, finalUrl);
   const sameTitle = titles.some(title => expected.has(articleHeadlineKey(title)));
-  if (expected.size && titles.length && !sameTitle) return false;
+  if (expected.size && titles.length && !titles.every(title => expected.has(articleHeadlineKey(title)))) return false;
   const $ = load(html);
   const canonicalMatches = $("link[rel~='canonical'][href]").toArray().some(el => {
     const canonical = publicLink($(el).attr("href"), url);
@@ -130,10 +175,11 @@ export function sameArticleAlternate(html: string, finalUrl: string, alternate: 
   });
   return sameTitle || canonicalMatches || articleIdentityUrl(url) === articleIdentityUrl(alternate.canonical);
 }
-export function structuredArticleBody(html: string): { title: string; text: string } {
+export function structuredArticleBody(html: string, pageUrl?: string, expectedTitle?: string): { title: string; text: string } {
   if (articleAccessProblem(html)) return { title: "", text: "" };
-  const candidates = articleNodes(html).filter(a => typeof a.articleBody === "string");
-  const article = candidates.sort((a, b) => String(b.articleBody).length - String(a.articleBody).length)[0];
+  const candidates = primaryStructuredArticles(html, pageUrl, expectedTitle).filter(a => typeof a.articleBody === "string");
+  const bodies = new Set(candidates.map(article => String(article.articleBody).trim()));
+  const article = bodies.size === 1 ? candidates[0] : undefined;
   if (!article) return { title: "", text: "" };
   const $ = load(String(article.articleBody));
   $("script,style,iframe").remove();
@@ -164,9 +210,8 @@ export async function publisherArticleLink(context: ArticleContext, fetchImpl: t
   const feed = PUBLIC_NEWS_FEEDS.find(f => new URL(f.site).hostname.replace(/^www\./, "") === host);
   if (!feed || (context.takeExtraCall && !context.takeExtraCall())) return null;
   const r = await fetchImpl(feed.url, { maxBytes: 2 * 1024 * 1024, timeoutMs: Math.min(8000, timeoutMs), accept: "application/rss+xml,application/xml,text/xml" });
-  const key = (s: string) => s.normalize("NFKC").replace(/[\p{P}\p{Z}\s]/gu, "").toLowerCase();
   const urls = new Set(parseNewsRss(decodePublicText(r.body, r.contentType), feed, new Date())
-    .filter(item => key(item.title) === key(context.title!))
+    .filter(item => articleHeadlineKey(item.title) === articleHeadlineKey(context.title!))
     .map(item => publicLink(item.originallink || item.link)).filter((u): u is string => !!u));
   return urls.size === 1 ? [...urls][0] : null;
 }

@@ -50,7 +50,7 @@ async function cardImage(copy, pageIndex) {
 }
 
 function fixture() {
-  const state = { saved: { version: 3, revisionId: 30, hasSavedCopy: true, copy: initialCopy() }, reviewStatus: "reviewed", cards: [], approvals: [], deliveries: [], writes: [], aiAttempts: 0, nextAssetId: 701 };
+  const state = { publicationDraft: { version: 1, captions: { instagram: "아이와 함께 오늘의 뉴스를 읽고 서로의 질문을 나눠 보세요.", telegram: "" } }, saved: { version: 3, revisionId: 30, hasSavedCopy: true, copy: initialCopy() }, reviewStatus: "reviewed", cards: [], approvals: [], deliveries: [], writes: [], aiAttempts: 0, nextAssetId: 701 };
   const assetCopies = new Map();
   const makeAsset = () => {
     const id = state.nextAssetId; state.nextAssetId += 10;
@@ -67,11 +67,13 @@ function fixture() {
       item: { id: 9790, channelId: 3, primarySourceId: 901, title: "뉴스를 읽는 가족의 시간", kind: "current_dialogue", origin: "collected", version: state.saved.version, currentRevisionId: state.saved.revisionId, reviewStatus: state.reviewStatus, evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: payload, canvaDesign: null, createdAt: stamp, updatedAt: stamp, subcategory: null },
       current: { id: state.saved.revisionId, revisionNo: state.saved.revisionId - 27, author: "operator", payload, createdAt: stamp },
       primary: { id: 901, title: "가족과 함께 읽는 과학 프로그램 소식", originalUrl: "https://source.example/article", normalizedUrl: "https://source.example/article", kind: "rss_direct", publisher: "테스트 과학신문", fetchStatus: "ok", fetchedText: "지역 과학 프로그램이 열립니다. 공개된 안내문에서 일정을 확인하고, 참가 조건은 공식 자료를 다시 확인해 주세요. 이 본문은 브라우저 테스트를 위한 합성 자료입니다.", snippet: "가족과 나누는 과학 뉴스", publishedAt: stamp, publishedPrecision: "day", lastFetchedAt: stamp, attachments: [], meta: {}, isSample: false },
-      linked: [], revisions: [{ id: state.saved.revisionId, revisionNo: state.saved.revisionId - 27, author: "operator", payload, createdAt: stamp }], cards: clone(state.cards), approvals: clone(state.approvals), deliveries: clone(state.deliveries), similar: [], defaultCaptions: { instagram: "아이와 함께 오늘의 뉴스를 읽고 서로의 질문을 나눠 보세요.", telegram: "" },
+      linked: [], revisions: [{ id: state.saved.revisionId, revisionNo: state.saved.revisionId - 27, author: "operator", payload, createdAt: stamp }], cards: clone(state.cards), approvals: clone(state.approvals), deliveries: clone(state.deliveries), similar: [], publicationDraft: clone(state.publicationDraft), defaultCaptions: { instagram: "아이와 함께 오늘의 뉴스를 읽고 서로의 질문을 나눠 보세요.", telegram: "" },
       publicationReadiness: { ready: true, blockers: [], dryRun: false, autoPublish: true, dailyLimit: 10, expectedUsername: "alligodang.official", destinations: [{ id: 20, label: "@alligodang.official", platform: "instagram", configured: true }] },
     };
   };
-  const studio = () => ({ card: { id: 25, version: 2, title: detail().item.title, channel: "alligodang", format: "카드뉴스", stage: "review", sourceItemId: 9790, script: "", caption: "", memo: "", imagePath: "", panels: Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), createdAt: stamp, updatedAt: stamp, sourceOutput: { assetId: state.cards[0].id, channelId: 3, itemId: 9790, revisionId: state.cards[0].revisionId, stale: state.cards[0].revisionId !== state.saved.revisionId, pages: state.cards[0].carousel.pages, coverCredit: "테스트 자료" } }, revisions: [], jobs: [], images: [] });
+  // current-dialogue stores its Studio channel as "news" (shared/channelKeys.ts).
+  // The account's display name and Instagram handle are not the saved channel key.
+  const studio = () => ({ card: { id: 25, version: 2, title: detail().item.title, channel: "news", format: "카드뉴스", stage: "review", sourceItemId: 9790, script: "", caption: "", memo: "", imagePath: "", panels: Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), createdAt: stamp, updatedAt: stamp, sourceOutput: { assetId: state.cards[0].id, channelId: 3, itemId: 9790, revisionId: state.cards[0].revisionId, stale: state.cards[0].revisionId !== state.saved.revisionId, pages: state.cards[0].carousel.pages, coverCredit: "테스트 자료" } }, revisions: [], jobs: [], images: [] });
   async function api(route, url) {
     const request = route.request(), pathname = url.pathname, method = request.method();
     const body = request.postData() ? request.postDataJSON() : undefined;
@@ -87,6 +89,11 @@ function fixture() {
     else if (pathname === "/api/studio/cards") data = { cards: [studio().card], ai, notes: "", notesVersion: 1 };
     else if (pathname === "/api/channels/3/templates") data = { current: "set:n04", items: [{ key: "set:n04", name: "뉴스 브리핑", description: "원문에서 시작하는 가족의 뉴스", kind: "builtin", family: "news", pageCount: 5 }] };
     else if (pathname === itemPath && method === "GET") data = detail();
+    else if (pathname === `${itemPath}/publication-draft` && method === "PATCH") {
+      assert.equal(body.version, state.publicationDraft.version);
+      state.publicationDraft = { version: body.version + 1, captions: clone(body.captions) };
+      data = clone(state.publicationDraft);
+    }
     else if (pathname === copyPath && method === "GET") data = clone(state.saved);
     else if (pathname === copyPath && method === "PATCH") {
       assert.equal(body.version, state.saved.version, "copy saves must use the accepted version");
@@ -97,7 +104,7 @@ function fixture() {
       return route.fulfill({ contentType: "image/jpeg", body: await cardImage(body.copy, body.page) });
     } else if (pathname === `${copyPath}/generate`) {
       state.aiAttempts++;
-      if (state.aiAttempts === 1) return route.fulfill({ status: 503, json: { error: "Gemini HTTP 503: Gemini 서버가 잠시 혼잡합니다. 잠시 후 다시 시도하거나 직접 편집을 이어가세요. 총 3회 시도했습니다." } });
+      if (state.aiAttempts === 1) return route.fulfill({ status: 503, json: { error: "Gemini HTTP 503: Gemini 서버가 잠시 혼잡합니다. 잠시 후 다시 시도하거나 직접 편집을 이어가세요. 총 3회 시도했습니다.", jobId: 9901, jobStatus: "failed" } });
       data = { ...clone(state.saved), model: "synthetic-gemini", copy: { ...clone(state.saved.copy), cover: { title: "검토할 AI 제안", subtitle: "기존 문구는 적용 전까지 유지합니다" } } };
     } else if (pathname === `${itemPath}/card`) {
       assert.equal(body.version, state.saved.version);
@@ -107,6 +114,10 @@ function fixture() {
       state.reviewStatus = body.status; state.saved.version++;
       data = detail().item;
     } else if (pathname === `${itemPath}/approve`) {
+      assert.equal(body.publicationDraftVersion, state.publicationDraft.version);
+      assert.deepEqual(body.captions, state.publicationDraft.captions);
+      assert.deepEqual(body.destinationIds, [20]);
+      assert.match(body.requestId, /^[0-9a-f-]{36}$/i);
       const id = 1000 + state.approvals.length;
       const approval = { id, revisionId: state.saved.revisionId, scheduledAt: body.timing === "later" ? body.scheduledAt : new Date().toISOString(), status: "active" };
       state.approvals.unshift(approval);
@@ -117,6 +128,12 @@ function fixture() {
       state.approvals.find(approval => approval.id === id).status = "cancelled";
       state.deliveries.filter(row => row.d.approvalId === id).forEach(row => { row.d.status = "cancelled"; });
       data = { approvalCancelled: true, message: "아직 시작하지 않은 전송을 취소했습니다." };
+    } else if (/^\/api\/channels\/3\/deliveries\/\d+\/reconcile$/.test(pathname)) {
+      data = { ok: true, status: "unknown", message: "아직 결과를 확인하지 못했습니다." };
+    } else if (/^\/api\/channels\/3\/deliveries\/\d+\/confirm-not-posted$/.test(pathname)) {
+      const id = Number(pathname.split("/").at(-2));
+      state.deliveries.find(entry => entry.d.id === id).d.status = "failed";
+      data = { ok: true, message: "미게시 확인을 기록했습니다." };
     } else if (/^\/api\/channels\/3\/deliveries\/\d+\/retry$/.test(pathname)) {
       const id = Number(pathname.split("/").at(-2));
       const row = state.deliveries.find(entry => entry.d.id === id);
@@ -160,6 +177,16 @@ async function noOverflow(page, label) {
     assert(box && box.x >= 0 && box.x + box.width <= dimensions.width + 1, `${label}: text field outside viewport`);
   }
 }
+async function actionNotCovered(page) {
+  for (const button of await page.locator(".card-copy-savebar button").all()) {
+    await button.evaluate(node => node.scrollIntoView({ block: "end" }));
+    assert(await button.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      return !!hit && (hit === node || node.contains(hit));
+    }), "save/render action must receive the hit test above navigation and notices");
+  }
+}
 async function saveCopy(page) {
   await page.locator(".card-copy-savebar").getByRole("button", { name: "문구 저장", exact: true }).click();
   await page.waitForFunction(() => [...document.querySelectorAll(".card-copy-savebar button")].some(button => button.textContent === "문구 저장" && button.disabled));
@@ -178,7 +205,7 @@ try {
     console.log(`WebKit unavailable; using Chromium (${String(webkitError.message).split("\n")[0]})`);
     browser = await playwright.chromium.launch({ ...(process.env.WORKSPACE_BROWSER_EXECUTABLE ? { executablePath: process.env.WORKSPACE_BROWSER_EXECUTABLE, args: ["--no-zygote", "--disable-dev-shm-usage"] } : {}) });
   }
-  for (const width of [393, 1280, 320]) {
+  for (const width of [393, 1280, 320, 430]) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 768, hasTouch: width < 768, locale: "ko-KR", timezoneId: "Asia/Seoul", serviceWorkers: "block", reducedMotion: "reduce" });
     await context.addInitScript(() => localStorage.setItem("spacepenguin.channel", "3"));
     const page = await context.newPage(), fixtureData = fixture(), { state } = fixtureData;
@@ -198,7 +225,8 @@ try {
       }
     });
     try {
-      await page.goto(`${origin}/studio/25`);
+      await page.goto(origin);
+      await page.locator('a[href="/studio/25"]').first().click();
       await ready(page); await previewReady(page);
       assert.equal(mutations(state).length, 0, "opening a workspace must not generate or publish");
       const workspaceNav = await page.locator(".content-workspace-nav").innerText();
@@ -210,6 +238,15 @@ try {
       const secondTitle = "두 번째 카드의 별도 제목", secondBody = "둘째 카드에서만 고친 문구입니다. 첫 카드와 서로 섞이지 않습니다.";
       await page.getByRole("button", { name: /^1번째 본문 문구 편집/ }).click();
       await field(page, "title").fill(firstTitle); await field(page, "body").fill(firstBody);
+      await page.getByLabel("보기 채널", { exact: true }).selectOption("all");
+      await waitValue(page, "body", firstBody);
+      await page.getByLabel("보기 채널", { exact: true }).selectOption("3");
+      await waitValue(page, "body", firstBody);
+      await page.goBack();
+      await page.getByRole("dialog", { name: "저장하지 않은 변경이 있습니다" }).waitFor();
+      await page.getByRole("button", { name: "머무르기", exact: true }).click();
+      await waitValue(page, "body", firstBody);
+      assert(await mountedEditor.evaluate(node => node.isConnected), "browser Back must keep the dirty editor mounted");
       const urlBefore = page.url();
       await nav(page, "자료·초안").click(); await page.locator("#source-panel").waitFor({ state: "visible" });
       assert.equal(page.url(), urlBefore, "source inspection must stay in the same workspace route");
@@ -231,6 +268,7 @@ try {
       await previewReady(page); await noOverflow(page, `edited fields ${width}`);
       await page.locator(".card-copy-fields").scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${outputDir}/copy-fields-${width}.png` });
+      await actionNotCovered(page);
       await saveCopy(page);
       assert.equal(mutations(state).filter(write => write.path === copyPath).length, 1);
       assert.equal(state.saved.copy.pages[0].body, firstBody); assert.equal(state.saved.copy.pages[1].body, secondBody);
@@ -259,6 +297,13 @@ try {
 
       await clickMutation(page, page.locator(".card-copy-savebar").getByRole("button", { name: "게시 준비", exact: true }), `${itemPath}/card`);
       await page.locator("#publish-options[open]").waitFor();
+      const caption = "화면을 다시 열어도 남아야 하는 게시물 캡션입니다.";
+      await page.getByRole("textbox", { name: "인스타그램 캡션", exact: true }).fill(caption);
+      assert(await page.locator(".publish-confirm input").isDisabled(), "unsaved caption must block publication confirmation");
+      await page.getByRole("button", { name: "캡션 저장", exact: true }).click();
+      await page.getByText("캡션 저장됨 · v2", { exact: true }).waitFor();
+      await page.reload(); await ready(page); await nav(page, "게시 준비").click();
+      assert.equal(await page.getByRole("textbox", { name: "인스타그램 캡션", exact: true }).inputValue(), caption);
       await page.getByRole("button", { name: "내용 확인 · 검토 완료", exact: true }).click();
       await page.getByRole("button", { name: "내용 검토 완료됨", exact: true }).waitFor();
       const now = page.getByRole("radio", { name: /^지금 게시/ }), later = page.getByRole("radio", { name: /^예약 게시/ });
@@ -286,20 +331,24 @@ try {
 
       state.deliveries[0].d.status = "unknown"; state.deliveries[0].d.lastError = "전송 응답을 확인하지 못했습니다.";
       await page.locator("#delivery-panel").getByRole("button", { name: /새로고침/ }).click();
+      await page.getByText("게시 계정에서 확인한 결과 기록", { exact: true }).click();
       const notPosted = page.getByRole("checkbox", { name: "게시 계정에서 이 콘텐츠가 게시되지 않은 것을 확인했습니다.", exact: true });
       await notPosted.waitFor();
-      const retry = page.getByRole("button", { name: "다시 전송", exact: true });
-      assert(await retry.isDisabled(), "ambiguous publication requires an explicit not-posted check");
+      assert.equal(await page.getByRole("button", { name: "다시 전송", exact: true }).count(), 0, "unresolved results cannot be retried");
+      const confirmNotPosted = page.getByRole("button", { name: "미게시 확인 기록", exact: true });
+      assert(await confirmNotPosted.isDisabled(), "ambiguous publication requires an explicit not-posted check");
       await notPosted.check();
       await noOverflow(page, `delivery recovery ${width}`);
       await page.locator("#delivery-panel").scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${outputDir}/delivery-recovery-${width}.png` });
+      await clickMutation(page, confirmNotPosted, `/api/channels/3/deliveries/${state.deliveries[0].d.id}/confirm-not-posted`);
+      const retry = page.getByRole("button", { name: "다시 전송", exact: true });
       await clickMutation(page, retry, `/api/channels/3/deliveries/${state.deliveries[0].d.id}/retry`);
       assert.equal(state.writes.filter(write => /\/retry$/.test(write.path)).length, 1);
       assert.equal(state.writes.filter(write => /\/cancel$/.test(write.path)).length, 1);
       assert.equal(state.saved.copy.pages[0].body, firstBody); assert.equal(state.saved.copy.pages[1].body, secondBody);
       assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
-      results.push({ engine, width, result: "passed", savedPages: 2, aiRecovery: true, publicationModes: ["now", "later"], cancelAndConfirmedRetry: true });
+      results.push({ engine, width, result: "passed", savedPages: 2, aiRecovery: true, publicationModes: ["now", "later"], cancelAndConfirmedRetry: true, captionPersistence: true, historyGuard: true, channelPreservation: true, actionHitTests: true });
       console.log(`${engine} ${width}px: canonical workspace, two-page save/reload, unsaved navigation, AI recovery, now/later and cancel/retry passed`);
     } catch (error) {
       console.error(JSON.stringify({ width, errors, blocked, writes: mutations(state), url: page.url() }));

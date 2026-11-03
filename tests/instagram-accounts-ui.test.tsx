@@ -128,9 +128,11 @@ describe("Instagram account connection states", () => {
     expect(mocks.connect).not.toHaveBeenCalled();
     await act(async () => [...host.querySelectorAll<HTMLAnchorElement>("a")].find(link => link.textContent === "다른 작업으로")!.click());
     expect(host.querySelector('[role="dialog"]')?.textContent).toContain("저장하지 않은 변경");
-    await click("취소");
+    await click("머무르기", host.querySelector('[role="dialog"]')!);
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
     expect(host.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe("synthetic-ui-test-token");
     expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("offers the token form directly when OAuth is not configured and explains the issuance screen without changing typed tokens", async () => {
@@ -176,8 +178,12 @@ describe("Instagram account connection states", () => {
     await render(); await openTokenForm(); await fillToken();
     await click("연결 입력 닫기", account());
     expect(host.querySelector('[role="dialog"]')?.textContent).toContain("저장하지 않은 변경");
-    await click("취소");
+    await click("머무르기", host.querySelector('[role="dialog"]')!);
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
     expect(host.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe("synthetic-ui-test-token");
+    expect(button("연결 입력 닫기", account())).toBeDefined();
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("only reports saved-and-leave after the token has actually been verified and saved", async () => {

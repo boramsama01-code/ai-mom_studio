@@ -46,7 +46,7 @@ it("shows an immediate post choice with no date requirement, and waits for final
   expect(button("확인한 내용 바로 게시").disabled).toBe(true);
   expect(mocks.api.mock.calls.some(([path]) => path.endsWith("/approve"))).toBe(false);
   await confirm(); await click("확인한 내용 바로 게시");
-  expect(mocks.api).toHaveBeenCalledWith("/studio/cards/8/publication/approve", { method: "POST", body: { version: 3, assetId: 40, destinationId: 20, timing: "now", scheduledAt: undefined } });
+  expect(mocks.api).toHaveBeenCalledWith("/studio/cards/8/publication/approve", { method: "POST", body: { version: 3, assetId: 40, destinationId: 20, timing: "now", scheduledAt: undefined, requestId: expect.any(String) } });
   expect(mocks.toast).toHaveBeenCalledWith("info", expect.stringContaining("바로 게시를 요청"));
 });
 it("requests an explicit future schedule only after the user chooses scheduled posting", async () => {
@@ -55,6 +55,37 @@ it("requests an explicit future schedule only after the user chooses scheduled p
   expect(input).not.toBeNull(); expect(button("확인한 내용 예약 게시").disabled).toBe(true);
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "2099-01-01T20:00"); input.dispatchEvent(new Event("input", { bubbles: true })); });
   await settle(); await confirm(); await click("확인한 내용 예약 게시");
-  expect(mocks.api).toHaveBeenCalledWith("/studio/cards/8/publication/approve", { method: "POST", body: { version: 3, assetId: 40, destinationId: 20, timing: "later", scheduledAt: "2099-01-01T11:00:00.000Z" } });
+  expect(mocks.api).toHaveBeenCalledWith("/studio/cards/8/publication/approve", { method: "POST", body: { version: 3, assetId: 40, destinationId: 20, timing: "later", scheduledAt: "2099-01-01T11:00:00.000Z", requestId: expect.any(String) } });
   expect(mocks.toast).toHaveBeenCalledWith("info", expect.stringContaining("예약을 저장"));
+});
+
+it("reuses the approval request ID after a lost response and changes it for a new timing intent", async () => {
+  const fallback = mocks.api.getMockImplementation()!;
+  const ids: string[] = [];
+  mocks.api.mockImplementation(async (path, options) => {
+    if (path.endsWith("/publication/approve")) {
+      ids.push(options.body.requestId);
+      throw new Error("응답을 받지 못했습니다.");
+    }
+    return fallback(path, options);
+  });
+  await preview(); await confirm();
+  await click("확인한 내용 바로 게시");
+  await click("확인한 내용 바로 게시");
+  expect(ids).toHaveLength(2); expect(ids[0]).toBe(ids[1]);
+  await click("예약 게시");
+  const input = host.querySelector<HTMLInputElement>('input[type="datetime-local"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "2099-01-01T20:00"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+  await settle(); await confirm(); await click("확인한 내용 예약 게시");
+  expect(ids).toHaveLength(3); expect(ids[2]).not.toBe(ids[0]);
+});
+
+it("starts a new approval request group after an acknowledged success", async () => {
+  await preview(); await confirm(); await click("확인한 내용 바로 게시");
+  // The synthetic status has no active delivery, representing a completed or
+  // cancelled prior request. The operator explicitly confirms a new approval.
+  await confirm(); await click("확인한 내용 바로 게시");
+  const requests = mocks.api.mock.calls.filter(([path]) => path.endsWith("/publication/approve"));
+  expect(requests).toHaveLength(2);
+  expect(requests[1][1].body.requestId).not.toBe(requests[0][1].body.requestId);
 });

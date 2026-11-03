@@ -53,7 +53,14 @@ describe("source cards automatically reach the board", () => {
     process.env.DRY_RUN = "false"; process.env.AUTO_PUBLISH = "true";
     process.env.TELEGRAM_BOT_TOKEN = "test-only-bot-token"; process.env.TG_SCIENCE_DIALOGUE_CHAT_ID = "@fixture";
     await getDb().insert(destinations).values({ channelId: 2, platform: "telegram_channel", label: "alt-text fixture", enabled: true, secretRefs: { chatId: "TG_SCIENCE_DIALOGUE_CHAT_ID" } });
+    const lookup = vi.fn(async (url: string | URL) => {
+      expect(new URL(String(url)).pathname).toMatch(/\/getChat$/);
+      return new Response(JSON.stringify({ ok: true, result: { id: -1001234, type: "channel", username: "fixture" } }));
+    });
+    vi.stubGlobal("fetch", lookup);
     const approved=await agent.post(`${endpoint}/approve`).set(H).send({...approvalBody,altTextVersion:1});
+    vi.unstubAllGlobals();
+    expect(lookup).toHaveBeenCalledOnce();
     expect(approved.status,JSON.stringify(approved.body)).toBe(201);
     expect(approved.body.approval.captions.altTexts).toEqual(values);
     const updated=values.map((_:string,i:number)=>`새 설명. ${i+1}페이지 확인한 설명.`);
@@ -81,7 +88,7 @@ describe("source cards automatically reach the board", () => {
     expect(restored.status).toBe(200);
     expect((await agent.get(`/api/studio/cards/${cardId}`)).body.card.sourceOutput).toEqual(before.sourceOutput);
     expect((await getDb().select().from(deliveries).where(eq(deliveries.id, delivery.id)))[0].status).toBe("cancelled");
-    expect((await getDb().select().from(approvals).where(eq(approvals.id, approval.id)))[0].status).toBe("cancelled");
+    expect((await getDb().select().from(approvals).where(eq(approvals.id, approval.id)))[0].status).toBe("invalidated");
     expect(await getDb().select().from(studioCards).where(eq(studioCards.sourceItemId, id))).toHaveLength(1);
   });
   it("does not attach a late AI cover after the board is trashed and restored", async () => {
@@ -106,6 +113,10 @@ describe("source cards automatically reach the board", () => {
   it("persists five ordered images, previews and downloads them, and never duplicates or overwrites board work", async () => {
     const { agent, H, id, endpoint } = await setup();
     const before = (await agent.get(endpoint)).body;
+    const draft = (await agent.get(`/api/studio/cards/${before.canonicalStudioCardId}`)).body.card;
+    expect(draft.stage).toBe("writing");
+    expect(draft.sourceReference).toEqual({ itemId: id, channelId: 2 });
+    expect(draft.sourceOutput).toBeUndefined();
     const generated = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "typography" });
     expect(generated.status, JSON.stringify(generated.body)).toBe(200);
     const { carousel, studioCardId } = generated.body;
@@ -113,7 +124,9 @@ describe("source cards automatically reach the board", () => {
     const detail = (await agent.get(endpoint)).body;
     expect(detail.cards).toHaveLength(1); expect(detail.current).toEqual(before.current); expect(detail.approvals).toHaveLength(0);
     const board = (await agent.get("/api/studio/cards")).body.cards.find((c: any) => c.id === studioCardId);
-    expect(board.stage).toBe("review"); expect(board.sourceOutput.pages).toHaveLength(5); expect(board.sourceOutput.assetId).toBe(generated.body.id);
+    // Rendering does not mean the operator has completed review.
+    expect(board.id).toBe(draft.id); expect(board.stage).toBe("making");
+    expect(board.sourceOutput.pages).toHaveLength(5); expect(board.sourceOutput.assetId).toBe(generated.body.id);
     for (const page of carousel.pages) expect((await agent.get(`/api/channels/2/media/${page.id}`)).status).toBe(200);
     const zip = await agent.get(`/api/channels/2/media/${generated.body.id}/deck.zip`).buffer(true).parse((res, done) => {
       const chunks: Buffer[] = []; res.on("data", (chunk: Buffer) => chunks.push(chunk)); res.on("end", () => done(null, Buffer.concat(chunks))); res.on("error", done);
@@ -147,13 +160,22 @@ describe("source cards automatically reach the board", () => {
     expect((await agent.get(`/api/channels/2/media/${a.body.id}/deck.zip`)).status).toBe(409);
     delete process.env.OPENAI_API_KEY;
   });
-  it("fails clearly without an image connection or on provider failure, without adding an incomplete board card", async () => {
+  it("keeps the editable draft after an image failure without adding incomplete images or duplicate board cards", async () => {
     const { agent, H, id, endpoint } = await setup();
+    const before = (await agent.get(endpoint)).body;
     expect((await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "ai" })).body.code).toBe("ai_not_configured");
     process.env.OPENAI_API_KEY = "test-key"; makeImage.mockRejectedValueOnce(new Error("image provider failed"));
     const response = await agent.post(`${endpoint}/card`).set(H).send({ coverMode: "ai" });
     expect(response.status).toBe(500); expect(response.body.error).toContain("image provider failed");
-    expect(await getDb().select().from(studioCards).where(eq(studioCards.sourceItemId, id))).toHaveLength(0);
+    const rows = await getDb().select().from(studioCards).where(eq(studioCards.sourceItemId, id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(before.canonicalStudioCardId);
+    expect(await getDb().select().from(mediaAssets).where(eq(mediaAssets.contentItemId, id))).toHaveLength(0);
+    const after = (await agent.get(endpoint)).body;
+    expect(after.current).toEqual(before.current);
+    const draft = (await agent.get(`/api/studio/cards/${rows[0].id}`)).body.card;
+    expect(draft).toMatchObject({ stage: "writing", sourceReference: { itemId: id, channelId: 2 } });
+    expect(draft.sourceOutput).toBeUndefined();
     delete process.env.OPENAI_API_KEY;
   });
 });

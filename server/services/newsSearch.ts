@@ -10,6 +10,8 @@ import { stripHtml } from "./text";
 import { parseNewsPubDate } from "./dates";
 import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { naverSearch, NaverError, searchCalls, type NaverItem } from "./naver";
+import { decodePublicText } from "./publicTextResponse";
+import { currentGenerationSignal } from "./generationContext";
 
 export const PUBLIC_NEWS_FEEDS = [
   { name: "포천좋은신문", url: "https://www.pcgoodnews.co.kr/data/rss/news.xml", site: "https://www.pcgoodnews.co.kr" },
@@ -81,7 +83,11 @@ export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?
   const now = opts.now ?? new Date(), feeds = opts.feeds ?? PUBLIC_NEWS_FEEDS;
   const counts = { rssRequests: 0, rssFeedOk: 0, rssFeedFailed: 0, googleQueries: 0, googleFailed: 0, blogSkipped: 0 };
   const warnings: Array<{ scope: string; message: string }> = [];
-  const loadXml = opts.loadXml ?? (async (url: string) => (await safeFetch(url, { maxBytes: 2 * 1024 * 1024, timeoutMs: 8000, accept: "application/rss+xml,application/atom+xml,application/xml,text/xml;q=0.9" })).body.toString("utf8"));
+  const loadXml = opts.loadXml ?? (async (url: string) => {
+    currentGenerationSignal()?.throwIfAborted();
+    const response = await safeFetch(url, { maxBytes: 2 * 1024 * 1024, timeoutMs: 8000, accept: "application/rss+xml,application/atom+xml,application/xml,text/xml;q=0.9" });
+    return decodePublicText(response.body, response.contentType);
+  });
   let direct: Promise<NaverItem[]> | null = null, googleStopped = false, blogError: NaverError | null = null;
   const warn = (scope: string, message: string) => { if (!warnings.some(w => w.scope === scope)) warnings.push({ scope, message }); };
   async function directItems() {
@@ -89,6 +95,7 @@ export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?
       const items: NaverItem[] = [];
       // Two simultaneous public feeds at most; each has its own error state.
       for (let i = 0; i < feeds.length; i += 2) {
+        currentGenerationSignal()?.throwIfAborted();
         const batch = await Promise.allSettled(feeds.slice(i, i + 2).map(async feed => {
           counts.rssRequests++;
           try { const found = parseNewsRss(await loadXml(feed.url), feed, now); counts.rssFeedOk++; return found; }
@@ -101,6 +108,7 @@ export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?
     return direct;
   }
   const search: SearchFunction = async (query, endpoint, display, counter) => {
+    currentGenerationSignal()?.throwIfAborted();
     if (searchCalls(counter) >= counter.limit) throw new NaverError("이번 실행의 검색 한도 도달", "rate_limit");
     if (endpoint === "blog") {
       if (blogError) { counts.blogSkipped++; throw blogError; }
@@ -115,18 +123,21 @@ export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?
     }
     counter.rss = (counter.rss ?? 0) + 1;
     const matches = (await directItems()).filter(item => matchesNewsQuery(item, query));
+    currentGenerationSignal()?.throwIfAborted();
     let google: NaverItem[] = [], googleOk = false;
     if (!googleStopped) {
       const url = new URL("https://news.google.com/rss/search");
       url.search = new URLSearchParams({ q: `${opts.recruitment ? noticeSearchQuery(query) : query} when:7d`, hl: "ko", gl: "KR", ceid: "KR:ko" }).toString();
       try {
         google = await pacedGoogle(async () => {
+          currentGenerationSignal()?.throwIfAborted();
           counts.rssRequests++; counts.googleQueries++;
           return parseNewsRss(await loadXml(url.href), { name: "Google 뉴스", url: url.href, site: "https://news.google.com" }, now, true);
         }, !opts.loadXml);
         googleOk = true;
         if (google.length >= 100) warn("google_limit", "Google 뉴스 RSS의 결과 상한에 도달했습니다. 전체 기사 수집을 보장하지 않습니다.");
       } catch (e) {
+        currentGenerationSignal()?.throwIfAborted();
         googleStopped = true; counts.googleFailed++;
         warn("google_news_rss", `Google 뉴스 RSS: ${(e as Error).message}. 이번 실행의 추가 요청은 중단하고 언론사 RSS를 계속 확인합니다.`);
       }

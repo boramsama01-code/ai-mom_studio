@@ -4,7 +4,7 @@
  */
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { getDb, type DB } from "../db";
-import { channels, searchRules, workerRuns, type Job } from "../../shared/schema";
+import { channels, jobs, searchRules, workerRuns, type Job } from "../../shared/schema";
 import { claimJob, completeJob, failJob, heartbeat, newWorkerId, recoverExpired } from "./queue";
 import { runCollect } from "./collect";
 import { publishDue } from "./publish";
@@ -13,6 +13,39 @@ import { loadStoredSecrets } from "../secretStore";
 import { getSetting } from "../seed";
 import { channelDiscovery } from "./discovery";
 import { processStudioJob } from "./studio";
+import { withGenerationContext } from "../services/generationContext";
+
+const collecting = new Set<AbortController>();
+export function stopActiveCollections() {
+  for (const controller of collecting) controller.abort(new Error("전역 정지 또는 서버 종료로 수집을 중단했습니다."));
+}
+
+async function withCollectionControl<T>(db: DB, work: () => Promise<T>, ownedJob?: { id: number; workerId: string }): Promise<T> {
+  const controller = new AbortController();
+  collecting.add(controller);
+  const assertActive = async (dbtx: DB, lock = false) => {
+    controller.signal.throwIfAborted();
+    if (await getSetting(dbtx, "global_stop", false)) throw new Error("전역 정지 상태로 수집과 AI 요청을 중단했습니다.");
+    if (ownedJob) {
+      const query = dbtx.select({ id: jobs.id, leaseExpiresAt: jobs.leaseExpiresAt }).from(jobs).where(and(eq(jobs.id, ownedJob.id), eq(jobs.status, "running"), eq(jobs.leaseOwner, ownedJob.workerId)));
+      const [job] = await (lock ? query.for("update") : query);
+      if (!job?.leaseExpiresAt || job.leaseExpiresAt <= new Date()) throw new Error("전역 정지 또는 실행 권한 만료로 수집을 중단했습니다.");
+    }
+  };
+  let polling = false;
+  const monitor = setInterval(() => {
+    if (polling || controller.signal.aborted) return;
+    polling = true;
+    void assertActive(db).catch(() => controller.abort(new Error("전역 정지 또는 작업 상태 변경으로 수집을 중단했습니다."))).finally(() => { polling = false; });
+  }, 2_000);
+  monitor.unref();
+  try {
+    await assertActive(db);
+    const result = await withGenerationContext({ signal: controller.signal, assertActive: tx => assertActive(tx, true) }, work);
+    controller.signal.throwIfAborted();
+    return result;
+  } finally { clearInterval(monitor); collecting.delete(controller); }
+}
 
 async function startRun(db: DB, workerId: string, command: string) {
   const [r] = await db.insert(workerRuns).values({ workerId, command }).returning();
@@ -36,7 +69,18 @@ export async function checkWorkerConnection() {
 /** 수집 작업 1건 처리 — 성공 여부 반환(GitHub 워커와 웹 서버 즉시 실행이 함께 씀) */
 export async function processCollectJob(db: DB, job: Job, workerId: string): Promise<boolean> {
   if (!job.channelId) throw new Error("채널 없는 수집 작업");
-  const r = await runCollect(db, job.channelId, { trigger: "worker", collectionOnly: job.payload.collectionOnly === true, subcategory: typeof job.payload.subcategory === "string" ? job.payload.subcategory : undefined, heartbeat: () => heartbeat(db, job.id, workerId) });
+  if (env.autoGenerate && job.payload.collectionOnly !== true) {
+    // A collection can call paid curation before it has saved any selected items.
+    // Never replay that ambiguous outcome after a crash, including jobsOnce's catch path.
+    job.maxAttempts = job.attempts;
+    const [reserved] = await db.update(jobs).set({ maxAttempts: job.attempts }).where(and(
+      eq(jobs.id, job.id), eq(jobs.type, "collect"), eq(jobs.status, "running"), eq(jobs.leaseOwner, workerId),
+      eq(jobs.attempts, job.attempts), sql`${jobs.leaseExpiresAt} > clock_timestamp()`,
+    )).returning({ maxAttempts: jobs.maxAttempts });
+    if (!reserved) throw new Error("수집 작업의 실행 권한이 만료되어 조회·AI 요청을 시작하지 않았습니다.");
+    job.maxAttempts = reserved.maxAttempts;
+  }
+  const r = await withCollectionControl(db, () => runCollect(db, job.channelId!, { trigger: "worker", collectionOnly: job.payload.collectionOnly === true, subcategory: typeof job.payload.subcategory === "string" ? job.payload.subcategory : undefined, heartbeat: () => heartbeat(db, job.id, workerId) }), { id: job.id, workerId });
   if (r.status === "failed") {
     // 키 미연결·인증 오류 등은 재시도해도 같으므로 재시도하지 않음
     await failJob(db, job, workerId, `수집 실행 #${r.runId} 실패: ${r.errors[0]?.message ?? "원인 미상"}`, false);
@@ -109,7 +153,7 @@ export async function collectOnce(opts: { channelSlug?: string; isSchedule?: boo
     // 활성 검색어·연결된 공식 게시판·자동 화제 발굴이 모두 없는 채널은 호출하지 않음
     if (!n && !b && !channelDiscovery(ch)) continue;
     try {
-      const r = await runCollect(db, ch.id, { trigger: opts.isSchedule ? "schedule" : "cli" });
+      const r = await withCollectionControl(db, () => runCollect(db, ch.id, { trigger: opts.isSchedule ? "schedule" : "cli" }));
       results.push({ slug: ch.slug, status: r.status, counts: r.counts });
     } catch (e) {
       results.push({ slug: ch.slug, status: "failed", error: (e as Error).message });

@@ -16,14 +16,47 @@ import { AiServiceError } from "../services/llm";
 import { getSetting } from "../seed";
 import { STUDIO_CHARACTER_GUIDE, studioCharacterById } from "../../shared/studioCharacters";
 import { studioPanelReferences } from "../services/studioCharacters";
+import { assertGenerationActive, withGenerationContext } from "../services/generationContext";
+import { invalidateStudioPublication, lockStudioPublication } from "../services/studioPublicationState";
 
 const payloadSchema = studioGenerationSchema.safeExtend({ cardId: z.number().int().positive(), snapshot: studioContentSchema });
+const activeJobs = new Map<number, { controller: AbortController; work: Promise<boolean> }>();
+let stopping = false;
+
+async function checkStudioJob(db: DB, jobId: number, workerId: string, signal: AbortSignal, lock = false) {
+  signal.throwIfAborted();
+  if (stopping || await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태로 생성을 중단했습니다.");
+  const query = db.select({ id: jobs.id, leaseExpiresAt: jobs.leaseExpiresAt }).from(jobs).where(and(eq(jobs.id, jobId), eq(jobs.status, "running"), eq(jobs.leaseOwner, workerId)));
+  const [active] = await (lock ? query.for("update") : query);
+  if (!active?.leaseExpiresAt || active.leaseExpiresAt.getTime() <= Date.now()) throw new Error("생성 작업의 실행 권한이 만료되어 결과를 적용하지 않았습니다.");
+  signal.throwIfAborted();
+}
+
+/** Cancellation is also observed across processes; it reaches the active provider HTTP request. */
+export function processStudioJob(db: DB, job: Job, workerId: string): Promise<boolean> {
+  const existing = activeJobs.get(job.id);
+  if (existing) return existing.work;
+  const controller = new AbortController();
+  if (stopping) controller.abort(new Error("서버 종료로 생성을 중단했습니다."));
+  let checking = false;
+  const monitor = setInterval(() => {
+    if (checking || controller.signal.aborted) return;
+    checking = true;
+    void checkStudioJob(db, job.id, workerId, controller.signal).catch(error => controller.abort(error)).finally(() => { checking = false; });
+  }, 1000);
+  monitor.unref();
+  const work = withGenerationContext({ signal: controller.signal, assertActive: guardDb => checkStudioJob(guardDb, job.id, workerId, controller.signal, true) },
+    () => runStudioJob(db, job, workerId, controller.signal)).finally(() => { clearInterval(monitor); activeJobs.delete(job.id); });
+  activeJobs.set(job.id, { controller, work });
+  return work;
+}
 
 /** A paid request is attempted once. Lease expiry marks it failed instead of charging again. */
-export async function processStudioJob(db: DB, job: Job, workerId: string): Promise<boolean> {
+async function runStudioJob(db: DB, job: Job, workerId: string, signal: AbortSignal): Promise<boolean> {
   let timer: ReturnType<typeof setInterval> | undefined;
   try {
     const payload = payloadSchema.parse(job.payload);
+    await checkStudioJob(db, job.id, workerId, signal);
     const instruction = studioInstruction(payload);
     if (await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태로 생성을 실행하지 않았습니다.");
     const card = await loadStudioCard(db, payload.cardId);
@@ -43,6 +76,7 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
         provider: payload.provider, directive: instruction,
         content: { title: content.title, channel: content.channel, format: content.format, brief: content.memo, script: content.script, caption: content.caption, panels: content.panels.map(p => ({ scene: p.scene, dialogue: p.dialogue })) },
         referenceText: STUDIO_CHARACTER_GUIDE,
+        signal,
       };
       if (payload.textTarget === "experience") {
         const generated=await generateExperience(db,card.id,content,payload.instruction);
@@ -72,6 +106,7 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
       image = await generateStudioImage({
         prompt: `${content.characters.length ? STUDIO_CHARACTER_GUIDE : ""}\n이번 콘텐츠의 선택된 등장인물: ${content.characters.map(id => studioCharacterById(id).name).join(", ") || "없음"}\n${studioImageContext(content, panelIndex)}\n수정 지시: ${instruction}\n${referenceGuide} 패널 하나만, 말풍선·글자·자막 없이 그린다. 대사는 별도로 편집한다.`,
         referenceImages: refs,
+        signal,
       });
       if (image.bytes.length > 20 * 1024 * 1024) throw new Error("생성 이미지가 저장 한도를 초과했습니다.");
       const meta = await sharp(image.bytes, { limitInputPixels: 40_000_000 }).metadata();
@@ -79,11 +114,13 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
       model = image.model;
       provider = "openai";
     }
-    const result = await db.transaction(async tx => {
-      const current = await loadStudioCard(tx as unknown as DB, card.id, true);
+    await db.transaction(async tx => {
+      const current = await lockStudioPublication(tx as unknown as DB, card.id);
       assertStudioActive(current);
+      await assertGenerationActive(tx as unknown as DB);
       const [lease] = await tx.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.id, job.id), eq(jobs.status, "running"), eq(jobs.leaseOwner, workerId))).for("update");
       if (!lease) throw new Error("생성 작업의 실행 권한이 만료되어 결과를 적용하지 않았습니다.");
+      if (current.version === payload.version) await invalidateStudioPublication(tx as unknown as DB, current);
       if (image) {
         const [stored] = await tx.insert(studioImages).values({ cardId: card.id, panelIndex: payload.panelIndex!, bytes: image.bytes, mimeType: image.mimeType, model: image.model }).returning({ id: studioImages.id });
         content = { ...content, stage: "review", panels: content.panels.map((p, i) => i === payload.panelIndex ? { ...p, imageId: stored.id } : p) };
@@ -92,14 +129,16 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
       const updated = await tx.update(studioCards).set({ content, version: payload.version + 1, updatedAt: new Date() }).where(and(eq(studioCards.id, card.id), eq(studioCards.version, payload.version))).returning();
       const applied = updated.length > 0;
       const [revision] = await tx.insert(studioRevisions).values({ cardId: card.id, version: payload.version + 1, snapshot: content, instruction, provider, model, applied }).returning({ id: studioRevisions.id });
-      return { cardId: card.id, revisionId: revision.id, applied, kind: payload.kind, textTarget: payload.textTarget, changedFields: payload.kind === "text" ? studioChangedTextFields(payload.snapshot, content) : [], panelIndex: payload.panelIndex ?? null, message: applied ? "생성 결과를 저장했습니다." : "생성 중 직접 수정한 내용은 유지했습니다. 기록에서 생성 결과를 확인하고 적용하세요." };
+      const result = { cardId: card.id, revisionId: revision.id, applied, kind: payload.kind, textTarget: payload.textTarget, changedFields: payload.kind === "text" ? studioChangedTextFields(payload.snapshot, content) : [], panelIndex: payload.panelIndex ?? null, message: applied ? "생성 결과를 저장했습니다." : "생성 중 직접 수정한 내용은 유지했습니다. 기록에서 생성 결과를 확인하고 적용하세요." };
+      await assertGenerationActive(tx as unknown as DB);
+      await completeJob(tx as unknown as DB, job.id, workerId, result);
+      return result;
     });
-    await completeJob(db, job.id, workerId, result);
     return true;
   } catch (e) {
     // Provider adapters use fixed safe messages. Never return upstream response bodies or credentials.
     const ownMessage = /^(휴지통에 있는 콘텐츠입니다|보관된 채널입니다|전역 정지 상태로|생성 전 콘텐츠가|캐릭터 기준 이미지가|생성 이미지가|생성 이미지 형식이|생성 작업의 실행 권한이)/.test((e as Error).message ?? "");
-    const message = e instanceof z.ZodError ? "생성 결과의 형식이 올바르지 않아 적용하지 않았습니다." : e instanceof AiServiceError || ownMessage ? (e as Error).message : "생성 처리 또는 결과 저장에 실패했습니다. 연결과 작업 상태를 확인하세요.";
+    const message = signal.aborted ? "생성을 중단해 결과를 적용하지 않았습니다. 공급자의 처리·과금 여부는 확인할 수 없습니다." : e instanceof z.ZodError ? "생성 결과의 형식이 올바르지 않아 적용하지 않았습니다." : e instanceof AiServiceError || ownMessage ? (e as Error).message : "생성 처리 또는 결과 저장에 실패했습니다. 연결과 작업 상태를 확인하세요.";
     await failJob(db, job, workerId, `${message} 자동 재시도하지 않았습니다.`, false);
     return false;
   } finally { if (timer) clearInterval(timer); }
@@ -107,7 +146,7 @@ export async function processStudioJob(db: DB, job: Job, workerId: string): Prom
 
 let running: Promise<void> | null = null;
 export function kickInlineStudio(db: DB): boolean {
-  if (!env.inlineWorker) return false;
+  if (stopping || !env.inlineWorker) return false;
   if (running) return true;
   const workerId = `studio-${crypto.randomBytes(4).toString("hex")}`;
   running = (async () => {
@@ -115,6 +154,7 @@ export function kickInlineStudio(db: DB): boolean {
       await loadStoredSecrets(db);
       await recoverExpired(db);
       for (let i = 0; i < 8; i++) {
+        if (stopping || await getSetting(db, "global_stop", false)) break;
         const job = await claimJob(db, workerId, ["studio_generate"]);
         if (!job) break;
         await processStudioJob(db, job, workerId);
@@ -125,5 +165,13 @@ export function kickInlineStudio(db: DB): boolean {
   return true;
 }
 export async function waitStudioIdle() { while (running) await running; }
+
+/** Stop claims, abort active provider requests, then let guarded result transactions finish. */
+export async function stopInlineStudio(): Promise<void> {
+  stopping = true;
+  for (const { controller } of activeJobs.values()) controller.abort(new Error("서버 종료로 생성을 중단했습니다."));
+  await Promise.allSettled([...activeJobs.values()].map(({ work }) => work));
+  await waitStudioIdle();
+}
 
 

@@ -82,7 +82,7 @@ describe("one persistent channel scope", () => {
     await render(); await click("미저장 입력"); await choose("2");
     expect(selector().value).toBe("all");
     expect(localStorage.getItem("spacepenguin.channel")).toBeNull();
-    await click("취소");
+    await click("머무르기");
     expect(selector().value).toBe("all");
     save.mockResolvedValueOnce(false); await choose("2"); await click("저장하고 이동");
     expect(save).toHaveBeenCalledOnce(); expect(selector().value).toBe("all");
@@ -99,7 +99,7 @@ describe("one persistent channel scope", () => {
     await click("작업 나가기");
     expect(host.querySelector('[role="dialog"]')?.textContent).toContain("저장하지 않은 변경");
     expect(leave).not.toHaveBeenCalled();
-    await click("취소");
+    await click("머무르기");
     expect(leave).not.toHaveBeenCalled();
   });
 });

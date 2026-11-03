@@ -19,6 +19,7 @@ import { openaiFailureMessage } from "./openaiError";
 import type { AiProvider } from "../../shared/aiProviders";
 import { geminiRequest } from "./gemini";
 import { aiCardCopySchema, cardCopyTemplateInstruction, CARD_COPY_AI_LIMITS, type CardCopy } from "../../shared/cardCopy";
+import { currentGenerationSignal } from "./generationContext";
 
 export const PROMPT_VERSION = {
   curate: "curate-v1",
@@ -117,16 +118,19 @@ export function aiErrorMessage(provider: AiProvider, status?: number): string {
 export async function openaiRequest(
   endpoint: "/responses" | "/images/generations" | "/images/edits",
   body: Record<string, unknown>,
-  opts: { timeoutMs?: number; maxBytes?: number } = {},
+  opts: { timeoutMs?: number; maxBytes?: number; signal?: AbortSignal } = {},
 ): Promise<Record<string, any>> {
   if (!env.openaiKey) throw new AiServiceError("설정에서 OpenAI API 키를 먼저 입력하세요.", "not_configured");
   const maxBytes = opts.maxBytes ?? 2_000_000;
+  const cancellation = [opts.signal, currentGenerationSignal()].filter((signal): signal is AbortSignal => !!signal);
+  const signal = AbortSignal.any([...cancellation, AbortSignal.timeout(opts.timeoutMs ?? 90_000)]);
   try {
+    signal.throwIfAborted();
     const response = await fetch(`https://api.openai.com/v1${endpoint}`, {
       method: "POST",
       headers: { authorization: `Bearer ${env.openaiKey}`, "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 90_000),
+      signal,
       redirect: "error",
     });
     if (!response.ok) {
@@ -140,15 +144,24 @@ export async function openaiRequest(
     if (!reader) throw new AiServiceError("AI 응답이 비어 있습니다.", "parse");
     const chunks: Uint8Array[] = [];
     let length = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      length += value.byteLength;
-      if (length > maxBytes) {
-        await reader.cancel();
-        throw new AiServiceError("AI 응답이 저장 한도를 초과했습니다.", "parse");
+    const abort = () => { void reader.cancel().catch(() => undefined); };
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      signal.throwIfAborted();
+      while (true) {
+        const { done, value } = await reader.read();
+        signal.throwIfAborted();
+        if (done) break;
+        length += value.byteLength;
+        if (length > maxBytes) {
+          await reader.cancel();
+          throw new AiServiceError("AI 응답이 저장 한도를 초과했습니다.", "parse");
+        }
+        chunks.push(value);
       }
-      chunks.push(value);
+    } finally {
+      signal.removeEventListener("abort", abort);
+      reader.releaseLock();
     }
     try {
       const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -158,6 +171,8 @@ export async function openaiRequest(
       throw new AiServiceError("AI 응답 형식을 읽을 수 없습니다.", "parse");
     }
   } catch (e) {
+    if (cancellation.some(value => value.aborted)) throw new AiServiceError("AI 요청을 취소했습니다. 기존 내용은 유지됩니다. 공급자의 처리·과금 완료 여부는 확인할 수 없어 자동 재호출하지 않았습니다.");
+    if (signal.aborted) throw new AiServiceError("OpenAI 응답 대기 시간이 초과됐습니다. 처리·과금 여부를 확인할 수 없어 자동 재호출하지 않았습니다. 기존 내용은 유지됩니다.");
     if (e instanceof AiServiceError) throw e;
     throw new AiServiceError(aiErrorMessage("openai"));
   }
@@ -177,6 +192,8 @@ export async function callTool<T>(opts: {
   signal?: AbortSignal;
 }): Promise<LlmResult<T>> {
   const provider = opts.provider ?? env.aiProvider;
+  const signals = [opts.signal, currentGenerationSignal()].filter((signal): signal is AbortSignal => !!signal);
+  const signal = signals.length ? AbortSignal.any(signals) : undefined;
   const model = provider === "gemini" ? env.geminiModel : provider === "openai" ? env.openaiModel : env.anthropicModel;
   if (!(provider === "gemini" ? env.geminiKey : provider === "openai" ? env.openaiKey : env.anthropicKey))
     return { ok: false, kind: "not_configured", error: `${provider === "gemini" ? "Gemini" : provider === "openai" ? "GPT" : "Claude"} API 미연결: 설정에서 API 키를 입력하세요.` };
@@ -185,6 +202,7 @@ export async function callTool<T>(opts: {
   let validationFeedback = "";
   const attempts = provider === "gemini" ? 1 : Math.min(2, Math.max(1, opts.maxAttempts ?? 2));
   for (let attempt = 0; attempt < attempts; attempt++) {
+    if (signal?.aborted) return { ok: false, kind: "api", error: "AI 요청을 취소했습니다. 기존 내용은 유지됩니다.", usage };
     if (!opts.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달", usage };
     let payload: unknown;
     let responseModel = model;
@@ -197,7 +215,7 @@ export async function callTool<T>(opts: {
           systemInstruction: { parts: [{ text: `${opts.system}\n${opts.toolDescription}\n요청한 결과를 JSON 객체로만 반환하세요.` }] },
           contents: [{ role: "user", parts: [{ text: opts.user }] }],
           generationConfig: { responseMimeType: "application/json", responseJsonSchema: opts.inputSchema, maxOutputTokens: opts.maxTokens ?? 4000 },
-        }, { signal: opts.signal, reserveRetry: () => opts.budget.take() });
+        }, { signal, reserveRetry: () => opts.budget.take() });
         responseModel = typeof resp.modelVersion === "string" ? resp.modelVersion : model;
         inputTokens = Number(resp.usageMetadata?.promptTokenCount) || 0;
         outputTokens = (Number(resp.usageMetadata?.candidatesTokenCount) || 0) + (Number(resp.usageMetadata?.thoughtsTokenCount) || 0);
@@ -216,7 +234,7 @@ export async function callTool<T>(opts: {
           tools: [{ type: "function", name: opts.toolName, description: opts.toolDescription, parameters: opts.inputSchema, strict: false }],
           tool_choice: { type: "function", name: opts.toolName },
           parallel_tool_calls: false,
-        });
+        }, { signal });
         responseModel = typeof resp.model === "string" ? resp.model : model;
         inputTokens = Number(resp.usage?.input_tokens) || 0;
         outputTokens = Number(resp.usage?.output_tokens) || 0;
@@ -232,7 +250,7 @@ export async function callTool<T>(opts: {
           tools: [{ name: opts.toolName, description: opts.toolDescription, input_schema: opts.inputSchema as Anthropic.Tool.InputSchema }],
           tool_choice: { type: "tool", name: opts.toolName },
           messages,
-        });
+        }, { signal });
         responseModel = claudeResponse.model;
         inputTokens = claudeResponse.usage.input_tokens;
         outputTokens = claudeResponse.usage.output_tokens;
@@ -240,6 +258,7 @@ export async function callTool<T>(opts: {
         if (claudeResponse.stop_reason !== "max_tokens" && block?.type === "tool_use") payload = block.input;
       }
     } catch (e) {
+      if (signal?.aborted) return { ok: false, kind: "api", error: "AI 요청을 취소했습니다. 기존 내용은 유지됩니다. 공급자의 처리·과금 여부는 확인할 수 없어 자동 재호출하지 않았습니다.", usage };
       return { ok: false, kind: e instanceof AiServiceError ? e.kind : "api", error: e instanceof AiServiceError ? e.message : aiErrorMessage(provider, (e as { status?: number }).status), usage };
     }
     usage.inputTokens += inputTokens;

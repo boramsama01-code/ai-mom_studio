@@ -249,6 +249,13 @@ describe("카드·승인·게시", () => {
     process.env.DRY_RUN = "false"; process.env.AUTO_PUBLISH = "true";
     process.env.TELEGRAM_BOT_TOKEN = "test-only-bot-token";
     process.env.TG_OPPORTUNITIES_CHAT_ID = "@test_channel";
+    // Approval now freezes getChat's numeric identity; this lookup never posts.
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (!url.pathname.endsWith("/getChat")) throw new Error("Unexpected outbound request before publication mock");
+      const address = url.searchParams.get("chat_id");
+      return new Response(JSON.stringify({ ok: true, result: { id: address === "@backup" ? -100702 : -100701, type: "channel", username: address?.replace(/^@/, "") } }));
+    }));
   });
   async function prepareApproved(agent: request.Agent, csrf: string, schedules = payload().schedules) {
     const H = { "x-csrf-token": csrf };
@@ -392,7 +399,7 @@ describe("카드·승인·게시", () => {
     vi.stubGlobal("fetch", async (_url: string, init: { body: FormData }) => {
       n++;
       const chat = init.body.get("chat_id");
-      if (chat === "@test_channel") return new Response(JSON.stringify({ ok: true, result: { message_id: 77, chat: { username: "test_channel" } } }), { status: 200 });
+      if (chat === "-100701") return new Response(JSON.stringify({ ok: true, result: { message_id: 77, chat: { username: "test_channel" } } }), { status: 200 });
       return new Response(JSON.stringify({ ok: false, description: "Bad Request: chat not found" }), { status: 400 });
     });
     const s = await publishDue(db, { now: new Date() });
@@ -437,8 +444,8 @@ describe("카드·승인·게시", () => {
 describe("작업 큐", () => {
   it("중복 요청 방지, lease 만료 복구", async () => {
     const db = getDb();
-    const a = await enqueueJob(db, { type: "collect", channelId: 2, dedupeKey: "collect:2" });
-    const b = await enqueueJob(db, { type: "collect", channelId: 2, dedupeKey: "collect:2" });
+    const a = await enqueueJob(db, { type: "collect", channelId: 2, dedupeKey: "collect:2", payload: { collectionOnly: true } });
+    const b = await enqueueJob(db, { type: "collect", channelId: 2, dedupeKey: "collect:2", payload: { collectionOnly: true } });
     expect(b.duplicate).toBe(true);
     expect(b.job.id).toBe(a.job.id);
     const claimed = await claimJob(db, "w1", ["collect"]);

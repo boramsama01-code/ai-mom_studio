@@ -41,14 +41,22 @@ export async function enqueueJob(
   return { job: existing[0], duplicate: true };
 }
 
-/** lease 만료 작업 복구 */
+/** Recover leases; legacy AI-capable collections must not replay an unknown paid request. */
 export async function recoverExpired(db: DB): Promise<number> {
+  // Only the JSON boolean true proves the whole collection excluded AI. Do not
+  // rely on today's AUTO_GENERATE value: the old process may have used other settings.
+  const paidCollection = sql`type = 'collect' and coalesce(payload->'collectionOnly', 'null'::jsonb) <> 'true'::jsonb`;
+  const final = sql`attempts >= max_attempts or (${paidCollection})`;
   const r = await db.execute(sql`
     update jobs set
-      status = case when attempts >= max_attempts then 'failed' else 'queued' end,
-      last_error = coalesce(last_error, '') || case when attempts >= max_attempts then ' [lease 만료 — 재시도 한도 도달]' else ' [lease 만료 — 재대기]' end,
+      status = case when ${final} then 'failed' else 'queued' end,
+      max_attempts = case when ${paidCollection} then greatest(attempts, 1) else max_attempts end,
+      last_error = coalesce(last_error, '') || case
+        when ${paidCollection} then ' [수집 lease 만료 — 이전 AI 처리·과금 여부를 확인할 수 없어 자동 재실행하지 않았습니다. 저장된 자료를 확인한 뒤 필요한 작업을 직접 다시 시작하세요.]'
+        when attempts >= max_attempts then ' [lease 만료 — 재시도 한도 도달]'
+        else ' [lease 만료 — 재대기]' end,
       lease_owner = null, lease_expires_at = null,
-      finished_at = case when attempts >= max_attempts then now() else null end
+      finished_at = case when ${final} then now() else null end
     where status = 'running' and lease_expires_at < now()
   `);
   return r.rowCount ?? 0;
@@ -78,7 +86,7 @@ export async function claimJob(db: DB, workerId: string, types: string[]): Promi
 export async function heartbeat(db: DB, jobId: number, workerId: string): Promise<boolean> {
   const r = await db.execute(sql`
     update jobs set heartbeat_at = now(), lease_expires_at = now() + (${LEASE_MS} || ' milliseconds')::interval
-    where id = ${jobId} and lease_owner = ${workerId} and status = 'running'
+    where id = ${jobId} and lease_owner = ${workerId} and status = 'running' and lease_expires_at > clock_timestamp()
   `);
   return (r.rowCount ?? 0) > 0;
 }

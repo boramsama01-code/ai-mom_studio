@@ -188,7 +188,7 @@ studioRoutes.post("/studio/cards/:id/publication/prepare", ah(async (req, res) =
   res.json(await prepareStudioPublication(getDb(), intParam(req.params.id), version, actorOf(req)));
 }));
 studioRoutes.post("/studio/cards/:id/publication/approve", ah(async (req, res) => {
-  const input = parse(z.object({ version: z.number().int().positive(), assetId: z.number().int().positive(), destinationId: z.number().int().positive(), timing: z.enum(["now", "later"]).optional(), scheduledAt: z.string().datetime({ offset: true }).optional() }).strict(), req.body);
+  const input = parse(z.object({ requestId: z.string().uuid().optional(), version: z.number().int().positive(), assetId: z.number().int().positive(), destinationId: z.number().int().positive(), timing: z.enum(["now", "later"]).optional(), scheduledAt: z.string().datetime({ offset: true }).optional() }).strict(), req.body);
   const result = await approveStudioPublication(getDb(), intParam(req.params.id), input, actorOf(req));
   const workerStarted = result.timing === "now" && kickInlinePublish(getDb(), { approvalId: result.approvalId });
   res.status(201).json({ ...result, workerStarted });

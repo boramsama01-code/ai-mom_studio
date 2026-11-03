@@ -6,19 +6,20 @@
 import crypto from "node:crypto";
 import type { DB } from "../db";
 import { claimJob, failJob, recoverExpired } from "./queue";
-import { processCollectJob } from "./run";
+import { processCollectJob, stopActiveCollections } from "./run";
 import { env } from "../env";
 
 let running: Promise<void> | null = null;
+let stopping = false;
 
 export function kickInlineCollect(db: DB): boolean {
-  if (!env.inlineWorker) return false;
+  if (!env.inlineWorker || stopping) return false;
   if (running) return true; // 이미 도는 루프가 새 작업도 집어 간다
   const workerId = `web-${crypto.randomBytes(4).toString("hex")}`;
   running = (async () => {
     try {
       await recoverExpired(db);
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 6 && !stopping; i++) {
         const job = await claimJob(db, workerId, ["collect"]);
         if (!job) break;
         try {
@@ -39,4 +40,11 @@ export function kickInlineCollect(db: DB): boolean {
 /** 테스트용: 진행 중인 즉시 처리가 끝날 때까지 대기 */
 export async function waitInlineIdle() {
   while (running) await running;
+}
+
+/** Stop taking new jobs before the web process releases its database pool. */
+export async function stopInlineCollect() {
+  stopping = true;
+  stopActiveCollections();
+  await waitInlineIdle();
 }

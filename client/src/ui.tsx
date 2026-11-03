@@ -111,17 +111,17 @@ export function DirtyModal() {
   const g = useDirtyGuard();
   if (!g.pending) return null;
   return (
-    <Modal title="저장하지 않은 변경이 있습니다" onClose={() => g.resolve("cancel")}>
+    <Modal title="저장하지 않은 변경이 있습니다" onClose={() => { if (!g.resolving) g.resolve("cancel"); }}>
       <p>이동하기 전에 어떻게 할까요?</p>
       <div className="row">
-        <button className="btn primary" onClick={() => g.resolve("save")}>
-          저장하고 이동
+        <button className="btn primary" disabled={g.resolving} onClick={() => g.resolve("save")}>
+          {g.resolving ? "저장 중…" : "저장하고 이동"}
         </button>
-        <button className="btn danger" onClick={() => g.resolve("discard")}>
+        <button className="btn danger" disabled={g.resolving} onClick={() => g.resolve("discard")}>
           버리고 이동
         </button>
-        <button className="btn" onClick={() => g.resolve("cancel")}>
-          취소
+        <button className="btn" disabled={g.resolving} onClick={() => g.resolve("cancel")}>
+          머무르기
         </button>
       </div>
     </Modal>

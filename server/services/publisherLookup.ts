@@ -4,9 +4,10 @@ import { isIP } from "node:net";
 import { safeFetch, FetchFailure } from "./safeFetch";
 import { isPrivateIp } from "./url";
 import { PUBLIC_NEWS_FEEDS, parseNewsRss } from "./newsSearch";
-import { articleAccessProblem, articleHeadlineKey, articleHeadlines, decodeGoogleNewsUrl, isGoogleNewsUrl, type ArticleContext } from "./articleSource";
+import { articleAccessProblem, articleHeadlineKey, matchesPrimaryArticleHeadline, decodeGoogleNewsUrl, isGoogleNewsUrl, type ArticleContext } from "./articleSource";
 import { fetchAndExtract, type ExtractResult } from "./extract";
 import { decodePublicText } from "./publicTextResponse";
+import { currentGenerationSignal } from "./generationContext";
 
 export const headlineKey = articleHeadlineKey;
 const hostKey = (s: string) => s.toLowerCase().replace(/^(www|m|amp|rss)\./, "");
@@ -70,9 +71,8 @@ export function publisherSearchLink(html: string, base: string, title: string): 
   });
   return urls.size === 1 ? [...urls][0] : null;
 }
-export function pageHasHeadline(html: string, title: string): boolean {
-  const key = headlineKey(title);
-  return !!key && articleHeadlines(html).some(value => headlineKey(value) === key);
+export function pageHasHeadline(html: string, title: string, pageUrl?: string): boolean {
+  return matchesPrimaryArticleHeadline(html, title, pageUrl);
 }
 
 /** Signature matches fetchAndExtract so both collection and manual refetch share this policy. */
@@ -94,6 +94,7 @@ export async function fetchPublisherArticle(url: string, fetchImpl: typeof safeF
   const deadline = Date.now() + 24_000;
   let calls = 0;
   const read: typeof safeFetch = async (target, options = {}) => {
+    currentGenerationSignal()?.throwIfAborted();
     if (!samePublisherUrl(target, home.href)) throw new FetchFailure("언론사와 다른 도메인의 주소는 원문으로 사용하지 않았습니다.", "blocked");
     if (calls >= 5 || Date.now() >= deadline) throw new FetchFailure("언론사 원문 확인 시간·요청 한도에 도달했습니다.", "timeout");
     if (calls > 0 && context.takeExtraCall && !context.takeExtraCall()) throw new FetchFailure("이번 수집의 원문 호출 한도에 도달했습니다.", "too_large");
@@ -137,10 +138,11 @@ export async function fetchPublisherArticle(url: string, fetchImpl: typeof safeF
     if (candidates.length !== 1) return { ok: false, status: "unsupported", error: "언론사 공개 목록·RSS·검색에서 제목이 정확히 일치하는 원문을 찾지 못했습니다. Google 확인 화면은 요청하지 않았으며 다른 기사로 대체하지 않았습니다." };
     const checked: typeof safeFetch = async (target, options) => {
       const r = await read(target, options);
-      if (!pageHasHeadline(decodePublicText(r.body, r.contentType), title)) throw new FetchFailure("원문 페이지의 제목이 수집 제목과 일치하지 않아 본문을 저장하지 않았습니다.", "redirect");
+      if (!pageHasHeadline(decodePublicText(r.body, r.contentType), title, r.finalUrl)) throw new FetchFailure("원문 페이지의 제목이 수집 제목과 일치하지 않아 본문을 저장하지 않았습니다.", "redirect");
       return r;
     };
-    return await fetchAndExtract(candidates[0], checked);
+    // read() already reserves every extra request; retain identity without double-charging the fetch budget.
+    return await fetchAndExtract(candidates[0], checked, { title, publisherUrl: context.publisherUrl });
   } catch (e) {
     return { ok: false, status: e instanceof FetchFailure && (e.kind === "blocked" || [401, 402, 403, 429].includes(e.status || 0)) ? "blocked" : "failed",
       error: `언론사 직접 확인 실패: ${e instanceof Error ? e.message : "조회 오류"}. Google 자동 조회로 재시도하지 않았습니다.` };

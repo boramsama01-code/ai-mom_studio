@@ -63,8 +63,11 @@ function StudioBoard({ onTrash }: { onTrash: () => void }) {
   const [entry] = useState(() => new URLSearchParams(window.location.search));
   const [entryChannel, setEntryChannel] = useState(() => entry.get("channel") ?? "");
   const [importingZip, setImportingZip] = useState(false);
-  const [creating, setCreating] = useState(() => entry.get("start") === "experience");
-  const [newMode, setNewMode] = useState<"choose"|"experience"|"finished">(() => entry.get("start") === "experience" ? "experience" : "choose");
+  const [creating, setCreating] = useState(() => ["experience", "free", "finished"].includes(entry.get("start") ?? ""));
+  const [newMode, setNewMode] = useState<"choose"|"experience"|"finished"|"free">(() => {
+    const start = entry.get("start");
+    return start === "experience" || start === "free" || start === "finished" ? start : "choose";
+  });
   const [archived, setArchived] = useState(false);
   const [newStage, setNewStage] = useState<Stage>("idea");
   const [layout, setLayout] = useState<"list" | "board">("list");
@@ -130,7 +133,7 @@ function Dialog({ title, children, onClose }: { title: string; children: ReactNo
   return <dialog className="studio-dialog" ref={ref} aria-label={title} onCancel={(e) => { e.preventDefault(); onClose(); }}><div className="row between"><h2>{title}</h2><button type="button" className="btn ghost" aria-label="닫기" onClick={onClose}>✕</button></div>{children}</dialog>;
 }
 
-function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = "" }: { initialSubcategory?: string; channel: Channel; stage: Stage; initialMode: "choose"|"experience"|"finished"; onClose: () => void }) {
+function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = "" }: { initialSubcategory?: string; channel: Channel; stage: Stage; initialMode: "choose"|"experience"|"finished"|"free"; onClose: () => void }) {
   const channels = useStudioChannels();
   const { channels: sourceChannels, select } = useChannel();
   const [mode, setMode] = useState<"choose" | "experience" | "finished" | "free">(initialMode);
@@ -224,7 +227,7 @@ function StudioDetail({ id }: { id: number }) {
   if (q.data.card.trashedAt) return <TrashedStudioDetail card={q.data.card} />;
   if (q.data.card.finishedDeck) return <FinishedDeckEditor key={q.data.card.id} data={q.data} />;
   if (q.data.card.experience) return <ExperienceEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} />;
-  if (q.data.card.sourceOutput && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard key={q.data.card.id} card={q.data.card} /><SourceBoardNotes card={q.data.card} /></>;
+  if ((q.data.card.sourceReference || q.data.card.sourceOutput) && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard key={q.data.card.id} card={q.data.card} /><SourceBoardNotes card={q.data.card} /></>;
   // A background polling failure must not unmount the editor and discard unsaved work.
   return <>{q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}<StudioEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} /></>;
 }
@@ -358,7 +361,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
     </header>
     {newer && dirty && <div className="notice warn row between"><span>서버에 새 버전이 있습니다. 현재 입력은 유지했습니다.</span><button className="btn sm" onClick={() => guard.confirmLeave(() => accept(data.card))}>새 버전 불러오기</button></div>}
     {(save.error || restore.error) && <ErrorBox error={save.error || restore.error} />}
-    {data.card.sourceOutput && <details className="content-drawer"><summary><strong>자료에서 만든 카드</strong><span>원문·카드 문구 확인</span></summary><SourceStudioCard key={data.card.id} card={data.card} embedded /></details>}
+    {(data.card.sourceReference || data.card.sourceOutput) && <details className="content-drawer"><summary><strong>자료에서 만든 카드</strong><span>원문·카드 문구 확인</span></summary><SourceStudioCard key={data.card.id} card={data.card} embedded /></details>}
     <div className="tabs" role="tablist" aria-label="콘텐츠 편집">
       <button role="tab" aria-selected={tab === "content"} onClick={() => setTab("content")}>콘텐츠 편집</button>
       <button role="tab" aria-selected={tab === "history"} onClick={() => guard.confirmLeave(() => setTab("history"))}>버전 기록 {data.revisions.length}</button>

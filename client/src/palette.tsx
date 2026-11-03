@@ -39,12 +39,12 @@ export function CommandPalette({ open, onClose, onCollect }: { open: boolean; on
 
   const cmds: Cmd[] = useMemo(() => {
     const pages: Cmd[] = [
-      ["/", "내 콘텐츠"], ["/today", "아침 수집 브리핑"], ["/inbox", "수집함"], ["/drafts", "콘텐츠 초안"], ["/publish", "발행함"],
+      ["/", "내 콘텐츠"], ["/today", "아침 수집 브리핑"], ["/inbox", "수집함"], ["/publish", "발행함"],
       ["/rules", "검색 설정"], ["/design", "카드 디자인"], ["/connections", "API 키 관리 · OpenAI / Claude / Canva"], ["/settings", "채널 설정"], ["/account", "계정·비밀번호 변경"], ["/runs", "실행 기록"],
     ].map(([href, label]) => ({ id: `p${href}`, label, group: "이동", run: () => go(href) }));
     const actions: Cmd[] = [
       { id: "a-collect", label: "수집 요청", hint: "현재 채널", group: "동작", run: onCollect },
-      { id: "a-new", label: "새 초안 직접 작성", group: "동작", run: () => go("/drafts") },
+      { id: "a-new", label: "새 초안 직접 작성", group: "동작", run: () => go("/?start=free") },
       { id: "a-pending", label: "검토 대기만 보기", group: "동작", run: () => go("/inbox?review=pending,review_required") },
     ];
     const chans: Cmd[] = channels.map((c) => ({ id: `c${c.id}`, label: `채널 전환: ${c.name}`, group: "채널", run: () => select(c.id) }));
