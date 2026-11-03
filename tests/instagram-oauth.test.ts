@@ -199,7 +199,7 @@ describe("operator-bound Meta Unified Login", () => {
   it.each([["provider", "provider_error"], ["transport", "unavailable"], ["json", "invalid_response"]])("preserves the original failure and consumed state if token inspection fails: %s", async (mode, outcome) => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const { agent, state } = await start(), originalFetch = fetcher.getMockImplementation()!;
+      const { agent, state } = await start(), originalFetch = fetcher.getMockImplementation()! as typeof fetch;
       fetcher.mockImplementation(async (input: string | URL, init?: RequestInit) => {
         if (!new URL(input).pathname.endsWith("/debug_token")) return originalFetch(input, init);
         if (mode === "transport") throw new Error("PRIVATE https://graph.facebook.com/debug_token?input_token=test-only-system-user-token&access_token=111|test-only-app-secret");
@@ -222,7 +222,7 @@ describe("operator-bound Meta Unified Login", () => {
   it("keeps granted target comparisons server-only and removes raw provider identities from logs", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      const { agent, state } = await start(), originalFetch = fetcher.getMockImplementation()!;
+      const { agent, state } = await start(), originalFetch = fetcher.getMockImplementation()! as typeof fetch;
       const ids = ["17841458158640250", "1445218102004133", "1398092400054123", "28938016352504966", "99999999999999999"];
       fetcher.mockImplementation(async (input: string | URL, init?: RequestInit) => new URL(input).pathname.endsWith("/debug_token")
         ? new Response(JSON.stringify({ data: { is_valid: true, app_id: "111", type: "SYSTEM_USER", user_id: "77777777777777777", username: "PRIVATE_HANDLE", application: "PRIVATE_APP", access_token: "test-only-system-user-token", scopes: ["instagram_basic", "instagram_business_basic", "PRIVATE_SCOPE"], granular_scopes: [{ scope: "instagram_basic", target_ids: ids, message: "PRIVATE_PROVIDER_TEXT" }] } }))
