@@ -332,20 +332,26 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
     expect(new URL(fetcher.mock.calls[0][0]).origin).toBe("https://graph.instagram.com");
   });
 
-  describe("one additional operator-observed ID after an exact object lookup error", () => {
-    const alternateId = "1445218102004133";
-    const alternateProfile = { id: alternateId, username: "spacepenguin.co" };
+  describe("one operator-observed business asset after an exact object lookup error", () => {
+    const assetId = "1445218102004133";
+    const mappedId = "17841499999999999";
+    const asset = { id: assetId, ig_user_id: mappedId, ig_username: "spacepenguin.co" };
+    const mappedProfile = { id: mappedId, username: "spacepenguin.co" };
     const objectError = { error: { code: 100, error_subcode: 33, message: `private provider detail ${token}` } };
 
-    it("accepts the observed candidate only after its exact profile and protected quota both pass", async () => {
+    it.each([penguinId, mappedId])("resolves the asset to verified publishing IGUser %s, never the asset ID", async canonicalId => {
       const injectedFetch = vi.fn().mockResolvedValueOnce(response({ data: [] }))
         .mockResolvedValueOnce(response(objectError, 400))
-        .mockResolvedValueOnce(response(alternateProfile)).mockResolvedValueOnce(response(quota));
-      expect(await accountIdentity(token, "facebook", "@SPACEPENGUIN.CO", injectedFetch)).toEqual({ ok: true, userId: alternateId, username: "spacepenguin.co" });
+        .mockResolvedValueOnce(response({ ...asset, ig_user_id: canonicalId, ig_username: "SPACEPENGUIN.CO" }))
+        .mockResolvedValueOnce(response({ id: canonicalId, username: "spacepenguin.co" })).mockResolvedValueOnce(response(quota));
+      expect(await accountIdentity(token, "facebook", "@SPACEPENGUIN.CO", injectedFetch)).toEqual({ ok: true, userId: canonicalId, username: "spacepenguin.co" });
       expect(fetcher).not.toHaveBeenCalled();
       expect(injectedFetch.mock.calls.map(([url]) => new URL(url).pathname)).toEqual([
-        "/v26.0/me/assigned_instagram_accounts", `/v26.0/${penguinId}`, `/v26.0/${alternateId}`, `/v26.0/${alternateId}/content_publishing_limit`,
+        "/v26.0/me/assigned_instagram_accounts", `/v26.0/${penguinId}`, `/v26.0/${assetId}`, `/v26.0/${canonicalId}`, `/v26.0/${canonicalId}/content_publishing_limit`,
       ]);
+      expect(new URL(injectedFetch.mock.calls[2][0]).searchParams.get("fields")).toBe("id,ig_user_id,ig_username");
+      expect(new URL(injectedFetch.mock.calls[3][0]).searchParams.get("fields")).toBe("id,username");
+      expect(new URL(injectedFetch.mock.calls[4][0]).searchParams.get("fields")).toBe("quota_usage,config");
       for (const [url, init] of injectedFetch.mock.calls) {
         expect(new URL(url).origin).toBe("https://graph.facebook.com");
         expect(new URL(url).searchParams.get("access_token")).toBeNull();
@@ -357,21 +363,21 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
       [403, 100, 33], [200, 100, 33], [400, 100, 34],
       [400, 200, 33], [400, 190, 463], [429, 100, 33],
       [400, 100, undefined], [400, 100, "33"],
-    ])("does not try the candidate after HTTP %s / Graph %s / subcode %s", async (status, code, subcode) => {
+    ])("does not resolve an asset after HTTP %s / Graph %s / subcode %s", async (status, code, subcode) => {
       fetcher.mockResolvedValueOnce(response({ data: [] }))
         .mockResolvedValueOnce(response({ error: { code, error_subcode: subcode, message: "provider detail" } }, status));
       expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false, reason: "direct_account_access_failed" });
       expect(fetcher).toHaveBeenCalledTimes(2);
     });
 
-    it.each(["alligodang.official", "highscoop.official", "fryday.official.kr"])("does not reuse another channel's candidate for %s", async username => {
+    it.each(["alligodang.official", "highscoop.official", "fryday.official.kr"])("does not reuse another channel's asset for %s", async username => {
       fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400));
       expect(await accountIdentity(token, "facebook", username)).toMatchObject({ ok: false, reason: "direct_account_access_failed" });
       expect(fetcher).toHaveBeenCalledTimes(2);
-      expect(fetcher.mock.calls.every(([url]) => !new URL(url).pathname.includes(alternateId))).toBe(true);
+      expect(fetcher.mock.calls.every(([url]) => !new URL(url).pathname.includes(assetId))).toBe(true);
     });
 
-    it("never uses the candidate to recover a nonempty assigned-list profile error", async () => {
+    it("never resolves an asset to recover a nonempty assigned-list profile error", async () => {
       fetcher.mockResolvedValueOnce(response({ data: [{ id: penguinId }] })).mockResolvedValueOnce(response(objectError, 400));
       expect(await accountIdentity(token, "facebook", "spacepenguin.co")).toMatchObject({ ok: false, reason: "account_identity_incomplete" });
       expect(fetcher).toHaveBeenCalledTimes(2);
@@ -384,15 +390,21 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
         .rejects.toMatchObject({ status: 400, extra: { code: "direct_publish_access_failed" } });
       expect(transaction).not.toHaveBeenCalled();
       expect(fetcher).toHaveBeenCalledTimes(3);
-      expect(fetcher.mock.calls.every(([url]) => !new URL(url).pathname.includes(alternateId))).toBe(true);
+      expect(fetcher.mock.calls.every(([url]) => !new URL(url).pathname.includes(assetId))).toBe(true);
     });
 
     it.each([
-      ["the primary ID instead of the requested candidate", profile, "account_mismatch"],
-      ["a different account", { id: alternateId, username: "highscoop.official" }, "account_mismatch"],
-      ["missing identity", {}, "invalid_account_response"],
-      ["an unsafe username", { id: alternateId, username: `https://private.example/${token}` }, "invalid_account_response"],
-    ])("does not save a candidate profile with %s", async (_name, body, reason) => {
+      ["an unexpected asset ID", { ...asset, id: "99" }, "account_mismatch"],
+      ["a different account", { ...asset, ig_username: "highscoop.official" }, "account_mismatch"],
+      ["an IGUser-shaped response instead of an asset mapping", { id: assetId, username: "spacepenguin.co" }, "invalid_account_response"],
+      ["missing mapping", {}, "invalid_account_response"],
+      ["an unsafe username", { ...asset, ig_username: `https://private.example/${token}` }, "invalid_account_response"],
+      ["the asset ID reused as an IGUser ID", { ...asset, ig_user_id: assetId }, "invalid_account_response"],
+      ["a zero IGUser ID", { ...asset, ig_user_id: "0" }, "invalid_account_response"],
+      ["an oversized IGUser ID", { ...asset, ig_user_id: "1".repeat(41) }, "invalid_account_response"],
+      ["a rounded numeric IGUser ID", { ...asset, ig_user_id: Number(mappedId) }, "invalid_account_response"],
+      ["a nonnumeric IGUser ID", { ...asset, ig_user_id: `https://private.example/${token}` }, "invalid_account_response"],
+    ])("does not fetch a mapped profile or save an asset with %s", async (_name, body, reason) => {
       fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400)).mockResolvedValueOnce(response(body));
       const { db, transaction } = connectionDatabase();
       const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
@@ -403,8 +415,39 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
       expect(fetcher).toHaveBeenCalledTimes(3);
     });
 
-    it.each(["denied", "malformed", "transport failure"])("does not save the candidate when its quota has %s", async failureKind => {
-      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400)).mockResolvedValueOnce(response(alternateProfile));
+    it.each([
+      ["the asset ID instead of the mapped IGUser ID", { ...mappedProfile, id: assetId }, "account_mismatch"],
+      ["a different IGUser ID", profile, "account_mismatch"],
+      ["a different account", { ...mappedProfile, username: "highscoop.official" }, "account_mismatch"],
+      ["missing identity", {}, "invalid_account_response"],
+      ["an unsafe username", { ...mappedProfile, username: `https://private.example/${token}` }, "invalid_account_response"],
+    ])("does not check quota or save a mapped profile with %s", async (_name, body, reason) => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400))
+        .mockResolvedValueOnce(response(asset)).mockResolvedValueOnce(response(body));
+      const { db, transaction } = connectionDatabase();
+      const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+      expect(failure).toMatchObject({ status: 400, extra: { code: reason } });
+      expect(failure.message).not.toContain(token);
+      expect(transaction).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledTimes(4);
+    });
+
+    it.each(["object error", "transport failure"])("keeps mapped-profile %s blocked without saving or another fallback", async failureKind => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400)).mockResolvedValueOnce(response(asset));
+      if (failureKind === "transport failure") fetcher.mockRejectedValueOnce(new Error(`private failure ${token}`));
+      else fetcher.mockResolvedValueOnce(response(objectError, 400));
+      const { db, transaction } = connectionDatabase();
+      const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+      const diagnostic = failureKind === "transport failure" ? "HTTP - / Graph - / subcode - / lost=true" : "HTTP 400 / Graph 100 / subcode 33 / lost=false";
+      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_account_access_failed" }, message: expect.stringContaining(`[진단: mapped_profile / ${diagnostic}]`) });
+      expect(failure.message).not.toContain(token);
+      expect(transaction).not.toHaveBeenCalled();
+      expect(fetcher).toHaveBeenCalledTimes(4);
+    });
+
+    it.each(["denied", "malformed", "transport failure"])("does not save a verified mapped profile when its quota has %s", async failureKind => {
+      fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400))
+        .mockResolvedValueOnce(response(asset)).mockResolvedValueOnce(response(mappedProfile));
       if (failureKind === "transport failure") fetcher.mockRejectedValueOnce(new Error(`private failure ${token}`));
       else fetcher.mockResolvedValueOnce(failureKind === "denied" ? response({ error: { code: 200, message: `private failure ${token}` } }, 403) : response({ data: [] }));
       const { db, transaction } = connectionDatabase();
@@ -412,15 +455,15 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
       expect(failure).toMatchObject({ status: 400, extra: { code: "direct_publish_access_failed" } });
       expect(failure.message).not.toContain(token);
       expect(transaction).not.toHaveBeenCalled();
-      expect(fetcher).toHaveBeenCalledTimes(4);
-      expect(new URL(fetcher.mock.calls[3][0]).pathname).toBe(`/v26.0/${alternateId}/content_publishing_limit`);
+      expect(fetcher).toHaveBeenCalledTimes(5);
+      expect(new URL(fetcher.mock.calls[4][0]).pathname).toBe(`/v26.0/${mappedId}/content_publishing_limit`);
     });
 
-    it("stops after one candidate request if that request fails in transit", async () => {
+    it("stops after one business-asset request if that request fails in transit", async () => {
       fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(objectError, 400)).mockRejectedValueOnce(new Error(`private failure ${token}`));
       const { db, transaction } = connectionDatabase();
       const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
-      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_account_access_failed" }, message: expect.stringContaining("[진단: alternate_profile / HTTP - / Graph - / subcode - / lost=true]") });
+      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_account_access_failed" }, message: expect.stringContaining("[진단: business_asset / HTTP - / Graph - / subcode - / lost=true]") });
       expect(failure.message).not.toContain(token);
       expect(transaction).not.toHaveBeenCalled();
       expect(fetcher).toHaveBeenCalledTimes(3);
@@ -440,13 +483,13 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
         access_token: token, url: privateText,
       };
       fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(providerError, status));
-      const usesAlternate = status === 400 && code === 100 && subcode === 33;
-      if (usesAlternate) fetcher.mockResolvedValueOnce(response(providerError, status));
+      const usesAsset = status === 400 && code === 100 && subcode === 33;
+      if (usesAsset) fetcher.mockResolvedValueOnce(response(providerError, status));
       const result = await accountIdentity(token, "facebook", "spacepenguin.co");
-      expect(result).toMatchObject({ ok: false, reason: "direct_account_access_failed", error: expect.stringContaining(`[진단: ${usesAlternate ? "alternate_profile" : "direct_profile"} / HTTP ${status} / Graph ${code} / subcode ${subcode ?? "-"} / lost=false]`) });
+      expect(result).toMatchObject({ ok: false, reason: "direct_account_access_failed", error: expect.stringContaining(`[진단: ${usesAsset ? "business_asset" : "direct_profile"} / HTTP ${status} / Graph ${code} / subcode ${subcode ?? "-"} / lost=false]`) });
       const shown = JSON.stringify(result);
       for (const forbidden of [token, "https://", "PRIVATE_PROVIDER_TYPE", "PRIVATE_TRACE", "error_data", "299"]) expect(shown).not.toContain(forbidden);
-      expect(fetcher).toHaveBeenCalledTimes(usesAlternate ? 3 : 2);
+      expect(fetcher).toHaveBeenCalledTimes(usesAsset ? 3 : 2);
       expect(fetcher.mock.calls.every(([, init]) => init.method === "GET")).toBe(true);
     });
 
@@ -487,7 +530,7 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
       fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(providerError, 400)).mockResolvedValueOnce(response(providerError, 400));
       const { db, transaction } = connectionDatabase();
       const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
-      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_account_access_failed" }, message: expect.stringContaining("[진단: alternate_profile / HTTP 400 / Graph 100 / subcode 33 / lost=false]") });
+      expect(failure).toMatchObject({ status: 400, extra: { code: "direct_account_access_failed" }, message: expect.stringContaining("[진단: business_asset / HTTP 400 / Graph 100 / subcode 33 / lost=false]") });
       expect(failure.message).not.toContain(token);
       expect(failure.message).not.toContain("https://");
       expect(failure.message).not.toContain("PRIVATE_TRACE");
