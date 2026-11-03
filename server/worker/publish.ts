@@ -242,14 +242,30 @@ export async function approveItem(
 
 export async function cancelApproval(db: DB, approvalId: number, actor: string) {
   return db.transaction(async (tx) => {
-    const [ap] = await tx.select().from(approvals).where(eq(approvals.id, approvalId));
-    if (!ap || ap.status !== "active") return { ok: false as const, error: "취소할 수 있는 승인이 아닙니다." };
-    const processing = await tx.select({ id: deliveries.id }).from(deliveries).where(and(eq(deliveries.approvalId, approvalId), inArray(deliveries.status, ["processing", "succeeded", "unknown"])));
-    await tx.update(deliveries).set({ status: "cancelled", lastError: "운영자 취소", updatedAt: new Date() }).where(and(eq(deliveries.approvalId, approvalId), eq(deliveries.status, "scheduled")));
-    await tx.update(approvals).set({ status: "cancelled", updatedAt: new Date() }).where(eq(approvals.id, approvalId));
-    if (!processing.length) await tx.update(contentItems).set({ publishStatus: "cancelled" }).where(eq(contentItems.id, ap.contentItemId));
-    await audit(tx, { actor, action: "cancel_approval", entity: "approval", entityId: approvalId, channelId: ap.channelId, detail: { alreadyProcessing: processing.length } });
-    return { ok: true as const, alreadyProcessing: processing.length };
+    const [initial] = await tx.select().from(approvals).where(eq(approvals.id, approvalId));
+    if (!initial) return { ok: false as const, error: "취소할 수 있는 승인이 아닙니다." };
+    // Match approveItem/retryDelivery lock order. A worker claim and cancellation
+    // cannot both change the same scheduled delivery after this locked snapshot.
+    await tx.select({ id: contentItems.id }).from(contentItems).where(eq(contentItems.id, initial.contentItemId)).for("update");
+    const pending = await tx.select().from(deliveries).where(eq(deliveries.approvalId, approvalId)).orderBy(deliveries.id).for("update");
+    const [ap] = await tx.select().from(approvals).where(eq(approvals.id, approvalId)).for("update");
+    if (!ap || ap.status !== "active") return { ok: false as const, error: "취소할 수 있는 승인이 아닙니다. 최신 전송 상태를 확인하세요." };
+    const started = pending.filter(d => ["processing", "succeeded", "unknown"].includes(d.status));
+    const scheduled = pending.filter(d => d.status === "scheduled");
+    if (started.length && !scheduled.length) return { ok: false as const, error: "이미 전송이 시작되었거나 게시 결과 확인이 필요한 건은 취소할 수 없습니다. 전송 상태와 게시 계정을 확인하세요." };
+    const now = new Date();
+    const cancelled = await tx.update(deliveries).set({ status: "cancelled", lastError: "운영자 예약 취소", updatedAt: now })
+      .where(and(eq(deliveries.approvalId, approvalId), eq(deliveries.status, "scheduled"))).returning({ id: deliveries.id });
+    // Keep a mixed approval active: an in-flight request must finish normally and
+    // must never appear as cancelled merely because another destination was queued.
+    const approvalCancelled = !started.length;
+    if (approvalCancelled) {
+      await tx.update(approvals).set({ status: "cancelled", updatedAt: now }).where(and(eq(approvals.id, approvalId), eq(approvals.status, "active")));
+      await tx.update(contentItems).set({ publishStatus: "cancelled", updatedAt: now }).where(eq(contentItems.id, ap.contentItemId));
+    }
+    await audit(tx, { actor, action: "cancel_approval", entity: "approval", entityId: approvalId, channelId: ap.channelId, detail: { cancelled: cancelled.length, alreadyProcessing: started.length, approvalCancelled } });
+    return { ok: true as const, cancelled: cancelled.length, alreadyProcessing: started.length, approvalCancelled,
+      message: approvalCancelled ? "예약을 취소했습니다. 이 승인으로 더 이상 전송하지 않습니다." : `대기 중인 ${cancelled.length}건만 취소했습니다. 이미 시작된 ${started.length}건은 취소되지 않았으므로 전송 결과를 확인해 주세요.` };
   });
 }
 
@@ -261,7 +277,8 @@ function kstDayStart(now: Date): Date {
   return new Date(Date.parse(`${kstToday(now)}T00:00:00Z`) - KST_OFFSET_MIN * 60_000);
 }
 
-export async function publishDue(db: DB, opts: { now?: Date; limit?: number; actor?: string } = {}): Promise<PublishStats> {
+export type PublishTarget = { approvalId: number; deliveryId?: never } | { deliveryId: number; approvalId?: never };
+export async function publishDue(db: DB, opts: { now?: Date; limit?: number; actor?: string; approvalId?: number; deliveryId?: number } = {}): Promise<PublishStats> {
   const now = opts.now ?? new Date();
   const stats: PublishStats = { processed: 0, succeeded: 0, failed: 0, unknown: 0, dryRun: 0, skipped: 0, notes: [] };
   if (await getSetting(db, "global_stop", false)) {
@@ -276,7 +293,9 @@ export async function publishDue(db: DB, opts: { now?: Date; limit?: number; act
     .select({ d: deliveries, ap: approvals })
     .from(deliveries)
     .innerJoin(approvals, eq(deliveries.approvalId, approvals.id))
-    .where(and(eq(deliveries.status, "scheduled"), eq(approvals.status, "active"), lte(approvals.scheduledAt, now)))
+    .where(and(eq(deliveries.status, "scheduled"), eq(approvals.status, "active"), lte(approvals.scheduledAt, now),
+      opts.approvalId !== undefined ? eq(deliveries.approvalId, opts.approvalId) : undefined,
+      opts.deliveryId !== undefined ? eq(deliveries.id, opts.deliveryId) : undefined))
     .orderBy(approvals.scheduledAt, deliveries.id)
     .limit(opts.limit ?? 10);
 
@@ -296,7 +315,9 @@ export async function publishDue(db: DB, opts: { now?: Date; limit?: number; act
   const resumable = await db
     .select()
     .from(deliveries)
-    .where(and(eq(deliveries.status, "processing"), sql`${deliveries.externalContainerId} is not null`, sql`${deliveries.externalId} is null`, sql`${deliveries.updatedAt} < now() - interval '2 minutes'`))
+    .where(and(eq(deliveries.status, "processing"), sql`${deliveries.externalContainerId} is not null`, sql`${deliveries.externalId} is null`, sql`${deliveries.updatedAt} < now() - interval '2 minutes'`,
+      opts.approvalId !== undefined ? eq(deliveries.approvalId, opts.approvalId) : undefined,
+      opts.deliveryId !== undefined ? eq(deliveries.id, opts.deliveryId) : undefined))
     .limit(5);
   for (const d of resumable) {
     const [claimed] = await db.update(deliveries).set({ updatedAt: new Date() }).where(and(eq(deliveries.id, d.id), eq(deliveries.status, "processing"), eq(deliveries.updatedAt, d.updatedAt))).returning();
@@ -430,7 +451,10 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
       return "unknown";
     }
     if (w.state !== "FINISHED") {
-      await finish(db, d, { status: "failed", errorKind: w.err?.kind ?? "terminal", lastError: w.err?.error ?? `컨테이너 상태 ${w.state} ${w.detail ?? ""}` });
+      // ERROR/EXPIRED cannot be published again. Keep an unreadable container,
+      // however: its next status check may reveal an already published post.
+      const unusable = w.state === "ERROR" || w.state === "EXPIRED";
+      await finish(db, d, { status: "failed", errorKind: w.err?.kind ?? "terminal", lastError: w.err?.error ?? `컨테이너 상태 ${w.state} ${w.detail ?? ""}`, ...(unusable ? { externalContainerId: null } : {}) });
       return "failed";
     }
     const p = await ig.publishContainer(userId, token, containerId, authMode);
@@ -452,13 +476,28 @@ async function processDelivery(db: DB, d: Delivery, now: Date): Promise<"succeed
 
 /** 실패한 목적지만 재시도(결과 불명은 운영자가 '게시 안 됨'을 확인한 경우에만) */
 export async function retryDelivery(db: DB, deliveryId: number, actor: string, confirmNotPosted = false) {
-  const [d] = await db.select().from(deliveries).where(eq(deliveries.id, deliveryId));
-  if (!d) return { ok: false as const, error: "전송 기록 없음" };
-  if (d.status === "unknown" && !confirmNotPosted) return { ok: false as const, error: "결과 불명 전송은 실제로 게시되지 않았음을 확인한 뒤 재시도하세요." };
-  if (!["failed", "unknown", "dry_run"].includes(d.status)) return { ok: false as const, error: "재시도할 수 없는 상태입니다." };
-  const [ap] = await db.select().from(approvals).where(eq(approvals.id, d.approvalId));
-  if (ap.status !== "active") return { ok: false as const, error: "승인이 유효하지 않습니다. 다시 승인하세요." };
-  await db.update(deliveries).set({ status: "scheduled", lastError: null, errorKind: null, externalContainerId: d.status === "unknown" ? null : d.externalContainerId, updatedAt: new Date() }).where(eq(deliveries.id, d.id));
-  await audit(db, { actor, action: "retry_delivery", entity: "delivery", entityId: d.id, channelId: d.channelId, detail: { from: d.status, confirmNotPosted } });
-  return { ok: true as const };
+  return db.transaction(async tx => {
+    const [initial] = await tx.select().from(deliveries).where(eq(deliveries.id, deliveryId));
+    if (!initial) return { ok: false as const, error: "전송 기록 없음" };
+    const [initialApproval] = await tx.select().from(approvals).where(eq(approvals.id, initial.approvalId));
+    if (!initialApproval) return { ok: false as const, error: "승인 기록이 없습니다." };
+    const [item] = await tx.select().from(contentItems).where(eq(contentItems.id, initialApproval.contentItemId)).for("update");
+    const [d] = await tx.select().from(deliveries).where(eq(deliveries.id, deliveryId)).for("update");
+    const [ap] = await tx.select().from(approvals).where(eq(approvals.id, initial.approvalId)).for("update");
+    if (!d || !["failed", "unknown", "dry_run"].includes(d.status) || d.externalId) return { ok: false as const, error: "이미 처리 중이거나 다시 전송할 수 없는 상태입니다. 최신 전송 상태를 확인하세요." };
+    if (d.status === "unknown" && !confirmNotPosted) return { ok: false as const, code: "confirmation_required" as const, error: "결과 불명 전송은 실제로 게시되지 않았음을 확인한 뒤 다시 전송하세요." };
+    if (!ap || ap.status !== "active" || !item || item.currentRevisionId !== ap.revisionId || item.reviewStatus !== "reviewed" || item.excluded || item.relevance === "irrelevant") {
+      return { ok: false as const, error: "승인 이후 콘텐츠나 승인 상태가 바뀌었습니다. 최신 내용을 확인하고 다시 승인하세요." };
+    }
+    const now = new Date();
+    // Older failures retained these terminal container IDs. Discard only our
+    // explicit terminal-state record, never a generic auth/transport failure.
+    const unusableContainer = d.status === "failed" && /^컨테이너 상태 (?:ERROR|EXPIRED)(?:\s|$)/.test(d.lastError ?? "");
+    const changed = await tx.update(deliveries).set({ status: "scheduled", lastError: null, errorKind: null, completedAt: null, requestStartedAt: null, externalUrl: null, externalContainerId: d.status === "unknown" || unusableContainer ? null : d.externalContainerId, updatedAt: now })
+      .where(and(eq(deliveries.id, d.id), eq(deliveries.approvalId, ap.id), eq(deliveries.status, d.status))).returning({ id: deliveries.id });
+    if (!changed.length) return { ok: false as const, error: "전송 상태가 이미 변경됐습니다. 최신 상태를 확인하세요." };
+    await tx.update(contentItems).set({ publishStatus: "scheduled", updatedAt: now }).where(eq(contentItems.id, item.id));
+    await audit(tx, { actor, action: "retry_delivery", entity: "delivery", entityId: d.id, channelId: d.channelId, detail: { from: d.status, confirmNotPosted } });
+    return { ok: true as const, deliveryId: d.id, approvalId: ap.id };
+  });
 }

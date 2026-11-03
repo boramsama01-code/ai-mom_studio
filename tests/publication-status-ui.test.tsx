@@ -51,7 +51,7 @@ beforeEach(() => {
   runtime = { integrations: { flags: { dryRun: false, autoPublish: true } }, workerConnected: true, globalStop: false };
   studioStatus = { channelId: 2, channelName: "하이스쿱", expectedUsername: "highscoop.official", ready: true, blockers: [], dailyLimit: 3, dryRun: false, autoPublish: true, destinations: [{ id: 20, label: "@highscoop.official", enabled: true, configured: true }], deliveries: [] };
   HTMLElement.prototype.scrollIntoView = function () { mocks.scroll(this.id); };
-  mocks.api.mockImplementation(async (path: string, options?: { method?: string }) => {
+  mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: any }) => {
     if (path === "/status") return structuredClone(runtime);
     if (path === "/channels/2/items/9") return structuredClone(detail);
     if (path === "/studio/ai-status") return { defaultProvider: "gemini", text: { gemini: false, openai: false, anthropic: false } };
@@ -61,8 +61,8 @@ beforeEach(() => {
     };
     if (path === "/canva/status") return { connected: false };
     if (path === "/channels/2/items/9/approve" && options?.method === "POST") {
-      detail = { ...detail, approvals: [{ id: 11, revisionId: 4, scheduledAt: future, status: "active" }], deliveries: [{ d: { id: 101, approvalId: 11, status: "scheduled", lastError: null, externalUrl: null, completedAt: null }, dest: { label: "@highscoop.official", platform: "instagram" } }] };
-      return { ok: true, destinations: 1, approval: detail.approvals[0] };
+      detail = { ...detail, approvals: [{ id: 11, revisionId: 4, scheduledAt: options.body?.timing === "later" ? options.body.scheduledAt : new Date().toISOString(), status: "active" }], deliveries: [{ d: { id: 101, approvalId: 11, status: "scheduled", lastError: null, externalUrl: null, completedAt: null }, dest: { label: "@highscoop.official", platform: "instagram" } }] };
+      return { ok: true, destinations: 1, approval: detail.approvals[0], timing: options.body?.timing, workerStarted: options.body?.timing === "now" };
     }
     if (path === "/deliveries?channelId=all") return detail.deliveries.map((row: any) => ({ ...structuredClone(row), ap: detail.approvals.find((a: any) => a.id === row.d.approvalId), item: detail.item }));
     if (path === "/publication-orphans?channelId=all") return structuredClone(orphanRows);
@@ -80,30 +80,46 @@ async function settle() {
 async function render(element: ReactNode) { await act(async () => root.render(createElement(QueryClientProvider, { client }, element))); await settle(); }
 function button(text: string) { const result = [...host.querySelectorAll("button")].find(b => b.textContent === text); if (!result) throw new Error(`Missing button: ${text}`); return result; }
 async function click(text: string) { await act(async () => button(text).click()); await settle(); }
+async function goTo(text: string) {
+  const control = [...host.querySelectorAll<HTMLButtonElement>(".content-workspace-nav button")].find(node => node.textContent === text);
+  if (!control) throw new Error(`Missing workspace navigation: ${text}`);
+  await act(async () => control.click()); await settle();
+}
+async function confirmPublication() {
+  const control = host.querySelector<HTMLInputElement>(".publish-confirm input")!;
+  expect(control.disabled).toBe(false);
+  if (!control.checked) await act(async () => control.click());
+  await settle();
+}
 const writes = () => mocks.api.mock.calls.filter(([, options]) => options?.method && options.method !== "GET");
 
 describe("승인 저장과 실제 전송의 구분", () => {
-  it("opens the actual delivery records from the next action, preserving the dirty guard", async () => {
+  it("opens delivery records in place while preserving the mounted editor and its dirty guard", async () => {
     mocks.search = "";
     await render(createElement(ItemDetailPage, { cid: 2, id: 9 }));
-    await click("3 카드·승인");
-    const next = host.querySelector<HTMLButtonElement>(".next-action-bottom button")!;
-    expect(next.textContent).toBe("전송 상태");
+    const editor = host.querySelector("#card-panel");
+    const title = host.querySelector<HTMLTextAreaElement>('.card-copy-editor textarea[id$="-title"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(title, "저장하기 전 입력"); title.dispatchEvent(new Event("input", { bubbles: true })); });
     mocks.guard.confirmLeave.mockClear();
-    await act(async () => next.click()); await settle();
-    expect(mocks.guard.confirmLeave).toHaveBeenCalledTimes(1);
+    await goTo("전송 상태");
+    expect(mocks.guard.confirmLeave).not.toHaveBeenCalled();
+    expect(mocks.guard.setDirty).toHaveBeenCalledWith("card-copy-2-9", true, expect.any(Function));
     expect(host.querySelector("#delivery-panel")).not.toBeNull();
-    expect(host.querySelector("#card-panel")).toBeNull();
+    expect(host.querySelector("#card-panel")).toBe(editor);
+    expect(host.querySelector<HTMLTextAreaElement>('.card-copy-editor textarea[id$="-title"]')?.value).toBe("저장하기 전 입력");
+    expect(host.querySelector("#delivery-panel")?.closest("details")?.open).toBe(true);
     expect(document.activeElement?.id).toBe("delivery-panel");
     expect(mocks.scroll).toHaveBeenLastCalledWith("delivery-panel");
     expect(host.textContent).toContain("예약 시각 지남 · 전송 대기");
     expect(writes()).toEqual([]);
   });
 
-  it("opens a linked delivery tab directly and shows why an approval with zero deliveries will not publish", async () => {
+  it("opens a linked delivery drawer directly and explains an approval with zero deliveries", async () => {
     detail.deliveries = [];
     await render(createElement(ItemDetailPage, { cid: 2, id: 9 }));
-    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.id).toBe("tab-delivery");
+    expect(host.querySelector('[role="tablist"]')).toBeNull();
+    expect(host.querySelector("#delivery-panel")?.closest("details")?.open).toBe(true);
+    expect(host.querySelector("#card-panel")).not.toBeNull();
     expect(host.textContent).toContain("승인 저장됨");
     expect(host.textContent).toContain("전송 예약이 없습니다");
     expect(host.querySelector('a[href="/instagram"]')).not.toBeNull();
@@ -114,20 +130,22 @@ describe("승인 저장과 실제 전송의 구분", () => {
 
   it("blocks another approval when the server reports missing publication permissions", async () => {
     detail.publicationReadiness = { ...detail.publicationReadiness, ready: false, blockers: ["@highscoop.official의 Instagram 게시 권한을 연결하세요."] };
-    await render(createElement(ItemDetailPage, { cid: 2, id: 9 })); await click("3 카드·승인");
-    expect(button("이 버전·카드·캡션으로 최종 승인").disabled).toBe(true);
+    detail.deliveries = []; detail.approvals = [];
+    await render(createElement(ItemDetailPage, { cid: 2, id: 9 })); await goTo("게시 준비"); await confirmPublication();
+    expect(button("승인하고 지금 게시").disabled).toBe(true);
     expect(host.textContent).toContain("Instagram 게시 권한을 연결하세요");
-    await act(async () => button("이 버전·카드·캡션으로 최종 승인").click());
+    await act(async () => button("승인하고 지금 게시").click());
     expect(writes()).toEqual([]);
   });
 
   it("blocks duplicate requests for the same revision while allowing an approval with no delivery to be approved again", async () => {
     await render(createElement(ItemDetailPage, { cid: 2, id: 9 }));
+    await goTo("게시 준비"); await confirmPublication();
     for (const status of ["scheduled", "processing", "succeeded", "unknown"]) {
       detail.deliveries[0].d.status = status;
       await act(async () => { client.setQueryData(["ch", 2, "item", 9], structuredClone(detail)); });
-      await click("3 카드·승인");
-      expect(button("이 버전·카드·캡션으로 최종 승인").disabled, status).toBe(true);
+      await goTo("게시 준비"); await confirmPublication();
+      expect(button("승인하고 지금 게시").disabled, status).toBe(true);
       if (status === "scheduled") expect(host.textContent).toContain("기존 예약을 취소한 뒤 다시 승인");
       await click("전송 상태 확인");
       expect(host.querySelector("#delivery-panel")).not.toBeNull();
@@ -135,26 +153,32 @@ describe("승인 저장과 실제 전송의 구분", () => {
     for (const status of ["failed", "dry_run"]) {
       detail.deliveries[0].d.status = status;
       await act(async () => { client.setQueryData(["ch", 2, "item", 9], structuredClone(detail)); });
-      await click("3 카드·승인");
-      expect(button("이 버전·카드·캡션으로 최종 승인").disabled, status).toBe(false);
+      await goTo("게시 준비"); await confirmPublication();
+      expect(button("승인하고 지금 게시").disabled, status).toBe(false);
     }
     detail.deliveries = [];
     await act(async () => { client.setQueryData(["ch", 2, "item", 9], structuredClone(detail)); }); await settle();
-    expect(button("이 버전·카드·캡션으로 최종 승인").disabled).toBe(false);
+    expect(button("승인하고 지금 게시").disabled).toBe(false);
     expect(host.textContent).not.toContain("이미 전송 예약이 있습니다");
     expect(writes()).toEqual([]);
   });
 
   it("moves to the persisted delivery record after approval without calling it a successful post", async () => {
     detail.approvals = []; detail.deliveries = []; detail.item.publishStatus = "waiting";
-    await render(createElement(ItemDetailPage, { cid: 2, id: 9 })); await click("3 카드·승인");
-    await click("이 버전·카드·캡션으로 최종 승인");
+    await render(createElement(ItemDetailPage, { cid: 2, id: 9 })); await goTo("게시 준비");
+    expect(host.querySelector('input[type="datetime-local"]')).toBeNull();
+    expect(button("승인하고 지금 게시").disabled).toBe(true);
+    await confirmPublication(); await click("승인하고 지금 게시");
     expect(host.querySelector("#delivery-panel")).not.toBeNull();
     expect(host.textContent).toContain("승인 #11");
-    expect(host.textContent).toContain("예약 대기 · 아직 게시 안 됨");
+    expect(host.querySelector("#delivery-panel")?.textContent).toContain("전송 대기");
+    expect(host.querySelector("#delivery-panel")?.closest("details")?.open).toBe(true);
+    expect(host.querySelector("#card-panel")).not.toBeNull();
     expect(host.querySelector('a[href="' + expectedUrl + '"]')).toBeNull();
     expect(writes().map(([path]) => path)).toEqual(["/channels/2/items/9/approve"]);
-    expect(mocks.toast).toHaveBeenLastCalledWith("ok", expect.stringContaining("전송 예약을 저장했습니다"));
+    expect(writes()[0][1]?.body).toMatchObject({ timing: "now", revisionId: 4, mediaAssetId: 40 });
+    expect(writes()[0][1]?.body).not.toHaveProperty("scheduledAt");
+    expect(mocks.toast).toHaveBeenLastCalledWith("ok", expect.stringContaining("바로 게시하도록 요청"));
   });
 
   it("refreshes waiting records automatically and replaces the stale scheduled state with the actual failure", async () => {
@@ -221,7 +245,7 @@ describe("발행함과 제작 보드의 전송 상태", () => {
   });
 
   it("shows simulated and failed Studio attempts with timestamps and failure details", async () => {
-    studioStatus.deliveries = [{ id: 1, status: "dry_run", lastError: null, externalUrl: null, scheduledAt: past }, { id: 2, status: "failed", lastError: "연결된 계정에 게시 권한이 없습니다.", externalUrl: null, scheduledAt: past }];
+    studioStatus.deliveries = [{ id: 1, approvalId: 10, approvalStatus: "active", status: "dry_run", lastError: null, externalUrl: null, scheduledAt: past }, { id: 2, approvalId: 10, approvalStatus: "active", status: "failed", lastError: "연결된 계정에 게시 권한이 없습니다.", externalUrl: null, scheduledAt: past }];
     await render(createElement(StudioPublish, { base: card, dirty: false, busy: false, save: vi.fn().mockResolvedValue(card) }));
     expect(host.textContent).toContain("모의 실행 완료 · 실제 게시 안 함");
     expect(host.textContent).toContain("전송 실패");

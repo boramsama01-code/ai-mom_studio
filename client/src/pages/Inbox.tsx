@@ -1,7 +1,7 @@
 import { CategorySelect } from "../CategorySelect";
 import { studioKey } from "@shared/channelKeys";
 import { useEffect, useRef, useState } from "react";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useToast } from "../toast";
 import { DiscoveryBadge } from "../discovery";
@@ -28,6 +28,19 @@ export type ListRow = {
 type ListResp = { total: number; page: number; pageSize: number; items: ListRow[] };
 
 const SOURCE_KIND: Record<string, string> = { naver_news: "네이버 뉴스", naver_blog: "블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 RSS", official: "공식", manual: "직접 추가", manual_text: "본문 직접 저장" };
+const BODY_FILTERS = [
+  { value: "", label: "모든 본문 상태" },
+  { value: "ok", label: "본문 확보" },
+  { value: "not_fetched", label: "본문 미조회" },
+  { value: "failed,blocked,unsupported", label: "본문 확인 필요" },
+];
+const BODY_STATES: Record<string, { label: string; kind: "" | "ok" | "warn" | "err"; hint: string }> = {
+  ok: { label: "본문 확보", kind: "ok", hint: "원문 본문이 저장되어 있습니다." },
+  not_fetched: { label: "본문 미조회", kind: "", hint: "제목·요약만 수집한 상태로, 아직 본문 조회를 시도하지 않았습니다." },
+  failed: { label: "본문 조회 실패", kind: "err", hint: "본문 조회를 완료하지 못했습니다. 자료를 열어 원인과 복구 방법을 확인하세요." },
+  blocked: { label: "자동 조회 제한", kind: "warn", hint: "출처가 자동 조회를 제한했습니다. 원문을 직접 확인할 수 있습니다." },
+  unsupported: { label: "본문 직접 확인", kind: "warn", hint: "공개 응답에서 본문을 추출하지 못했습니다. 원문 확인이나 본문 붙여넣기가 필요합니다." },
+};
 
 export function InboxPage() {
   const { selected, current } = useChannel();
@@ -39,6 +52,7 @@ export function InboxPage() {
     review: params.get("review") ?? "",
     schedule: params.get("schedule") ?? "",
     evidence: params.get("evidence") ?? "",
+    fetchStatus: params.get("fetchStatus") ?? "",
     category: params.get("category") ?? "",
     subcategory: params.get("subcategory") ?? "",
     noticeIntent: params.get("noticeIntent") ?? (params.has("subcategory") ? "all" : "candidate"),
@@ -48,14 +62,14 @@ export function InboxPage() {
   const [page, setPage] = useState(1);
   useEffect(() => { if (followToday) { setF(old => ({ ...old, collectedOn: today })); setPage(1); } }, [today, followToday]);
   const [qInput, setQInput] = useState(f.q);
-  const [mode, setMode] = useState<"ideas" | "scraps">(() => params.has("collectedOn") || params.has("subcategory") ? "scraps" : "ideas");
+  const [mode, setMode] = useState<"ideas" | "scraps">(() => params.has("collectedOn") || params.has("subcategory") || params.has("fetchStatus") ? "scraps" : "ideas");
   const ideas = isIdeaChannel(current) && mode === "ideas";
   const previousChannel = useRef(selected);
   useEffect(() => { setPage(1); if (previousChannel.current !== selected) { setMode("ideas"); setF(old => ({ ...old, subcategory: "" })); previousChannel.current = selected; } }, [selected]);
   const noticeChannel = current?.contentType === "notice";
   const query = useQuery({
     queryKey: ["ch", selected, "items", f, page, ideas],
-    queryFn: () => api<ListResp>(`/items?${qs({ channelId: selected, ...f, noticeIntent: noticeChannel ? f.noticeIntent : undefined, collectedOn: ideas ? undefined : f.collectedOn || undefined, origin: ideas ? "idea" : "scrap", page, pageSize: 20 })}`),
+    queryFn: () => api<ListResp>(`/items?${qs({ channelId: selected, ...f, fetchStatus: ideas ? undefined : f.fetchStatus || undefined, noticeIntent: noticeChannel ? f.noticeIntent : undefined, collectedOn: ideas ? undefined : f.collectedOn || undefined, origin: ideas ? "idea" : "scrap", page, pageSize: 20 })}`),
     placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === selected && previousQuery?.queryKey[5] === ideas ? previous : undefined,
     refetchInterval: 60_000,
   });
@@ -63,7 +77,7 @@ export function InboxPage() {
     setF((o) => ({ ...o, [k]: v }));
     setPage(1);
   };
-  const resetFilters = () => { setQInput(""); setFollowToday(false); setF({ q: "", review: "", schedule: "", evidence: "", category: "", subcategory: "", noticeIntent: "all", view: "inbox", collectedOn: "" }); setPage(1); };
+  const resetFilters = () => { setQInput(""); setFollowToday(false); setF({ q: "", review: "", schedule: "", evidence: "", fetchStatus: "", category: "", subcategory: "", noticeIntent: "all", view: "inbox", collectedOn: "" }); setPage(1); };
   const yesterday = kstDay(new Date(Date.now() - 86400_000));
   const isNotice = current ? current.contentType === "notice" : true;
 
@@ -77,26 +91,10 @@ export function InboxPage() {
         {current && <GuardedLink className="btn sm" href={`/?start=experience&channel=${studioKey(current.slug)}`}>직접 다녀온 후기 쓰기</GuardedLink>}
       </div>
       {isIdeaChannel(current) && <div className="tabs inbox-modes" role="group" aria-label="수집함 자료 유형"><button aria-pressed={ideas} onClick={() => { setMode("ideas"); resetFilters(); }}>아이디어 100</button><button aria-pressed={!ideas} onClick={() => { setMode("scraps"); resetFilters(); }}>스크랩 자료</button></div>}
-      {!ideas && <CollectionPanel date={f.collectedOn || undefined} subcategory={f.subcategory} />}
-      <CategorySelect channel={current?.slug ?? "all"} value={f.subcategory} onChange={v => set("subcategory", v)} filter />
-      {current && <InboxKeywords key={current.id} cid={current.id} kind={current.contentType} subcategory={f.subcategory} />}
-      {noticeChannel && <section className="panel stack" aria-label="공고 선별" style={{ marginBottom: 16 }}>
-        <div className="row" role="group" aria-label="공고 성격">
-          {[...NOTICE_INTENTS, "all"].map(intent => <button key={intent} className={`btn sm ${f.noticeIntent === intent ? "primary" : ""}`} aria-pressed={f.noticeIntent === intent} onClick={() => set("noticeIntent", intent)}>{intent === "all" ? "전체 자료" : NOTICE_INTENT_LABEL[intent as NoticeIntent]}</button>)}
-        </div>
-        <p className="small muted" style={{ margin: 0 }}>모집·접수 단서가 있는 자료를 먼저 보여드립니다. 제목·요약에 따른 분류이며, 현재 신청 가능 여부·대상·마감일은 공식 원문에서 확인해야 합니다. 기존 자료는 삭제하지 않으며 ‘전체 자료’에서 볼 수 있습니다.</p>
-      </section>}
       {ideas && <p className="small muted idea-intro">소재를 선택하면 구성안과 참고 자료를 볼 수 있습니다. 제작 보드에서 원고와 이미지를 완성하세요.</p>}
-      {!ideas && <div className="row collection-date-filter" role="group" aria-label="수집 날짜">
-        <button className={`btn sm ${f.collectedOn === today ? "primary" : ""}`} onClick={() => { setFollowToday(true); set("collectedOn", today); }}>오늘</button>
-        <button className={`btn sm ${f.collectedOn === yesterday ? "primary" : ""}`} aria-pressed={f.collectedOn === yesterday} onClick={() => { setFollowToday(false); set("collectedOn", yesterday); }}>어제</button>
-        <button className={`btn sm ${!f.collectedOn ? "primary" : ""}`} onClick={() => { setFollowToday(false); set("collectedOn", ""); }}>전체 기간</button>
-        <label className="field"><span className="sr-only">수집일 선택</span><input type="date" aria-label="수집일 선택" value={f.collectedOn} onChange={e => { setFollowToday(false); set("collectedOn", e.target.value); }} /></label>
-        <span className="small muted">{query.data?.total ?? "—"}건{f.review ? " · 검토 상태 필터 적용 중" : ""}</span>
-      </div>}
       <form
         className="panel stack inbox-search-panel"
-        style={{ marginBottom: 16 }}
+        style={{ marginBottom: 16, minWidth: 0 }}
         role="search"
         onSubmit={(e) => {
           e.preventDefault();
@@ -104,15 +102,37 @@ export function InboxPage() {
         }}
       >
         <div className="row">
-          <label className="field" style={{ flex: "2 1 220px" }}>
+          <label className="field" style={{ flex: "2 1 220px", minWidth: 0 }}>
             <span className="sr-only">검색</span>
             <input placeholder={ideas ? "아이디어 제목 검색" : "제목 검색"} value={qInput} onChange={(e) => setQInput(e.target.value)} />
           </label>
           <button className="btn primary">검색</button>
           <button type="button" className="btn ghost" onClick={resetFilters}>필터 초기화</button>
         </div>
+        <div className="row" style={{ alignItems: "flex-end", gap: 12, minWidth: 0 }}>
+          <div style={{ flex: "1 1 180px", minWidth: 0 }}><CategorySelect channel={current?.slug ?? "all"} value={f.subcategory} onChange={v => set("subcategory", v)} filter /></div>
+          {!ideas && <label className="field" style={{ flex: "1 1 180px", minWidth: 0 }}>
+            본문 상태
+            <select aria-label="본문 상태" value={f.fetchStatus} onChange={e => set("fetchStatus", e.target.value)}>
+              {BODY_FILTERS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>}
+          {noticeChannel && <label className="field" style={{ flex: "1 1 180px", minWidth: 0 }}>
+            공고 성격
+            <select aria-label="공고 성격" value={f.noticeIntent} onChange={e => set("noticeIntent", e.target.value)}>
+              {[...NOTICE_INTENTS, "all"].map(intent => <option key={intent} value={intent}>{intent === "all" ? "전체 자료" : NOTICE_INTENT_LABEL[intent as NoticeIntent]}</option>)}
+            </select>
+          </label>}
+        </div>
+        {!ideas && <div className="row collection-date-filter" role="group" aria-label="수집 날짜" style={{ margin: 0, padding: 0, minWidth: 0 }}>
+          <button type="button" className={`btn sm ${f.collectedOn === today ? "primary" : ""}`} aria-pressed={f.collectedOn === today} onClick={() => { setFollowToday(true); set("collectedOn", today); }}>오늘</button>
+          <button type="button" className={`btn sm ${f.collectedOn === yesterday ? "primary" : ""}`} aria-pressed={f.collectedOn === yesterday} onClick={() => { setFollowToday(false); set("collectedOn", yesterday); }}>어제</button>
+          <button type="button" className={`btn sm ${!f.collectedOn ? "primary" : ""}`} aria-pressed={!f.collectedOn} onClick={() => { setFollowToday(false); set("collectedOn", ""); }}>전체 기간</button>
+          <label className="field" style={{ minWidth: 0 }}><span className="sr-only">수집일 선택</span><input type="date" aria-label="수집일 선택" value={f.collectedOn} onChange={e => { setFollowToday(false); set("collectedOn", e.target.value); }} /></label>
+        </div>}
+        {!ideas && <p className="small muted" style={{ margin: 0 }}>본문 미조회는 오류가 아닌 조회 전 상태입니다.{noticeChannel ? " 모집·접수 후보의 자격과 마감일은 공식 원문에서 확인하세요." : ""}</p>}
         <details className="filters" open={!!(f.review || f.evidence || f.schedule || f.category || f.view !== "inbox")}>
-          <summary className="btn sm" style={{ width: "fit-content" }}>필터{[f.review, f.evidence, f.schedule, f.category].filter(Boolean).length ? ` (${[f.review, f.evidence, f.schedule, f.category].filter(Boolean).length}개 적용)` : ""}{f.view !== "inbox" ? " · 보기 변경됨" : ""}</summary>
+          <summary className="btn sm" style={{ width: "fit-content", maxWidth: "100%", whiteSpace: "normal" }}>추가 필터{[f.review, f.evidence, f.schedule, f.category].filter(Boolean).length ? ` (${[f.review, f.evidence, f.schedule, f.category].filter(Boolean).length}개 적용)` : ""}{f.view !== "inbox" ? " · 보기 변경됨" : ""}</summary>
         <div className="grid grid-3" style={{ marginTop: 12 }}>
           <label className="field">
             보기
@@ -167,14 +187,24 @@ export function InboxPage() {
         </details>
       </form>
 
+      {(!ideas || current) && <details className="settings-details inbox-collection-options" style={{ margin: "0 0 16px", minWidth: 0 }}>
+        <summary style={{ display: "list-item", listStylePosition: "inside" }}>수집 현황·설정 <span className="small muted" style={{ fontWeight: 400, marginLeft: 8 }}>지금 수집 · 키워드 관리</span></summary>
+        <div className="stack" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+          {!ideas && <CollectionPanel date={f.collectedOn || undefined} subcategory={f.subcategory} />}
+          {current && <InboxKeywords key={current.id} cid={current.id} kind={current.contentType} subcategory={f.subcategory} />}
+        </div>
+      </details>}
+
+      {!query.isLoading && !query.error && <p className="small muted" role="status">{ideas ? "아이디어" : "자료"} {query.data?.total ?? 0}건{!ideas && f.fetchStatus ? ` · ${BODY_FILTERS.find(option => option.value === f.fetchStatus)?.label ?? "본문 상태 필터 적용"}` : ""}</p>}
+
       {query.isLoading ? (
         <Loading lines={4} label="수집함 불러오는 중" />
       ) : query.error ? (
         <ErrorBox error={query.error} retry={() => query.refetch()} />
       ) : !query.data?.items.length ? (
         <Empty>
-          {noticeChannel && f.noticeIntent !== "all" ? `선택한 기간에 ‘${NOTICE_INTENT_LABEL[f.noticeIntent as NoticeIntent] ?? "공고"}’ 자료가 없습니다. ‘확인 필요’ 또는 ‘전체 자료’도 확인하세요. ` : f.collectedOn ? `${f.collectedOn}에 새로 수집된 자료가 없습니다. ` : "조건에 맞는 자료가 없습니다. "}
-          {f.view === "inbox" && !f.q && !f.review && !f.evidence ? "위에서 수집 키워드를 추가하거나, 전체 기간의 자료를 확인해 보세요." : "필터를 바꿔 보세요."}
+          {f.fetchStatus && !ideas ? "선택한 기간에 이 본문 상태의 자료가 없습니다. " : noticeChannel && f.noticeIntent !== "all" ? `선택한 기간에 ‘${NOTICE_INTENT_LABEL[f.noticeIntent as NoticeIntent] ?? "공고"}’ 자료가 없습니다. ‘확인 필요’ 또는 ‘전체 자료’도 확인하세요. ` : f.q || f.review || f.evidence || f.category || f.subcategory || f.schedule ? "조건에 맞는 자료가 없습니다. " : f.collectedOn ? `${f.collectedOn}에 새로 수집된 자료가 없습니다. ` : "조건에 맞는 자료가 없습니다. "}
+          {f.view === "inbox" && !f.q && !f.review && !f.evidence && !f.fetchStatus ? "수집 현황·설정에서 키워드를 추가하거나, 전체 기간의 자료를 확인해 보세요." : "필터를 바꿔 보세요."}
           <div className="empty-actions"><button className="btn" onClick={resetFilters}>전체 자료 보기</button></div>
         </Empty>
       ) : (
@@ -201,14 +231,15 @@ export function ItemList({ rows, showChannel }: { rows: ListRow[]; showChannel: 
 
 function ItemBody({ row: { item, source, channelName, matchedQuery, noticeIntent }, showChannel }: { row: ListRow; showChannel: boolean }) {
   const idea = readIdea(item.edited);
-  if (item.origin === "idea" && idea) return <div className="idea-list-content"><span className="idea-number">{String(idea.number).padStart(3, "0")}</span><div><div className="meta"><span>{idea.category}</span><span>{idea.format}</span>{showChannel && <span>{channelName}</span>}</div><GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">{item.title}</GuardedLink><p className="small muted snippet">{idea.angle}</p><span className="small muted">기획 아이디어 · 게시 전 확인 필요</span></div></div>;
+  const bodyState = source ? BODY_STATES[source.fetchStatus] : undefined;
+  if (item.origin === "idea" && idea) return <div className="idea-list-content"><span className="idea-number">{String(idea.number).padStart(3, "0")}</span><div style={{ minWidth: 0, overflowWrap: "anywhere" }}><div className="meta"><span>{idea.category}</span><span>{idea.format}</span>{showChannel && <span>{channelName}</span>}</div><GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">{item.title}</GuardedLink><p className="small muted snippet">{idea.angle}</p><span className="small muted">기획 아이디어 · 게시 전 확인 필요</span></div></div>;
   return (
     <>
       <GuardedLink href={`/items/${item.channelId}/${item.id}`} className="title">
         {item.title}
       </GuardedLink>
-      {item.discovery?.reason ? <p className="small snippet">AI 선정 이유: {item.discovery.reason}</p> : source?.snippet && <p className="small muted snippet">{source.snippet}</p>}
-      <div className="meta">
+      {item.discovery?.reason ? <p className="small snippet" style={{ overflowWrap: "anywhere" }}>AI 선정 이유: {item.discovery.reason}</p> : source?.snippet && <p className="small muted snippet" style={{ overflowWrap: "anywhere" }}>수집 요약: {source.snippet}</p>}
+      <div className="meta" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
         {showChannel && <span>{channelName}</span>}
         <span>{CONTENT_KIND_LABEL[item.kind as ContentKind]}</span>
         {item.category && <span>{item.category}</span>}
@@ -217,6 +248,7 @@ function ItemBody({ row: { item, source, channelName, matchedQuery, noticeIntent
         {matchedQuery && <span>검색어: {matchedQuery}</span>}
       </div>
       <div className="row">
+        {bodyState && <Badge kind={bodyState.kind} title={bodyState.hint}>{bodyState.label}</Badge>}
         {item.isSample && <Badge kind="sample">샘플 · 실제 정보 아님</Badge>}
         {noticeIntent && <Badge kind={noticeIntent === "candidate" ? "ok" : "warn"}>{NOTICE_INTENT_LABEL[noticeIntent]}</Badge>}
         <DiscoveryBadge info={item.discovery} />
@@ -225,7 +257,7 @@ function ItemBody({ row: { item, source, channelName, matchedQuery, noticeIntent
         {item.kind === "notice" && <StatusBadge type="schedule" value={item.scheduleStatus} />}
         {item.relevance !== "uncertain" && <StatusBadge type="relevance" value={item.relevance} />}
         {item.publishStatus !== "waiting" && <StatusBadge type="publish" value={item.publishStatus} />}
-        {item.excluded && <Badge kind="err">제외됨: {item.excludedReason}</Badge>}
+        {item.excluded && <Badge kind="err"><span style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}>제외됨: {item.excludedReason}</span></Badge>}
       </div>
     </>
   );

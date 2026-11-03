@@ -6,6 +6,7 @@ import "./styles.css";
 import "./studio.css";
 import "./design-system.css";
 import "./channel-navigation.css";
+import "./contentWorkspace.css";
 import { Icon, type IconName } from "./icons";
 import { useFocusScope } from "./useFocusScope";
 import { api } from "./api";
@@ -34,24 +35,28 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 15_000 } },
 });
 
-const NAV: Array<{ group: string; items: Array<{ href: string; label: string; icon: IconName; count?: "review" | "ready" }> }> = [
+const NAV: Array<{ group: string; collapsible?: boolean; items: Array<{ href: string; label: string; icon: IconName; count?: "review" }> }> = [
   {
     group: "스튜디오",
-    items: [{ href: "/", label: "내 콘텐츠", icon: "grid" }],
+    items: [
+      { href: "/", label: "내 콘텐츠", icon: "grid" },
+      { href: "/inbox", label: "수집함", icon: "inbox", count: "review" },
+      { href: "/publish", label: "발행함", icon: "send" },
+    ],
   },
   {
-    group: "자료 수집 · 발행",
+    group: "더 보기",
+    collapsible: true,
     items: [
       { href: "/today", label: "아침 수집 브리핑", icon: "sun" },
-      { href: "/inbox", label: "수집함", icon: "inbox", count: "review" },
-      { href: "/drafts", label: "콘텐츠 초안", icon: "pen", count: "ready" },
-      { href: "/publish", label: "발행함", icon: "send" },
-      { href: "/instagram", label: "인스타그램 연결", icon: "link" },
+      { href: "/drafts", label: "콘텐츠 초안", icon: "pen" },
     ],
   },
   {
     group: "설정",
+    collapsible: true,
     items: [
+      { href: "/instagram", label: "인스타그램 연결", icon: "link" },
       { href: "/rules", label: "검색 설정", icon: "sliders" },
       { href: "/design", label: "수집 카드 디자인", icon: "design" },
       { href: "/connections", label: "API 키 관리", icon: "link" },
@@ -62,8 +67,8 @@ const NAV: Array<{ group: string; items: Array<{ href: string; label: string; ic
   },
 ];
 
-function NavigationGroup({ title, expanded, children }: { title: string; expanded: boolean; children: ReactNode }) {
-  return title === "설정" ? <details className="nav-group nav-settings" open={expanded}><summary className="nav-group-label">설정<Icon name="chevron" size={14} /></summary>{children}</details> : <div className="nav-group"><div className="nav-group-label">{title}</div>{children}</div>;
+function NavigationGroup({ title, collapsible, expanded, children }: { title: string; collapsible?: boolean; expanded: boolean; children: ReactNode }) {
+  return collapsible ? <details className="nav-group nav-settings" open={expanded}><summary className="nav-group-label">{title}<Icon name="chevron" size={14} /></summary>{children}</details> : <div className="nav-group"><div className="nav-group-label">{title}</div>{children}</div>;
 }
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -83,7 +88,7 @@ function Shell() {
   const status = useQuery({ queryKey: ["status"], queryFn: () => api<{ globalStop: boolean }>("/status"), refetchInterval: 60_000 });
   const today = useQuery({
     queryKey: ["ch", selected, "today"],
-    queryFn: () => api<{ counts: { pendingReview: number; draftsReady: number } }>(`/channels/${selected}/today`),
+    queryFn: () => api<{ counts: { pendingReview: number } }>(`/channels/${selected}/today`),
     enabled: selected !== "all",
     refetchInterval: 120_000,
   });
@@ -152,16 +157,16 @@ function Shell() {
         </button>
         <nav className="nav">
           {NAV.map((g) => (
-            <NavigationGroup key={g.group} title={g.group} expanded={g.items.some(n => isActive(n.href))}>
+            <NavigationGroup key={g.group} title={g.group} collapsible={g.collapsible} expanded={g.items.some(n => isActive(n.href))}>
               {g.items.map((n) => {
-                const c = n.count === "review" ? counts?.pendingReview : n.count === "ready" ? counts?.draftsReady : undefined;
+                const c = n.count === "review" ? counts?.pendingReview : undefined;
                 return (
                   <GuardedLink key={n.href} href={n.href} ariaCurrent={isActive(n.href)} onClick={() => setOpen(false)}>
                     <span className="nav-icon" aria-hidden>
                       <Icon name={n.icon} size={19} />
                     </span>
                     <span className="grow">{n.label}</span>
-                    {!!c && <span className="nav-count" aria-label={`${c}건`}>{c}</span>}
+                    {!!c && <span className="nav-count" aria-label={`검토 대기 ${c}건`} title={`검토 대기 ${c}건`}>{c}</span>}
                   </GuardedLink>
                 );
               })}
@@ -214,7 +219,7 @@ function Shell() {
         </ScreenErrorBoundary>
       </main>
       </div>
-      <nav className="mobile-nav" aria-label="빠른 메뉴">{NAV.flatMap(g => g.items).filter(n => ["/", "/inbox", "/drafts"].includes(n.href)).map(n => <GuardedLink key={n.href} href={n.href} ariaCurrent={isActive(n.href)}><Icon name={n.icon} size={20} /><span>{n.label}</span></GuardedLink>)}<button aria-label="전체 메뉴 열기" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" size={20} /><span>전체 메뉴</span></button></nav>
+      <nav className="mobile-nav" aria-label="빠른 메뉴">{NAV.flatMap(g => g.items).filter(n => ["/", "/inbox", "/publish"].includes(n.href)).map(n => <GuardedLink key={n.href} href={n.href} ariaCurrent={isActive(n.href)}><Icon name={n.icon} size={20} /><span>{n.label}</span></GuardedLink>)}<button aria-label="전체 메뉴 열기" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" size={20} /><span>전체 메뉴</span></button></nav>
       <CommandPalette open={palette} onClose={() => setPalette(false)} onCollect={collect} />
       <DirtyModal />
     </div>

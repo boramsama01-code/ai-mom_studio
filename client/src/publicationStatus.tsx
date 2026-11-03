@@ -39,7 +39,9 @@ export function deliveryState(status: string, scheduledAt?: string | Date | null
   if (status === "cancelled") return { label: "전송 취소됨", detail: "이 전송 건은 처리하지 않습니다. 취소 사유를 확인하세요.", tone: "" };
   if (status === "processing") return { label: "전송 처리 중", detail: "게시 완료 응답을 기다리고 있습니다. 아직 게시 성공으로 확정되지 않았습니다.", tone: "" };
   if (status === "scheduled" || status === "waiting") {
-    const due = scheduledAt ? new Date(scheduledAt).getTime() <= now : false;
+    const scheduledTime = scheduledAt ? new Date(scheduledAt).getTime() : NaN;
+    const due = scheduledTime <= now;
+    if (due && now - scheduledTime <= 60_000) return { label: "전송 대기 · 게시 요청됨", detail: "게시 요청이 저장되었습니다. 전송이 시작되면 진행 상황과 실제 게시 결과가 여기에 표시됩니다.", tone: "" };
     return due
       ? { label: "예약 시각 지남 · 전송 대기", detail: "예약 시간이 지났지만 전송이 시작되지 않았습니다. 현재 게시 설정, 계정 연결, 실행 기록을 확인하세요.", tone: "warn" }
       : { label: "예약 대기 · 아직 게시 안 됨", detail: "승인과 예약이 저장되었습니다. 예약 시각 이후 전송 결과가 여기에 표시됩니다.", tone: "" };
