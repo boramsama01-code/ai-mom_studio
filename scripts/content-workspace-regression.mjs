@@ -71,7 +71,9 @@ function fixture() {
       publicationReadiness: { ready: true, blockers: [], dryRun: false, autoPublish: true, dailyLimit: 10, expectedUsername: "alligodang.official", destinations: [{ id: 20, label: "@alligodang.official", platform: "instagram", configured: true }] },
     };
   };
-  const studio = () => ({ card: { id: 25, version: 2, title: detail().item.title, channel: "alligodang", format: "카드뉴스", stage: "review", sourceItemId: 9790, script: "", caption: "", memo: "", imagePath: "", panels: Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), createdAt: stamp, updatedAt: stamp, sourceOutput: { assetId: state.cards[0].id, channelId: 3, itemId: 9790, revisionId: state.cards[0].revisionId, stale: state.cards[0].revisionId !== state.saved.revisionId, pages: state.cards[0].carousel.pages, coverCredit: "테스트 자료" } }, revisions: [], jobs: [], images: [] });
+  // current-dialogue stores its Studio channel as "news" (shared/channelKeys.ts).
+  // The account's display name and Instagram handle are not the saved channel key.
+  const studio = () => ({ card: { id: 25, version: 2, title: detail().item.title, channel: "news", format: "카드뉴스", stage: "review", sourceItemId: 9790, script: "", caption: "", memo: "", imagePath: "", panels: Array.from({ length: 4 }, () => ({ scene: "", dialogue: "", imageId: null })), createdAt: stamp, updatedAt: stamp, sourceOutput: { assetId: state.cards[0].id, channelId: 3, itemId: 9790, revisionId: state.cards[0].revisionId, stale: state.cards[0].revisionId !== state.saved.revisionId, pages: state.cards[0].carousel.pages, coverCredit: "테스트 자료" } }, revisions: [], jobs: [], images: [] });
   async function api(route, url) {
     const request = route.request(), pathname = url.pathname, method = request.method();
     const body = request.postData() ? request.postDataJSON() : undefined;
