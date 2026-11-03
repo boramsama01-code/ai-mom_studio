@@ -87,7 +87,7 @@ describe("operator-bound Meta Unified Login", () => {
   it("consumes a denial and reports a fixed reason without trusting provider text", async () => {
     const { agent, state } = await start();
     const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, error: "secret-provider-text" });
-    expect(done.headers.location).toBe("/instagram?instagram=error&reason=denied");
+    expect(done.headers.location).toBe("/instagram?instagram=error&reason=denied&stage=callback");
     expect(done.text).not.toContain("secret-provider-text"); expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -95,7 +95,96 @@ describe("operator-bound Meta Unified Login", () => {
     const { agent, state } = await start();
     mocks.connect.mockRejectedValue(new HttpError(400, "provider-detail", { code: "account_mismatch" }));
     const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "test-code", channelId: "999", username: "other.account" });
-    expect(done.headers.location).toBe("/instagram?instagram=error&reason=account_mismatch");
+    expect(done.headers.location).toBe("/instagram?instagram=error&reason=account_mismatch&stage=connection_validation");
     expect(mocks.connect).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ username: "spacepenguin.co" }), "admin");
+  });
+
+  it("distinguishes a missing OAuth code before attempting any exchange", async () => {
+    const { agent, state } = await start();
+    const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, stage: "persistence", graph_code: "999", error_description: "PRIVATE_PROVIDER_TEXT" });
+    expect(done.headers.location).toBe("/instagram?instagram=error&reason=invalid_request&stage=callback");
+    expect(fetcher).not.toHaveBeenCalled(); expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("keeps safe token-exchange codes without echoing provider text, credentials or callback fields", async () => {
+    const { agent, state } = await start();
+    const privateText = "PRIVATE_TOKEN_STATE_CODE https://private.invalid/?access_token=PRIVATE_TOKEN";
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ access_token: privateText, error: { code: 190, error_subcode: 463, message: privateText, error_data: { token: privateText }, fbtrace_id: privateText } }), { status: 400 }));
+    const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: privateText, stage: privateText, token: privateText });
+    expect(done.headers.location).toBe("/instagram?instagram=error&reason=exchange_failed&stage=token_exchange&http_status=400&graph_code=190&graph_subcode=463&lost=false");
+    for (const secret of [privateText, "PRIVATE", state, "test-only-app-secret"]) expect(done.text + done.headers.location).not.toContain(secret);
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it.each([null, [], {}, { access_token: "too-short" }, { error: { code: "190", error_subcode: "PRIVATE", message: { token: "PRIVATE" } } }])("diagnoses a malformed token-exchange response safely: %j", async body => {
+    const { agent, state } = await start();
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify(body), { status: 200 }));
+    const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "test-code" });
+    expect(done.headers.location).toBe("/instagram?instagram=error&reason=exchange_failed&stage=token_exchange&http_status=200&lost=false");
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("reports transport loss without an exception URL or cause", async () => {
+    const { agent, state } = await start();
+    fetcher.mockRejectedValueOnce(new Error("PRIVATE https://graph.facebook.com/?client_secret=PRIVATE&code=PRIVATE"));
+    const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "test-code" });
+    expect(done.headers.location).toBe("/instagram?instagram=error&reason=exchange_failed&stage=token_exchange&lost=true");
+    expect(done.text).not.toContain("PRIVATE"); expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it("keeps a changed configuration distinct from a rejected token exchange", async () => {
+    const { agent, state } = await start();
+    delete process.env.META_APP_SECRET;
+    const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "test-code" });
+    expect(done.headers.location).toBe("/instagram?instagram=error&reason=configuration&stage=configuration");
+    expect(fetcher).not.toHaveBeenCalled(); expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["instagram_identity_failed", "assigned_accounts"],
+    ["account_identity_incomplete", "account_profile"],
+    ["direct_account_access_failed", "direct_profile"],
+    ["direct_account_access_failed", "business_asset"],
+    ["direct_account_access_failed", "mapped_profile"],
+    ["direct_publish_access_failed", "quota"],
+    ["publishing_permission", "quota"],
+    ["persistence_failed", "persistence"],
+  ])("retains %s at %s and drops all unapproved error metadata", async (reason, stage) => {
+    const { agent, state } = await start();
+    mocks.connect.mockRejectedValue(new HttpError(400, "PRIVATE SQL TOKEN URL", { code: reason, token: "PRIVATE", state, diagnostic: { stage, httpStatus: 400, graphCode: 100, graphSubcode: 33, lost: false, message: "PRIVATE", code: "PRIVATE", state } }));
+    const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "test-code" });
+    expect(done.headers.location).toBe(`/instagram?instagram=error&reason=${reason}&stage=${stage}&http_status=400&graph_code=100&graph_subcode=33&lost=false`);
+    expect(done.text + done.headers.location).not.toContain("PRIVATE");
+    expect(done.text + done.headers.location).not.toContain(state);
+  });
+
+  it.each([
+    new Error("PRIVATE SQL TOKEN URL"),
+    new HttpError(500, "PRIVATE SQL TOKEN URL", { code: "PRIVATE", diagnostic: { stage: "PRIVATE", graphCode: "100", cause: "PRIVATE" } }),
+    ...["", 0, false, null, {}, []].map(code => new HttpError(400, "PRIVATE", { code })),
+  ])("does not trust unknown exceptions or reason/stage values", async error => {
+    const { agent, state } = await start();
+    mocks.connect.mockRejectedValue(error);
+    const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "test-code" });
+    expect(done.headers.location).toBe("/instagram?instagram=error&reason=connect_failed&stage=connection_validation");
+    expect(done.text).not.toContain("PRIVATE");
+  });
+
+  it("logs only fixed failure diagnostics and never logs OAuth secrets or successful connections", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      fetcher.mockImplementation(async () => new Response(JSON.stringify({ access_token: "test-only-system-user-token" }), { headers: { "content-type": "application/json" } }));
+      const success = await start();
+      await success.agent.get("/api/studio/instagram/oauth/callback").query({ state: success.state, code: "private-success-code" });
+      expect(warn).not.toHaveBeenCalled();
+      const { agent, state } = await start();
+      const privateText = "EAA_PRIVATE_TOKEN https://private.invalid/?access_token=PRIVATE_TOKEN";
+      mocks.connect.mockRejectedValue(new HttpError(400, privateText, { code: "direct_account_access_failed", token: privateText, username: "PRIVATE_USERNAME", diagnostic: { stage: "business_asset", httpStatus: 400, graphCode: 100, graphSubcode: 33, lost: false, provider_message: privateText, state, code: "private-auth-code", stack: "PRIVATE_STACK" } }));
+      await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "private-auth-code", error_description: privateText });
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith("[instagram_oauth]", JSON.stringify({ reason: "direct_account_access_failed", diagnostic: { stage: "business_asset", httpStatus: 400, graphCode: 100, graphSubcode: 33, lost: false } }));
+      const logged = JSON.stringify(warn.mock.calls);
+      for (const secret of ["PRIVATE", "private-auth-code", state, success.state, "test-only-app-secret", "test-only-system-user-token", "https://"]) expect(logged).not.toContain(secret);
+    } finally { warn.mockRestore(); }
   });
 });

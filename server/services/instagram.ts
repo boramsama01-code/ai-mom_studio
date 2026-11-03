@@ -7,6 +7,7 @@ import { altTextError } from "../../shared/altText";
  * 문서: https://developers.facebook.com/docs/instagram-platform/content-publishing/
  */
 import { env } from "../env";
+import { instagramDiagnostic, type InstagramDiagnosticStage, type InstagramOAuthReason } from "../../shared/instagramOAuthDiagnostics";
 
 export type InstagramAuthMode = "instagram" | "facebook";
 const HOSTS: Record<InstagramAuthMode, string> = { instagram: "https://graph.instagram.com", facebook: "https://graph.facebook.com" };
@@ -41,17 +42,21 @@ function instagramId(value: unknown): string | undefined {
   return undefined;
 }
 
+function accountFailure(stage: InstagramDiagnosticStage, error: string, reason: InstagramOAuthReason = "instagram_identity_failed", failure?: { lost?: boolean; diagnostic?: IgFailureDiagnostic }) {
+  return { ok: false as const, error, reason, diagnostic: instagramDiagnostic(stage, failure?.diagnostic, failure?.lost) };
+}
+
 /** Read the account identity from the token, never accept a user-entered account ID. */
 export async function accountIdentity(token: string, authMode: InstagramAuthMode = "instagram", expectedUsername?: string, fetchImpl: typeof fetch = fetch) {
   if (authMode === "facebook") {
     const accounts = new Map<string, { userId: string; username?: string }>();
     const normalized = expectedUsername?.trim().replace(/^@/, "").toLowerCase();
-    const invalidResponse = () => ({ ok: false as const, error: "Meta에서 받은 계정 정보가 완전하지 않거나 서로 일치하지 않습니다. 잠시 후 다시 연결해 주세요.", reason: "invalid_account_response" as const });
-    const incompleteIdentity = () => ({ ok: false as const, error: "Meta 계정 목록은 받았지만 일부 계정의 사용자명을 확인하지 못했습니다. 잠시 후 다시 연결하거나 Meta에서 연결할 계정만 선택해 다시 인증해 주세요.", reason: "account_identity_incomplete" as const });
+    const invalidResponse = (stage: InstagramDiagnosticStage = "assigned_accounts") => accountFailure(stage, "Meta에서 받은 계정 정보가 완전하지 않거나 서로 일치하지 않습니다. 잠시 후 다시 연결해 주세요.", "invalid_account_response");
+    const incompleteIdentity = (failure?: { lost?: boolean; diagnostic?: IgFailureDiagnostic }) => accountFailure("account_profile", "Meta 계정 목록은 받았지만 일부 계정의 사용자명을 확인하지 못했습니다. 잠시 후 다시 연결하거나 Meta에서 연결할 계정만 선택해 다시 인증해 주세요.", "account_identity_incomplete", failure);
     let after: string | undefined;
     for (let page = 0; page < 10; page++) {
       const result = await igFetch("me/assigned_instagram_accounts", "GET", { fields: "id,username", limit: "100", ...(after ? { after } : {}) }, token, authMode, fetchImpl);
-      if (!result.ok) return { ok: false as const, error: "Meta 계정 권한을 확인하지 못했습니다. 통합 로그인에서 이 인스타그램 계정을 선택하고 다시 연결하세요." + lookupFailureDiagnostic("assigned_accounts", result) };
+      if (!result.ok) return accountFailure("assigned_accounts", "Meta 계정 권한을 확인하지 못했습니다. 통합 로그인에서 이 인스타그램 계정을 선택하고 다시 연결하세요." + lookupFailureDiagnostic("assigned_accounts", result), "instagram_identity_failed", result);
       if (!Array.isArray(result.json.data)) return invalidResponse();
       const paging = result.json.paging;
       if (paging !== undefined && (!paging || typeof paging !== "object" || Array.isArray(paging))) return invalidResponse();
@@ -68,12 +73,12 @@ export async function accountIdentity(token: string, authMode: InstagramAuthMode
       }
       const next = result.json.paging?.cursors?.after;
       if (!result.json.paging?.next) break;
-      if (typeof next !== "string" || !next || next === after || page === 9) return { ok: false as const, error: "Meta 계정 목록을 모두 확인하지 못했습니다. 연결할 계정만 선택해 다시 인증하세요.", reason: "account_list_incomplete" as const };
+      if (typeof next !== "string" || !next || next === after || page === 9) return accountFailure("assigned_accounts", "Meta 계정 목록을 모두 확인하지 못했습니다. 연결할 계정만 선택해 다시 인증하세요.", "account_list_incomplete");
       after = next;
     }
     if (accounts.size === 0) {
       const hint = normalized ? INSTAGRAM_TARGET_HINTS.get(normalized) : undefined;
-      if (!hint) return { ok: false as const, error: "이 토큰에서 연결 가능한 인스타그램 계정 목록이 비어 있습니다. 토큰을 발급한 Meta 앱과 로그인한 인스타그램 계정을 확인해 주세요.", reason: "no_assigned_accounts" as const };
+      if (!hint) return accountFailure("assigned_accounts", "이 토큰에서 연결 가능한 인스타그램 계정 목록이 비어 있습니다. 토큰을 발급한 Meta 앱과 로그인한 인스타그램 계정을 확인해 주세요.", "no_assigned_accounts");
       let targetId = hint.primaryId;
       let profileStage: "direct_profile" | "mapped_profile" = "direct_profile";
       let profile = await igFetch(targetId, "GET", { fields: "id,username" }, token, authMode, fetchImpl);
@@ -82,22 +87,22 @@ export async function accountIdentity(token: string, authMode: InstagramAuthMode
         // authorized mapping may identify a different canonical IGUser ID, but
         // both its handle and the freshly fetched IGUser must match this channel.
         const asset = await igFetch(hint.businessAssetId, "GET", { fields: "id,ig_user_id,ig_username" }, token, authMode, fetchImpl);
-        if (!asset.ok) return { ok: false as const, error: "Meta의 인스타그램 비즈니스 자산 정보를 확인하지 못했습니다. 해당 자산의 접근 권한을 확인해 주세요." + lookupFailureDiagnostic("business_asset", asset), reason: "direct_account_access_failed" as const };
+        if (!asset.ok) return accountFailure("business_asset", "Meta의 인스타그램 비즈니스 자산 정보를 확인하지 못했습니다. 해당 자산의 접근 권한을 확인해 주세요." + lookupFailureDiagnostic("business_asset", asset), "direct_account_access_failed", asset);
         const assetId = instagramId(asset.json.id), mappedId = instagramId(asset.json.ig_user_id), assetUsername = asset.json.ig_username;
-        if (!assetId || !mappedId || !/^[1-9]\d{0,39}$/.test(mappedId) || mappedId === assetId || typeof assetUsername !== "string" || !INSTAGRAM_USERNAME.test(assetUsername)) return invalidResponse();
-        if (assetId !== hint.businessAssetId || assetUsername.toLowerCase() !== normalized) return { ok: false as const, error: "Meta 비즈니스 자산의 계정이 이 채널의 게시 계정과 일치하지 않습니다. 인스타그램 연결 정보를 확인해 주세요.", reason: "account_mismatch" as const };
+        if (!assetId || !mappedId || !/^[1-9]\d{0,39}$/.test(mappedId) || mappedId === assetId || typeof assetUsername !== "string" || !INSTAGRAM_USERNAME.test(assetUsername)) return invalidResponse("business_asset");
+        if (assetId !== hint.businessAssetId || assetUsername.toLowerCase() !== normalized) return accountFailure("business_asset", "Meta 비즈니스 자산의 계정이 이 채널의 게시 계정과 일치하지 않습니다. 인스타그램 연결 정보를 확인해 주세요.", "account_mismatch");
         targetId = mappedId;
         profileStage = "mapped_profile";
         profile = await igFetch(targetId, "GET", { fields: "id,username" }, token, authMode, fetchImpl);
       }
-      if (!profile.ok) return { ok: false as const, error: "Meta 계정 목록은 비어 있고, 이 토큰으로 대상 계정 정보를 직접 조회하지 못했습니다. 토큰을 발급한 Meta 앱과 해당 계정의 접근 권한을 확인해 주세요." + lookupFailureDiagnostic(profileStage, profile), reason: "direct_account_access_failed" as const };
+      if (!profile.ok) return accountFailure(profileStage, "Meta 계정 목록은 비어 있고, 이 토큰으로 대상 계정 정보를 직접 조회하지 못했습니다. 토큰을 발급한 Meta 앱과 해당 계정의 접근 권한을 확인해 주세요." + lookupFailureDiagnostic(profileStage, profile), "direct_account_access_failed", profile);
       const userId = instagramId(profile.json.id), username = profile.json.username;
-      if (!userId || typeof username !== "string" || !INSTAGRAM_USERNAME.test(username)) return invalidResponse();
-      if (userId !== targetId || username.toLowerCase() !== normalized) return { ok: false as const, error: "Meta에서 직접 확인한 계정이 이 채널의 게시 계정과 일치하지 않습니다. 인스타그램 연결 정보를 확인해 주세요.", reason: "account_mismatch" as const };
+      if (!userId || typeof username !== "string" || !INSTAGRAM_USERNAME.test(username)) return invalidResponse(profileStage);
+      if (userId !== targetId || username.toLowerCase() !== normalized) return accountFailure(profileStage, "Meta에서 직접 확인한 계정이 이 채널의 게시 계정과 일치하지 않습니다. 인스타그램 연결 정보를 확인해 주세요.", "account_mismatch");
       // Enforce publishing access here, including identity-only worker callers.
       // Profile readability alone must never authorize this alternate path.
       const quota = await publishingLimit(userId, token, authMode, fetchImpl);
-      if (!quota.ok) return { ok: false as const, error: "대상 계정 정보는 확인했지만 게시 API 접근을 확인하지 못했습니다. Meta에서 instagram_basic과 instagram_content_publish 권한을 확인해 주세요.", reason: "direct_publish_access_failed" as const };
+      if (!quota.ok) return accountFailure("quota", "대상 계정 정보는 확인했지만 게시 API 접근을 확인하지 못했습니다. Meta에서 instagram_basic과 instagram_content_publish 권한을 확인해 주세요.", "direct_publish_access_failed", quota);
       return { ok: true as const, userId, username };
     }
 
@@ -108,28 +113,28 @@ export async function accountIdentity(token: string, authMode: InstagramAuthMode
     const profiles = await Promise.all(unresolved.map(account => igFetch(account.userId, "GET", { fields: "id,username" }, token, authMode, fetchImpl)));
     for (let index = 0; index < unresolved.length; index++) {
       const account = unresolved[index], profile = profiles[index];
-      if (!profile.ok) return incompleteIdentity();
-      if (instagramId(profile.json.id) !== account.userId) return invalidResponse();
+      if (!profile.ok) return incompleteIdentity(profile);
+      if (instagramId(profile.json.id) !== account.userId) return invalidResponse("account_profile");
       const username = profile.json.username;
       if (typeof username !== "string" || !INSTAGRAM_USERNAME.test(username)) return incompleteIdentity();
       account.username = username;
     }
     const verified = [...accounts.values()].filter((account): account is { userId: string; username: string } => typeof account.username === "string");
     const matches = verified.filter(a => !normalized || a.username.toLowerCase() === normalized);
-    if (matches.length > 1) return { ok: false as const, error: normalized ? "같은 사용자명으로 여러 계정 ID가 반환되어 게시 계정을 확정할 수 없습니다. Meta에서 연결할 계정을 확인해 주세요." : "여러 인스타그램 계정이 확인됐습니다. 연결할 계정을 지정해 주세요.", reason: "ambiguous_account" as const };
+    if (matches.length > 1) return accountFailure("assigned_accounts", normalized ? "같은 사용자명으로 여러 계정 ID가 반환되어 게시 계정을 확정할 수 없습니다. Meta에서 연결할 계정을 확인해 주세요." : "여러 인스타그램 계정이 확인됐습니다. 연결할 계정을 지정해 주세요.", "ambiguous_account");
     if (matches.length === 0) {
       const handles = [...new Set(verified.map(account => account.username.toLowerCase()))];
       const shown = handles.slice(0, 5).map(username => `@${username}`).join(", ") + (handles.length > 5 ? ` 외 ${handles.length - 5}개` : "");
       const target = normalized && INSTAGRAM_USERNAME.test(normalized) ? `@${normalized}` : "선택한 계정";
-      return { ok: false as const, error: `이 토큰에서 확인한 계정: ${shown}. 연결하려는 ${target}이 목록에 없습니다. Meta에서 로그인한 계정과 선택한 게시 계정을 확인해 주세요.`, reason: "account_mismatch" as const };
+      return accountFailure("assigned_accounts", `이 토큰에서 확인한 계정: ${shown}. 연결하려는 ${target}이 목록에 없습니다. Meta에서 로그인한 계정과 선택한 게시 계정을 확인해 주세요.`, "account_mismatch");
     }
     return { ok: true as const, ...matches[0] };
   }
   const result = await igFetch("me", "GET", { fields: "user_id,username" }, token, "instagram", fetchImpl);
-  if (!result.ok) return { ok: false as const, error: result.err.kind === "token_expired" ? "토큰이 만료됐습니다. Instagram Login 토큰을 다시 발급해 주세요." : "인스타그램 계정 인증에 실패했습니다. 토큰과 권한을 확인하세요." };
+  if (!result.ok) return accountFailure("account_profile", result.err.kind === "token_expired" ? "토큰이 만료됐습니다. Instagram Login 토큰을 다시 발급해 주세요." : "인스타그램 계정 인증에 실패했습니다. 토큰과 권한을 확인하세요.", "instagram_identity_failed", result);
   const userId = String(result.json.user_id ?? "");
   const username = String(result.json.username ?? "");
-  if (!/^\d+$/.test(userId) || !/^[a-zA-Z0-9._]{1,30}$/.test(username)) return { ok: false as const, error: "계정 정보를 확인할 수 없습니다. Instagram Login 방식의 토큰이 필요합니다." };
+  if (!/^\d+$/.test(userId) || !/^[a-zA-Z0-9._]{1,30}$/.test(username)) return accountFailure("account_profile", "계정 정보를 확인할 수 없습니다. Instagram Login 방식의 토큰이 필요합니다.");
   return { ok: true as const, userId, username };
 }
 
@@ -163,7 +168,7 @@ function providerFailureDiagnostic(status: number, body: { error?: unknown }): I
 
 function classify(status: number, body: { error?: { code?: number; error_subcode?: number; message?: string; type?: string } }): IgError {
   const e = body.error || {};
-  const msg = (e.message || `HTTP ${status}`).slice(0, 300);
+  const msg = typeof e.message === "string" && e.message ? e.message.slice(0, 300) : `HTTP ${status}`;
   if (e.code === 190) return { kind: "token_expired", error: `액세스 토큰 만료·무효: ${msg}` };
   if (e.code === 10 || e.code === 200 || status === 403) return { kind: "auth", error: `권한 부족: ${msg}` };
   if (e.code === 4 || e.code === 17 || e.code === 32 || e.code === 613 || status === 429) return { kind: "rate_limit", error: `호출 한도: ${msg}` };

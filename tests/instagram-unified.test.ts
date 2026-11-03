@@ -3,6 +3,7 @@ import { accountIdentity, containerStatus, createCarouselContainer, createContai
 import { resolveSecrets } from "../server/services/secrets";
 import { connectInstagram } from "../server/services/instagramConnection";
 import type { DB } from "../server/db";
+import { HttpError } from "../server/routes/util";
 
 const token = "test-only-secret-token";
 let fetcher: ReturnType<typeof vi.fn>;
@@ -261,7 +262,7 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
     fetcher.mockResolvedValueOnce(response({ data: [] })).mockResolvedValueOnce(response(profile)).mockResolvedValueOnce(response(body));
     const { db, transaction } = connectionDatabase();
     const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
-    expect(failure).toMatchObject({ status: 400, extra: { code: "direct_publish_access_failed" } });
+    expect(failure).toMatchObject({ status: 400, extra: { code: "direct_publish_access_failed", diagnostic: { stage: "quota", lost: false } } });
     expect(failure.message).not.toContain(token);
     expect(transaction).not.toHaveBeenCalled();
     expect(fetcher).toHaveBeenCalledTimes(3);
@@ -275,7 +276,7 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
     fetcher.mockRejectedValueOnce(new Error(`private transport detail ${token}`));
     const { db, transaction } = connectionDatabase();
     const failure = await connectInstagram(db, 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
-    expect(failure).toMatchObject({ status: 400, extra: { code: stage === "profile" ? "direct_account_access_failed" : "direct_publish_access_failed" } });
+    expect(failure).toMatchObject({ status: 400, extra: { code: stage === "profile" ? "direct_account_access_failed" : "direct_publish_access_failed", diagnostic: { stage: stage === "profile" ? "direct_profile" : "quota", lost: true } } });
     expect(failure.message).not.toContain(token);
     expect(transaction).not.toHaveBeenCalled();
     expect(fetcher).toHaveBeenCalledTimes(stage === "profile" ? 2 : 3);
@@ -534,9 +535,60 @@ describe("empty assigned lists with operator-confirmed target hints", () => {
       expect(failure.message).not.toContain(token);
       expect(failure.message).not.toContain("https://");
       expect(failure.message).not.toContain("PRIVATE_TRACE");
-      expect(failure.extra).toEqual({ code: "direct_account_access_failed" });
+      expect(failure.extra).toEqual({ code: "direct_account_access_failed", diagnostic: { stage: "business_asset", httpStatus: 400, graphCode: 100, graphSubcode: 33, lost: false } });
       expect(transaction).not.toHaveBeenCalled();
       expect(fetcher).toHaveBeenCalledTimes(3);
     });
+  });
+});
+
+describe("structured connection failure stages", () => {
+  const dbWithTransaction = (transaction: ReturnType<typeof vi.fn>) => ({ select: () => ({ from: () => ({ where: async () => [{ id: 1, slug: "penguin", active: true }] }) }), transaction }) as unknown as DB;
+  const verified = () => {
+    fetcher.mockResolvedValueOnce(response({ data: [{ id: "2", username: "spacepenguin.co" }] }))
+      .mockResolvedValueOnce(response({ data: [{ quota_usage: 0, config: { quota_total: 100 } }] }));
+  };
+
+  it.each([
+    ["assigned_accounts", { data: null }, "invalid_account_response"],
+    ["assigned_accounts", { error: { code: 190, error_subcode: 463, message: { token } } }, "instagram_identity_failed"],
+  ])("retains %s metadata even when the provider response is malformed", async (stage, body, reason) => {
+    fetcher.mockResolvedValueOnce(response(body));
+    const transaction = vi.fn();
+    const failure = await connectInstagram(dbWithTransaction(transaction), 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+    expect(failure).toMatchObject({ status: 400, extra: { code: reason, diagnostic: { stage } } });
+    expect(failure.message + JSON.stringify(failure.extra)).not.toContain(token);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("preserves protected quota error codes without entering the save transaction", async () => {
+    fetcher.mockResolvedValueOnce(response({ data: [{ id: "2", username: "spacepenguin.co" }] }))
+      .mockResolvedValueOnce(response({ error: { code: 10, error_subcode: 33, message: token } }, 403));
+    const transaction = vi.fn();
+    const failure = await connectInstagram(dbWithTransaction(transaction), 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+    expect(failure).toMatchObject({ status: 400, extra: { code: "publishing_permission", diagnostic: { stage: "quota", httpStatus: 403, graphCode: 10, graphSubcode: 33, lost: false } } });
+    expect(failure.message + JSON.stringify(failure.extra)).not.toContain(token);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it("strips database error details only after account and quota verification", async () => {
+    verified();
+    const privateText = `PRIVATE_SQL access_token=${token}`;
+    const transaction = vi.fn().mockRejectedValue(new Error(privateText));
+    const failure = await connectInstagram(dbWithTransaction(transaction), 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+    expect(failure).toMatchObject({ status: 500, message: "서버 오류가 발생했습니다. 잠시 후 다시 시도하세요.", extra: { code: "persistence_failed", diagnostic: { stage: "persistence" } } });
+    expect(failure.message + failure.stack + JSON.stringify(failure)).not.toContain("PRIVATE_SQL");
+    expect(failure.message + failure.stack + JSON.stringify(failure)).not.toContain(token);
+    expect(failure.cause).toBeUndefined();
+    expect(transaction).toHaveBeenCalledOnce(); expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves an existing validation conflict's status and message", async () => {
+    verified();
+    const conflict = new HttpError(409, "이미 다른 인스타그램 계정이 연결돼 있습니다.", { diagnostic: { stage: "connection_validation" } });
+    const transaction = vi.fn().mockRejectedValue(conflict);
+    const failure = await connectInstagram(dbWithTransaction(transaction), 1, { token, username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "test").catch(error => error);
+    expect(failure).toBe(conflict);
+    expect(failure).toMatchObject({ status: 409, message: "이미 다른 인스타그램 계정이 연결돼 있습니다.", extra: { diagnostic: { stage: "connection_validation" } } });
   });
 });

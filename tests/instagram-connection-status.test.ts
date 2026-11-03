@@ -55,7 +55,11 @@ it("reuses the existing destination ID when its label differs only in casing or 
 
 it("never activates newly saved credentials after a transaction rollback", async () => {
   const { db } = connectionDatabase(true);
-  await expect(connectInstagram(db, 1, { token: "test-only-token", username: "spacepenguin.co", dailyLimit: 3 }, "operator")).rejects.toThrow("commit failed");
+  await expect(connectInstagram(db, 1, { token: "test-only-token", username: "spacepenguin.co", dailyLimit: 3 }, "operator")).rejects.toMatchObject({
+    status: 500,
+    message: "서버 오류가 발생했습니다. 잠시 후 다시 시도하세요.",
+    extra: { code: "persistence_failed", diagnostic: { stage: "persistence" } },
+  });
   expect(mocks.save).toHaveBeenCalled();
   expect(mocks.activate).not.toHaveBeenCalled();
 });

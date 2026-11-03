@@ -8,29 +8,30 @@ import { isFromEnvironment, saveSecret } from "../secretStore";
 import { HttpError } from "../routes/util";
 import { audit } from "../audit";
 import { testCloudinary } from "./connectionTest";
+import { instagramDiagnostic, sanitizeInstagramDiagnostic } from "../../shared/instagramOAuthDiagnostics";
 
 export async function connectInstagram(db: DB, channelId: number, input: { token: string; username: string; dailyLimit: number; authMode?: InstagramAuthMode; expiresAt?: string | null }, actor: string) {
   const [ch] = await db.select().from(channels).where(eq(channels.id, channelId));
-  if (!ch?.active) throw new HttpError(409, "사용 중인 채널을 선택하세요.");
+  if (!ch?.active) throw new HttpError(409, "사용 중인 채널을 선택하세요.", { diagnostic: { stage: "connection_validation" } });
   const intended = instagramAccountMismatch(ch.slug, input.username);
-  if (intended) throw new HttpError(400, intended);
+  if (intended) throw new HttpError(400, intended, { diagnostic: { stage: "connection_validation" } });
   const authMode = input.authMode ?? "instagram";
   const identity = await accountIdentity(input.token, authMode, input.username);
-  if (!identity.ok) throw new HttpError(400, identity.error, { code: "reason" in identity ? identity.reason : "instagram_identity_failed" });
-  if (normalizeInstagramUsername(identity.username) !== normalizeInstagramUsername(input.username)) throw new HttpError(400, `이 토큰은 @${identity.username}의 토큰입니다. 게시하려는 계정과 일치하는지 확인하세요.`, { code: "account_mismatch" });
+  if (!identity.ok) throw new HttpError(400, identity.error, { code: identity.reason, diagnostic: sanitizeInstagramDiagnostic(identity.diagnostic) });
+  if (normalizeInstagramUsername(identity.username) !== normalizeInstagramUsername(input.username)) throw new HttpError(400, `이 토큰은 @${identity.username}의 토큰입니다. 게시하려는 계정과 일치하는지 확인하세요.`, { code: "account_mismatch", diagnostic: { stage: "account_profile" } });
   const mismatch = instagramAccountMismatch(ch.slug, identity.username);
-  if (mismatch) throw new HttpError(409, mismatch);
+  if (mismatch) throw new HttpError(409, mismatch, { diagnostic: { stage: "connection_validation" } });
   const quota = await publishingLimit(identity.userId, input.token, authMode);
-  if (!quota.ok) throw new HttpError(400, `계정은 확인했지만 게시 API 접근이 거부됐습니다. 프로페셔널 계정과 ${authMode === "facebook" ? "instagram_content_publish" : "instagram_business_content_publish"} 권한을 확인하세요.`, { code: "publishing_permission" });
+  if (!quota.ok) throw new HttpError(400, `계정은 확인했지만 게시 API 접근이 거부됐습니다. 프로페셔널 계정과 ${authMode === "facebook" ? "instagram_content_publish" : "instagram_business_content_publish"} 권한을 확인하세요.`, { code: "publishing_permission", diagnostic: instagramDiagnostic("quota", "diagnostic" in quota ? quota.diagnostic : undefined, quota.lost) });
   const refs: Record<string, string> = { ...defaultSecretRefs("instagram", ch.slug), authMode: `IG_${slugToEnvPart(ch.slug)}_AUTH_MODE` };
-  if (Object.values(refs).some(isFromEnvironment)) throw new HttpError(409, "서버 환경변수에서 관리하는 계정입니다. API 키 관리 화면에서 기존 연결을 확인하세요.");
+  if (Object.values(refs).some(isFromEnvironment)) throw new HttpError(409, "서버 환경변수에서 관리하는 계정입니다. API 키 관리 화면에서 기존 연결을 확인하세요.", { diagnostic: { stage: "connection_validation" } });
   const activate: Array<() => void> = [];
   await db.transaction(async tx => {
     const [fresh] = await tx.select().from(channels).where(eq(channels.id, ch.id)).for("update");
-    if (!fresh?.active) throw new HttpError(409, "사용 중인 채널을 선택하세요.");
+    if (!fresh?.active) throw new HttpError(409, "사용 중인 채널을 선택하세요.", { diagnostic: { stage: "connection_validation" } });
     const others = await tx.select().from(destinations).where(and(eq(destinations.channelId, ch.id), eq(destinations.platform, "instagram"), eq(destinations.enabled, true)));
-    if (others.some(other => normalizeInstagramUsername(other.label) !== normalizeInstagramUsername(identity.username))) throw new HttpError(409, "이미 다른 인스타그램 계정이 연결돼 있습니다. 채널 설정에서 기존 목적지를 확인하세요.");
-    if (others.length > 1) throw new HttpError(409, "동일 계정의 활성 게시 목적지가 여러 개 있습니다. 채널 설정에서 사용할 목적지 하나를 확인한 뒤 다시 연결하세요.");
+    if (others.some(other => normalizeInstagramUsername(other.label) !== normalizeInstagramUsername(identity.username))) throw new HttpError(409, "이미 다른 인스타그램 계정이 연결돼 있습니다. 채널 설정에서 기존 목적지를 확인하세요.", { diagnostic: { stage: "connection_validation" } });
+    if (others.length > 1) throw new HttpError(409, "동일 계정의 활성 게시 목적지가 여러 개 있습니다. 채널 설정에서 사용할 목적지 하나를 확인한 뒤 다시 연결하세요.", { diagnostic: { stage: "connection_validation" } });
     activate.push(await saveSecret(tx as unknown as DB, refs.accessToken, input.token, actor, { activate: false }));
     activate.push(await saveSecret(tx as unknown as DB, refs.userId, identity.userId, actor, { activate: false }));
     activate.push(await saveSecret(tx as unknown as DB, refs.authMode, authMode, actor, { activate: false }));
@@ -48,6 +49,14 @@ export async function connectInstagram(db: DB, channelId: number, input: { token
     const metadata = { authMode, username: identity.username, verifiedAt: new Date().toISOString(), expiresAt: input.expiresAt ?? null };
     await tx.insert(appSettings).values({ key: `instagram_connection:${ch.id}`, value: metadata }).onConflictDoUpdate({ target: appSettings.key, set: { value: metadata, updatedAt: new Date() } });
     await audit(tx, { actor, action: "connect_instagram", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { username: identity.username, dailyLimit: input.dailyLimit, authMode } });
+  }).catch((error: unknown) => {
+    // Keep validation/conflict messages and status codes unchanged for manual
+    // connections. Unexpected save failures must not carry SQL, values or causes.
+    if (error instanceof HttpError) {
+      error.extra = { ...error.extra, diagnostic: sanitizeInstagramDiagnostic(error.extra?.diagnostic) ?? { stage: "persistence" } };
+      throw error;
+    }
+    throw new HttpError(500, "서버 오류가 발생했습니다. 잠시 후 다시 시도하세요.", { code: "persistence_failed", diagnostic: { stage: "persistence" } });
   });
   for (const commit of activate) commit();
   return { username: identity.username, used: quota.used, total: quota.total, authMode };
