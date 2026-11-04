@@ -8,6 +8,7 @@ import { familyCopyText, type FamilyDialogueResponse } from "../client/src/Famil
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
 import { cardCopyFixture } from "./fixtures/cardCopy";
 import { ApiError } from "../client/src/api";
+import { activateDraftRecoveryScope } from "../client/src/draftRecovery";
 import { defaultPageDesigns, familyFieldValue } from "../shared/familyDialogue";
 import type { FamilyEvidenceView } from "../shared/familyEvidence";
 import { familyEvidenceFixture } from "./fixtures/familyEvidence";
@@ -96,6 +97,7 @@ async function connectEvidence(path: string, evidenceId: string) {
 describe("family dialogue v2 editor", () => {
   it("keeps a new image credit in unsaved recovery, preview inputs and copied text", async () => {
     const session = { user: "operator", recoveryScope: "a".repeat(64) };
+    expect(activateDraftRecoveryScope(session.recoveryScope).ok).toBe(true);
     client.setQueryData(["me"], session);
     generate = async () => {
       const result = structuredClone(saved) as FamilyDialogueResponse;
