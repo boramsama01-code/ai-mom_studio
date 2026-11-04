@@ -217,7 +217,7 @@ describe("source workspace role models and partial generation recovery", () => {
     expect(host.querySelectorAll(".family-page-strip>button")).toHaveLength(8);
     const notice = host.querySelector('[data-testid="family-generation-next-step"]');
     expect(notice?.textContent).toContain("8장 원고와 표지 배경을 저장했습니다");
-    expect(notice?.textContent).toContain("Canva 8장 만들기"); expect(notice?.textContent).toContain("스튜디오 초안");
+    expect(notice?.textContent).toContain("8장 디자인 완성"); expect(notice?.textContent).toContain("스튜디오 초안");
     expect(host.querySelector('[aria-label="Canva 8장 디자인"]')).not.toBeNull();
     expect(mocks.api.mock.calls.some(([path]) => /\/(card|approve|canva\/jobs)$/.test(path) && writes().some(([writePath]) => writePath === path))).toBe(false);
   });

@@ -89,6 +89,7 @@ describe("Canva editorial request and import UI", () => {
   it("shows the selected style's exact image field count and blocks an unverified 14-style source",async()=>{
     props.copy.templateKey='cardnews14-cinematic-v1';await render();
     expect(host.querySelector('[data-testid="reading-canva-readiness"]')?.textContent).toContain('8개 이미지');
+    expect(host.querySelector('[aria-label="스튜디오 8장 디자인"]')).not.toBeNull();
     expect(button('Canva 8장 만들기').disabled).toBe(true);expect(writes()).toHaveLength(0);
     await click('스튜디오에서 8장 만들기');expect(mocks.local).toHaveBeenCalledOnce();expect(writes()).toHaveLength(0);
     await render({disabled:true});expect(button('스튜디오에서 8장 만들기').disabled).toBe(true);
