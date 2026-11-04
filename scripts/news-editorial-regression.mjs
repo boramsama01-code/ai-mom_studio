@@ -222,12 +222,18 @@ try {
       assert.match(await page.locator('.card-copy-preview-column').innerText(), /닫는 표지/);
       const coverOptions = page.locator('details.content-options').filter({ has: page.locator('summary', { hasText: '표지·이미지 설정' }) }).first();
       await coverOptions.locator('summary').click(); await coverOptions.locator('select').selectOption('reuse');
-      await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === `${itemPath}/card` && response.ok()), page.locator('.card-copy-savebar').getByRole('button', { name: '이미지 생성·갱신', exact: true }).click()]);
-      assert.equal(state.cards[0].carousel.pages.length, 8);
+      const [renderResponse] = await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === `${itemPath}/card` && response.request().method() === 'POST' && response.ok()), page.locator('.card-copy-savebar').getByRole('button', { name: '이미지 생성·갱신', exact: true }).click()]);
+      const rendered = await renderResponse.json();
+      assert.equal(rendered.carousel.pages.length, 8); assert.equal(state.cards[0].id, rendered.id);
+      const final = page.locator('.card-carousel');
+      // A render response starts a separate item refresh. Wait for that new
+      // artifact's identity even while the publication details are still closed.
+      await final.locator(`.card-carousel-stage img[src="/api/channels/3/media/${rendered.carousel.pages[0].id}"]`).waitFor({ state: 'attached' });
       await page.getByRole('button', { name: '이미지 확인 · 게시 준비 열기', exact: true }).click();
-      const final = page.locator('.card-carousel'); await final.waitFor(); assert.equal(await final.locator('.page-dots button').count(), 8);
+      await final.waitFor(); assert.equal(await final.locator('.page-dots button').count(), 8);
       await final.locator('.page-dots button').nth(4).click();
-      const finalImage = final.locator('.card-carousel-stage img'); await finalImage.evaluate(img => img.decode());
+      const finalImage = final.locator(`.card-carousel-stage img[src="/api/channels/3/media/${rendered.carousel.pages[4].id}"]`);
+      await finalImage.waitFor(); await finalImage.evaluate(img => img.decode());
       assert.deepEqual(await finalImage.evaluate(img => [img.naturalWidth, img.naturalHeight]), [1080, 1350]);
       await finalImage.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${outputDir}/final-${width}.png` });
       assert.equal(state.writes.filter(write => write.path.endsWith('/background')).length, 2);

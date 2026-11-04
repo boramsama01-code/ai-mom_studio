@@ -12,7 +12,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -35,16 +35,22 @@ jobs:
       - run: npm test
       - run: npm run build
       - name: Install mobile browser regression tools
+        id: browser_tools
         run: npm install --no-save --package-lock=false playwright@1.62.1 && npx playwright install --with-deps webkit
       - name: Verify mobile WebKit layout and channel actions
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/mobile-regression.mjs
       - name: Verify one-page editing, save/reopen and publication controls
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/content-workspace-regression.mjs
       - name: Verify eight-page news editing, comparison text and page backgrounds
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node --import tsx scripts/news-editorial-regression.mjs
       - name: Verify guarded channel switching and new channel creation
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/channel-navigation-regression.mjs
       - name: Verify automatic images, manual fallback and final page previews
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/studio-automatic-regression.mjs
       - uses: actions/upload-artifact@v4
         if: always()
