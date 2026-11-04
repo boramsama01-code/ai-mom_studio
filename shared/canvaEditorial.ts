@@ -1,7 +1,7 @@
 /** Flat Canva fields are a boundary adapter, never the authoring schema. */
 import type { CardCopyV2, FamilyPageId } from './familyDialogue';
 import { familyDisplayDescriptors, familyReadingTextValues, resolveFamilyDisplay, type FamilyDisplayContext } from './familyDisplay';
-import { readingProfileForTemplateKey, type ReadingCardProfile } from './readingCardProfiles';
+import { LEGACY_READING_PROFILE_IDS, readingProfileForTemplateKey, type ReadingCardProfile } from './readingCardProfiles';
 
 export const CANVA_MAPPING_VERSION = 'family-dialogue-8/v1.1';
 export const CANVA_PAGE_IDS = ['cover','news_summary','implication','discussion','perspectives','concept','activity','outro'] as const;
@@ -29,11 +29,14 @@ export const CANVA_READING_TEXT_FIELDS = [
 
 export type CanvaProfileSnapshot = {
   mappingVersion: string; profileId?: string; profileTemplateVersion?: string; profileImageSha256?: string;
+  sourceLayoutSha256?: string; sourceAssetsSha256?: string;
 };
 export function snapshotCanvaProfile(profile?: ReadingCardProfile): CanvaProfileSnapshot {
   return profile ? {
     mappingVersion: profile.mappingVersion, profileId: profile.id,
     profileTemplateVersion: profile.templateVersion, profileImageSha256: profile.profileImageSha256,
+    ...(profile.sourceLayoutSha256 !== undefined ? { sourceLayoutSha256: profile.sourceLayoutSha256 } : {}),
+    ...(profile.sourceAssetsSha256 !== undefined ? { sourceAssetsSha256: profile.sourceAssetsSha256 } : {}),
   } : { mappingVersion: CANVA_MAPPING_VERSION };
 }
 /** Import/reconciliation retains the original renderer binding. It must never
@@ -44,16 +47,29 @@ export function storedCanvaProfileSnapshot(input: CanvaProfileSnapshot): CanvaPr
     ...(input.profileId !== undefined ? { profileId: input.profileId } : {}),
     ...(input.profileTemplateVersion !== undefined ? { profileTemplateVersion: input.profileTemplateVersion } : {}),
     ...(input.profileImageSha256 !== undefined ? { profileImageSha256: input.profileImageSha256 } : {}),
+    ...(input.sourceLayoutSha256 !== undefined ? { sourceLayoutSha256: input.sourceLayoutSha256 } : {}),
+    ...(input.sourceAssetsSha256 !== undefined ? { sourceAssetsSha256: input.sourceAssetsSha256 } : {}),
   };
 }
-/** Jobs created before profiles existed are legacy jobs. A pinned new profile
- * must remain available at the exact contract and approved-image version. */
+/** Jobs created before profiles existed are legacy jobs. New handoff profiles
+ * pin both source files and the asset set before any upload/Autofill. Completed
+ * exports use their own immutable trace and do not resolve the live catalog. */
 export function resolveCanvaProfile(input: CanvaProfileSnapshot): ReadingCardProfile | undefined {
   if (input.profileId === undefined) return undefined;
   const profile = readingProfileForTemplateKey(input.profileId);
   if (!profile || profile.id !== input.profileId || profile.mappingVersion !== input.mappingVersion
       || profile.templateVersion !== input.profileTemplateVersion || profile.profileImageSha256 !== input.profileImageSha256) {
     throw new Error('이 Canva 작업에 저장된 읽기 디자인·매핑·프로필 이미지 버전을 확인할 수 없습니다. 기존 결과를 유지했습니다.');
+  }
+  const legacy = LEGACY_READING_PROFILE_IDS.some(id => id === profile.id);
+  const hasStoredFingerprint = input.sourceLayoutSha256 !== undefined || input.sourceAssetsSha256 !== undefined;
+  if (!legacy || hasStoredFingerprint) {
+    const validHash = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+    if (!validHash(input.sourceLayoutSha256) || !validHash(input.sourceAssetsSha256)
+        || !validHash(profile.sourceLayoutSha256) || !validHash(profile.sourceAssetsSha256)
+        || input.sourceLayoutSha256 !== profile.sourceLayoutSha256 || input.sourceAssetsSha256 !== profile.sourceAssetsSha256) {
+      throw new Error('이 Canva 작업에 저장된 원본 배치·자산 버전이 현재 읽기 디자인과 다릅니다. 기존 원고와 결과를 유지했습니다.');
+    }
   }
   return profile;
 }

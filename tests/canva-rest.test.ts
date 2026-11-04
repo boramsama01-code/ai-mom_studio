@@ -25,6 +25,13 @@ describe("Canva REST read boundaries", () => {
     expect(CANVA_SCOPES).toEqual(expect.arrayContaining(["profile:read", "asset:read", "asset:write"]));
     expect(new URL(buildAuthUrl({ challenge: "challenge", state: "state", redirectUri: "https://studio.example/callback" })).searchParams.get("scope")).toContain("asset:write");
   });
+  it("distinguishes an explicitly empty capability list from an incomplete capability response", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(json({ capabilities: [] })).mockResolvedValueOnce(json({})).mockResolvedValueOnce(json({ capabilities: null }));
+    await expect(getCanvaCapabilities(db, { fetchImpl })).resolves.toEqual({ capabilities: [] });
+    for (let index = 0; index < 2; index++) await expect(getCanvaCapabilities(db, { fetchImpl })).rejects.toMatchObject({ code: "invalid_response", reason: "invalid_response", outcomeUnknown: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls.every(([, request]) => request.method === "GET")).toBe(true);
+  });
   it("uses canvas dimensions and requests a ninth page to reject longer masters", async () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(json(pages())).mockResolvedValueOnce(json(pages(9)));
     const valid = await getCanvaPages(db, "design_1", { fetchImpl }); expect(valid.validEightPageMaster).toBe(true); expect(valid.items[0]).toMatchObject({ pageNumber: 1, width: 1080, height: 1350 });
@@ -100,10 +107,46 @@ describe("durable Canva submit and lookup contracts", () => {
 });
 
 describe("safe Canva failures and request limits", () => {
+  it.each([
+    { providerCode: "missing_scope", message: "scope profile:read never-print-access-token", code: "permission_denied", reason: "missing_scope" },
+    { providerCode: "permission_denied", message: "Not allowed to access design with id 'private-design'", code: "permission_denied", reason: "permission_denied" },
+    { providerCode: "permission_denied", message: "Access the autofill feature and other powerful design tools by upgrading your Canva plan here: https://www.canva.com/pricing?private=token", code: "permission_denied", reason: "capability_missing" },
+    { providerCode: "permission_denied", message: 'Not allowed to access createAutofillJob, requires one of capabilities ["autofill"]', code: "permission_denied", reason: "capability_missing" },
+  ])("keeps $reason separate while retaining the worker's safe rejection code", async ({ providerCode, message, code, reason }) => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ code: providerCode, message }, 403));
+    const error = await submitCanvaAutofill(db, { type: "design", id: "master_1", title: "원고 보존", data }, { fetchImpl }).catch(value => value);
+    expect(error).toMatchObject({ code, reason, providerCode, outcomeUnknown: false });
+    expect(error.message).not.toContain(message); expect(JSON.stringify(error)).not.toContain("private"); expect(JSON.stringify(error)).not.toContain("never-print");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it("does not label design access denial or an MCP-only wrapper code as an Autofill plan failure", async () => {
+    const message = "This feature requires a Canva plan with access to autofill (such as Canva Pro, Canva Teams, or Canva Enterprise).";
+    const fetchImpl = vi.fn().mockResolvedValueOnce(json({ code: "permission_denied", message }, 403)).mockResolvedValueOnce(json({ code: "INVALID_ARGUMENT", message }, 400));
+    await expect(getCanvaDesign(db, "design_1", { fetchImpl })).rejects.toMatchObject({ code: "permission_denied", reason: "permission_denied" });
+    await expect(submitCanvaAutofill(db, { type: "design", id: "master_1", title: "원고 보존", data }, { fetchImpl })).rejects.toMatchObject({ code: "invalid_request", reason: "invalid_request", providerCode: null, outcomeUnknown: false });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+  it.each(["quota_exceeded", "credit_quota_exceeded", "credit_quota_cooldown", "app_credit_quota_exceeded"])("separates %s from a short request-rate limit without automatically retrying", async providerCode => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ code: providerCode, message: "never-print-credit-details" }, 429));
+    const error = await submitCanvaExport(db, "design_1", { fetchImpl }).catch(value => value);
+    expect(error).toMatchObject({ code: "rate_limited", reason: "quota_exceeded", providerCode, outcomeUnknown: false });
+    expect(error.message).toContain("사용 한도"); expect(error.message).not.toContain("never-print"); expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it.each([408, 503])("does not turn HTTP %i into a replayable rejection because of an inconsistent error body", async status => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ code: "missing_scope", message: "provider diagnostic" }, status));
+    await expect(submitCanvaExport(db, "design_1", { fetchImpl })).rejects.toMatchObject({ code: "provider_unavailable", reason: "provider_unavailable", outcomeUnknown: true });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it("keeps a confirmed HTTP rejection safe even if its diagnostic body cannot be parsed", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response("not-json never-print-secret", { status: 403 }));
+    const error = await submitCanvaExport(db, "design_1", { fetchImpl }).catch(value => value);
+    expect(error).toMatchObject({ code: "permission_denied", reason: "permission_denied", providerCode: null, outcomeUnknown: false });
+    expect(error.message).not.toContain("never-print"); expect(fetchImpl).toHaveBeenCalledOnce();
+  });
   it.each([[401, "auth_required", false], [403, "permission_denied", false], [404, "not_found", false], [429, "rate_limited", false], [503, "provider_unavailable", true]] as const)("classifies HTTP %i without copying secrets from errors", async (status, code, outcomeUnknown) => {
     const fetchImpl = vi.fn().mockResolvedValue(json({ code: "secret-code", message: "never-print-refresh-token" }, status));
     const error = await submitCanvaExport(db, "design_1", { fetchImpl }).catch(value => value);
-    expect(error).toBeInstanceOf(CanvaRestError); expect(error).toMatchObject({ code, outcomeUnknown }); expect(error.message).not.toContain("never-print"); expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(error).toBeInstanceOf(CanvaRestError); expect(error).toMatchObject({ code, outcomeUnknown, providerCode: null }); expect(error.message).not.toContain("never-print"); expect(fetchImpl).toHaveBeenCalledOnce();
   });
   it("treats transport failure as unknown and never auto-replays the POST", async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new Error("never-print-access-token"));

@@ -6,6 +6,8 @@ import { defaultPageDesigns, familyCardCopySchema, pageDesignsSchema, type CardC
 import { familyPageText, familyPageTitle } from "./familyDialogueCard";
 import { familyReadingTextValues } from "../../shared/familyDisplay";
 import { readingProfileForTemplateKey, readingImageSlot } from "../../shared/readingCardProfiles";
+import { readingArtworkComposition, readingArtworkPagesLabel, readingArtworkPrompt } from "../../shared/readingImagePrompts";
+import { resolvedReadingPageDesigns } from "../../shared/readingPageImages";
 import { channels, contentItems, contentRevisions, mediaAssets, studioCards } from "../../shared/schema";
 import type { DB } from "../db";
 import { audit } from "../audit";
@@ -79,7 +81,7 @@ export async function loadCardPageArtworkForPage(db: DB, itemId: number, channel
     const page = copy.pages[pageIndex];
     if (!page) throw new HttpError(400, "배경을 볼 페이지를 확인해 주세요.");
     const designs = defaultPageDesigns();
-    designs[page.id] = (pageDesigns ?? designs)[page.id];
+    designs[page.id] = resolvedReadingPageDesigns(copy, pageDesigns ?? designs)[page.id];
     return loadCardPageArtwork(db, itemId, channelId, copy, designs);
   }
   return loadCardPageArtwork(db, itemId, channelId, { ...copy,
@@ -151,11 +153,11 @@ function selectedPage(copy: CardCopy | CardCopyV2, pageId: CardPageId, pageDesig
     const page = copy.pages.find(value => value.id === pageId);
     if (!page) throw new HttpError(400, "배경을 적용할 카드 페이지를 확인해 주세요.");
     const profile = readingProfileForTemplateKey(copy.templateKey), photoSlot = profile && readingImageSlot(profile, page.id);
-    if (profile && photoSlot?.kind !== "artwork") throw new HttpError(422, "이 카드뉴스 스타일의 사진은 1·4·7장에 배치합니다. 8장 ALL 프로필은 승인된 원본을 사용합니다.", { code: "reading_photo_slot_missing" });
-    const design = (pageDesigns ?? defaultPageDesigns())[page.id];
+    if (profile && photoSlot?.kind !== "artwork") throw new HttpError(422, `이 카드뉴스 스타일의 사진은 ${readingArtworkPagesLabel(profile)}에 배치합니다. 닫는 표지의 프로필은 승인된 원본을 사용합니다.`, { code: "reading_photo_slot_missing" });
+    const design = resolvedReadingPageDesigns(copy, pageDesigns ?? defaultPageDesigns())[page.id];
     const values = profile ? familyReadingTextValues(copy) : null;
     return { title: familyPageTitle(page), subtitle: "", body: values && profile ? profile.pages[page.page - 1].textBoxes.map(box => values[box.field]).filter(Boolean).join("\n") : familyPageText(page).join("\n"), role: page.id,
-      ...(photoSlot ? { photoSlot: { width: photoSlot.width, height: photoSlot.height } } : {}),
+      ...(profile ? { photoComposition: readingArtworkComposition(profile, page.id) } : {}),
       background: design.background.kind === "image" && design.background.assetId ? { assetId: design.background.assetId } : undefined,
     };
   }
@@ -210,11 +212,11 @@ export async function createCardPageArtwork(db: DB, input: CardPageArtworkInput)
       normalized = await decodeCardPageUpload(input.imageData);
     } else {
       const background = (snapshot.page as typeof snapshot.page & { background?: Background | null }).background;
-      const photoSlot = "photoSlot" in snapshot.page ? snapshot.page.photoSlot : undefined;
+      const photoComposition = "photoComposition" in snapshot.page ? snapshot.page.photoComposition : undefined;
       const previous = background ? await loadCardPageArtworkAsset(db, input.itemId, input.channelId, background.assetId) : null;
       try {
         const generated = await generateStudioImage({ provider: "openai", model: imageSelection!.model, purpose: "cover",
-          prompt: JSON.stringify({ use: photoSlot ? `Original editorial artwork for a fixed ${photoSlot.width}x${photoSlot.height} photograph window. Strong readable subject and texture for secondary-school students and parents. Korean text is entirely outside this image, so do not leave blank title space. No lettering, invented data, logos or counterfeit documentary depictions of real events.` : "An original editorial background with a calm, uncluttered central area for separately rendered Korean text. No lettering, diagrams with invented values, logos, or documentary-style depictions of real events.", articleTitle: snapshot.item.title, pageTitle: snapshot.page.title, subtitle: snapshot.page.subtitle, body: "body" in snapshot.page ? snapshot.page.body : "", role: "role" in snapshot.page ? snapshot.page.role : "cover", perspectives: "columns" in snapshot.page ? snapshot.page.columns : undefined }),
+          prompt: JSON.stringify({ use: photoComposition ? readingArtworkPrompt(photoComposition) : "An original editorial background with a calm, uncluttered central area for separately rendered Korean text. No lettering, diagrams with invented values, logos, or documentary-style depictions of real events.", ...(photoComposition ? { photoComposition } : {}), articleTitle: snapshot.item.title, pageTitle: snapshot.page.title, subtitle: snapshot.page.subtitle, body: "body" in snapshot.page ? snapshot.page.body : "", role: "role" in snapshot.page ? snapshot.page.role : "cover", perspectives: "columns" in snapshot.page ? snapshot.page.columns : undefined }),
           instruction: input.instruction?.trim(),
           referenceImages: previous ? [`data:image/jpeg;base64,${previous.bytes.toString("base64")}`] : undefined,
           signal: currentGenerationSignal(),

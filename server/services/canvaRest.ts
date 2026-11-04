@@ -2,13 +2,17 @@
 import { z } from "zod";
 import type { DB } from "../db";
 import type { CanvaDataset, CanvaField } from "../../shared/canvaEditorial";
+import { canvaProviderErrorCodeSchema, type CanvaFailureReason, type CanvaProviderErrorCode } from "../../shared/canvaCapabilities";
 import { accessToken, CANVA_API, CanvaError } from "./canva";
 
 export type CanvaRestOptions = { fetchImpl?: typeof fetch; signal?: AbortSignal };
 export type CanvaRestErrorCode = "not_connected" | "auth_required" | "permission_denied" | "not_found" | "export_expired" | "rate_limited" | "invalid_request" | "provider_unavailable" | "result_unknown" | "invalid_response" | "cancelled" | "job_failed";
 export class CanvaRestError extends CanvaError {
-  constructor(message: string, status: number | undefined, public override code: CanvaRestErrorCode, public outcomeUnknown = false, public jobId: string | null = null) {
+  public reason: CanvaFailureReason;
+  public providerCode: CanvaProviderErrorCode | null;
+  constructor(message: string, status: number | undefined, public override code: CanvaRestErrorCode, public outcomeUnknown = false, public jobId: string | null = null, detail: { reason?: CanvaFailureReason; providerCode?: CanvaProviderErrorCode | null } = {}) {
     super(message, status, code); this.name = "CanvaRestError";
+    this.reason = detail.reason ?? code; this.providerCode = detail.providerCode ?? null;
   }
 }
 const idSchema = z.string().min(1).max(200).regex(/^[a-zA-Z0-9_-]+$/);
@@ -34,14 +38,30 @@ function validate<T>(schema: z.ZodType<T>, value: unknown, input = false, jobId:
   return parsed.data;
 }
 const validId = (value: string) => validate(idSchema, value, true);
-function httpError(status: number, submitted: boolean) {
+function httpError(status: number, submitted: boolean, path: string, failure?: unknown) {
+  const parsedCode = canvaProviderErrorCodeSchema.safeParse(object(failure) ? failure.code : undefined);
+  const providerCode = parsedCode.success ? parsedCode.data : null;
+  const providerMessage = object(failure) && typeof failure.message === "string" && failure.message.length <= 4000 ? failure.message : "";
+  const detail = { providerCode };
+  // Do not let an inconsistent error body turn an uncertain POST into a known rejection.
+  if (status >= 500 || status === 408) return new CanvaRestError("Canva가 요청 결과를 확인해 주지 못했습니다. 중복 생성을 피하려고 자동 재요청하지 않았습니다.", status, "provider_unavailable", submitted, null, detail);
+  if (providerCode === "missing_scope" || providerCode === "invalid_scope") return new CanvaRestError("Canva 연결에 필요한 권한이 빠져 있습니다. Canva 연결 설정에서 계정을 다시 연결하고 요청한 권한을 승인해 주세요.", status, "permission_denied", false, null, { ...detail, reason: "missing_scope" });
+  if (providerCode && ["invalid_access_token", "revoked_access_token", "invalid_grant"].includes(providerCode)) return new CanvaRestError("Canva 인증이 만료되었거나 해제되었습니다. 계정을 다시 연결해 주세요.", status, "auth_required", false, null, detail);
+  if (providerCode && ["quota_exceeded", "credit_quota_exceeded", "credit_quota_cooldown", "app_credit_quota_exceeded"].includes(providerCode)) return new CanvaRestError("Canva 기능 이용량 또는 크레딧 한도에 도달했습니다. 계정·앱의 사용 한도를 확인한 뒤 다시 요청해 주세요. 기존 원고와 작업 기록은 유지했습니다.", status, "rate_limited", false, null, { ...detail, reason: "quota_exceeded" });
+  // A 403 alone does not prove a plan problem. Only the documented Autofill
+  // capability message, on an Autofill endpoint, can refine resource denial.
+  const autofillCapabilityDenied = status === 403 && providerCode === "permission_denied" && /^\/autofills(?:\/|$)/.test(path) && (
+    /requires (?:one of )?capabilities \[\s*["']autofill["']/i.test(providerMessage)
+    || /access the autofill feature[\s\S]*upgrading your canva plan/i.test(providerMessage)
+    || /requires a canva plan with access to autofill/i.test(providerMessage)
+  );
+  if (autofillCapabilityDenied) return new CanvaRestError("현재 연결한 Canva 계정·팀에서 자동 채우기를 사용할 수 없습니다. 이 기능이 포함된 플랜과 연결한 계정·팀을 확인해 주세요. 원본 디자인과 원고는 유지했습니다.", status, "permission_denied", false, null, { ...detail, reason: "capability_missing" });
   const [code, message]: [CanvaRestErrorCode, string] = status === 401 ? ["auth_required", "Canva 인증이 만료되었습니다. 계정을 다시 연결해 주세요."]
-    : status === 403 ? ["permission_denied", "Canva 권한이 부족합니다. 현재 계정·팀과 필요한 연결 권한·기능 이용 가능 여부를 확인해 주세요."]
+    : status === 403 ? ["permission_denied", "Canva 디자인·자료에 접근할 권한이 부족합니다. 현재 연결한 계정·팀과 해당 자료의 접근 권한을 확인해 주세요."]
     : status === 404 ? ["not_found", "Canva 디자인·템플릿 또는 작업을 찾을 수 없습니다. 현재 계정과 ID를 확인해 주세요."]
     : status === 429 ? ["rate_limited", "Canva 호출 한도에 도달했습니다. 잠시 후 저장된 작업의 결과를 확인해 주세요."]
-    : status >= 500 ? ["provider_unavailable", "Canva가 요청 결과를 확인해 주지 못했습니다. 중복 생성을 피하려고 자동 재요청하지 않았습니다."]
     : ["invalid_request", "Canva가 요청 항목을 거절했습니다. 디자인·데이터 필드·이미지 형식을 확인해 주세요."];
-  return new CanvaRestError(message, status, code, submitted && (status >= 500 || status === 408));
+  return new CanvaRestError(message, status, code, false, null, detail);
 }
 async function responseJson(response: Response, signal: AbortSignal, submitted: boolean): Promise<unknown> {
   const maxBytes = 2_000_000;
@@ -83,17 +103,17 @@ async function rest(db: DB, path: string, options: CanvaRestOptions, request: { 
       ...(request.bytes ? { body: request.bytes as unknown as BodyInit } : request.json !== undefined ? { body: JSON.stringify(request.json) } : {}),
     });
     if (!response.ok) {
+      let failure: unknown;
+      try { failure = await responseJson(response, signal, false); } catch { /* HTTP rejection remains known even when its diagnostic body is malformed. */ }
       // Only this documented terminal outcome permits an explicit new export.
       // Other 404s can mean an inaccessible/wrong ID and must not be guessed to be expiry.
       if (!submitted && response.status === 404 && /^\/exports\/[a-zA-Z0-9_-]+$/.test(path)) {
-        let failure: unknown;
-        try { failure = await responseJson(response, signal, false); } catch { /* Retain the original safe HTTP classification. */ }
         if (object(failure) && failure.code === "not_found" && failure.message === "export job result has expired") {
           throw new CanvaRestError("Canva 출력 파일의 보관 기간이 끝났습니다. 기존 디자인을 확인한 뒤 다시 내보내 주세요.", 404, "export_expired");
         }
       }
       try { await response.body?.cancel(); } catch { /* Provider error contents never leave this boundary. */ }
-      throw httpError(response.status, submitted);
+      throw httpError(response.status, submitted, path, failure);
     }
     return await responseJson(response, signal, submitted);
   } catch (error) {
@@ -112,8 +132,9 @@ export type CanvaExportResult = { urls: string[] };
 export type CanvaAssetResult = { assetId: string };
 
 export async function getCanvaCapabilities(db: DB, options: CanvaRestOptions = {}): Promise<{ capabilities: string[] }> {
-  const value = validate(z.object({ capabilities: z.array(z.string().max(80).regex(/^[a-z_]+$/)).max(50).optional() }), await rest(db, "/users/me/capabilities", options));
-  return { capabilities: value.capabilities ?? [] };
+  const parsed = z.object({ capabilities: z.array(z.string().max(80).regex(/^[a-z_]+$/)).max(50) }).safeParse(await rest(db, "/users/me/capabilities", options));
+  if (!parsed.success) throw new CanvaRestError("Canva 기능 확인 응답이 불완전합니다. 계정의 사용 가능 여부를 단정하지 않았으니 연결 상태를 다시 확인해 주세요.", 502, "invalid_response");
+  return { capabilities: parsed.data.capabilities };
 }
 export async function getCanvaPrincipal(db: DB, options: CanvaRestOptions = {}): Promise<CanvaPrincipal> {
   const value = validate(z.object({ team_user: ownerSchema }), await rest(db, "/users/me", options));

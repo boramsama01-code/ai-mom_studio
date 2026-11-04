@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DB } from "../server/db";
 import type { mediaAssets, contentItems } from "../shared/schema";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
+import { snapshotCanvaProfile } from "../shared/canvaEditorial";
+import { LEGACY_READING_PROFILE_IDS, readingProfileForTemplateKey } from "../shared/readingCardProfiles";
 import { sha256 } from "../server/services/text";
 const calls = vi.hoisted(() => ({ evidence: vi.fn(), pages: vi.fn() }));
 vi.mock("../server/services/familyEditorialPersistence", () => ({ assertFamilyEvidenceForCopy: calls.evidence }));
@@ -34,6 +36,16 @@ const db = {
 } as unknown as DB;
 beforeEach(() => { state = fixture(); calls.evidence.mockReset().mockResolvedValue({}); calls.pages.mockReset().mockImplementation(async () => state.pages); });
 
+function bindProfile(key = 'cardnews14-cinematic-v1') {
+  const profile = readingProfileForTemplateKey(key)!;
+  const { mappingVersion, ...binding } = snapshotCanvaProfile(profile);
+  Object.assign(state.job!.input, binding, { mappingVersion });
+  Object.assign(state.job!.result, binding, { mappingVersion, templateVersion: profile.templateVersion });
+  Object.assign(state.input.revision.payload.canvaExport, binding, { dataFieldMappingVersion: mappingVersion, templateVersion: profile.templateVersion });
+  state.input.revision.payload.cardCopy.templateKey = profile.templateKey;
+  return [state.job!.input, state.job!.result, state.input.revision.payload.canvaExport] as Record<string, unknown>[];
+}
+
 describe("Canva approval artifact binding", () => {
   it("accepts one frozen output with the same current caption, evidence, order and original hashes", async () => {
     const proof = await assertCanvaPublication(db, state.input);
@@ -43,6 +55,34 @@ describe("Canva approval artifact binding", () => {
   it("does not change the existing v1 publication contract", async () => {
     state.input.revision.payload.cardCopy = { version: 1 };
     expect(await assertCanvaPublication(db, state.input)).toBeNull(); expect(calls.evidence).not.toHaveBeenCalled(); expect(calls.pages).not.toHaveBeenCalled();
+  });
+  it.each(LEGACY_READING_PROFILE_IDS)('accepts the historical %s export without source fingerprint fields', async key => {
+    const records = bindProfile(key);
+    for (const record of records) { expect(record).not.toHaveProperty('sourceLayoutSha256'); expect(record).not.toHaveProperty('sourceAssetsSha256'); }
+    expect((await assertCanvaPublication(db, state.input))?.jobId).toBe(10);
+  });
+  it('validates a completed export against its stored source after the catalog changes', async () => {
+    // These are preserved historical hashes, deliberately different from the
+    // current profile. An immutable 16-file export needs no new provider call.
+    for (const record of bindProfile()) Object.assign(record, { sourceLayoutSha256: '3'.repeat(64), sourceAssetsSha256: '4'.repeat(64) });
+    expect((await assertCanvaPublication(db, state.input))?.jobId).toBe(10);
+    expect((await assertCanvaReusableArtifact(db, state.input))?.jobId).toBe(10);
+  });
+  it.each([
+    [0, 'sourceLayoutSha256'], [1, 'sourceLayoutSha256'], [2, 'sourceLayoutSha256'],
+    [0, 'sourceAssetsSha256'], [1, 'sourceAssetsSha256'], [2, 'sourceAssetsSha256'],
+  ] as const)('blocks a changed fingerprint in artifact record %s / %s', async (index, field) => {
+    bindProfile()[index][field] = '0'.repeat(64);
+    await expect(assertCanvaPublication(db, state.input)).rejects.toMatchObject({ status: 409, extra: { code: 'canva_publication_mismatch' } });
+    expect(calls.pages).not.toHaveBeenCalled(); expect(calls.evidence).not.toHaveBeenCalled();
+  });
+  it.each(['sourceLayoutSha256', 'sourceAssetsSha256', 'both'] as const)('does not downgrade a new export by removing %s from every stored record', async missing => {
+    for (const record of bindProfile()) {
+      if (missing !== 'sourceAssetsSha256') delete record.sourceLayoutSha256;
+      if (missing !== 'sourceLayoutSha256') delete record.sourceAssetsSha256;
+    }
+    await expect(assertCanvaPublication(db, state.input)).rejects.toMatchObject({ status: 409, extra: { code: 'canva_publication_mismatch' } });
+    expect(calls.pages).not.toHaveBeenCalled(); expect(calls.evidence).not.toHaveBeenCalled();
   });
   it.each(["caption_revision", "caption_review", "caption_changed", "evidence", "copy", "background", "renderer", "revision", "job", "order", "missing_page", "builtin_page", "second_cover", "original_hash", "missing_original"])("blocks %s mismatches before an approval can be stored", async mutation => {
     const payload = state.input.revision.payload;

@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { CanvaJobDto, CanvaMasterDto } from "../../shared/canvaEditorial";
 import { ApiError } from "./api";
 import { canvaReconcileRequestSchema, canvaReconciliationSchema, type CanvaReconcileRequest } from '../../shared/canvaReconciliation';
+import { canvaConnectionStatusSchema } from '../../shared/canvaCapabilities';
 const id = z.number().int().positive();
 const canvaUrl = z.string().max(8192).refine(value => { try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password && !url.port && (url.hostname === "canva.com" || url.hostname.endsWith(".canva.com")); } catch { return false; } });
 const page = z.object({ id, sha256: z.string().regex(/^[a-f0-9]{64}$/), title: z.string().max(1000), altText: z.string().max(1000).optional() });
@@ -28,7 +29,7 @@ export const parseCanvaJob = (value: unknown): CanvaJobDto => parsed(jobSchema, 
 export const parseCanvaJobs = (value: unknown): { items: CanvaJobDto[] } => parsed(z.object({ items: z.array(jobSchema).max(100) }), value);
 export const parseCanvaMaster = (value: unknown): CanvaMasterDto => parsed(masterSchema, value);
 export const parseCanvaMasters = (value: unknown): { items: CanvaMasterDto[] } => parsed(z.object({ items: z.array(masterSchema).max(500) }), value);
-export const parseCanvaConnection = (value: unknown) => parsed(z.object({ configured: z.boolean(), connected: z.boolean(), autofill: z.boolean(), capabilities: z.array(z.string().max(100)).max(100) }), value);
+export const parseCanvaConnection = (value: unknown) => parsed(canvaConnectionStatusSchema, value);
 export const parseCanvaAcceptance = (value: unknown) => parsed(z.object({ ok: z.literal(true) }), value);
 export function readCanvaRequest(key: string): CanvaRequestBody | null {
   try { const result = canvaRequestBodySchema.safeParse(JSON.parse(sessionStorage.getItem(key) ?? "null")); return result.success ? result.data : null; }

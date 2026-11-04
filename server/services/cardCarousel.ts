@@ -17,6 +17,7 @@ import { checkEditorialCard, renderEditorialCard } from "./editorialCard";
 import { defaultPageDesigns, familyCardCopySchema, pageDesignsSchema, type CardCopyV2, type PageDesigns } from "../../shared/familyDialogue";
 import { checkFamilyDialogueCard, familyBrandName, familyPageText, familyPageTitle, renderFamilyDialogueCard, type FamilyCardContext } from "./familyDialogueCard";
 import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
+import { resolvedReadingPageDesigns } from "../../shared/readingPageImages";
 import { layoutReadingCard, readingPageText, renderReadingCard } from "./readingCard";
 
 type Block = CardModel["blocks"][number];
@@ -178,7 +179,7 @@ export async function renderCarouselCover(model: CardModel, count: number, art: 
 export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, style: CardStyle, art: Buffer | null, credit: string, pageImages: CarouselPageImages = new Map()): Promise<Buffer> {
   if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= plan.count) throw new HttpError(400, "카드 페이지를 확인해 주세요.");
   if (plan.family) {
-    const { copy, designs, context } = plan.family, page = copy.pages[pageIndex], design = designs[page.id];
+    const { copy, designs, context } = plan.family, page = copy.pages[pageIndex], design = resolvedReadingPageDesigns(copy, designs)[page.id];
     const assetId = design.background.kind === "image" ? design.background.assetId : undefined;
     const image = assetId ? pageImages.get(assetId) : undefined;
     if (design.background.kind === "image" && (!assetId || !image)) throw new HttpError(422, "이 페이지에 선택한 배경을 불러올 수 없습니다. 저장한 원고는 유지했습니다. 배경을 다시 선택해 주세요.");
@@ -200,7 +201,7 @@ export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, 
 export async function renderCarouselPages(plan: CarouselPlan, style: CardStyle, art: Buffer | null, credit: string, pageImages: CarouselPageImages = new Map()) {
   const visibleAlt = (index:number,fallback:string[]) => {
     if(!plan.family) return conciseAlt(fallback);
-    const {copy,designs,context}=plan.family,page=copy.pages[index],bg=designs[page.id].background;
+    const {copy,designs,context}=plan.family,page=copy.pages[index],bg=resolvedReadingPageDesigns(copy,designs)[page.id].background;
     const displayContext={...context,imageCredit:bg.kind==='image'&&bg.assetId?pageImages.credits?.get(bg.assetId)??'배경 이미지':''};
     return conciseAlt([`${index+1}페이지.`,...(readingProfileForTemplateKey(copy.templateKey)?readingPageText(copy,page,displayContext):familyPageText(page,displayContext))]);
   };

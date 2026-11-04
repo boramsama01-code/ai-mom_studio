@@ -96,6 +96,15 @@ async function connectEvidence(path: string, evidenceId: string) {
 }
 
 describe("family dialogue v2 editor", () => {
+  it("saves and reopens the 14-style photo layouts without losing an edited field or an intentionally empty display label",async()=>{
+    await render(); await input('fields.headline','내가 고친 제목');await input('displayOverrides.kicker','');
+    const choose=async(key:string)=>{const picker=host.querySelector<HTMLSelectElement>('[aria-label="카드뉴스 스타일"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(picker,key);picker.dispatchEvent(new Event('change',{bubbles:true}));});await settle();};
+    await choose('cardnews14-cinematic-v1');await selectPage('2페이지 · 뉴스 요약');expect(host.querySelector('.page-background-editor')).not.toBeNull();
+    await choose('cardnews14-swiss-modernism-v1');expect(host.querySelector('.page-background-editor')).toBeNull();expect(host.textContent).toContain('사진은 1·3·4·7장');
+    await selectPage('3페이지 · 뉴스의 의미');expect(host.querySelector('.page-background-editor')).not.toBeNull();
+    await click('문구·디자인 저장');expect(saved.copy.templateKey).toBe('cardnews14-swiss-modernism-v1');
+    await render(null);client.clear();await render();expect(field('fields.headline').value).toBe('내가 고친 제목');expect(field('displayOverrides.kicker').value).toBe('');
+  });
   it("selects a reading profile, preserves manual text, exposes its photo slots, and reopens the saved style", async () => {
     await render();
     await input("fields.headline", "서로의 판단 기준");

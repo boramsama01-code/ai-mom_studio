@@ -19,7 +19,8 @@ vi.mock("../shared/readingCanvaMasters", () => ({ readingMasterSourceApproved: a
 vi.mock("../server/services/readingCard", async original => ({ ...await original<object>(), layoutReadingCard: api.layout }));
 const { getDb, closeDb } = await import("../server/db");
 const { createRevision } = await import("../server/content");
-const { registerCanvaMaster, enqueueCanvaRender, resumeCanvaJob, runCanvaJobs, acceptCanvaImport } = await import("../server/services/canvaEditorial");
+const { registerCanvaMaster, enqueueCanvaRender, resumeCanvaJob, runCanvaJobs, acceptCanvaImport, canvaJobDto } = await import("../server/services/canvaEditorial");
+const { assertCanvaPublication } = await import("../server/services/canvaPublication");
 const { reconcileCanvaJob, canvaRecoveryToken } = await import("../server/services/canvaReconciliation");
 const { canvaInputHash } = await import("../server/services/canvaEditorialAssets");
 const { CanvaRestError } = await import("../server/services/canvaRest");
@@ -453,12 +454,94 @@ describe("reading profile admission and recovery with synthetic Canva datasets",
     expect(submitted).toMatchObject({ status: "queued", phase: "autofill_polling", autofillJobId: "autofill_new" });
     const data = api.submitAutofill.mock.calls[0][1].data as Record<string, { type: string; asset_id?: string }>;
     expect(Object.values(data).filter(value => value.type === "text")).toHaveLength(46);
-    expect(Object.keys(data).filter(name => data[name].type === "image")).toEqual([
+    // PostgreSQL JSONB object order is not a page order. Every declared field
+    // must still receive its own exact uploaded asset ID.
+    expect(Object.keys(data).filter(name => data[name].type === "image").sort()).toEqual([
       "P01_COVER_IMAGE", "P04_CONTEXT_IMAGE", "P07_ACTIVITY_IMAGE", "P08_PROFILE_IMAGE",
     ]);
-    expect(data.P08_PROFILE_IMAGE.asset_id).toBe("asset_P08_PROFILE_IMAGE");
+    for (const slot of f.profile.images) expect(data[slot.field]).toEqual({ type: 'image', asset_id: `asset_${slot.field}` });
     expect(data).not.toHaveProperty("P01_IMAGE"); expect(data).not.toHaveProperty("P01_HEADER_BRAND");
     expect(api.submitAutofill).toHaveBeenCalledOnce(); expect(api.submitUpload).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['cardnews14-cinematic-v1', 8], ['cardnews14-cobalt-paper-v1', 4], ['cardnews14-swiss-modernism-v1', 5],
+  ] as const)('pins both source hashes and the exact %s image contract (%s fields)', async (key, imageCount) => {
+    const f = await readingFixture('complete', { status: 'failed' }, key);
+    const admitted = await enqueueCanvaRender(f.db, { ...f.request, requestId: randomUUID() });
+    expect(admitted.input).toMatchObject(snapshotCanvaProfile(f.profile));
+    expect(admitted.input.sourceLayoutSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(admitted.input.sourceAssetsSha256).toMatch(/^[a-f0-9]{64}$/);
+    await f.db.update(canvaRenderJobs).set({ phase: 'autofill_prepare', result: { uploadedImages: f.uploadedImages } }).where(eq(canvaRenderJobs.id, admitted.id));
+    expect(await runNow(admitted.id)).toMatchObject({ status: 'queued', phase: 'autofill_polling', autofillJobId: 'autofill_new' });
+    const data = api.submitAutofill.mock.calls[0][1].data as Record<string, { type: string; asset_id?: string }>;
+    expect(Object.values(data).filter(value => value.type === 'text')).toHaveLength(46);
+    const imageFields = Object.keys(data).filter(name => data[name].type === 'image');
+    expect(imageFields).toHaveLength(imageCount);
+    expect(imageFields.sort()).toEqual(f.profile.images.map(slot => slot.field).sort());
+    for (const slot of f.profile.images) expect(data[slot.field]).toEqual({ type: 'image', asset_id: `asset_${slot.field}` });
+    expect(api.submitAutofill).toHaveBeenCalledOnce(); expect(api.submitUpload).not.toHaveBeenCalled();
+  });
+  it('refuses an incomplete catalog fingerprint at admission without adding a runnable job', async () => {
+    const f = await readingFixture('complete', { status: 'failed' }, 'cardnews14-hello-v1');
+    const previousHash = f.profile.sourceAssetsSha256;
+    try {
+      f.profile.sourceAssetsSha256 = undefined;
+      await expect(enqueueCanvaRender(f.db, { ...f.request, requestId: randomUUID() }))
+        .rejects.toMatchObject({ status: 409, extra: { code: 'canva_profile_changed' } });
+    } finally { f.profile.sourceAssetsSha256 = previousHash; }
+    expect(await f.db.select().from(canvaRenderJobs).where(eq(canvaRenderJobs.contentItemId, f.item.id))).toHaveLength(1);
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
+    expect(api.design).not.toHaveBeenCalled(); expect(api.dataset).not.toHaveBeenCalled();
+  });
+  it.each(['sourceLayoutSha256', 'sourceAssetsSha256'] as const)('blocks changed %s before images or Autofill can be sent', async field => {
+    const f = await readingFixture('autofill_prepare', {}, 'cardnews14-cinematic-v1');
+    await f.db.update(canvaRenderJobs).set({ input: { ...f.job.input, [field]: '0'.repeat(64) } }).where(eq(canvaRenderJobs.id, f.job.id));
+    expect(await runNow(f.job.id)).toMatchObject({ status: 'failed', errorCode: 'canva_profile_changed' });
+    const [current] = await f.db.select().from(contentItems).where(eq(contentItems.id, f.item.id));
+    expect(current).toMatchObject({ version: f.item.version, currentRevisionId: f.revision.id });
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
+    expect(api.principal).not.toHaveBeenCalled(); expect(api.design).not.toHaveBeenCalled(); expect(api.dataset).not.toHaveBeenCalled();
+  });
+  it('does not treat a stored ready master as approval for a new handoff source', async () => {
+    const f = await readingFixture('complete', { status: 'failed' }, 'cardnews14-cinematic-v1');
+    const actual = await vi.importActual<typeof import('../shared/readingCanvaMasters')>('../shared/readingCanvaMasters');
+    api.sourceApproved.mockImplementation(actual.readingMasterSourceApproved);
+    await expect(enqueueCanvaRender(f.db, { ...f.request, requestId: randomUUID() }))
+      .rejects.toMatchObject({ status: 422, extra: { code: 'canva_profile_source_unapproved' } });
+    expect(await f.db.select().from(canvaRenderJobs).where(eq(canvaRenderJobs.contentItemId, f.item.id))).toHaveLength(1);
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
+  });
+  it('preserves both fingerprints in the saved 16-file artifact, API result and approval proof', async () => {
+    const f = await readingFixture('download', { designId: 'generated_design', designUpdatedAt: '123', exportJobId: 'export_known' }, 'cardnews14-cinematic-v1');
+    api.getExport.mockResolvedValue({ id: 'export_known', status: 'success', result: { urls: Array.from({ length: 8 }, (_, index) => `https://export-download.canva.com/hash-${index}`) } });
+    const completed = await runNow(f.job.id);
+    expect(completed.status).toBe('ready');
+    const trace = { profileId: f.profile.id, profileTemplateVersion: f.profile.templateVersion, profileImageSha256: f.profile.profileImageSha256,
+      sourceLayoutSha256: f.profile.sourceLayoutSha256, sourceAssetsSha256: f.profile.sourceAssetsSha256 };
+    expect(completed.result).toMatchObject(trace); expect(canvaJobDto(completed).result).toMatchObject(trace);
+    const [revision] = await f.db.select().from(contentRevisions).where(eq(contentRevisions.id, completed.outputRevisionId!));
+    const [item] = await f.db.select().from(contentItems).where(eq(contentItems.id, f.item.id));
+    const [asset] = await f.db.select().from(mediaAssets).where(eq(mediaAssets.id, completed.outputAssetId!));
+    expect(revision.payload.canvaExport).toMatchObject(trace);
+    expect(await f.db.select().from(mediaAssets).where(eq(mediaAssets.revisionId, revision.id))).toHaveLength(16);
+    expect((await assertCanvaPublication(f.db, { item, revision, asset }))?.jobId).toBe(completed.id);
+    await f.db.update(canvaRenderJobs).set({ input: { ...completed.input, sourceLayoutSha256: '0'.repeat(64) } }).where(eq(canvaRenderJobs.id, completed.id));
+    await expect(assertCanvaPublication(f.db, { item, revision, asset }))
+      .rejects.toMatchObject({ status: 409, extra: { code: 'canva_publication_mismatch' } });
+    expect(await f.db.select().from(approvals).where(eq(approvals.contentItemId, f.item.id))).toHaveLength(0);
+    expect(api.submitAutofill).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled();
+  });
+  it('imports a previously created handoff design without new source approval or Autofill permission', async () => {
+    const f = await readingFixture('complete', { status: 'failed', designId: 'Dexisting_handoff_copy' }, 'cardnews14-cinematic-v1');
+    api.sourceApproved.mockReturnValue(false);
+    api.capabilities.mockResolvedValue({ capabilities: [] });
+    await f.db.update(canvaMasters).set({ status: 'design_changed' }).where(eq(canvaMasters.id, f.master.id));
+    const imported = await enqueueCanvaRender(f.db, { ...f.request, requestId: randomUUID(), importFromJobId: f.job.id });
+    expect(imported.input).toMatchObject(snapshotCanvaProfile(f.profile));
+    expect(imported).toMatchObject({ purpose: 'import', masterId: f.master.id, designId: 'Dexisting_handoff_copy' });
+    expect(await runNow(imported.id)).toMatchObject({ status: 'queued', phase: 'export_prepare' });
+    expect(api.sourceApproved).not.toHaveBeenCalled(); expect(api.capabilities).not.toHaveBeenCalled();
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
   });
   it("checks real-layout overflow before admitting an upload or autofill job", async () => {
     const f = await readingFixture("complete", { status: "failed" }, "reading-cobalt-paper-v1");
@@ -478,8 +561,8 @@ describe("reading profile admission and recovery with synthetic Canva datasets",
       .rejects.toMatchObject({ status: 409, extra: { code: "canva_profile_changed" } });
     expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled();
   });
-  it("keeps the original profile through reconciliation after the editor selects a different profile", async () => {
-    const f = await readingFixture("autofill_submitting", { status: "result_unknown" });
+  it.each(['reading-ink-lime-v1', 'cardnews14-cinematic-v1'])("keeps the original %s snapshot through reconciliation after the editor selects a different profile", async key => {
+    const f = await readingFixture("autofill_submitting", { status: "result_unknown" }, key);
     const changed = structuredClone(f.copy), other = readingProfileForTemplateKey("reading-cobalt-paper-v1")!;
     changed.templateKey = other.templateKey;
     const revision = await createRevision(f.db, { contentItemId: f.item.id, author: "operator",

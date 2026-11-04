@@ -1,11 +1,12 @@
 /**
  * Canva Connect API — 자동 채우기(Autofill)와 내보내기(Export)
- * 문서: https://www.canva.dev/docs/connect/
+ * 문서: https://www.canva.dev/docs/apps/rest-apis/
  *
  * - OAuth 2.0 Authorization Code + PKCE(s256), 토큰 교환은 Basic 인증(client id:secret)
  * - 리프레시 토큰은 한 번만 쓸 수 있으므로 갱신할 때마다 새 토큰을 저장
  * - 토큰은 연결 키 저장소(암호화)에 보관, 화면·로그에 노출하지 않음
- * - 자동 채우기는 Canva Pro/Teams/Enterprise 계정의 "브랜드 템플릿"에서 동작(Canva 정책)
+ * - 자동 채우기는 dataset 필드가 있는 디자인·브랜드 템플릿을 지원한다.
+ *   플랜 이름으로 추측하지 않고 현재 OAuth 사용자의 autofill capability를 확인한다.
  */
 import crypto from "node:crypto";
 import type { DB } from "../db";

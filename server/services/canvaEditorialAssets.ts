@@ -11,6 +11,7 @@ import type { CardCopyV2, PageDesigns } from '../../shared/familyDialogue';
 import { FAMILY_PAGE_COLORS } from '../../shared/familyDialogueTheme';
 import { CANVA_APPROVED_PARENT_LOGO, CANVA_PAGE_IDS } from '../../shared/canvaEditorial';
 import { READING_PROFILE_LOGO_ID, readingProfileDesignErrors, type ReadingCardProfile } from '../../shared/readingCardProfiles';
+import { resolvedReadingPageDesigns } from '../../shared/readingPageImages';
 import { prepareReadingArtwork } from './readingCardImages';
 
 export function canonicalJson(value:unknown):string {
@@ -48,6 +49,7 @@ export function assertCanvaDesignSettings(pageDesigns:PageDesigns,profile?:Readi
 /** Text remains in Canva. Only the selected photograph/background is prepared here. */
 export async function prepareCanvaImages(db:DB,a:{itemId:number;channelId:number;copy:CardCopyV2;pageDesigns:PageDesigns;profile?:ReadingCardProfile}) {
   assertCanvaDesignSettings(a.pageDesigns,a.profile);
+  const pageDesigns=resolvedReadingPageDesigns(a.copy,a.pageDesigns);
   const images:Array<{field:string;bytes:Buffer;hash:string}>=[];
   if(a.profile) {
     const profile=a.profile, outro=a.copy.pages.find(page=>page.id==='outro');
@@ -58,7 +60,7 @@ export async function prepareCanvaImages(db:DB,a:{itemId:number;channelId:number
       let bytes:Buffer;
       if(slot.kind==='profile') bytes=logo;
       else {
-        const design=a.pageDesigns[slot.pageId],bg=design.background;
+        const design=pageDesigns[slot.pageId],bg=design.background;
         const image=bg.kind==='image'?await loadCardPageArtworkAsset(db,a.itemId,a.channelId,bg.assetId!):null;
         const pageIndex=CANVA_PAGE_IDS.indexOf(slot.pageId);
         // Studio preview and Canva use the same source bytes, slot ratio,
@@ -71,7 +73,7 @@ export async function prepareCanvaImages(db:DB,a:{itemId:number;channelId:number
   }
   for(const [index,id] of CANVA_PAGE_IDS.entries()){
     if(id==='outro') continue;
-    const design=a.pageDesigns[id],bg=design.background;
+    const design=pageDesigns[id],bg=design.background;
     // The approved reading-news cover is full bleed, like the body background
     // frames. Cropping, focal point and overlay therefore survive Autofill.
     const width=1080,height=1350;

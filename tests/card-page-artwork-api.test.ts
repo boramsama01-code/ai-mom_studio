@@ -60,6 +60,24 @@ async function enteredWithin(promise: Promise<void>) {
 }
 
 describe("page-specific backgrounds on PostgreSQL", () => {
+  it("loads only the inherited cover bytes for a selected 14-style inner page and preserves its saved reference state", async () => {
+    const f = await fixture(), uploaded = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const copy = familyDialogueCardFixture(), profile = READING_CARD_PROFILES.find(value => value.sourceStyleId === "cinematic")!;
+    copy.templateKey = profile.templateKey;
+    const designs = readingProfileDesigns(profile, familyDialogueMetadataFixture().pageDesigns);
+    designs.cover.background = { ...designs.cover.background, kind: "image", assetId: uploaded.body.assetId };
+    designs.news_summary.background.inheritCover = true;
+    const before = structuredClone(designs);
+    const selected = await loadCardPageArtworkForPage(getDb(), f.item.id, 2, copy, 1, designs);
+    expect([...selected.keys()]).toEqual([uploaded.body.assetId]);
+    expect(selected.credits.get(uploaded.body.assetId)).toBe("직접 등록 이미지");
+    expect(designs).toEqual(before); expect(designs.news_summary.background.assetId).toBeUndefined();
+    const other = await fixture();
+    await expect(loadCardPageArtworkForPage(getDb(), other.item.id, 2, copy, 1, designs)).rejects.toMatchObject({ status: 404 });
+    designs.news_summary.background.inheritCover = false;
+    expect((await loadCardPageArtworkForPage(getDb(), f.item.id, 2, copy, 1, designs)).size).toBe(0);
+  });
   it("uses fixed reading-photo geometry and blocks artwork requests on text-only pages", async () => {
     const f=await fixture(),copy=familyDialogueCardFixture(),metadata=familyDialogueMetadataFixture(),profile=READING_CARD_PROFILES[0];
     copy.templateKey=profile.templateKey;const outro=copy.pages[7];if(outro.id==='outro')outro.fields.logoAssetId=READING_PROFILE_LOGO_ID;
@@ -71,8 +89,9 @@ describe("page-specific backgrounds on PostgreSQL", () => {
     expect(rejected.status).toBe(422);expect(makeImage).not.toHaveBeenCalled();
     const created=await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f,{version:item.version,pageId:'discussion',mode:'ai',imageData:undefined}));
     expect(created.status,JSON.stringify(created.body)).toBe(200);expect(makeImage).toHaveBeenCalledTimes(1);
-    expect(makeImage.mock.calls[0][0].prompt).toContain('936x360');
-    expect(makeImage.mock.calls[0][0].prompt).toContain('text is entirely outside');
+    const imagePrompt=JSON.parse(makeImage.mock.calls[0][0].prompt);
+    expect(imagePrompt.photoComposition).toMatchObject({pageId:'discussion',slot:{width:936,height:360},textPlacement:'outside_image',textSafeAreas:[]});
+    expect(imagePrompt.use).toContain('글자가 겹치지 않는다');
     expect(created.body).toMatchObject({pageId:'discussion',source:'ai',credit:'AI 일러스트 · OpenAI'});
   });
   it("uses v2 semantic IDs and scopes both current and recoverable images to the owning item", async () => {

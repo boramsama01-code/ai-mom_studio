@@ -6,6 +6,7 @@ import { familyCardCopySchema, evidenceBindingSchema, pageDesignsSchema, type Ca
 import { CANVA_PAGE_IDS, canvaTextFields, canvaDisplaySupportErrors, canvaVariant, validateCanvaDataset, snapshotCanvaProfile, storedCanvaProfileSnapshot, resolveCanvaProfile, type CanvaProfileSnapshot, type CanvaConceptMode, type CanvaJobDto, type CanvaMasterDto, type CanvaField, type CanvaDataset, type CanvaTextOptions } from '../../shared/canvaEditorial';
 import { readingProfileForTemplateKey, readingProfileForTemplateVersion, type ReadingCardProfile } from '../../shared/readingCardProfiles';
 import { readingMasterSourceApproved } from '../../shared/readingCanvaMasters';
+import { resolvedReadingPageDesigns } from '../../shared/readingPageImages';
 import { layoutReadingCard } from './readingCard';
 import { CardOverflowError } from './card';
 import { HttpError } from '../routes/util';
@@ -67,9 +68,10 @@ function assertCanvaTextFits(copy:CardCopyV2,master:Master,purpose:'create'|'imp
 }
 function canvaDisplayOptions(input:Input,dataset:CanvaDataset,profile?:ReadingCardProfile):CanvaTextOptions {
   const caption=captionPackageSchema.safeParse(input.payload.captionPackage);
+  const pageDesigns=resolvedReadingPageDesigns(input.copy,input.pageDesigns);
   return { dataset,profile,requireDisplayFields:true,context:familyDisplayContext(input.copy,caption.success?caption.data:null),
     pageContexts:Object.fromEntries(input.copy.pages.map(page=>{
-      const bg=input.pageDesigns[page.id].background;
+      const bg=pageDesigns[page.id].background;
       return [page.id,{imageCredit:bg.kind==='image'?input.artworkCredits?.[String(bg.assetId)]??'배경 이미지':''}];
     })) };
 }
@@ -81,7 +83,7 @@ export const canvaMasterDto=(m:Master):CanvaMasterDto=>({id:m.id,conceptMode:m.c
 export function canvaJobDto(job:Job):CanvaJobDto {
   const result=job.result;
   const reconciliations=canvaReconciliations(result);
-  return {id:job.id,requestId:job.requestId,purpose:job.purpose,status:job.status,phase:job.phase,sourceRevisionId:job.sourceRevisionId,sourceVersion:job.sourceVersion,designId:job.designId,editUrl:job.editUrl,exportJobId:job.exportJobId,outputAssetId:job.outputAssetId,outputRevisionId:job.outputRevisionId,errorCode:job.errorCode,errorMessage:job.errorMessage,createdAt:job.createdAt.toISOString(),recoveryToken:canvaRecoveryToken(job),result:result?{...(typeof result.profileId==='string'?{profileId:result.profileId,profileTemplateVersion:result.profileTemplateVersion,profileImageSha256:result.profileImageSha256}:{}),pages:result.pages,originals:result.originals,templateVersion:result.templateVersion,datasetHash:result.datasetHash,mappingVersion:result.mappingVersion,exportedAt:result.exportedAt,contentRevision:result.contentRevision,evidenceSetId:result.evidenceSetId,...(reconciliations.length?{reconciled:true,reconciliation:reconciliations[0],reconciliationHistory:reconciliations.slice(1)}:{}),...(result.reuseReason==='caption_only'?{reusedFromJobId:result.reusedFromJobId,reuseReason:result.reuseReason,reusedAt:result.reusedAt}:{})}:null};
+  return {id:job.id,requestId:job.requestId,purpose:job.purpose,status:job.status,phase:job.phase,sourceRevisionId:job.sourceRevisionId,sourceVersion:job.sourceVersion,designId:job.designId,editUrl:job.editUrl,exportJobId:job.exportJobId,outputAssetId:job.outputAssetId,outputRevisionId:job.outputRevisionId,errorCode:job.errorCode,errorMessage:job.errorMessage,createdAt:job.createdAt.toISOString(),recoveryToken:canvaRecoveryToken(job),result:result?{...(typeof result.profileId==='string'?{profileId:result.profileId,profileTemplateVersion:result.profileTemplateVersion,profileImageSha256:result.profileImageSha256,...(typeof result.sourceLayoutSha256==='string'?{sourceLayoutSha256:result.sourceLayoutSha256}:{}),...(typeof result.sourceAssetsSha256==='string'?{sourceAssetsSha256:result.sourceAssetsSha256}:{})}:{}),pages:result.pages,originals:result.originals,templateVersion:result.templateVersion,datasetHash:result.datasetHash,mappingVersion:result.mappingVersion,exportedAt:result.exportedAt,contentRevision:result.contentRevision,evidenceSetId:result.evidenceSetId,...(reconciliations.length?{reconciled:true,reconciliation:reconciliations[0],reconciliationHistory:reconciliations.slice(1)}:{}),...(result.reuseReason==='caption_only'?{reusedFromJobId:result.reusedFromJobId,reuseReason:result.reuseReason,reusedAt:result.reusedAt}:{})}:null};
 }
 
 export async function registerCanvaMaster(db:DB,a:{channelId:number;sourceId:string;conceptMode:CanvaConceptMode;hasExternalActivity:boolean;templateVersion:string;actor:string}) {
@@ -139,6 +141,9 @@ export async function enqueueCanvaRender(db:DB,a:{channelId:number;itemId:number
     const artworkCredits=purpose==='create'?await loadCardPageArtworkCredits(tx as DB,item.id,a.channelId,parsed.data,designs.data):priorInput?.artworkCredits??{};
     const input:Input={payload,title:item.title,copy:parsed.data,pageDesigns:designs.data,evidenceSetId:evidence.data.evidenceSetId,
       ...(priorInput?storedCanvaProfileSnapshot(priorInput):snapshotCanvaProfile(selectedProfile)),datasetHash:priorInput?.datasetHash??master.datasetHash,artworkCredits};
+    // Validate a new source snapshot before making it runnable. Imports keep
+    // the original exported trace, even after a catalog revision is retired.
+    if(purpose==='create')profileForInput(input,master);
     const displayOptions=canvaDisplayOptions(input,master.dataset as CanvaDataset,selectedProfile);
     assertCanvaTextFits(parsed.data,master,purpose,selectedProfile,displayOptions);
     if(purpose==='create'){
@@ -313,7 +318,9 @@ async function saveCanvaOutput(db:DB,job:Job,master:Master,pngs:Buffer[],jpegs:B
     const input=asInput(job),stale=item.version!==job.sourceVersion||item.currentRevisionId!==job.sourceRevisionId;
     const apply=!stale&&job.purpose==='create';
     const exportedAt=new Date().toISOString();
-    const profileTrace=input.profileId?{profileId:input.profileId,profileTemplateVersion:input.profileTemplateVersion,profileImageSha256:input.profileImageSha256}:{};
+    const profileTrace=input.profileId?{profileId:input.profileId,profileTemplateVersion:input.profileTemplateVersion,profileImageSha256:input.profileImageSha256,
+      ...(input.sourceLayoutSha256!==undefined?{sourceLayoutSha256:input.sourceLayoutSha256}:{}),
+      ...(input.sourceAssetsSha256!==undefined?{sourceAssetsSha256:input.sourceAssetsSha256}:{})}:{};
     const metadata={...profileTrace,rendererProvider:'canva',canvaDesignId:job.designId,templateVersion:master.templateVersion,sourceDesignId:master.sourceId,dataFieldMappingVersion:input.mappingVersion,datasetHash:input.datasetHash,contentRevision:job.sourceRevisionId,evidenceSetId:input.evidenceSetId,requestHash:job.requestHash,autofillJobId:job.autofillJobId,exportJobId:job.exportJobId,designUpdatedAt:job.designUpdatedAt,exportedAt};
     const outputPayload={...input.payload,rendererProvider:'canva',canvaExport:metadata,dependencies:{...(input.payload.dependencies as Record<string,unknown>),render:apply?'current':'needs_review'}};
     const revision=await createRevision(tx,{contentItemId:item.id,author:'operator',payload:outputPayload,note:job.purpose==='import'?'Canva 최신 디자인 가져오기 · 문구 대조 필요':'Canva 8장 생성·출력 저장',makeCurrent:apply});

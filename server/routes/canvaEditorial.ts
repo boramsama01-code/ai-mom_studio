@@ -11,9 +11,10 @@ import { registerCanvaMaster,canvaMasterDto,enqueueCanvaRender,canvaJobDto,accep
 import { kickCanvaJobs } from '../worker/canva';
 import { reconcileCanvaJob } from '../services/canvaReconciliation';
 import { canvaReconcileRequestSchema } from '../../shared/canvaReconciliation';
+import type { CanvaConnectionStatus } from '../../shared/canvaCapabilities';
 
 export const canvaEditorialRoutes=Router();
-const route=(fn:Parameters<typeof ah>[0])=>ah(async(req,res,next)=>{try{return await fn(req,res,next);}catch(error){if(error instanceof CanvaRestError)throw new HttpError(error.status===401?422:error.status===429?429:502,error.message,{code:error.code});throw error;}});
+const route=(fn:Parameters<typeof ah>[0])=>ah(async(req,res,next)=>{try{return await fn(req,res,next);}catch(error){if(error instanceof CanvaRestError)throw new HttpError(error.outcomeUnknown?502:error.status===429?429:error.status&&error.status>=400&&error.status<500?422:502,error.message,{code:error.code,reason:error.reason,providerCode:error.providerCode,outcomeUnknown:error.outcomeUnknown});throw error;}});
 const itemScope=async(cid:unknown,iid:unknown)=>{
   const channel=await loadChannel(cid),itemId=intParam(iid);
   const [item]=await getDb().select({id:contentItems.id}).from(contentItems).where(and(eq(contentItems.id,itemId),eq(contentItems.channelId,channel.id)));
@@ -23,9 +24,15 @@ const itemScope=async(cid:unknown,iid:unknown)=>{
 
 canvaEditorialRoutes.get('/canva/editorial/status',route(async(_req,res)=>{
   const configured=canvaConfigured(),connected=canvaConnected();
-  if(!configured||!connected)return res.json({configured,connected,autofill:false,capabilities:[],reason:'not_connected'});
-  const result=await getCanvaCapabilities(getDb());
-  res.json({configured,connected,autofill:result.capabilities.includes('autofill'),capabilities:result.capabilities});
+  const base:CanvaConnectionStatus={configured,connected,autofill:false,capabilities:[],capabilityStatus:'unknown',reason:null,message:null,providerCode:null,checkedAt:null};
+  if(!configured||!connected)return res.json({...base,reason:'not_connected',message:'Canva 계정을 연결한 뒤 자동 채우기 기능을 확인해 주세요.'});
+  try {
+    const result=await getCanvaCapabilities(getDb()),autofill=result.capabilities.includes('autofill');
+    return res.json({...base,autofill,capabilities:result.capabilities,capabilityStatus:autofill?'available':'unavailable',reason:autofill?null:'capability_missing',message:autofill?null:'현재 연결한 Canva 계정·팀에는 자동 채우기 기능이 없습니다. 기능이 포함된 플랜과 연결한 계정·팀을 확인해 주세요.',checkedAt:new Date().toISOString()});
+  } catch(error) {
+    if(!(error instanceof CanvaRestError))throw error;
+    return res.json({...base,reason:error.reason,message:error.message,providerCode:error.providerCode,checkedAt:new Date().toISOString()});
+  }
 }));
 canvaEditorialRoutes.get('/channels/:cid/canva/masters',route(async(req,res)=>{
   const channel=await loadChannel(req.params.cid);

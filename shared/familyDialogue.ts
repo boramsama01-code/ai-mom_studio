@@ -66,7 +66,7 @@ export type CardCopyV2 = z.infer<typeof familyCardCopySchema>;
 const percent = z.number().min(0).max(100);
 export const pageDesignSchema = z.object({
   alignment: z.enum(["center", "left"]),
-  background: z.object({ kind: z.enum(["none", "brand", "image"]), assetId: z.number().int().positive().optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fit: z.enum(["cover", "contain"]), focalX: percent, focalY: percent, brightness: z.number().min(0).max(200), overlay: percent }).strict().refine(value => value.kind !== "image" || value.assetId !== undefined, "이미지 배경에는 저장된 자산이 필요합니다."),
+  background: z.object({ kind: z.enum(["none", "brand", "image"]), assetId: z.number().int().positive().optional(), inheritCover: z.boolean().optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fit: z.enum(["cover", "contain"]), focalX: percent, focalY: percent, brightness: z.number().min(0).max(200), overlay: percent }).strict().refine(value => value.kind !== "image" || value.assetId !== undefined, "이미지 배경에는 저장된 자산이 필요합니다."),
   previousAssetIds: z.array(z.number().int().positive()).max(20).optional(),
 }).strict();
 export type PageDesign = z.infer<typeof pageDesignSchema>;

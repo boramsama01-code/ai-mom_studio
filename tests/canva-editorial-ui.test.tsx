@@ -3,7 +3,7 @@ import { act, type ComponentProps, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CanvaEditorial } from "../client/src/CanvaEditorial";
+import { CanvaEditorial, CanvaMasterSettings } from "../client/src/CanvaEditorial";
 import { ApiError } from "../client/src/api";
 import type { CanvaJobDto, CanvaMasterDto } from "../shared/canvaEditorial";
 import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
@@ -20,7 +20,7 @@ const base = "/channels/3/items/28/canva/jobs", storageKey = "canva-request:3:28
 const uuid = (index: number): ReturnType<Crypto["randomUUID"]> => `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
 type Props = ComponentProps<typeof CanvaEditorial>;
 let root: Root, host: HTMLDivElement, client: QueryClient, props: Props;
-let jobs: CanvaJobDto[], masters: CanvaMasterDto[], connection: { configured: boolean; connected: boolean; autofill: boolean; capabilities: string[] };
+let jobs: CanvaJobDto[], masters: CanvaMasterDto[], connection: import('../shared/canvaCapabilities').CanvaConnectionStatus;
 let enqueue: ((body: any) => Promise<unknown>) | null, action: ((path: string, body: any) => Promise<unknown>) | null, listJobs: (() => Promise<unknown>) | null;
 function job(id = 11, status: CanvaJobDto["status"] = "queued", override: Partial<CanvaJobDto> = {}): CanvaJobDto {
   const completed = ["ready", "needs_review", "superseded"].includes(status);
@@ -71,10 +71,31 @@ function reconciled(source: CanvaJobDto, body: any, status: string = 'needs_revi
 }
 
 describe("Canva editorial request and import UI", () => {
+  it("shows all 14 saved source links and sample previews without enabling Autofill bindings", async()=>{
+    await act(async()=>root.render(<QueryClientProvider client={client}><CanvaMasterSettings channelId={3}/></QueryClientProvider>));await settle();
+    expect(host.querySelectorAll('.canva-style-card')).toHaveLength(14);
+    expect(host.querySelectorAll('.canva-style-card img')).toHaveLength(14);
+    expect(host.querySelectorAll('a[href^="https://www.canva.com/d/"]')).toHaveLength(14);
+    expect(host.textContent).toContain('Canva 자동 출력 검증 대기');expect(writes()).toHaveLength(0);
+  });
+  it("keeps unknown capability distinct from a confirmed missing entitlement and only performs a read on retry",async()=>{
+    connection={...connection,autofill:false,capabilityStatus:'unknown',reason:'provider_unavailable',message:'Canva 응답을 확인하지 못했습니다.'};await render();
+    expect(host.querySelector('[data-testid="canva-capability-status"]')?.textContent).toContain('아직 확인하지 못했습니다');
+    expect(button('Canva 8장 만들기').disabled).toBe(true);
+    connection={...connection,capabilityStatus:'unavailable',reason:'capability_missing',message:'연결한 계정·팀의 기능 이용 권한을 확인해 주세요.'};
+    await click('권한 다시 확인');
+    expect(host.querySelector('[data-testid="canva-capability-status"]')?.textContent).toContain('사용할 수 없습니다');expect(writes()).toHaveLength(0);
+  });
+  it("shows the selected style's exact image field count and blocks an unverified 14-style source",async()=>{
+    props.copy.templateKey='cardnews14-cinematic-v1';await render();
+    expect(host.querySelector('[data-testid="reading-canva-readiness"]')?.textContent).toContain('8개 이미지');
+    expect(button('Canva 8장 만들기').disabled).toBe(true);expect(writes()).toHaveLength(0);
+  });
+
   it("keeps a new reading profile previewable but blocks Canva creation until a matching master is registered", async () => {
     props.copy.templateKey=READING_CARD_PROFILES[0].templateKey;
     await render();
-    expect(host.querySelector('[data-testid="reading-canva-readiness"]')?.textContent).toContain("Canva 전송 준비 중");
+    expect(host.querySelector('[data-testid="reading-canva-readiness"]')?.textContent).toContain("실제 출력을 검증한 뒤");
     expect(button("Canva 8장 만들기").disabled).toBe(true);expect(writes()).toHaveLength(0);
     masters=[{...masters[0],id:8,templateVersion:READING_CARD_PROFILES[1].templateVersion}];
     await act(async()=>{await client.invalidateQueries({queryKey:['canva-masters',3]});});await settle();

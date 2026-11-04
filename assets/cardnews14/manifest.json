@@ -1,0 +1,51 @@
+{
+  "images": [
+    {
+      "key": "A",
+      "path": "cinematic-ink-teal-background.jpg",
+      "sha256": "b77b2e9f59feb23b5f206997a70e3100d0230b46925058276000a6dd9f22e5ca",
+      "bytes": 313652,
+      "includedVersion": "exact file embedded in source HTML",
+      "width": 1122,
+      "height": 1402,
+      "source": "AI-generated editorial concept photo",
+      "prompt": "Use case: photorealistic-natural\nAsset type: a text-free photographic background for a 4:5 portrait Instagram editorial news card; final layout will overlay real editable typography later.\nPrimary request: create one high-resolution premium editorial still-life photograph, exact portrait 4:5 aspect ratio (target 2048 x 2560). This must look like an art-directed photograph, not an illustration, not a graphic card design.\nScene/backdrop: a dark ink-teal research desk in a dim modern study. A small physically plausible brushed-metal sculpture of a human brain sits at the lower right, photographed from a slightly elevated three-quarter viewpoint. The desk surface and back wall fade into deep ink teal and near-black. Tiny natural tungsten highlights reveal the tactile grooves and brushed steel. Keep the arrangement minimal.\nComposition/framing: entire upper 45 percent is quiet, dark, softly textured negative space. Keep the dominant sculpture entirely in the lower-right 40 percent, comfortably inside the frame. Leave generous dark space along the left side as well. The photograph itself fills the entire canvas edge to edge.\nLighting/mood: restrained cinematic tungsten key light from the right, soft teal ambient shadows, elegant contrast, subtle natural film grain, fine realistic material detail. Serious contemporary science magazine photography suitable for teens and adults.\nConstraints: no text of any kind; no letters, numbers, logos, watermarks, typography, labels, paper writing, frame, border, color blocks, UI, people, hands, icons, infographic or illustration. No neon glow, holograms, robot face or glossy CGI. No rounded picture-window framing. All visible objects are unbranded and unmarked. Do not place any object in the upper text-safe area.",
+      "note": "AI-generated editorial concept image; not a photograph documenting a real news event."
+    },
+    {
+      "key": "B",
+      "path": "monochrome-editorial-background.jpg",
+      "sha256": "114961482f971f656daba8953ddefe58a8d9e6fd5e9de48e641e771198bf60e5",
+      "bytes": 228929,
+      "includedVersion": "exact file embedded in source HTML",
+      "width": 1122,
+      "height": 1402,
+      "source": "AI-generated editorial concept photo",
+      "prompt": "Use case: photorealistic-natural\nAsset type: a text-free black-and-white photographic background for a 4:5 portrait Instagram editorial card; real editable words and coral accents will be added separately later.\nPrimary request: create one high-resolution premium monochrome editorial still-life photograph, exact portrait 4:5 aspect ratio (target 2048 x 2560). A real photographic feel, no graphic design composition baked in.\nScene/backdrop: a minimal dark laboratory workbench with a few unmarked optical glass objects and simple polished steel laboratory components clustered in the lower right, beside a single sheet of completely blank white paper. Think a clear prism, shallow glass vessel and slender unmarked steel tool. Convincing refraction, reflected light, transparent edges, matte paper texture. Black, white and neutral grays only, without any color tint.\nComposition/framing: the top 45 percent is an uncluttered dark soft-focus wall and quiet negative space. Main objects remain in the bottom-right 40 percent; the left side also stays quiet and dark. Use directional light to separate the glass from the dark background while keeping the blank paper in the lower portion. Full-bleed photo to every edge.\nLighting/mood: fashion-editorial precision applied to scientific tools, sharp material detail at focal point, elegant grayscale contrast, very subtle analog grain; refined but visually strong, for teen/adult readers.\nConstraints: no text, letters, numbers, ruler graduations, measurement marks, labels, logos, watermark, handwriting, printed paper, diagram, border, frame, colored accents, UI, people or hands. Nothing in the upper text-safe area. No illustration, vector art, cartoon, fake CGI laboratory, neon, hologram or round image-window.",
+      "note": "AI-generated editorial concept image; not a photograph documenting a real news event."
+    },
+    {
+      "key": "C",
+      "path": "amber-cream-editorial-background.jpg",
+      "sha256": "3eeb4b74d5eab37315fb7b833f2230893bf5740c24697ec68a89fa04dde94f08",
+      "bytes": 302130,
+      "includedVersion": "exact file embedded in source HTML",
+      "width": 1122,
+      "height": 1402,
+      "source": "AI-generated editorial concept photo",
+      "prompt": "Use case: photorealistic-natural\nAsset type: a text-free warm amber photographic background for a 4:5 portrait Instagram editorial news card; editable cream typography will be added separately later.\nPrimary request: create one high-resolution premium editorial still-life photograph, exact portrait 4:5 aspect ratio (target 2048 x 2560). It is a photo asset, not a ready-made poster or card with text.\nScene/backdrop: a richly textured dark wooden research desk under warm amber lamplight. In the lower right place a small brushed bronze-and-steel abstract folded-ribbon sculpture and a modest stack of entirely blank cream note paper, edges naturally imperfect. These are thoughtful, tactile objects in a quiet contemporary study. Lamp can be off camera; use its light rather than an oversized visible lamp. No marks on the paper or sculpture.\nComposition/framing: the upper 45 percent remains dark warm-brown near-black negative space with extremely subtle wall texture, clear for a large headline. Keep the subject cluster in the lower-right 40 percent and the left portion quiet. No item intrudes into the empty upper area. The photo extends full bleed to all edges.\nLighting/mood: intimate cinematic amber side lighting, cream highlights, deep coffee shadows, credible real materials, very subtle film grain. Strong enough for a modern magazine cover without looking antique or overly scholarly. Real photography, not illustration or 3D rendering.\nConstraints: absolutely no text, numerals, handwriting, mathematical symbols, printed charts, labels, logos, watermark, border, frame, UI, colored graphic shapes, people, hands, neon or hologram. All paper is fully blank and unlined. Do not produce a collage, multi-panel image, mockup or finished card design.",
+      "note": "AI-generated editorial concept image; not a photograph documenting a real news event."
+    },
+    {
+      "key": "logo",
+      "path": "allligodang-bw-profile.png",
+      "sha256": "743e3a9bddc5465a08970900eb078148c19aadedd80b55a328a2b4c0bfe25908",
+      "bytes": 863927,
+      "includedVersion": "exact file embedded in source HTML",
+      "source": "User-provided logo, existing prepared black-and-white profile asset",
+      "placement": "P08_PROFILE_IMAGE only",
+      "width": 1536,
+      "height": 1024
+    }
+  ]
+}

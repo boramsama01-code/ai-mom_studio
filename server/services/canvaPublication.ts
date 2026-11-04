@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { DB } from "../db";
 import { canvaRenderJobs, contentItems, contentRevisions, mediaAssets } from "../../shared/schema";
 import { captionPackageSchema, familyCardCopySchema, pageDesignsSchema } from "../../shared/familyDialogue";
+import type { CanvaProfileSnapshot } from "../../shared/canvaEditorial";
 import { HttpError } from "../routes/util";
 import { familyMetadataFromPayload } from "./familyEditorial";
 import { assertFamilyEvidenceForCopy } from "./familyEditorialPersistence";
@@ -16,9 +17,13 @@ type Revision = Pick<typeof contentRevisions.$inferSelect, "id" | "contentItemId
 type Asset = typeof mediaAssets.$inferSelect;
 const id = z.number().int().positive(), hash = z.string().regex(/^[a-f0-9]{64}$/);
 const imageIdentity = z.object({ id, sha256: hash });
-const exportMetadata = z.object({ rendererProvider: z.literal("canva"), canvaDesignId: z.string().min(1), templateVersion: z.string().min(1), sourceDesignId: z.string().min(1), dataFieldMappingVersion: z.string().min(1), datasetHash: hash, contentRevision: id, evidenceSetId: z.string().min(1), requestHash: hash, autofillJobId: z.string().nullable(), exportJobId: z.string().min(1), designUpdatedAt: z.string().min(1), exportedAt: z.string().datetime() });
-const exportResult = z.object({ pages: z.array(imageIdentity).length(8), originals: z.array(imageIdentity.extend({ page: z.number().int().min(1).max(8) })).length(8), templateVersion: z.string().min(1), datasetHash: hash, mappingVersion: z.string().min(1), exportedAt: z.string().datetime(), contentRevision: id, evidenceSetId: z.string().min(1) });
-const exportInput = z.object({ payload: z.record(z.string(), z.unknown()), copy: familyCardCopySchema, pageDesigns: pageDesignsSchema, evidenceSetId: z.string().min(1), mappingVersion: z.string().min(1), datasetHash: hash });
+const profileTraceShape = { profileId: z.string().min(1).optional(), profileTemplateVersion: z.string().min(1).optional(), profileImageSha256: hash.optional(), sourceLayoutSha256: hash.optional(), sourceAssetsSha256: hash.optional() };
+const exportMetadata = z.object({ ...profileTraceShape, rendererProvider: z.literal("canva"), canvaDesignId: z.string().min(1), templateVersion: z.string().min(1), sourceDesignId: z.string().min(1), dataFieldMappingVersion: z.string().min(1), datasetHash: hash, contentRevision: id, evidenceSetId: z.string().min(1), requestHash: hash, autofillJobId: z.string().nullable(), exportJobId: z.string().min(1), designUpdatedAt: z.string().min(1), exportedAt: z.string().datetime() });
+const exportResult = z.object({ ...profileTraceShape, pages: z.array(imageIdentity).length(8), originals: z.array(imageIdentity.extend({ page: z.number().int().min(1).max(8) })).length(8), templateVersion: z.string().min(1), datasetHash: hash, mappingVersion: z.string().min(1), exportedAt: z.string().datetime(), contentRevision: id, evidenceSetId: z.string().min(1) });
+const exportInput = z.object({ ...profileTraceShape, payload: z.record(z.string(), z.unknown()), copy: familyCardCopySchema, pageDesigns: pageDesignsSchema, evidenceSetId: z.string().min(1), mappingVersion: z.string().min(1), datasetHash: hash });
+function profileBinding(trace: Omit<CanvaProfileSnapshot, "mappingVersion">) {
+  return { profileId: trace.profileId, profileTemplateVersion: trace.profileTemplateVersion, profileImageSha256: trace.profileImageSha256, sourceLayoutSha256: trace.sourceLayoutSha256, sourceAssetsSha256: trace.sourceAssetsSha256 };
+}
 function invalid(message: string): never { throw new HttpError(409, message, { code: "canva_publication_mismatch" }); }
 type ArtifactInput = { item: Item; revision: Revision; asset: Asset };
 export type CanvaArtifactProof = { pages: Asset[]; originals: Asset[]; jobId: number; job: typeof canvaRenderJobs.$inferSelect };
@@ -61,6 +66,16 @@ async function checkCanvaArtifact(db: DB, input: ArtifactInput, requireCurrentCa
   const trace = exported.data, artifacts = result.data, source = planned.data;
   if (job.designId !== trace.canvaDesignId || job.exportJobId !== trace.exportJobId || job.autofillJobId !== trace.autofillJobId || job.requestHash !== trace.requestHash || job.designUpdatedAt !== trace.designUpdatedAt || job.sourceRevisionId !== trace.contentRevision || artifacts.contentRevision !== job.sourceRevisionId) invalid("Canva 디자인·외부 작업·원고 버전 기록이 서로 다릅니다. 기존 게시 승인은 사용하지 않았습니다.");
   if (asset.templateKey !== `canva:${job.designId}` || artifacts.templateVersion !== trace.templateVersion || artifacts.datasetHash !== trace.datasetHash || source.datasetHash !== trace.datasetHash || artifacts.mappingVersion !== trace.dataFieldMappingVersion || source.mappingVersion !== trace.dataFieldMappingVersion || artifacts.exportedAt !== trace.exportedAt) invalid("Canva 템플릿·출력 버전 정보가 현재 이미지와 일치하지 않습니다.");
+  // Compare the saved intent to its exported bytes, not the current catalog.
+  // Retiring a profile must not invalidate an already verified immutable export.
+  const binding = profileBinding(source);
+  if (!isDeepStrictEqual(binding, profileBinding(trace)) || !isDeepStrictEqual(binding, profileBinding(artifacts))
+      || source.profileId !== undefined && (!source.profileTemplateVersion || !source.profileImageSha256)
+      || source.profileTemplateVersion !== undefined && source.profileTemplateVersion !== trace.templateVersion
+      || source.profileId === undefined && Object.values(binding).some(value => value !== undefined)
+      || (source.profileId?.startsWith("cardnews14-") || source.sourceLayoutSha256 !== undefined || source.sourceAssetsSha256 !== undefined) && (!source.sourceLayoutSha256 || !source.sourceAssetsSha256)) {
+    invalid("Canva 작업에 고정한 디자인·원본 배치·자산 기록이 저장된 출력과 다릅니다. 기존 이미지를 유지하고 승인은 중단했습니다.");
+  }
   if (trace.evidenceSetId !== metadata.evidenceBinding.evidenceSetId || artifacts.evidenceSetId !== trace.evidenceSetId || source.evidenceSetId !== trace.evidenceSetId || !isDeepStrictEqual(source.payload.evidenceBinding, metadata.evidenceBinding) || !isDeepStrictEqual(source.copy, copy.data) || !isDeepStrictEqual(source.pageDesigns, metadata.pageDesigns)) invalid("Canva 출력 이후 문구·배경·근거가 바뀌었습니다. 현재 원고로 다시 출력해 주세요.");
   if (requireCurrentCaption) {
     const sourceCaption = captionPackageSchema.safeParse(source.payload.captionPackage);

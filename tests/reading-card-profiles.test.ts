@@ -22,7 +22,7 @@ function copyFor(index=0,science=false) {
 }
 describe('reading profiles with fixed typography and photo windows',()=>{
   it('keeps 46 editable text fields and four image slots in both palettes and both concept modes',async()=>{
-    for(const [index,profile] of READING_CARD_PROFILES.entries()) for(const science of [false,true]) {
+    for(const [index,profile] of READING_CARD_PROFILES.filter(profile=>!profile.sourceStyleId).entries()) for(const science of [false,true]) {
       const copy=copyFor(index,science),values=familyReadingTextValues(copy,context),designs=readingProfileDesigns(profile,defaultPageDesigns());
       expect(profile.pages.flatMap(page=>page.textBoxes.map(box=>box.field)).sort()).toEqual(Object.keys(values).sort());
       expect(Object.keys(values)).toHaveLength(46);

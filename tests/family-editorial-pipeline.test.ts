@@ -42,6 +42,40 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("family editorial pipeline with mock provider HTTP", () => {
+  it("passes actual serif/sans typography and the connected reading-body contract for a new 14-style profile", async () => {
+    const f = fixture(), profile = readingProfileForTemplateKey("cardnews14-sharp-serif-v1")!;
+    f.input.templateKey = profile.templateKey;
+    const mock = createFamilyProviderMock(); vi.stubGlobal("fetch", vi.fn(mock.fetch));
+    await proposeFamilyDialogue(db, f.item, f.channel, f.revision, f.input, f.plan);
+    const contract = mock.calls.find(call => call.stage === "card_copy")?.input.templateContract;
+    expect(contract.fixedTypography.fields).toHaveLength(46);
+    expect(contract.fixedTypography.fields.find((field: any) => field.field === "P01_HEADLINE")).toMatchObject({ fontFamily: "Noto Serif KR", fontWeight: 900, effectiveFontWeight: 900, fontSize: 110, letterSpacing: -3, align: "left" });
+    expect(contract.fixedTypography.fields.find((field: any) => field.field === "P01_IMAGE_CREDIT")).toMatchObject({ fontFamily: "Noto Sans KR", effectiveFontWeight: 400 });
+    expect(contract.readingBodyMapping).toContain("의미·조건·남은 질문");
+    expect(contract.readingBodyMapping).toContain("스키마 글자 수 한도를 그대로");
+    expect(mock.calls.find(call => call.stage === "image_brief")?.input.photoComposition).toMatchObject({ textPlacement: "over_image", slot: { width: 1080, height: 1350 } });
+  });
+  it("sends actual profile photo bounds to a single requested image-brief stage without generating an unsolicited image", async () => {
+    const f = fixture(true), profile = readingProfileForTemplateKey("reading-ink-lime-v1")!;
+    (f.revision.payload as any).cardCopy.templateKey = profile.templateKey;
+    const mock = createFamilyProviderMock(); vi.stubGlobal("fetch", vi.fn(mock.fetch));
+    const result = await proposeFamilyDialogue(db, f.item, f.channel, f.revision, { ...f.input, templateKey: profile.templateKey, scope: "image_brief", pageId: "discussion" }, f.plan);
+    expect(mock.calls.map(call => call.stage)).toEqual(["image_brief"]);
+    expect(mock.calls[0].input.photoComposition).toMatchObject({ pageId: "discussion", slot: { width: 936, height: 360 }, textPlacement: "outside_image", textSafeAreas: [] });
+    expect(JSON.stringify(mock.calls[0].body)).toContain("글자가 겹치지 않는다");
+    expect(result.visualBriefs?.discussion?.pageId).toBe("discussion");
+    expect(controlled.image).not.toHaveBeenCalled();
+  });
+  it("does not call AI for a profile's text-only page or the approved closing logo", async () => {
+    const f = fixture(true), profile = readingProfileForTemplateKey("reading-ink-lime-v1")!;
+    (f.revision.payload as any).cardCopy.templateKey = profile.templateKey;
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    const result = await proposeFamilyDialogue(db, f.item, f.channel, f.revision, { ...f.input, templateKey: profile.templateKey, scope: "image_brief", pageId: "news_summary" }, f.plan);
+    expect(result.reviewFlags).toContainEqual(expect.objectContaining({ code: "reading_photo_slot_missing", message: expect.stringContaining("1·4·7장") }));
+    const logo = await proposeFamilyDialogue(db, f.item, f.channel, f.revision, { ...f.input, templateKey: profile.templateKey, scope: "image_brief", pageId: "outro" }, f.plan);
+    expect(logo.reviewFlags).toContainEqual(expect.objectContaining({ code: "approved_logo_only" }));
+    expect(fetcher).not.toHaveBeenCalled(); expect(controlled.image).not.toHaveBeenCalled();
+  });
   it("pins the reading layout and approved profile asset while preserving manual text and photos on regeneration", async () => {
     const f = fixture(true), payload = f.revision.payload as any, profile = readingProfileForTemplateKey("reading-ink-lime-v1")!;
     f.input.templateKey = profile.templateKey;
