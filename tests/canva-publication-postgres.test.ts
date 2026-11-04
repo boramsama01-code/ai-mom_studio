@@ -9,10 +9,10 @@ import type { CardCopyV2 } from '../shared/familyDialogue';
 import { login, resetDb, setTestEnv } from "./helpers";
 import { createFamilyPgFixture } from "./fixtures/familyEvidencePg";
 setTestEnv();
-const api = vi.hoisted(() => ({ export: vi.fn(), design: vi.fn(), download: vi.fn(), jpegs: vi.fn(), identity: vi.fn(), publish: vi.fn() }));
+const api = vi.hoisted(() => ({ export: vi.fn(), design: vi.fn(), download: vi.fn(), jpegs: vi.fn(), identity: vi.fn(), quota: vi.fn(), publish: vi.fn() }));
 vi.mock("../server/services/canvaRest", async original => ({ ...await original<object>(), getCanvaExportJob: api.export, getCanvaDesign: api.design }));
 vi.mock("../server/services/canvaEditorialAssets", async original => ({ ...await original<object>(), downloadCanvaExport: api.download, publicationJpegs: api.jpegs }));
-vi.mock("../server/services/instagram", async original => ({ ...await original<object>(), accountIdentity: api.identity, publishContainer: api.publish }));
+vi.mock("../server/services/instagram", async original => ({ ...await original<object>(), accountIdentity: api.identity, publishingLimit: api.quota, publishContainer: api.publish }));
 const { getDb, closeDb } = await import("../server/db");
 const { createApp } = await import("../server/app");
 const { publicationFixture, publicationAccounts } = await import("./fixtures/publication");
@@ -34,6 +34,11 @@ beforeEach(async () => {
   for (const [key, value] of Object.entries({ CLOUDINARY_CLOUD_NAME: "fixture", CLOUDINARY_API_KEY: "fixture", CLOUDINARY_API_SECRET: "fixture", AUTO_PUBLISH: "true", DRY_RUN: "false", INLINE_WORKER: "false", INSTAGRAM_API_VERSION: "v26.0" })) vi.stubEnv(key, value);
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Real external API calls prohibited in Canva publication test"); }));
   api.identity.mockImplementation(async (token: string) => ({ ok: true, ...publicationAccounts.get(token)! }));
+  api.quota.mockImplementation(async (userId: string, token: string, authMode: string) => {
+    const account = publicationAccounts.get(token);
+    if (!account || account.userId !== userId || authMode !== "instagram") throw new Error("Unrecognized isolated publication account");
+    return { ok: true, used: 0, total: 100 };
+  });
   api.export.mockResolvedValue({ id: "export_known", status: "success", result: { urls: Array.from({ length: 8 }, (_, index) => `https://export-download.canva.com/opaque-${index}`) } });
   api.design.mockResolvedValue({ id: "generated_design", pageCount: 8, updatedAt: 123, editUrl: "https://www.canva.com/design/generated_design/edit" });
   api.download.mockResolvedValue(pngs); api.jpegs.mockResolvedValue(jpegs);
@@ -66,6 +71,7 @@ it("approves one exact eight-page Canva artifact using real evidence and preserv
   expect(result.approval.revisionId).toBe(f.revision.id); expect(result.approval.mediaAssetId).toBe(f.asset.id);
   expect(await f.db.select().from(deliveries).where(eq(deliveries.approvalId, result.approval.id))).toHaveLength(1);
   expect(api.identity).toHaveBeenCalledOnce();
+  expect(api.quota).toHaveBeenCalledExactlyOnceWith(f.publication.userId, f.publication.token, "instagram");
 });
 
 it("rejects a built-in replacement or a lost original PNG before any account preflight", async () => {
@@ -141,6 +147,20 @@ it('reuses all sixteen exact artifact bytes after a stale caption is manually co
   expect(pages.map(page => page.bytes)).toEqual(oldPages.map(page => page.bytes));
   expect(originals.map(page => page.sha256).sort()).toEqual(oldOriginals.map(page => page.sha256).sort());
   expect(originals.map(page => page.bytes.toString('base64')).sort()).toEqual(oldOriginals.map(page => page.bytes.toString('base64')).sort());
+  const beforeNoopAssets = await f.db.select().from(mediaAssets).where(eq(mediaAssets.revisionId, confirmed.revisionId));
+  const beforeNoopRevisions = await f.db.select().from(contentRevisions).where(eq(contentRevisions.contentItemId, f.item.id));
+  expect(beforeNoopAssets).toHaveLength(16);
+  const confirmedAgain = await confirmFamilyCaption(f.db, f.item.id, f.item.channelId, { version: confirmed.version, publicationDraftVersion: 2, textConfirmed: true }, 'test-operator');
+  expect(confirmedAgain).toMatchObject({ version: confirmed.version, revisionId: confirmed.revisionId, canvaOutputReused: true, dependencies: { caption: 'current', render: 'current' } });
+  expect(await f.db.select().from(contentRevisions).where(eq(contentRevisions.contentItemId, f.item.id))).toHaveLength(beforeNoopRevisions.length);
+  const afterNoopAssets = await f.db.select().from(mediaAssets).where(eq(mediaAssets.revisionId, confirmed.revisionId));
+  expect(afterNoopAssets.map(row => row.id).sort((a, b) => a - b)).toEqual(beforeNoopAssets.map(row => row.id).sort((a, b) => a - b));
+  const reboundJobs = await f.db.select().from(canvaRenderJobs).where(and(eq(canvaRenderJobs.contentItemId, f.item.id), eq(canvaRenderJobs.purpose, 'caption_rebind')));
+  expect(reboundJobs).toHaveLength(1); expect(reboundJobs[0]).toMatchObject({ id: cached.id, status: 'ready', outputRevisionId: confirmed.revisionId, outputAssetId: asset.id });
+  const [unchanged] = await f.db.select().from(contentItems).where(eq(contentItems.id, f.item.id));
+  expect(unchanged).toMatchObject({ version: confirmed.version, currentRevisionId: confirmed.revisionId, reviewStatus: 'pending' });
+  expect(await f.db.select().from(approvals).where(eq(approvals.contentItemId, f.item.id))).toHaveLength(0);
+  expect(api.identity).not.toHaveBeenCalled(); expect(api.quota).not.toHaveBeenCalled(); expect(fetch).not.toHaveBeenCalled();
   for (const mock of [api.export, api.design, api.download, api.jpegs]) expect(mock).not.toHaveBeenCalled();
   await f.db.update(contentItems).set({ reviewStatus: 'reviewed' }).where(eq(contentItems.id, f.item.id));
   const result = await approveItem(f.db, { ...f.request, revisionId: confirmed.revisionId, mediaAssetId: asset.id, captions, publicationDraftVersion: 2, requestId: randomUUID() });

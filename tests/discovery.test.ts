@@ -176,7 +176,11 @@ describe("수집 실행 안의 자동 발굴", () => {
     aiSettings.editorial = { additionalResourcesAutoSearch: false, visitScope: "off" };
     const [originalChannel] = await getDb().select().from(schema.channels).where(eq(schema.channels.id, SCIENCE));
     await getDb().update(schema.channels).set({ aiSettings }).where(eq(schema.channels.id, SCIENCE));
-    const provider = createFamilyProviderMock(); vi.stubGlobal("fetch", vi.fn(provider.fetch));
+    const coverHeadline = "뼈 몇 조각으로,\n새 종을 알 수 있을까?";
+    const provider = createFamilyProviderMock({ transform: (call, data) => {
+      if (call.stage === "card_copy") { const cover = data.cardCopy.pages.find((page: any) => page.id === "cover"); cover.fields.headline = coverHeadline; cover.fields.subtitle = "공룡 화석을 읽는 기준"; }
+      return data;
+    } }); vi.stubGlobal("fetch", vi.fn(provider.fetch));
     try {
       const db = getDb();
       const r = await runCollect(db, SCIENCE, { trigger: "cli", now: NOW, naverFetch, fetchSource: okFetch });
@@ -193,14 +197,19 @@ describe("수집 실행 안의 자동 발굴", () => {
       expect(item.discovery).toMatchObject({ pickedBy: "claude", angle: "뼈 몇 조각으로 어떻게 새 종이라고 알 수 있을까?" });
       expect(item.currentRevisionId).not.toBeNull();
       expect(item.reviewStatus).toBe("pending"); // 초안이 생겨도 검토 대기
-      expect(item.title).toBe("뼈 몇 조각으로 새 종을 알 수 있을까?");
-      expect((item.discovery as { headline: string }).headline).toContain("공룡");
+      // V2 retains the collected article identity; the proposed card heading
+      // lives only in cardCopy.cover, separately from the curation angle.
+      expect(item.title).toBe(FOSSIL[0].title);
+      expect((item.discovery as { headline: string }).headline).toBe(FOSSIL[0].title);
+      expect(provider.calls.find(call => call.stage === "article_analysis")?.input.articleTitle).toBe(FOSSIL[0].title);
       const [run] = await db.select().from(schema.runs).where(eq(schema.runs.id, r.runId));
       expect(run.llmUsage).toMatchObject({ calls: provider.calls.length + 1 }); // Curation and every editorial/image stage share one allowance.
       expect(run.llmUsage!.calls).toBeLessThanOrEqual(originalChannel.budget.llmCallsPerRun);
       expect((run.snapshot as any).ai).toEqual({ summary: { provider: "gemini", model: "gemini-discovery-analysis" }, copy: { provider: "openai", model: "gpt-discovery-copy" } });
       const [revision] = await db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, item.currentRevisionId!));
       expect(revision.payload.cardCopy).toMatchObject({ version: 2, formatId: "family_dialogue_8" }); expect((revision.payload.cardCopy as any).pages).toHaveLength(8);
+      const savedCover = (revision.payload.cardCopy as any).pages.find((page: any) => page.id === "cover");
+      expect(savedCover.fields.headline).toBe(coverHeadline); expect(savedCover.fields.headline).not.toBe(item.title);
       expect(revision.payload.pageDesigns).toMatchObject({ cover: { background: { kind: "image", assetId: expect.any(Number) } } });
       expect(revision.payload.captionPackage).toMatchObject({ contentRevision: revision.id });
       expect(revision.payload.rendererProvider).toBe("canva");
