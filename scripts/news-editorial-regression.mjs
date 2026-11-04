@@ -21,8 +21,8 @@ await writeFile(`${outputDir}/results.json`, "[]");
 const server = await preview({ preview: { host: "127.0.0.1", port: 4177, strictPort: true } });
 const origin = "http://127.0.0.1:4177", itemPath = "/api/channels/3/items/9828", copyPath = `${itemPath}/card-copy`;
 const stamp = "2026-11-04T00:00:00.000Z", clone = value => structuredClone(value);
-const roles = { summary: { provider: "gemini", model: "fixture-summary" }, copy: { provider: "openai", model: "fixture-copy" }, image: { provider: "openai", model: "fixture-image" } };
-const channels = [{ id: 3, slug: "current-dialogue", name: "Alligodang", active: true, version: 1, accentColor: "#32756b", contentType: "current_dialogue", budget: {}, ai: roles }];
+const roles = { summary: { provider: "gemini", model: "gemini-fixture-summary" }, copy: { provider: "openai", model: "gpt-fixture-copy" }, image: { provider: "openai", model: "gpt-image-fixture" } };
+const channels = [{ id: 3, slug: "current-dialogue", name: "Alligodang", active: true, version: 1, accentColor: "#32756b", contentType: "current_dialogue", budget: {}, aiSettings: roles, effectiveAiSettings: roles, aiDefaultModels: { gemini: roles.summary.model, openai: roles.copy.model, anthropic: "claude-fixture", image: roles.image.model }, aiAvailability: { gemini: true, openai: true, anthropic: false } }];
 const ai = { defaultProvider: "gemini", text: { gemini: true, openai: true, anthropic: false }, image: true };
 const legacyCopy = () => ({ version: 1, templateKey: "set:n03", cover: { title: "기존 원고의 제목", subtitle: "직접 저장한 문구는 먼저 유지합니다" }, pages: Array.from({ length: 4 }, (_, i) => ({ id: `body-${i + 1}`, title: `직접 저장한 본문 ${i + 1}`, subtitle: "원문에서 확인한 내용", body: "기존에 저장한 문구입니다. 새 제안을 확인한 뒤 명시적으로 적용하기 전까지 그대로 보존해야 합니다." })) });
 const style = { layout: "minimal", collection: "n03" };
@@ -53,7 +53,7 @@ function fixture() {
     return {
       item: { id: 9828, channelId: 3, primarySourceId: 1, title: "기존 원고의 제목", kind: "current_dialogue", origin: "collected", version: state.saved.version, currentRevisionId: state.saved.revisionId, reviewStatus: "pending", evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: payload, canvaDesign: null, createdAt: stamp, updatedAt: stamp, subcategory: null }, current,
       primary: { id: 1, title: "테스트용 인터뷰와 AI의 능력", originalUrl: "https://source.example/isolated", normalizedUrl: "https://source.example/isolated", kind: "rss_direct", publisher: "브라우저 테스트 자료", fetchStatus: "ok", fetchedText: "이 문서는 테스트를 위한 합성 인터뷰입니다. 한 전문가가 AI의 미래를 전망했습니다. 전망을 이미 입증된 연구 결과로 바꾸어 표현하지 않습니다.", snippet: "테스트 자료", publishedAt: stamp, publishedPrecision: "day", lastFetchedAt: stamp, attachments: [], meta: {}, isSample: false },
-      linked: [], revisions: [current], cards: clone(state.cards), approvals: [], deliveries: [], similar: [], imageAiAvailable: true, ai: roles,
+      linked: [], revisions: [current], cards: clone(state.cards), approvals: [], deliveries: [], similar: [], imageAiAvailable: true,
       publicationDraft: { version: 1, captions: { instagram: "함께 질문을 나누는 합성 테스트 카드입니다.", telegram: "" }, options: { destinationIds: [20], timing: "now", scheduledAtKst: "" } }, defaultCaptions: { instagram: "함께 질문을 나누는 합성 테스트 카드입니다.", telegram: "" },
       publicationReadiness: { ready: true, blockers: [], dryRun: true, autoPublish: false, dailyLimit: 10, expectedUsername: "fixture.only", destinations: [{ id: 20, label: "@fixture.only", platform: "instagram", configured: true }] },
     };
@@ -77,6 +77,7 @@ function fixture() {
     else if (pathname === copyPath && method === "PATCH") {
       assert.equal(body.version, state.saved.version, "copy changes must use the current accepted version");
       const copy = cardCopySchema.parse(body.copy); plan(copy);
+      assert.equal(body.proposalJobId, state.saved.copy.storyFormat !== "discussion8" && copy.storyFormat === "discussion8" ? 502 : undefined, "apply the verified proposal ID once; later manual saves must not reuse it");
       state.saved = { ...state.saved, version: state.saved.version + 1, revisionId: state.saved.revisionId + 1, copy: clone(copy) };
       data = clone(state.saved);
     } else if (pathname === `${copyPath}/preview` && method === "POST") {
@@ -178,6 +179,8 @@ try {
       await page.goto(`${origin}/studio/2828`); await title(page).waitFor(); await previewReady(page);
       assert.equal(await pageButtons(page).count(), 5); assert.equal(state.writes.filter(write => !write.path.endsWith('/preview')).length, 0);
       assert.match(await page.locator('.card-copy-story-action').innerText(), /기사 요약 Gemini · 문구 GPT/);
+      const sourceModels = await page.locator('[data-testid="source-role-models"]').textContent();
+      for (const selection of Object.values(roles)) assert(sourceModels?.includes(selection.model), `source editor must use the channel's resolved ${selection.model} model`);
       const original = clone(state.saved.copy), rebuild = page.getByRole('button', { name: '8장 뉴스 대화로 다시 구성', exact: true });
       await rebuild.click(); await page.getByText(/합성 503 응답/).waitFor();
       assert.equal(await title(page).inputValue(), original.cover.title); assert.deepEqual(state.saved.copy, original); assert.equal(await pageButtons(page).count(), 5);
