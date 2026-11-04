@@ -1,4 +1,4 @@
-import { CHANNEL_INSTAGRAM, expectedInstagramUsername, instagramAccountMismatch, normalizeInstagramUsername } from "../../shared/channelInstagram";
+import { expectedInstagramUsername, instagramAccountMismatch, normalizeInstagramUsername } from "../../shared/channelInstagram";
 import { and, eq } from "drizzle-orm";
 import type { DB } from "../db";
 import { appSettings, channels, destinations } from "../../shared/schema";
@@ -9,6 +9,8 @@ import { HttpError } from "../routes/util";
 import { audit } from "../audit";
 import { testCloudinary } from "./connectionTest";
 import { instagramDiagnostic, sanitizeInstagramDiagnostic } from "../../shared/instagramOAuthDiagnostics";
+import { channelSlug } from "../../shared/channelKeys";
+import { orderedChannels } from "./channelOrder";
 
 export async function connectInstagram(db: DB, channelId: number, input: { token: string; username: string; dailyLimit: number; authMode?: InstagramAuthMode; expiresAt?: string | null }, actor: string) {
   const [ch] = await db.select().from(channels).where(eq(channels.id, channelId));
@@ -18,7 +20,9 @@ export async function connectInstagram(db: DB, channelId: number, input: { token
   const authMode = input.authMode ?? "instagram";
   const identity = await accountIdentity(input.token, authMode, input.username);
   if (!identity.ok) throw new HttpError(400, identity.error, { code: identity.reason, diagnostic: sanitizeInstagramDiagnostic(identity.diagnostic) });
-  if (normalizeInstagramUsername(identity.username) !== normalizeInstagramUsername(input.username)) throw new HttpError(400, `이 토큰은 @${identity.username}의 토큰입니다. 게시하려는 계정과 일치하는지 확인하세요.`, { code: "account_mismatch", diagnostic: { stage: "account_profile" } });
+  // Only the OAuth callback may omit a custom-channel hint. Manual token input
+  // requires a username at its route, and accountIdentity admits no ambiguity.
+  if (input.username && normalizeInstagramUsername(identity.username) !== normalizeInstagramUsername(input.username)) throw new HttpError(400, `이 토큰은 @${identity.username}의 토큰입니다. 게시하려는 계정과 일치하는지 확인하세요.`, { code: "account_mismatch", diagnostic: { stage: "account_profile" } });
   const mismatch = instagramAccountMismatch(ch.slug, identity.username);
   if (mismatch) throw new HttpError(409, mismatch, { diagnostic: { stage: "connection_validation" } });
   const quota = await publishingLimit(identity.userId, input.token, authMode);
@@ -89,15 +93,15 @@ export async function checkInstagramConnection(db: DB, channelId: number, destin
 
 /** Read connection presence without exposing credentials or claiming a fresh API check. */
 export async function instagramAccounts(db: DB) {
-  const chs = await db.select().from(channels).where(eq(channels.active, true));
+  const chs = (await orderedChannels(db)).filter(channel => channel.active);
   const rows = await db.select().from(destinations).where(eq(destinations.platform, "instagram"));
   return { accounts: chs.flatMap(ch => {
     // Only canonical publishing channels belong in this connection directory.
     // Legacy aliases remain valid for historical content checks, but must not
     // create a second account card while an older channel is still active.
-    const expectedUsername = CHANNEL_INSTAGRAM[ch.slug];
-    if (!expectedUsername) return [];
-    return [{ channelId: ch.id, channelName: ch.name, expectedUsername, destinations: rows.filter(d => d.channelId === ch.id).map(d => {
+    if (channelSlug(ch.slug) !== ch.slug) return [];
+    const expectedUsername = expectedInstagramUsername(ch.slug) ?? "";
+    return [{ channelId: ch.id, channelSlug: ch.slug, channelName: ch.name, expectedUsername, destinations: rows.filter(d => d.channelId === ch.id).map(d => {
       const sec = resolveSecrets(d.platform, ch.slug, d.secretRefs);
       return { id: d.id, label: d.label, enabled: d.enabled, configured: !sec.missing.length && !sec.invalid.length, authMode: sec.values.authMode ?? "instagram" };
     }) }];

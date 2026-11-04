@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getDb } from "../db";
 import { actorOf } from "../auth";
 import { channels } from "../../shared/schema";
-import { expectedInstagramUsername } from "../../shared/channelInstagram";
+import { expectedInstagramUsername, normalizeInstagramUsername } from "../../shared/channelInstagram";
 import { connectInstagram } from "../services/instagramConnection";
 import { exchangeUnifiedInstagramCode, InstagramOAuthError, instagramAuthorizationUrl, instagramOAuthConfig, newInstagramOAuth, validateInstagramOAuthState } from "../services/instagramOAuth";
 import { ah, HttpError, intParam, parse } from "./util";
@@ -17,14 +17,17 @@ export const instagramOAuthRoutes = Router();
 instagramOAuthRoutes.get("/studio/instagram/oauth/config", (_req, res) => res.json(instagramOAuthConfig()));
 
 instagramOAuthRoutes.post("/studio/instagram/:cid/oauth/start", ah(async (req, res) => {
-  parse(z.object({}).strict(), req.body ?? {});
+  const body = parse(z.object({ username: z.string().trim().regex(/^@?[A-Za-z0-9._]{1,30}$/).optional() }).strict(), req.body ?? {});
   if (req.session.demo) throw new HttpError(403, "운영자 계정으로 로그인해 연결하세요.");
   const config = instagramOAuthConfig();
   if (!config.configured) throw new HttpError(409, "Meta 앱 연결 설정을 먼저 완료해 주세요.", { code: "instagram_oauth_not_configured", missing: config.missing });
   const [channel] = await getDb().select().from(channels).where(eq(channels.id, intParam(req.params.cid)));
   if (!channel?.active) throw new HttpError(409, "사용 중인 채널을 선택하세요.");
-  const username = expectedInstagramUsername(channel.slug);
-  if (!username) throw new HttpError(409, "이 채널의 인스타그램 계정을 먼저 지정해 주세요.");
+  const expected = expectedInstagramUsername(channel.slug);
+  if (expected && body.username && normalizeInstagramUsername(body.username) !== expected) throw new HttpError(400, `이 채널에는 @${expected} 계정을 연결해 주세요.`);
+  // For a custom channel an omitted hint allows only one fully verified account.
+  // accountIdentity rejects an ambiguous Meta grant instead of picking a row.
+  const username = expected ?? (body.username ? normalizeInstagramUsername(body.username) : "");
   const pending = newInstagramOAuth({ channelId: channel.id, username, dailyLimit: channel.budget.dailyPublishLimit });
   req.session.instagramOauth = pending;
   await new Promise<void>((resolve, reject) => req.session.save(error => error ? reject(error) : resolve()));

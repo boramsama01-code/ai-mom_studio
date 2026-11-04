@@ -25,7 +25,7 @@ import "../client/src/main";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-it("주요 메뉴를 세 개로 유지하고 보조·설정 경로를 접으며 준비된 초안 수를 전체 초안 badge로 표시하지 않는다", async () => {
+it("PC·모바일의 주요 메뉴 네 개를 유지하고 연결·운영 도구를 접으며 준비된 초안 수를 전체 초안 badge로 표시하지 않는다", async () => {
   mocks.api.mockImplementation(async (url: string) => {
     if (url === "/status") return { globalStop: false };
     if (url === "/channels/1/today") return { counts: { pendingReview: 7, draftsReady: 99 } };
@@ -43,22 +43,22 @@ it("주요 메뉴를 세 개로 유지하고 보조·설정 경로를 접으며 
   try {
     await renderAt("/");
     const nav = host.querySelector(".sidebar .nav")!;
-    expect([...nav.querySelectorAll(":scope > div.nav-group a")].map(a => a.getAttribute("href"))).toEqual(["/", "/inbox", "/publish"]);
-    expect([...host.querySelectorAll(".mobile-nav a")].map(a => a.getAttribute("href"))).toEqual(["/", "/inbox", "/publish"]);
-    const more = nav.querySelector('a[href="/today"]')!.closest("details")!;
-    const settings = nav.querySelector('a[href="/instagram"]')!.closest("details")!;
-    expect(more.open).toBe(false);
-    expect(more.querySelector("summary")?.textContent).toContain("더 보기");
-    expect(more.querySelector('a[href="/today"]')).not.toBeNull();
-    expect(settings.open).toBe(false);
-    expect(settings.querySelector("summary")?.textContent).toContain("설정");
-    expect([...settings.querySelectorAll("a")].map(a => a.getAttribute("href"))).toEqual(["/instagram", "/rules", "/design", "/connections", "/settings", "/account", "/runs"]);
+    const primaryPaths = ["/", "/inbox", "/publish", "/settings"];
+    expect([...nav.querySelectorAll(":scope > div.nav-group a")].map(a => a.getAttribute("href"))).toEqual(primaryPaths);
+    expect([...nav.querySelectorAll(":scope > div.nav-group a .grow")].map(label => label.textContent)).toEqual(["내 콘텐츠", "수집함", "발행함", "설정"]);
+    expect([...host.querySelectorAll(".mobile-nav a")].map(a => a.getAttribute("href"))).toEqual(primaryPaths);
+    expect(nav.querySelectorAll(":scope > details.nav-group")).toHaveLength(1);
+    const tools = nav.querySelector('a[href="/today"]')!.closest("details")!;
+    expect(tools.open).toBe(false);
+    expect(tools.querySelector("summary")?.textContent).toContain("연결·운영 도구");
+    expect([...tools.querySelectorAll("a")].map(a => a.getAttribute("href"))).toEqual(["/today", "/instagram", "/rules", "/design", "/connections", "/account", "/runs"]);
+    expect(nav.querySelector('a[href="/settings"]')!.closest("details")).toBeNull();
     expect(nav.querySelector('a[href="/drafts"]')).toBeNull();
     expect(nav.querySelector('a[href="/inbox"] .nav-count')?.getAttribute("aria-label")).toBe("검토 대기 7건");
 
-    await act(async () => more.querySelector("summary")!.click());
-    expect(more.open).toBe(true);
-    await act(async () => more.querySelector<HTMLAnchorElement>('a[href="/today"]')!.click());
+    await act(async () => tools.querySelector("summary")!.click());
+    expect(tools.open).toBe(true);
+    await act(async () => tools.querySelector<HTMLAnchorElement>('a[href="/today"]')!.click());
     expect(mocks.navigate).toHaveBeenLastCalledWith("/today");
 
     await renderAt("/today");
@@ -66,6 +66,10 @@ it("주요 메뉴를 세 개로 유지하고 보조·설정 경로를 접으며 
     expect(host.querySelector('.sidebar a[href="/today"]')?.getAttribute("aria-current")).toBe("page");
     await renderAt("/instagram");
     expect(host.querySelector<HTMLAnchorElement>('.sidebar a[href="/instagram"]')!.closest("details")?.open).toBe(true);
+    await renderAt("/settings");
+    expect(host.querySelector('.sidebar a[href="/settings"]')?.getAttribute("aria-current")).toBe("page");
+    expect(host.querySelector('.mobile-nav a[href="/settings"]')?.getAttribute("aria-current")).toBe("page");
+    expect(host.querySelector<HTMLDetailsElement>(".sidebar .nav > details")?.open).toBe(false);
   } finally {
     await act(async () => root.unmount());
     host.remove();

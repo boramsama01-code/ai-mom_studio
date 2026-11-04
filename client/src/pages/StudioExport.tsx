@@ -1,6 +1,6 @@
 import { StudioPublish } from "./StudioPublish";
 import "../studioPublish.css";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { studioOutputDescription, studioPageCount, type StudioCard, type StudioContent, type StudioExportCheck } from "@shared/studio";
 import { cardDesignOptions } from "@shared/cardDesigns";
@@ -10,6 +10,8 @@ import { ErrorBox } from "../ui";
 import { useToast } from "../toast";
 import { studioAltTextDrafts, studioAltTextDefaults } from "@shared/altText";
 import { AltTextEditor } from "../AltTextEditor";
+import { experienceImageUrl } from "@shared/experience";
+import "../studioAutomation.css";
 
 async function downloadCard(card: StudioCard) {
   const zip = !!card.finishedDeck || !!card.sourceOutput || card.format === "카드뉴스";
@@ -42,28 +44,50 @@ const designs = [
   { id: "minimal", name: "미니멀", detail: "여백과 본문 중심" },
 ] as const;
 
-export function StudioExport({ form, base, dirty, busy, change, save, onFieldFocus }: {
+export function StudioExport({ form, base, dirty, busy: parentBusy, change, save, onFieldFocus, onPublicationBusyChange, active = true }: {
   form: StudioContent; base: StudioCard; dirty: boolean; busy: boolean;
   change: <K extends keyof StudioContent>(key: K, value: StudioContent[K]) => void;
   save: () => Promise<StudioCard>;
   onFieldFocus?: (field: string) => void;
+  onPublicationBusyChange?: (busy: boolean) => void;
+  active?: boolean;
 }) {
+  const [publicationBusy, setPublicationBusy] = useState(false);
+  const reportPublicationBusy = useCallback((value: boolean) => { setPublicationBusy(value); onPublicationBusyChange?.(value); }, [onPublicationBusyChange]);
+  const busy = parentBusy || publicationBusy;
   const [checkedInput, setCheckedInput] = useState(form);
   const [preview, setPreview] = useState<{ version: number; format: string } | null>(null);
   const [page, setPage] = useState(0);
   const [previewError, setPreviewError] = useState(false);
-  const [showCollection, setShowCollection] = useState(true);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewRetry, setPreviewRetry] = useState(0);
+  const [showCollection, setShowCollection] = useState(false);
   const toast = useToast();
   const pendingCheck = JSON.stringify(form) !== JSON.stringify(checkedInput);
   useEffect(() => { const timer = window.setTimeout(() => setCheckedInput(form), 450); return () => window.clearTimeout(timer); }, [form]);
   const check = useQuery({ queryKey: ["studio-export-check", checkedInput], queryFn: () => api<StudioExportCheck>("/studio/export-check", { method: "POST", body: checkedInput }), retry: false, staleTime: 60_000 });
   const blocked = pendingCheck || check.isFetching || !check.data || check.data.errors.length > 0;
+  // A saved preview is a read, not an AI request or an implicit save of current edits.
+  useEffect(() => {
+    if (!active || dirty || blocked) return;
+    setPreview(current => current?.version === base.version && current.format === base.format ? current : { version: base.version, format: base.format });
+  }, [active, dirty, blocked, base.version, base.format]);
+  useEffect(() => { setPage(current => Math.min(current, Math.max(0, studioPageCount(base) - 1))); }, [base]);
+  useEffect(() => { setPreviewError(false); setPreviewLoading(!!preview); }, [preview?.version, preview?.format, page, previewRetry]);
   const prepare = useMutation({ mutationFn: async (download: boolean) => {
     const saved = await save();
     if (download) await downloadCard(saved);
     return saved;
-  }, onSuccess: saved => { setPreview({ version: saved.version, format: saved.format }); setPage(0); setPreviewError(false); }, onError: error => toast("err", error.message) });
+  }, onSuccess: saved => { setPreview({ version: saved.version, format: saved.format }); setPreviewRetry(value => value + 1); setPreviewError(false); }, onError: error => toast("err", error.message) });
   const stalePreview = dirty || preview?.version !== base.version || preview?.format !== form.format;
+  const previewAvailable = preview?.version === base.version && preview?.format === base.format;
+  const pageLabels = base.finishedDeck ? base.finishedDeck.pages.map((_, index) => `${index + 1}페이지`) : base.experience ? ["표지", ...base.experience.pages.map((_, index) => `본문 ${index + 1}`)] : ["표지", "본문 1", "본문 2", "본문 3", "본문 4", "마무리"].slice(0, studioPageCount(base));
+  const pageArt = (index: number) => {
+    if (base.finishedDeck?.pages[index]) return `/api/studio/images/${base.finishedDeck.pages[index].imageId}`;
+    if (base.experience) { const id = index === 0 ? base.experience.coverId : base.experience.pages[index - 1]?.mediaId; return id ? experienceImageUrl(id) : null; }
+    const id = index > 0 ? base.panels[index - 1]?.imageId : null;
+    return id ? `/api/studio/images/${id}` : null;
+  };
   const focusField = (field: string) => { onFieldFocus?.(field); window.requestAnimationFrame(() => document.getElementById(`studio-${field}`)?.focus()); };
   return <><section className="panel stack studio-export" aria-labelledby="studio-export-heading">
     <div><h2 id="studio-export-heading">최종 이미지</h2><p className="small muted">{form.experience ? `후기 카드 ${studioPageCount(form)}장 · 1080 × 1350 PNG + 선택한 영상 원본 + 캡션` : studioOutputDescription(form.format, form.exportDesign)}</p></div>
@@ -90,13 +114,15 @@ export function StudioExport({ form, base, dirty, busy, change, save, onFieldFoc
       <button className="btn" disabled={busy || prepare.isPending || blocked} onClick={() => prepare.mutate(false)}>{prepare.isPending ? "준비 중…" : dirty ? "저장하고 미리보기" : "미리보기"}</button>
       <button className="btn primary" disabled={busy || prepare.isPending || blocked} onClick={() => prepare.mutate(true)}>{prepare.isPending ? "준비 중…" : `${dirty ? "저장하고 " : ""}${form.format === "카드뉴스" ? `${studioPageCount(form)}장 ZIP 받기` : "PNG 받기"}`}</button>
     </div>
-    {preview && <div className="studio-export-preview">
-      {stalePreview ? <p className="notice">편집 내용이 바뀌었습니다. 저장하고 미리보기를 갱신하세요.</p> : <>
-        {preview.format === "카드뉴스" && <div className="studio-preview-pages page-dots" role="group" aria-label="미리보기 페이지">{(form.experience ? ["표지", ...form.experience.pages.map((_,i)=>String(i+2))] : ["표지", "1", "2", "3", "4", "마무리"].slice(0, studioPageCount(form))).map((label, index) => <button className={index<=page?"filled":""} key={index} aria-label={`${index+1}페이지`} aria-pressed={page === index} onClick={() => { setPage(index); setPreviewError(false); }}></button>)}</div>}
-        {previewError ? <p className="notice err" role="alert">미리보기를 불러오지 못했습니다. 최신 버전인지 확인하고 다시 눌러 주세요.</p> : <img key={`${preview.version}-${page}`} src={`/api/studio/cards/${base.id}/export.png?version=${preview.version}&page=${page}&preview=1`} alt={`${base.title} ${page + 1}페이지 출력 미리보기`} onError={() => setPreviewError(true)} />}
+    {preview && <div className="studio-export-preview" aria-label="저장된 최종 이미지 미리보기">
+      <p className="small"><strong>저장된 버전 {preview.version}</strong>{stalePreview ? " · 현재 입력은 아직 반영되지 않았습니다. 저장하면 미리보기가 갱신됩니다." : " · 현재 원고와 그림을 반영했습니다."}</p>
+      {!previewAvailable ? <p className="notice">새 버전이 있습니다. 입력 내용을 확인하고 저장하면 최신 미리보기를 불러옵니다.</p> : <>
+        {preview.format === "카드뉴스" && <div className="studio-output-pages" role="group" aria-label="미리보기 페이지">{pageLabels.map((label, index) => <button key={index} type="button" aria-label={`${index + 1}페이지 · ${label}`} aria-pressed={page === index} onClick={() => setPage(index)}>{pageArt(index) ? <img src={pageArt(index)!} alt={`${label}에 넣은 저장 그림`} loading="lazy" /> : <span className="studio-output-page-placeholder" aria-hidden="true">{index + 1}</span>}<strong>{label}</strong><span>{pageArt(index) ? "그림 포함" : "글·레이아웃"}</span></button>)}</div>}
+        {preview.format === "카드뉴스" && <p className="small muted">{pageLabels[page]} · 위에서 각 본문을 선택하면 그림과 글이 합쳐진 최종 페이지를 볼 수 있습니다. 표지는 선택한 디자인에 따라 글 중심으로 표시됩니다.</p>}
+        {previewError ? <div className="notice err" role="alert"><p>미리보기를 불러오지 못했습니다. 저장한 원고와 그림은 유지됩니다.</p><button type="button" className="btn sm" onClick={() => setPreviewRetry(value => value + 1)}>미리보기 다시 불러오기</button></div> : <div className="studio-output-image" aria-busy={previewLoading}>{previewLoading && <p role="status" className="small muted">페이지 이미지를 불러오는 중…</p>}<img key={`${preview.version}-${page}-${previewRetry}`} src={`/api/studio/cards/${base.id}/export.png?version=${preview.version}&page=${page}&preview=1&attempt=${previewRetry}`} alt={`${base.title} ${page + 1}페이지 출력 미리보기`} onLoad={() => setPreviewLoading(false)} onError={() => { setPreviewLoading(false); setPreviewError(true); }} /></div>}
       </>}
     </div>}
     <p className="small studio-handoff">제작 완료 후 아래에서 게시 계정과 최종 이미지를 확인하고 발행하세요.</p>
-  </section>{(!base.sourceItemId || base.sourceOutput) && <StudioPublish base={base} dirty={dirty} busy={busy} save={save} />}</>;
+  </section>{(!base.sourceItemId || base.sourceOutput) && <StudioPublish base={base} dirty={dirty} busy={parentBusy || prepare.isPending} save={save} onBusyChange={reportPublicationBusy} />}</>;
 }
 

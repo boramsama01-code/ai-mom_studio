@@ -6,7 +6,9 @@ import { z } from "zod";
 import { aiProviders, type AiProvider } from "./aiProviders";
 import { PERSISTED_CARD_DESIGNS, CARD_COLOR_VARIANTS } from "./cardDesigns";
 
-export const studioChannels = ["penguin", "highscoop", "fryday", "news"] as const;
+/** Built-in examples only; the actual channel directory is loaded from /channels. */
+export const builtinStudioChannels = ["penguin", "highscoop", "fryday", "news"] as const;
+export const studioChannels = builtinStudioChannels;
 export const studioFormats = ["웹툰", "카드뉴스", "릴스", "브랜드", "기타"] as const;
 export const studioExportDesigns = ["editorial", "spotlight", "minimal", ...Array.from(new Set([...PERSISTED_CARD_DESIGNS, ...CARD_COLOR_VARIANTS].map(d => `set:${d.id}` as const)))] as const;
 export const studioPageCount = (content: { format: string; exportDesign: string; experience?: Experience | null; finishedDeck?: { pages: unknown[] } | null }) => content.finishedDeck ? content.finishedDeck.pages.length : content.experience ? content.experience.pages.length + 1 : content.format === "카드뉴스" ? content.exportDesign.startsWith("set:") ? 5 : 6 : 1;
@@ -100,11 +102,15 @@ export const studioGenerationSchema = z.object({
   version: z.number().int().positive(), kind: z.enum(["text", "image"]),
   provider: z.enum(aiProviders).default("openai"),
   instruction: z.string().trim().max(8000).default(""), panelIndex: z.number().int().min(0).max(3).optional(),
-  textTarget: z.enum(["rewrite", "fill", "caption", "experience"]).default("rewrite"),
+  panelIndexes: z.array(z.number().int().min(0).max(3)).min(1).max(4).refine(indexes => new Set(indexes).size === indexes.length, "같은 컷은 한 번만 선택해 주세요.").optional(),
+  textTarget: z.enum(["rewrite", "fill", "caption", "experience", "panel"]).default("rewrite"),
   requestId: z.string().uuid(),
 }).strict().superRefine((v, ctx) => {
   if (v.textTarget === "experience" && (v.kind !== "text" || v.provider !== "openai")) ctx.addIssue({ code: "custom", path: ["provider"], message: "사진·영상 후기는 GPT로 작성합니다." });
-  if (v.kind === "image" && v.panelIndex === undefined) ctx.addIssue({ code: "custom", path: ["panelIndex"], message: "다시 그릴 컷을 선택하세요." });
+  if (v.textTarget === "panel" && (v.kind !== "text" || v.panelIndex === undefined)) ctx.addIssue({ code: "custom", path: ["panelIndex"], message: "문구를 수정할 컷을 선택해 주세요." });
+  if (v.kind === "image" && v.panelIndex === undefined && v.panelIndexes === undefined) ctx.addIssue({ code: "custom", path: ["panelIndex"], message: "다시 그릴 컷을 선택하세요." });
+  if (v.panelIndex !== undefined && v.panelIndexes !== undefined) ctx.addIssue({ code: "custom", path: ["panelIndexes"], message: "한 컷 선택과 여러 컷 선택을 동시에 보낼 수 없습니다." });
+  if (v.kind === "text" && v.panelIndexes !== undefined) ctx.addIssue({ code: "custom", path: ["panelIndexes"], message: "여러 컷 선택은 그림 생성에서만 사용할 수 있습니다." });
   if (v.kind === "image" && v.provider !== "openai") ctx.addIssue({ code: "custom", path: ["provider"], message: "그림 생성은 OpenAI를 사용합니다." });
   if (v.kind === "text" && v.textTarget === "rewrite" && !v.instruction) ctx.addIssue({ code: "custom", path: ["instruction"], message: "전체 원고를 바꿀 내용을 입력하세요." });
 });

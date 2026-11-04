@@ -1,0 +1,7 @@
+.draft-recovery { min-width: 0; overflow-wrap: anywhere; }
+.draft-recovery pre { margin: .5rem 0 0; max-height: 18rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .88rem; }
+.draft-recovery-compare { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1rem; margin-top: .75rem; }
+.draft-recovery-compare h4 { margin: 0; }
+.draft-recovery .check { display: flex; align-items: flex-start; gap: .5rem; }
+.draft-recovery .check input { flex: 0 0 auto; margin-top: .25rem; }
+@media (max-width: 600px) { .draft-recovery-compare { grid-template-columns: minmax(0,1fr); } .draft-recovery .row > button { min-height: 44px; white-space: normal; } }

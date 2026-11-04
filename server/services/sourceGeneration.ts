@@ -9,7 +9,7 @@ import { recoverExpired } from "../worker/queue";
 import { withGenerationContext } from "./generationContext";
 import { sha256 } from "./text";
 
-const SOURCE_TYPES = ["source_generate", "card_copy_generate"];
+const SOURCE_TYPES = ["source_generate", "card_copy_generate", "card_render"];
 const GENERATION_TYPES = [...SOURCE_TYPES, "studio_generate"];
 const active = new Map<number, AbortController>();
 const REQUEST_LIMIT_MS = 180_000;
@@ -25,7 +25,7 @@ function stopped(job: Job): never {
 /** One paid logical request, recorded before network I/O; completed IDs are never run twice. */
 export async function runSourceGeneration<T extends Record<string, unknown>>(
   db: DB,
-  input: { type: "source_generate" | "card_copy_generate"; channelId: number; itemId: number; version: number; requestId?: string; intent: Record<string, unknown>; actor: string },
+  input: { type: "source_generate" | "card_copy_generate" | "card_render"; channelId: number; itemId: number; version: number; requestId?: string; intent: Record<string, unknown>; actor: string },
   work: () => Promise<T>,
 ): Promise<T & { jobId: number }> {
   const requestId = input.requestId ?? randomUUID();
@@ -117,7 +117,7 @@ export async function runSourceGeneration<T extends Record<string, unknown>>(
       : "AI 처리 또는 결과 저장에 실패했습니다. 자동 재실행하지 않았습니다. 기존 작업을 확인하거나 직접 편집하세요.";
     await db.update(jobs).set({ status: "failed", lastError: message, finishedAt: new Date(), leaseOwner: null, leaseExpiresAt: null })
       .where(and(eq(jobs.id, job.id), eq(jobs.status, "running"), eq(jobs.leaseOwner, job.leaseOwner!)));
-    throw new HttpError(error instanceof HttpError ? error.status : 422, message, { jobId: job.id, jobStatus: cancelled ? "cancelled" : "failed" });
+    throw new HttpError(error instanceof HttpError ? error.status : 422, message, { ...(error instanceof HttpError ? error.extra : {}), jobId: job.id, jobStatus: cancelled ? "cancelled" : "failed" });
   } finally {
     clearTimeout(deadline); clearInterval(heartbeat); controller.signal.removeEventListener("abort", stopHeartbeat); active.delete(job.id);
   }

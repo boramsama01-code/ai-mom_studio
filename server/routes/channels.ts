@@ -12,6 +12,8 @@ import { allowedSecretName, defaultSecretRefs, resolveSecrets, SECRET_FIELDS } f
 
 import type { DB } from "../db";
 import { CHANNEL_ORDER_KEY, channelIdsSchema, orderedChannels } from "../services/channelOrder";
+import { channelCategoriesSchema, channelContentTypes, channelCreateSchema } from "../../shared/channelSettings";
+import { assertAvailableChannelSlug, assertCategoryRemovalSafe, newChannelBudget } from "../services/channelSettings";
 
 export const channelRoutes = Router();
 
@@ -68,23 +70,22 @@ const channelPatch = z.object({
   name: z.string().trim().min(1).max(60).optional(),
   description: z.string().max(500).optional(),
   audience: z.string().trim().min(1).max(60).optional(),
+  contentType: z.enum(channelContentTypes).optional(),
+  categories: channelCategoriesSchema.optional(),
   accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   active: z.boolean().optional(),
   editorialGuide: z.string().max(4000).optional(),
   budget: budgetSchema.optional(),
-});
+}).strict();
 
 channelRoutes.post("/channels", ah(async (req, res) => {
-  const body = parse(z.object({
-    name: z.string().trim().min(1).max(60),
-    description: z.string().trim().max(500).default(""),
-    audience: z.string().trim().min(1).max(60).default("일반 독자"),
-    accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default("#51635A"),
-  }).strict(), req.body);
+  const body = parse(channelCreateSchema, req.body);
   const created = await getDb().transaction(async tx => {
     await tx.execute(sql`select pg_advisory_xact_lock(7193203)`);
-    const [ch] = await tx.insert(channels).values({ ...body, slug: `channel-${randomUUID()}`, contentType: "manual",
-      budget: { naverCallsPerRun: 0, resultsPerRun: 0, fetchTargetsPerRun: 0, fetchCallsPerRun: 0, llmCallsPerRun: 0, dailyPublishLimit: 0, discovery: { enabled: false, autoDraft: false } },
+    const slug = body.slug ?? `channel-${randomUUID()}`;
+    await assertAvailableChannelSlug(tx as unknown as DB, slug);
+    const [ch] = await tx.insert(channels).values({ ...body, slug,
+      budget: newChannelBudget(body.contentType),
     }).returning();
     await audit(tx, { actor: actorOf(req), action: "create", entity: "channel", entityId: ch.id, channelId: ch.id });
     return ch;
@@ -100,14 +101,17 @@ channelRoutes.patch(
     const body = parse(channelPatch, req.body);
     const { version, ...patch } = body;
     const db = getDb();
-    const updated = await db
-      .update(channels)
-      .set({ ...patch, version: sql`${channels.version} + 1`, updatedAt: new Date() })
-      .where(and(eq(channels.id, ch.id), eq(channels.version, version)))
-      .returning();
-    if (!updated.length) conflict(ch);
-    await audit(db, { actor: actorOf(req), action: "update", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { fields: Object.keys(patch) } });
-    res.json(updated[0]);
+    const updated = await db.transaction(async tx => {
+      const [fresh] = await tx.select().from(channels).where(eq(channels.id, ch.id)).for("update");
+      if (fresh.version !== version) conflict(fresh);
+      if (patch.categories !== undefined) await assertCategoryRemovalSafe(tx as unknown as DB, fresh, patch.categories);
+      // contentType is only the default for future items; existing kinds,
+      // revisions, destination bindings and publication evidence remain intact.
+      const [saved] = await tx.update(channels).set({ ...patch, version: fresh.version + 1, updatedAt: new Date() }).where(eq(channels.id, ch.id)).returning();
+      await audit(tx, { actor: actorOf(req), action: "update", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { fields: Object.keys(patch) } });
+      return saved;
+    });
+    res.json(updated);
   }),
 );
 

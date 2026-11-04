@@ -21,6 +21,7 @@ import { approveItem } from "../worker/publish";
 import { audit } from "../audit";
 import { loadPublicationReadiness } from "./publishReadiness";
 import { capturePublicationDestinations } from "./publicationDestination";
+import { assertPublicationDraftIntent } from "./publicationDraft";
 
 export async function studioPublishStatus(db: DB, cardId: number): Promise<StudioPublishStatus> {
   const card = await loadStudioCard(db, cardId);
@@ -38,7 +39,7 @@ export async function studioPublishStatus(db: DB, cardId: number): Promise<Studi
   if (ch.budget.dailyPublishLimit < 1) blockers.push("채널의 하루 발행 한도를 1건 이상으로 설정하세요.");
   if (env.dryRun || !env.autoPublish) blockers.push("서버가 모의 실행 또는 발행 중지 상태입니다.");
   const history = card.sourceItemId ? await db.select({ id: deliveries.id, approvalId: approvals.id, approvalStatus: approvals.status, status: deliveries.status, lastError: deliveries.lastError, externalUrl: deliveries.externalUrl, errorKind: deliveries.errorKind, needsReconciliation: deliveries.needsReconciliation, outcomeSource: deliveries.outcomeSource, phase: deliveries.phase, resolutionNote: deliveries.resolutionNote, destinationSnapshot: deliveries.destinationSnapshot, scheduledAt: approvals.scheduledAt }).from(deliveries).innerJoin(approvals, eq(deliveries.approvalId, approvals.id)).where(eq(approvals.contentItemId, card.sourceItemId)).orderBy(desc(deliveries.id)).limit(20) : [];
-  return { channelId: ch.id, channelName: ch.name, expectedUsername: expectedInstagramUsername(ch.slug), ready: !blockers.length, blockers, dailyLimit: ch.budget.dailyPublishLimit, dryRun: env.dryRun, autoPublish: env.autoPublish, destinations: choices, deliveries: history.map(d => ({ ...d, scheduledAt: d.scheduledAt.toISOString() })) };
+  return { channelId: ch.id, channelName: ch.name, expectedUsername: expectedInstagramUsername(ch.slug), ready: !blockers.length, blockers, dailyLimit: ch.budget.dailyPublishLimit, dryRun: env.dryRun, autoPublish: env.autoPublish, destinations: choices, publicationDraft: card.publicationDraft ?? { version: 0 }, deliveries: history.map(d => ({ ...d, scheduledAt: d.scheduledAt.toISOString() })) };
 }
 
 async function previewDto(db: DB, card: typeof studioCards.$inferSelect): Promise<StudioPublishPreview> {
@@ -98,10 +99,12 @@ export async function prepareStudioPublication(db: DB, cardId: number, version: 
   });
 }
 
-export async function approveStudioPublication(db: DB, cardId: number, input: { requestId?: string; version: number; assetId: number; destinationId: number } & PublicationTimingInput, actor: string) {
+export async function approveStudioPublication(db: DB, cardId: number, input: { requestId?: string; version: number; assetId: number; destinationId: number; publicationDraftVersion?: number } & PublicationTimingInput, actor: string) {
   const timing = resolvePublicationTiming(input);
   if (!timing.ok) throw new HttpError(400, timing.error);
   const status = await studioPublishStatus(db, cardId);
+  const intent = { publicationDraftVersion: input.publicationDraftVersion, destinationIds: [input.destinationId], timing: timing.timing, scheduledAt: timing.scheduledAt };
+  assertPublicationDraftIntent(status.publicationDraft, intent);
   if (!status.ready) throw new HttpError(409, status.blockers.join(" "));
   if (!status.destinations.some(d => d.id === input.destinationId && d.enabled && d.configured)) throw new HttpError(400, "게시할 인스타그램 계정을 확인하세요.");
   // Complete read-only provider verification before item/card row locks. The
@@ -114,12 +117,13 @@ export async function approveStudioPublication(db: DB, cardId: number, input: { 
     const dbtx = tx as unknown as DB;
     const card = await lockStudioPublication(dbtx, cardId);
     assertStudioActive(card);
+    assertPublicationDraftIntent(card.publicationDraft, intent);
     if (card.version !== input.version || card.importedMeta?.publishedVersion !== input.version || card.importedMeta?.generatedAssetId !== input.assetId) throw new HttpError(409, "미리보기 이후 수정됐습니다. 최신 이미지·캡션으로 다시 확인하세요.");
     const preview = await previewDto(dbtx, card);
     // approveItem owns duplicate/unknown guards across every revision, including
     // replay of the same request ID after its first HTTP response was lost.
     await tx.update(contentItems).set({ reviewStatus: "reviewed" }).where(eq(contentItems.id, preview.itemId));
-    const result = await approveItem(dbtx, { requestId: input.requestId, timing: timing.timing, itemId: preview.itemId, revisionId: preview.revisionId, mediaAssetId: preview.assetId, altTextVersion: 1, destinationIds: [input.destinationId], captions: { instagram: preview.caption, telegram: "" }, scheduledAt: timing.scheduledAt, actor }, { ...preflight, targets });
+    const result = await approveItem(dbtx, { requestId: input.requestId, publicationDraftVersion: input.publicationDraftVersion, timing: timing.timing, itemId: preview.itemId, revisionId: preview.revisionId, mediaAssetId: preview.assetId, altTextVersion: 1, destinationIds: [input.destinationId], captions: { instagram: preview.caption, telegram: "" }, scheduledAt: timing.scheduledAt, actor }, { ...preflight, targets });
     if (!result.ok) throw new HttpError(409, result.error);
     return { approvalId: result.approval.id, scheduledAt: result.approval.scheduledAt, timing: timing.timing };
   });

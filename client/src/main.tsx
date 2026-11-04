@@ -10,6 +10,7 @@ import "./contentWorkspace.css";
 import { Icon, type IconName } from "./icons";
 import { useFocusScope } from "./useFocusScope";
 import { api } from "./api";
+import { clearAllDraftRecovery } from "./draftRecovery";
 import { ChannelProvider, DirtyGuardProvider, useChannel, useDirtyGuard, useMe } from "./state";
 import { GuardedRouter } from "./GuardedRouter";
 import { DirtyModal, ErrorBox, GuardedLink, Loading } from "./ui";
@@ -42,24 +43,18 @@ const NAV: Array<{ group: string; collapsible?: boolean; items: Array<{ href: st
       { href: "/", label: "내 콘텐츠", icon: "grid" },
       { href: "/inbox", label: "수집함", icon: "inbox", count: "review" },
       { href: "/publish", label: "발행함", icon: "send" },
+      { href: "/settings", label: "설정", icon: "channels" },
     ],
   },
   {
-    group: "더 보기",
+    group: "연결·운영 도구",
     collapsible: true,
     items: [
       { href: "/today", label: "아침 수집 브리핑", icon: "sun" },
-    ],
-  },
-  {
-    group: "설정",
-    collapsible: true,
-    items: [
       { href: "/instagram", label: "인스타그램 연결", icon: "link" },
       { href: "/rules", label: "검색 설정", icon: "sliders" },
       { href: "/design", label: "수집 카드 디자인", icon: "design" },
       { href: "/connections", label: "API 키 관리", icon: "link" },
-      { href: "/settings", label: "채널 설정", icon: "channels" },
       { href: "/account", label: "계정·비밀번호", icon: "lock" },
       { href: "/runs", label: "실행 기록", icon: "clock" },
     ],
@@ -105,6 +100,7 @@ function Shell() {
   const isActive = (href: string) => (href === "/" ? inStudio : loc.startsWith(href) || (href === "/inbox" && loc.startsWith("/items")));
   const logout = () => guard.confirmLeave(() => {
     void api("/auth/logout", { method: "POST" }).then(() => {
+      clearAllDraftRecovery();
       qc.clear();
       location.href = "/";
     }).catch(error => toast("err", (error as Error).message));
@@ -229,7 +225,7 @@ function Shell() {
         </ScreenErrorBoundary>
       </main>
       </div>
-      <nav className="mobile-nav" aria-label="빠른 메뉴">{NAV.flatMap(g => g.items).filter(n => ["/", "/inbox", "/publish"].includes(n.href)).map(n => <GuardedLink key={n.href} href={n.href} ariaCurrent={isActive(n.href)}><Icon name={n.icon} size={20} /><span>{n.label}</span></GuardedLink>)}<button aria-label="전체 메뉴 열기" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" size={20} /><span>전체 메뉴</span></button></nav>
+      <nav className="mobile-nav" aria-label="빠른 메뉴">{NAV.flatMap(g => g.items).filter(n => ["/", "/inbox", "/publish", "/settings"].includes(n.href)).map(n => <GuardedLink key={n.href} href={n.href} ariaCurrent={isActive(n.href)}><Icon name={n.icon} size={20} /><span>{n.label}</span></GuardedLink>)}</nav>
       <CommandPalette open={palette} onClose={() => setPalette(false)} onCollect={collect} />
       <DirtyModal />
     </div>

@@ -8,6 +8,7 @@ spacepenguin-prep-*/
 # Existing preparation directories from before the rename remain excluded.
 ai-mom-prep-*/
 coverage/
+test-results/
 *.log
 .DS_Store
 tmp/

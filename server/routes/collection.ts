@@ -40,11 +40,11 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
       noticeReports: sql<number>`count(*) filter (where ${noticeIntentSql()} in ('retrospective','off_topic','closed'))::int`,
     }).from(contentItems).leftJoin(sourceDocuments, eq(sourceDocuments.id, itemSourceIdSql())).where(and(eq(contentItems.channelId, ch.id), eq(contentItems.isSample, !!req.session.demo), eq(contentItems.excluded, false), inArray(contentItems.origin, ["collected", "discovered"]), gte(contentItems.createdAt, start), lt(contentItems.createdAt, end)));
     const categoryRows = await db.select({ subcategory: contentItems.subcategory, count: sql<number>`count(*)::int` }).from(contentItems).where(and(eq(contentItems.channelId, ch.id), eq(contentItems.isSample, !!req.session.demo), eq(contentItems.excluded, false), inArray(contentItems.origin, ["collected", "discovered"]), gte(contentItems.createdAt, start), lt(contentItems.createdAt, end))).groupBy(contentItems.subcategory);
-    const categories = [...channelCategories(ch.slug), "미분류"].map(label => ({ label, newItems: categoryRows.filter(r => categoryLabel(r.subcategory) === label).reduce((n, r) => n + r.count, 0) }));
+    const categories = [...channelCategories(ch.slug, ch.categories), "미분류"].map(label => ({ label, newItems: categoryRows.filter(r => categoryLabel(r.subcategory) === label).reduce((n, r) => n + r.count, 0) }));
     const [lastRun] = await db.select().from(runs).where(and(eq(runs.channelId, ch.id), eq(runs.kind, "collect"))).orderBy(desc(runs.id)).limit(1);
     const pendingJobs = await db.select({ id: jobs.id, status: jobs.status, createdAt: jobs.createdAt, leaseExpiresAt: jobs.leaseExpiresAt }).from(jobs).where(and(eq(jobs.channelId, ch.id), eq(jobs.type, "collect"), inArray(jobs.status, ["queued", "running"])));
     const discovery = resolveDiscovery(ch.contentType, ch.budget.discovery);
-    const profile = COLLECTION_PROFILES[ch.slug];
+    const profile = Object.hasOwn(COLLECTION_PROFILES, ch.slug) ? COLLECTION_PROFILES[ch.slug] : undefined;
     const profileRules = profile ? (["news", "blog"] as const).flatMap(endpoint => profile[endpoint].map(query => {
       const matches = ruleRows.filter(r => r.normalizedQuery === normalizeQuery(query) && r.endpoint === endpoint);
       const existing = matches.find(r => !r.deletedAt) ?? matches[0];
@@ -61,7 +61,7 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
 
 collectionRoutes.post("/channels/:cid/collection-profile", ah(async (req, res) => {
   const ch = await loadChannel(req.params.cid), body = parse(z.object({ version: zVersion }), req.body);
-  const profile = COLLECTION_PROFILES[ch.slug];
+  const profile = Object.hasOwn(COLLECTION_PROFILES, ch.slug) ? COLLECTION_PROFILES[ch.slug] : undefined;
   if (!profile || !ch.active) throw new HttpError(400, "이 채널에는 외부 자료 수집 추천 묶음이 없습니다.");
   const db = getDb();
   const result = await db.transaction(async tx => {
@@ -87,7 +87,7 @@ collectionRoutes.post("/collection/collect", ah(async (req, res) => {
   const chs = await db.select().from(channels).where(and(eq(channels.active, true), channelId === "all" ? undefined : eq(channels.id, channelId)));
   const requested = [];
   for (const ch of chs) {
-    if (!validSubcategory(ch.slug, subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
+    if (!validSubcategory(ch.slug, subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     const [rule] = await db.select({ id: searchRules.id }).from(searchRules).where(and(eq(searchRules.channelId, ch.id), eq(searchRules.enabled, true), isNull(searchRules.deletedAt), subcategory ? eq(searchRules.subcategory, subcategory) : undefined)).limit(1);
     const [board] = await db.select({ id: officialSources.id }).from(officialSources).where(and(eq(officialSources.channelId, ch.id), eq(officialSources.enabled, true), sql`${officialSources.adapter} is not null and ${officialSources.verifiedAt} is not null`)).limit(1);
     const d = resolveDiscovery(ch.contentType, ch.budget.discovery);

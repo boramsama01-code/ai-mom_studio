@@ -65,13 +65,14 @@ async function chooseBodyStatus(value: string) {
   await settle();
 }
 
-it("검색과 본문 상태는 바로 보이고 수집 현황·키워드 관리는 기본 접힘 영역에 모인다", async () => {
+it("자동 수집과 검색은 바로 보이고 키워드 관리는 기본 접힘 영역에 모인다", async () => {
   await renderInbox();
   const details = host.querySelector<HTMLDetailsElement>("details.inbox-collection-options")!;
   expect(details).not.toBeNull();
   expect(details.open).toBe(false);
   expect(details.querySelector("summary")?.textContent).toContain("수집 현황·설정");
-  expect(details.querySelector('[data-testid="collection-status"]')).not.toBeNull();
+  expect(host.querySelector('[data-testid="collection-status"]')?.closest("details")).toBeNull();
+  expect(host.querySelector('.work-mode-options button[aria-pressed="true"] strong')?.textContent).toBe("자동");
   expect(details.querySelector('[data-testid="keyword-settings"]')).not.toBeNull();
   expect(host.querySelector('[aria-label="본문 상태"]')?.closest("details")).toBeNull();
   expect(host.textContent).toContain("본문 미조회는 오류가 아닌 조회 전 상태입니다.");

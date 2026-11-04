@@ -77,12 +77,12 @@ export async function renderPreview(db: DB, key: string, channel: Channel, page 
   if (hit) return hit;
   const style = await resolveStyle(db, key, channel.id);
   if (style.collection) {
-    const jpeg = await renderCollectionPreview(style.collection, page, channel.name);
+    const jpeg = await renderCollectionPreview(style.collection, page, channel.name, channel.slug);
     if (cache.size >= 120) cache.clear();
     cache.set(ck, jpeg);
     return jpeg;
   }
-  const model = buildCardModel({ kind: channel.contentType, payload: SAMPLE[channel.contentType] ?? SAMPLE.notice, channelName: channel.name, accent: channel.accentColor, sourceOrg: "예시 기관", checkedDate: "2026-09-29" });
+  const model = buildCardModel({ kind: channel.contentType, payload: SAMPLE[channel.contentType] ?? SAMPLE.notice, channelName: channel.name, channelSlug: channel.slug, accent: channel.accentColor, sourceOrg: "예시 기관", checkedDate: "2026-09-29" });
   const { jpeg } = await renderCardJpeg(model, style);
   if (cache.size > 60) cache.clear();
   cache.set(ck, jpeg);

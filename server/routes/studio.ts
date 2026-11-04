@@ -25,6 +25,8 @@ import { zipImportRoutes } from "./zipImport";
 import { studioFamilyReference, studioPoseReference } from "../services/studioCharacters";
 import { STUDIO_CHARACTERS } from "../../shared/studioCharacters";
 import { instagramOAuthRoutes } from "./instagramOAuth";
+import { studioPublicationDraftSaveSchema } from "../../shared/publicationDraft";
+import { getStudioPublicationDraft, saveStudioPublicationDraft } from "../services/publicationDraft";
 
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
@@ -95,10 +97,10 @@ studioRoutes.get("/studio/design-preview", ah(async (req, res) => {
   const channel = req.query.channel === undefined ? undefined : parse(z.string().min(1).max(100), req.query.channel);
   const [selected] = channel ? await getDb().select().from(channels).where(eq(channels.slug, channelSlug(channel))) : [];
   if (channel && !selected) throw new HttpError(404, "채널을 찾을 수 없습니다.");
-  const cacheKey = `${key}|${page}|${small}|${selected?.name ?? ""}`;
+  const cacheKey = `${key}|${page}|${small}|${selected?.slug ?? ""}|${selected?.name ?? ""}`;
   let bytes = designPreviewCache.get(cacheKey);
   if (!bytes) {
-    const image = await renderCollectionPreview(key.slice(4), page, selected?.name);
+    const image = await renderCollectionPreview(key.slice(4), page, selected?.name, selected?.slug);
     bytes = small ? await sharp(image).resize(360, 450).jpeg({ quality: 85 }).toBuffer() : image;
     if (designPreviewCache.size >= 120) designPreviewCache.clear();
     designPreviewCache.set(cacheKey, bytes);
@@ -183,12 +185,17 @@ studioRoutes.post("/studio/cards/:id/finished-images", raw({ type: [...STUDIO_IM
   res.status(201).json(await appendFinishedImage(getDb(), intParam(req.params.id), q.version, q.name, q.uploadId, req.body, actorOf(req)));
 }));
 studioRoutes.get("/studio/cards/:id/publication", ah(async (req, res) => { res.json(await studioPublishStatus(getDb(), intParam(req.params.id))); }));
+studioRoutes.get("/studio/cards/:id/publication-draft", ah(async (req, res) => { res.json(await getStudioPublicationDraft(getDb(), intParam(req.params.id))); }));
+studioRoutes.patch("/studio/cards/:id/publication-draft", ah(async (req, res) => {
+  const input = parse(studioPublicationDraftSaveSchema, req.body);
+  res.json(await saveStudioPublicationDraft(getDb(), intParam(req.params.id), input, actorOf(req)));
+}));
 studioRoutes.post("/studio/cards/:id/publication/prepare", ah(async (req, res) => {
   const { version } = parse(z.object({ version: z.number().int().positive() }).strict(), req.body);
   res.json(await prepareStudioPublication(getDb(), intParam(req.params.id), version, actorOf(req)));
 }));
 studioRoutes.post("/studio/cards/:id/publication/approve", ah(async (req, res) => {
-  const input = parse(z.object({ requestId: z.string().uuid().optional(), version: z.number().int().positive(), assetId: z.number().int().positive(), destinationId: z.number().int().positive(), timing: z.enum(["now", "later"]).optional(), scheduledAt: z.string().datetime({ offset: true }).optional() }).strict(), req.body);
+  const input = parse(z.object({ requestId: z.string().uuid().optional(), version: z.number().int().positive(), assetId: z.number().int().positive(), destinationId: z.number().int().positive(), publicationDraftVersion: z.number().int().min(0).optional(), timing: z.enum(["now", "later"]).optional(), scheduledAt: z.string().datetime({ offset: true }).optional() }).strict(), req.body);
   const result = await approveStudioPublication(getDb(), intParam(req.params.id), input, actorOf(req));
   const workerStarted = result.timing === "now" && kickInlinePublish(getDb(), { approvalId: result.approvalId });
   res.status(201).json({ ...result, workerStarted });

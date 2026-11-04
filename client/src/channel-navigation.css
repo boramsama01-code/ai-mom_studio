@@ -12,8 +12,9 @@
 .workspace-header .workspace-breadcrumb strong { color:#334c4a; font-weight:600; white-space:nowrap; }
 .workspace-header .workspace-bar-right { gap:14px; flex-shrink:0; }
 .global-channel-select { display:flex; align-items:center; gap:10px; color:#637371; font-size:12px; font-weight:600; }
+.global-channel-wrap { min-width:0; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
 .global-channel-label { white-space:nowrap; }
-.global-channel-control { position:relative; display:flex; align-items:center; min-width:194px; }
+.global-channel-control { position:relative; display:flex; align-items:center; min-width:194px; max-width:280px; }
 .global-channel-control select {
   width:100%; margin:0; min-height:44px; padding:10px 35px 10px 32px;
   appearance:none; -webkit-appearance:none; border:1px solid #dce7e3; border-radius:11px;
@@ -51,6 +52,18 @@
   .global-channel-select { display:grid; gap:3px; }
   .global-channel-label { font-size:10px; padding-left:2px; }
   .global-channel-control { min-width:0; width:155px; }
-  .global-channel-control select { min-height:36px; padding-top:7px; padding-bottom:7px; font-size:12px; }
+  .global-channel-control select { min-height:44px; padding-top:9px; padding-bottom:9px; font-size:12px; }
   .studio-scope-label { width:100%; }
+}
+.settings-page .page-head { flex-wrap:wrap; gap:12px; }
+.settings-page .page-head h1,.channel-editor h2 { overflow-wrap:anywhere; }
+.settings-page .settings-tabs { gap:18px; flex-wrap:wrap; }
+.channel-editor .savebar { gap:10px; flex-wrap:wrap; }
+.channel-settings-conflict pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:18rem; overflow:auto; }
+@media(max-width:560px) {
+  .settings-page .page-head>.btn { width:100%; min-height:44px; }
+  .settings-tabs button,.settings-tabs>.btn { min-height:44px; }
+  .channel-editor .savebar>.btn { flex:1 1 120px; min-height:44px; }
+  .channel-editor .grid { grid-template-columns:minmax(0,1fr); }
+  .channel-card .channel-edit { white-space:normal; }
 }

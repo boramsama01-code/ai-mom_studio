@@ -12,6 +12,16 @@ afterEach(() => { vi.unstubAllGlobals(); delete process.env.IG_PENGUIN_AUTH_MODE
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 describe("Meta Unified Login accounts", () => {
+  it("resolves exactly one custom OAuth account and rejects ambiguity before saving credentials", async () => {
+    fetcher.mockResolvedValueOnce(response({ data: [{ id: "8811", username: "atelier.account" }] }));
+    expect(await accountIdentity(token, "facebook")).toEqual({ ok: true, userId: "8811", username: "atelier.account" });
+    fetcher.mockReset().mockResolvedValue(response({ data: [{ id: "8811", username: "atelier.account" }, { id: "8822", username: "other.account" }] }));
+    const transaction = vi.fn();
+    const db = { select: () => ({ from: () => ({ where: async () => [{ id: 9, slug: "local-atelier", active: true }] }) }), transaction } as unknown as DB;
+    await expect(connectInstagram(db, 9, { token, username: "", dailyLimit: 0, authMode: "facebook" }, "test")).rejects.toMatchObject({ status: 400, extra: { code: "ambiguous_account" } });
+    expect(transaction).not.toHaveBeenCalled(); expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it("chooses only the expected username from a multi-account system-user token", async () => {
     fetcher.mockResolvedValue(response({ data: [{ id: "1", username: "highscoop.official" }, { id: "2", username: "spacepenguin.co" }] }));
     expect(await accountIdentity(token, "facebook", "@SPACEPENGUIN.CO")).toEqual({ ok: true, userId: "2", username: "spacepenguin.co" });

@@ -37,7 +37,8 @@ import { getSetting } from "../seed";
 import { resolveSecrets } from "../services/secrets";
 import { loadPublicationReadiness, publicationReadinessFor } from "../services/publishReadiness";
 import { capturePublicationDestinations, publicationDestinationError } from "../services/publicationDestination";
-import { lockDeliveryPublication, publicationEligibilityError, recomputePublicationStatus } from "../services/publicationState";
+import { assertPublicationDraftIntent } from "../services/publicationDraft";
+import { lockDeliveryPublication, publicationEligibilityError, recomputePublicationStatus, revokePublicationEligibility } from "../services/publicationState";
 import { beginDeliveryDispatch, claimPublicationDelivery, finishDeliveryAttempt as finish, parkContainerWait, recoverPublicationAttempts, savePreparedContainer, withDeliveryLease } from "../services/publicationAttempts";
 import { withPublisherHeartbeat } from "../services/publicationHealth";
 import { uploadCard } from "../services/cloudinary";
@@ -53,6 +54,7 @@ import { studioKey } from "../../shared/channelKeys";
 import type { CardCarousel } from "../../shared/carousel";
 import { HttpError } from "../routes/util";
 import { cardCopySchema } from "../../shared/cardCopy";
+import { assertGenerationActive, completeGenerationResult } from "../services/generationContext";
 export { reconcileDelivery, confirmDeliveryPosted, confirmDeliveryNotPosted } from "../services/publicationReconciliation";
 
 export async function currentRevision(db: DB, itemId: number) {
@@ -75,7 +77,7 @@ export async function sourceOrgFor(db: DB, item: { id?: number; primarySourceId:
 }
 
 /* ───────────── 카드 생성 ───────────── */
-type CardRenderOptions = { version?: number; coverMode?: "ai" | "typography" | "reuse"; actor?: string };
+type CardRenderOptions = { version?: number; coverMode?: "ai" | "typography" | "reuse"; regenerateCover?: boolean; coverInstruction?: string; actor?: string };
 
 /** Editing typography must not buy another illustration for unchanged source facts. */
 export async function findReusableCardCover(db: DB, itemId: number, payload: Record<string, unknown>) {
@@ -119,7 +121,11 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   try { style = await resolveStyle(db, key, ch.id); }
   catch (e) { return { ok: false as const, code: "template", error: (e as Error).message }; }
   const typographyOnly = !!style.collection && !collectionUsesArt(style.collection);
-  const cachedArt = typographyOnly || options.coverMode === "typography" ? null : await findReusableCardCover(db, item.id, payload);
+  if (options.regenerateCover && (options.coverMode !== "ai" || typographyOnly)) return { ok: false as const, code: "invalid_image_request", error: "그림이 있는 디자인과 AI 표지를 선택한 뒤 새 표지를 요청하세요." };
+  if (options.coverInstruction?.trim() && !options.regenerateCover) return { ok: false as const, code: "invalid_image_request", error: "표지 수정 지시는 새 표지 생성과 함께 요청해 주세요." };
+  const previousArt = typographyOnly || options.coverMode === "typography" ? null : await findReusableCardCover(db, item.id, payload);
+  // Ordinary copy/layout edits remain free. Only an explicit redraw buys new art.
+  const cachedArt = options.regenerateCover ? null : previousArt;
   const coverMode = typographyOnly ? "typography" : options.coverMode === "reuse" ? (cachedArt ? "ai" : "typography") : options.coverMode ?? (copy ? (cachedArt ? "ai" : "typography") : env.openaiKey ? "ai" : "typography");
   if (coverMode === "ai" && !cachedArt && !env.openaiKey) return { ok: false as const, code: "ai_not_configured", error: "AI 표지는 OpenAI 이미지 연결이 필요합니다. 연결 설정에서 키를 입력하거나 글자 중심 표지를 선택하세요." };
   if (coverMode === "ai" && !cachedArt && await getSetting(db, "global_stop", false)) return { ok: false as const, code: "global_stop", error: "전역 정지 상태입니다. 정지를 해제한 뒤 AI 표지를 만들어 주세요." };
@@ -127,7 +133,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   let newCoverArt: { bytes: Buffer; model: string } | null = null;
   let cover: CardCarousel["cover"] = { kind: "typography", credit: style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오" };
   try {
-    const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
+    const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
     // Check the title and source line before spending an image-generation call.
     await renderCarouselCover(plan.base, plan.count, null, cover.credit, style);
     let art: Buffer | null = null;
@@ -137,7 +143,14 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
         art = cached.bytes;
         cover = { kind: "ai", credit: "표지: AI 생성 · OpenAI", model: cached.templateKey ?? undefined };
       } else {
-        const generated = await generateStudioImage({ purpose: "cover", prompt: JSON.stringify({ title, topic: payload.topic, summary: payload.summary ?? payload.one_line_summary ?? payload.background, channel: ch.name }) });
+        const generated = await generateStudioImage({
+          purpose: "cover",
+          prompt: JSON.stringify({ title, subtitle: copy?.cover.subtitle, topic: payload.topic, summary: payload.summary ?? payload.one_line_summary ?? payload.background, channel: ch.name }),
+          ...(options.regenerateCover ? {
+            instruction: options.coverInstruction?.trim() || "같은 주제를 새로운 구도로 다시 그려 주세요.",
+            referenceImages: previousArt ? [`data:image/png;base64,${previousArt.bytes.toString("base64")}`] : [],
+          } : {}),
+        });
         art = generated.bytes;
         newCoverArt = { bytes: art, model: generated.model };
         cover = { kind: "ai", credit: "표지: AI 생성 · OpenAI", model: generated.model };
@@ -154,6 +167,9 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   const [freshBoard] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id)).for("update");
   if (freshBoard) assertStudioActive(freshBoard);
   if (freshBoard && (!existingBoard || freshBoard.version !== existingBoard.version)) throw new HttpError(409, "생성 중 보드의 작업 상태가 변경되어 결과를 반영하지 않았습니다. 최신 작업에서 다시 생성하세요.");
+  const needsImageReview = options.regenerateCover || (newCoverArt !== null && fresh.reviewStatus === "reviewed");
+  if (needsImageReview) await revokePublicationEligibility(db, item.id, "표지 그림을 새로 생성해 이전 승인을 철회했습니다. 새 그림을 검토한 뒤 다시 승인하세요.", options.actor ?? "system", now);
+  await assertGenerationActive(db);
   // Acquire the source/card locks before inserting assets (and their foreign-key locks).
   if (newCoverArt) await db.insert(mediaAssets).values({ channelId: ch.id, contentItemId: item.id, revisionId: rev.id, kind: "cover_art", source: "ai", templateKey: newCoverArt.model, mime: "image/png", width: 1024, height: 1024, bytes: newCoverArt.bytes, sha256: sha256(newCoverArt.bytes) }).onConflictDoNothing();
   const pages: CardCarousel["pages"] = [];
@@ -169,7 +185,12 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   const board = await createStudioCard(db, studioContentSchema.parse({ title: String(title).slice(0, 160), channel: studioKey(ch.slug), format: "카드뉴스", stage: "review" }), options.actor ?? "system", item.id);
   // Keep all manually edited board fields and version history; only its generated output changes.
   await db.update(studioCards).set({ updatedAt: now, importedMeta: sql`coalesce(${studioCards.importedMeta}, '{}'::jsonb) || ${JSON.stringify({ generatedAssetId: pages[0].id })}::jsonb` }).where(eq(studioCards.id, board.id));
-  return { ok: true as const, asset: { id: pages[0].id, sha256: pages[0].sha256, revisionId: rev.id, createdAt: now, source: key.startsWith("custom:") ? "custom" : "builtin", templateKey: key, carousel, studioCardId: board.id } };
+  // A reviewed image changed even though the source-text revision did not.
+  // Fence stale review/save actions and preserve dispatched publication evidence.
+  if (needsImageReview) await db.update(contentItems).set({ reviewStatus: "pending", version: fresh.version + 1, updatedAt: now }).where(eq(contentItems.id, item.id));
+  const asset = { id: pages[0].id, sha256: pages[0].sha256, revisionId: rev.id, itemVersion: needsImageReview ? fresh.version + 1 : fresh.version, createdAt: now, source: key.startsWith("custom:") ? "custom" : "builtin", templateKey: key, carousel, studioCardId: board.id };
+  await completeGenerationResult(db, asset);
+  return { ok: true as const, asset };
 }
 
 /* ───────────── 최종 승인 ───────────── */
@@ -195,6 +216,7 @@ export async function approveItem(
   if (rev.id !== a.revisionId) return { ok: false as const, error: "최신 버전이 아닙니다. 새로고침 후 다시 확인하세요." };
   if (item.reviewStatus !== "reviewed") return { ok: false as const, error: "먼저 '검토 완료'로 표시해야 최종 승인할 수 있습니다." };
   if (item.relevance === "irrelevant" || item.excluded) return { ok: false as const, error: "관련 없음/제외 항목은 승인할 수 없습니다." };
+  if (item.origin !== "studio") assertPublicationDraftIntent(item.publicationDraft, a, now);
   const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, a.mediaAssetId));
   if (!asset || asset.kind !== "card" || asset.revisionId !== rev.id) return { ok: false as const, error: "현재 버전으로 만든 카드가 아닙니다. 카드를 다시 생성하세요." };
   if(a.altTextVersion!==undefined && a.altTextVersion!==cardAltTextState(asset,item.title).version)throw new HttpError(409,"대체텍스트가 변경됐습니다. 최신 설명을 확인하고 다시 승인해 주세요.");
@@ -225,7 +247,11 @@ export async function approveItem(
       if (replay) return replay.approval;
     }
     if (freshItem.currentRevisionId !== rev.id || freshItem.reviewStatus !== "reviewed" || freshItem.excluded || freshItem.relevance === "irrelevant") throw new HttpError(409, "승인 전에 콘텐츠가 변경됐습니다. 다시 확인하세요.");
-    if (a.publicationDraftVersion !== undefined && a.publicationDraftVersion !== (freshItem.publicationDraft?.version ?? 0)) throw new HttpError(409, "게시 문구가 다른 화면에서 변경됐습니다. 저장된 최신 캡션을 확인하세요.");
+    // Studio-authored mirrors use the card's independent posting draft; source
+    // items use their caption/intent draft. The item lock also serializes any
+    // linked Studio draft save, so this check fences a change during preflight.
+    const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
+    assertPublicationDraftIntent(board?.importedMeta?.studioPublication ? board.publicationDraft : freshItem.publicationDraft, a, a.now ?? new Date());
     if (freshItem.publicationDraft && (freshItem.publicationDraft.captions.instagram !== a.captions.instagram || freshItem.publicationDraft.captions.telegram !== a.captions.telegram)) throw new HttpError(409, "저장된 캡션과 승인할 캡션이 다릅니다. 문구를 저장하고 다시 확인하세요.");
     // Lock every existing delivery across revisions, including failed rows:
     // a concurrent worker claim or retry must finish before this decision, or
@@ -251,7 +277,6 @@ export async function approveItem(
     }
     const freshReadiness = publicationReadinessFor(freshChannel, freshDestinations, await getSetting(tx as unknown as DB, "global_stop", false));
     if (!freshReadiness.ready) throw new HttpError(409, freshReadiness.blockers.join(" "));
-    const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
     if (board) { assertStudioActive(board); if (board.importedMeta?.studioPublication && rev.payload.studioVersion !== board.version) throw new HttpError(409, "제작보드가 수정됐습니다. 미리보기를 다시 준비하세요."); }
     const [freshAsset]=await tx.select().from(mediaAssets).where(eq(mediaAssets.id,asset.id));
     if(JSON.stringify(cardAltTextState(freshAsset,item.title))!==JSON.stringify(cardAltTextState(asset,item.title)))throw new HttpError(409,"대체텍스트가 변경됐습니다. 최신 설명을 확인하고 다시 승인해 주세요.");

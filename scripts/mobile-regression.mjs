@@ -1,13 +1,25 @@
 // Browser regression runs in GitHub Actions against the built app with synthetic API data.
 // No production credentials, database, AI requests, collection jobs or social posts are used.
 import assert from "node:assert/strict";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { preview } from "vite";
-import { webkit } from "playwright";
+const require = createRequire(import.meta.url);
+let playwright;
+try { playwright = require("playwright"); }
+catch { playwright = require(require.resolve("playwright", { paths: [process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES ?? "/nonexistent"] })); }
 
 const server = await preview({ preview: { host: "127.0.0.1", port: 4173, strictPort: true } });
-const browser = await webkit.launch();
+let browser, engine = "WebKit";
+try { browser = await playwright.webkit.launch(); }
+catch (error) {
+  if (process.env.CI) { await server.httpServer.close(); throw error; }
+  engine = "Chromium";
+  browser = await playwright.chromium.launch({ ...(process.env.WORKSPACE_BROWSER_EXECUTABLE ? { executablePath: process.env.WORKSPACE_BROWSER_EXECUTABLE, args: ["--no-zygote", "--disable-dev-shm-usage"] } : {}) });
+}
 await mkdir("test-results/mobile", { recursive: true });
+const results = [];
+await writeFile("test-results/mobile/results.json", "[]");
 const channels = [
   { id: 1, slug: "opportunities", name: "Highscoop", handle: "highscoop.official" },
   { id: 3, slug: "current-dialogue", name: "Alligodang", handle: "alligodang.official" },
@@ -89,7 +101,9 @@ try {
       assert.equal(writes.length, writesBeforePublication, "viewing publication history must not create approvals, retries, or social posts");
       await page.screenshot({ path: `test-results/mobile/publication-${width}.png`, fullPage: true });
       assert.deepEqual(errors, []);
-      console.log(`WebKit ${width}px: date/buttons, checkbox tap, channel collection, four account routes, zero-delivery approval history passed`);
+      results.push({ engine, width, errors, passed: true });
+      await writeFile("test-results/mobile/results.json", JSON.stringify(results, null, 2));
+      console.log(`${engine} ${width}px: date/buttons, checkbox tap, channel collection, four account routes, zero-delivery approval history passed`);
     } catch (e) {
       console.error(JSON.stringify({ width, errors, writes, controls: await page.locator('.collection-toolbar, .collection-summary input[type="checkbox"]').evaluateAll(nodes => nodes.map(n => ({ tag: n.tagName, checked: n.checked, rect: n.getBoundingClientRect().toJSON() }))) }));
       await page.screenshot({ path: `test-results/mobile/failure-${width}.png`, fullPage: true });

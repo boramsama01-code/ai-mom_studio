@@ -7,6 +7,7 @@ import type { Delivery } from "@shared/schema";
 import type { PublicationOrphan } from "@shared/publicationReadiness";
 import { deliveryState, PublicationRuntimeNotice, usePublicationRuntime } from "../publicationStatus";
 import { DeliveryActions } from "../DeliveryActions";
+import { WorkModeControl, type WorkMode } from "../WorkModeControl";
 
 type Row = { d: Delivery | null; dest: { label: string; platform: string } | null; ap: { id: number; scheduledAt: string; status: string; revisionId: number }; item: { id: number; title: string; channelId: number }; canonicalStudioCardId?: number | null; reason?: string };
 type DeliveryRow = Row & { d: Delivery; dest: { label: string; platform: string } };
@@ -32,6 +33,8 @@ function rowState(row: Row) {
 }
 export function PublishPage() {
   const { selected } = useChannel();
+  const [workMode, setWorkMode] = useState<WorkMode>("auto");
+  useEffect(() => { setWorkMode("auto"); }, [selected]);
   const [view, setView] = useState<"calendar" | "list">("list");
   const [weekOffset, setWeekOffset] = useState(0);
   const [page, setPage] = useState(1);
@@ -84,6 +87,8 @@ export function PublishPage() {
           </button>
         </div>
       </div>
+      <WorkModeControl context="publish" mode={workMode} onChange={setWorkMode} />
+      {workMode === "manual" && <section className="panel stack" aria-label="수동 게시 안내"><h2>이미지·캡션으로 직접 게시</h2><p className="small muted">게시 API 한도나 연결 문제일 때 콘텐츠 화면에서 완성 이미지와 저장한 캡션을 가져와 게시하세요. 남아 있는 예약은 먼저 취소하고, 전송 중·결과 확인 필요 건은 아래 내역에서 게시 여부를 확인하세요.</p><div className="row"><GuardedLink className="btn" href="/">내 콘텐츠에서 이미지·캡션 열기</GuardedLink><GuardedLink className="btn" href="/instagram">게시 계정 연결 복구</GuardedLink></div></section>}
       <div className="stack" style={{ marginBottom: 16 }}>
         <PublicationRuntimeNotice runtime={status.data} error={status.error} retry={() => status.refetch()} />
         <div className="row between"><span className="small muted">조회 결과 총 {total}건 · 이 페이지 {rows.length}건 · 전송 예약 없음 {orphanCount}건 · 예약 시각 지난 대기 {overdue}건 · 실패·확인 필요·모의 실행 {needsAttention}건</span><button className="btn sm" disabled={refreshing} onClick={refresh}>{refreshing ? "상태 확인 중…" : "상태 새로고침"}</button></div>

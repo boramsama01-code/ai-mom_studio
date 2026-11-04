@@ -29,9 +29,9 @@ beforeEach(() => {
   mocks.save.mockResolvedValue(mocks.activate); mocks.audit.mockResolvedValue(undefined);
 });
 
-function connectionDatabase(failCommit = false, existingCount = 1) {
-  const channel = { id: 1, slug: "penguin", active: true, budget: { dailyPublishLimit: 3 }, version: 1 };
-  const existing = { id: 4, label: "SPACEPENGUIN.CO", version: 2 };
+function connectionDatabase(failCommit = false, existingCount = 1, custom = false) {
+  const channel = { id: 1, slug: custom ? "local-atelier" : "penguin", active: true, budget: { dailyPublishLimit: 3 }, version: 1 };
+  const existing = { id: 4, label: custom ? "ATELIER.ACCOUNT" : "SPACEPENGUIN.CO", version: 2 };
   let reads = 0;
   const tx = {
     select: () => ({ from: () => ({ where: () => ++reads === 1 ? { for: async () => [channel] } : Promise.resolve(Array.from({ length: existingCount }, (_, index) => ({ ...existing, id: existing.id + index }))) }) }),
@@ -50,6 +50,16 @@ it("reuses the existing destination ID when its label differs only in casing or 
   await connectInstagram(db, 1, { token: "test-only-token", username: "spacepenguin.co", dailyLimit: 3, authMode: "facebook" }, "operator");
   expect(tx.update).toHaveBeenCalledWith(destinations);
   expect(tx.insert).not.toHaveBeenCalledWith(destinations);
+  expect(mocks.activate).toHaveBeenCalledTimes(3);
+});
+
+it("accepts a uniquely verified custom OAuth account without manufacturing a fixed username", async () => {
+  const { db, tx } = connectionDatabase(false, 1, true);
+  mocks.identity.mockResolvedValue({ ok: true, userId: "8811", username: "atelier.account" });
+  const connected = await connectInstagram(db, 1, { token: "test-only-token", username: "", dailyLimit: 0, authMode: "facebook" }, "operator");
+  expect(connected.username).toBe("atelier.account");
+  expect(mocks.identity).toHaveBeenCalledWith("test-only-token", "facebook", "");
+  expect(tx.update).toHaveBeenCalledWith(destinations);
   expect(mocks.activate).toHaveBeenCalledTimes(3);
 });
 

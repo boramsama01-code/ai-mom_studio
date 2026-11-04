@@ -31,6 +31,12 @@ import { deliveryState, deliverySummary, PublicationRuntimeNotice, usePublicatio
 import { usePublicationDraft, type PublicationDraft } from "../usePublicationDraft";
 import { usePublicationRequestId } from "../usePublicationRequestId";
 import { useGenerationRequest } from "../useGenerationRequest";
+import { useDraftRecovery } from "../useDraftRecovery";
+import { RecoveryNotice } from "../RecoveryNotice";
+import { SourceRevisionHistory } from "../SourceRevisionHistory";
+import { PublicationDraftControls } from "../PublicationDraftControls";
+import { compareSourceRevisions } from "@shared/sourceRevisionHistory";
+import { WorkModeControl, type WorkMode } from "../WorkModeControl";
 
 type Detail = {
   imageAiAvailable?: boolean;
@@ -61,6 +67,7 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   const q = useQuery({ queryKey: ["ch", requestedCid, "item", id], queryFn: () => api<Detail>(`/channels/${requestedCid}/items/${id}`), refetchInterval: query => query.state.data?.deliveries.some(({ d }) => ["scheduled", "processing"].includes(d.status)) ? 5000 : false });
   const runtime = usePublicationRuntime();
   const cid = q.data?.item.channelId ?? requestedCid;
+  const imageGeneration = useGenerationRequest(cid, id, "card-render");
   const sourceChannel = allChannels.find(ch => ch.id === cid);
   const search = useSearch();
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -68,6 +75,8 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   const [templateChoice, setTemplateChoice] = useState<string | null>(null);
   const [sourceDraftDirty, setSourceDraftDirty] = useState(false);
   const [sourceTextDirty, setSourceTextDirty] = useState(false);
+  const [workMode, setWorkMode] = useState<WorkMode>("auto");
+  useEffect(() => { if (sourceDraftDirty || sourceTextDirty) setSourceOpen(true); }, [sourceDraftDirty, sourceTextDirty]);
   const [, navigate] = useLocation();
   useEffect(() => {
     const target = entryTab(search);
@@ -75,7 +84,7 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
     setDeliveryOpen(target === "delivery");
     if (target === "delivery") window.setTimeout(() => document.getElementById("delivery-panel")?.scrollIntoView({ block: "start" }), 100);
   }, [requestedCid, id, search]);
-  useEffect(() => { setTemplateChoice(null); }, [requestedCid, id]);
+  useEffect(() => { setTemplateChoice(null); setWorkMode("auto"); }, [requestedCid, id]);
   useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}${search ? `?${search}` : ""}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, search, navigate]);
   useEffect(() => {
     if (!fromStudio && q.data?.item.origin === "studio" && q.data.canonicalStudioCardId) navigate(`/studio/${q.data.canonicalStudioCardId}`, { replace: true });
@@ -121,28 +130,29 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
         </div>
       </div>
       {q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}
+      <WorkModeControl mode={workMode} onChange={setWorkMode} />
       <nav className="content-workspace-nav" aria-label="현재 콘텐츠 작업">
         <button className="btn sm" onClick={() => go("publish", "card-panel")} disabled={!d.current}>카드 편집</button>
         <button className="btn sm" onClick={() => go("source", "source-panel")}>자료·초안</button>
         <button className="btn sm" onClick={() => go("publish", "publish-options")} disabled={!d.current}>게시 준비</button>
         <button className="btn sm" onClick={() => go("delivery", "delivery-panel")}>전송 상태</button>
       </nav>
-      <details className="content-drawer" open={sourceOpen || !d.current} onToggle={event => setSourceOpen(event.currentTarget.open)}>
+      <details className="content-drawer" open={sourceOpen || !d.current} onToggle={event => { if (event.target === event.currentTarget) setSourceOpen(event.currentTarget.open); }}>
         <summary><strong>자료·초안</strong><span>{sourceDraftDirty || sourceTextDirty ? "저장하지 않은 변경" : d.primary?.fetchStatus === "ok" ? "본문 확보됨" : d.primary?.fetchStatus === "not_fetched" ? "본문 불러오기" : d.primary ? "본문 확인 필요" : "직접 작성"}</span></summary>
         <div className="content-drawer-body stack">
-          <CategorySelect channel={sourceChannel?.slug ?? ""} value={d.item.subcategory ?? ""} onChange={v => guard.confirmLeave(() => categorize.mutate(v))} disabled={categorize.isPending} />
+          <CategorySelect channel={sourceChannel?.slug ?? ""} categories={sourceChannel?.categories} value={d.item.subcategory ?? ""} onChange={v => guard.confirmLeave(() => categorize.mutate(v))} disabled={categorize.isPending} />
           {categorize.error && <ErrorBox error={categorize.error} />}
           <DiscoveryNote info={d.item.discovery} />
           <SourcePanel key={d.item.id} d={d} cid={cid} onDirtyChange={setSourceTextDirty} />
-          <EditPanel key={`${cid}-${d.item.id}`} d={d} cid={cid} templateKey={templateChoice} onTemplateChange={setTemplateChoice} onDirtyChange={setSourceDraftDirty} />
+          <EditPanel key={`${cid}-${d.item.id}`} d={d} cid={cid} templateKey={templateChoice} onTemplateChange={setTemplateChoice} onDirtyChange={setSourceDraftDirty} workMode={workMode} imageGeneration={imageGeneration} />
         </div>
       </details>
-      <CardApprovePanel d={d} cid={cid} sourceDirty={sourceDraftDirty || sourceTextDirty} templateChoice={templateChoice} onTemplateChange={setTemplateChoice} onApproved={() => go("delivery", "delivery-panel")} runtime={runtime.data} />
+      <CardApprovePanel key={`${cid}-${d.item.id}`} d={d} cid={cid} sourceDirty={sourceDraftDirty || sourceTextDirty} templateChoice={templateChoice} onTemplateChange={setTemplateChoice} onApproved={() => go("delivery", "delivery-panel")} runtime={runtime.data} workMode={workMode} imageGeneration={imageGeneration} />
       <details className="content-drawer" open={deliveryOpen} onToggle={event => setDeliveryOpen(event.currentTarget.open)}>
         <summary><strong>전송 내역</strong><span>{d.deliveries.length ? `${d.deliveries.length}건 · 예약 취소·재전송` : "승인 후 상태 확인"}</span></summary>
         <ItemDeliveryPanel d={d} cid={cid} runtime={runtime.data} runtimeError={runtime.error} refresh={() => { q.refetch(); runtime.refetch(); }} refreshing={q.isFetching || runtime.isFetching} />
       </details>
-      <details className="content-drawer"><summary><strong>버전 기록</strong><span>{d.revisions.length}개</span></summary><HistoryPanel d={d} /></details>
+      <details className="content-drawer"><summary><strong>버전 기록</strong><span>{d.revisions.length}개</span></summary><SourceRevisionHistory key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} current={d.current} revisions={d.revisions} onRestored={() => setTemplateChoice(null)} /></details>
     </div>
   );
 }
@@ -318,7 +328,7 @@ function sourceFields(payload: Record<string, any> | null | undefined) {
   return fields;
 }
 
-export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange }: { d: Detail; cid: number; templateKey?: string | null; onTemplateChange?: (key: string) => void; onDirtyChange?: (dirty: boolean) => void }) {
+export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange, workMode = "auto", imageGeneration }: { d: Detail; cid: number; templateKey?: string | null; onTemplateChange?: (key: string) => void; onDirtyChange?: (dirty: boolean) => void; workMode?: WorkMode; imageGeneration?: ReturnType<typeof useGenerationRequest> }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
   const incoming = useMemo(() => sourceFields(d.current?.payload), [d.current]);
@@ -331,6 +341,11 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
   const [saved, setSaved] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(base);
   const draftRef = useRef(draft); draftRef.current = draft;
+  const recovery = useDraftRecovery<Record<string, any> | null>({
+    recoveryKey: `item:${cid}:${d.item.id}:source`, label: "초안", version, serverValue: base, value: draft, dirty,
+    ready: !!base, parse: value => value && typeof value === "object" && !Array.isArray(value) ? sourceFields(value as Record<string, any>) : null,
+    onRestore: value => { setDraft(value); setSaved(false); },
+  });
   useEffect(() => {
     // Compare edits with the accepted baseline, never with the newly arrived AI payload.
     if (!dirty && d.item.version >= version) {
@@ -342,6 +357,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
 
   const save = useMutation({
     mutationFn: () => {
+      if (recovery.pending) throw new Error("이 기기의 초안 복구본을 먼저 확인해 주세요.");
       submittedDraft.current = draft;
       return api<ContentItem>(`/channels/${cid}/items/${d.item.id}`, { method: "PATCH", body: { version, payload: cleanPayload(draft!), title: (draft?.title || draft?.key_question || d.item.title).toString().slice(0, 200) } });
     },
@@ -351,6 +367,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
       setConflict(null);
       setMergeConflict(null);
       setSaved(true);
+      if (JSON.stringify(draftRef.current) === JSON.stringify(submittedDraft.current)) recovery.clear();
       await qc.invalidateQueries({ queryKey: ["ch", cid] });
     },
     onError: (e) => {
@@ -366,11 +383,10 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
     }
   }, [save]);
   useEffect(() => {
-    guard.setDirty(`item-${d.item.id}`, dirty || save.isPending, doSave, () => { setDraft(base); setConflict(null); setMergeConflict(null); });
+    guard.setDirty(`item-${d.item.id}`, dirty || save.isPending || !!recovery.pending, doSave, () => { recovery.clear(); setDraft(base); setConflict(null); setMergeConflict(null); });
     if (dirty) setSaved(false);
     return () => guard.setDirty(`item-${d.item.id}`, false);
-  }, [dirty, save.isPending, doSave, guard, d.item.id, base]);
-  useEffect(() => { onDirtyChange?.(dirty || save.isPending || !!mergeConflict); }, [dirty, save.isPending, mergeConflict, onDirtyChange]);
+  }, [dirty, save.isPending, recovery.pending, doSave, guard, d.item.id, base]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   const beginDraft = useMutation({
@@ -409,20 +425,44 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
   const templates = useTemplates(cid);
   const [localTemplate, setLocalTemplate] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
-  const draftTemplate = templateKey ?? localTemplate ?? d.current?.payload.cardCopy?.templateKey ?? templates.data?.current ?? "builtin:classic";
+  const preferredTemplate = templateKey ?? localTemplate ?? d.current?.payload.cardCopy?.templateKey ?? templates.data?.current ?? "builtin:classic";
+  const draftTemplate = !d.current && workMode === "auto" && !templateKey && !localTemplate && preferredTemplate.startsWith("set:") && !collectionUsesArt(preferredTemplate.slice(4)) ? "set:n03" : preferredTemplate;
   const sourceReady = !d.primary || (d.primary.fetchStatus === "ok" && !!d.primary.fetchedText?.trim());
   const generation = useGenerationRequest(cid, d.item.id, "draft");
+  const [generationStep, setGenerationStep] = useState<"draft" | "image" | null>(null);
+  const [autoImageError, setAutoImageError] = useState<Error | null>(null);
   const gen = useMutation({
-    mutationFn: () => generation.run(`/channels/${cid}/items/${d.item.id}/generate`, { version: d.item.version, provider, templateKey: draftTemplate }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
+    mutationFn: async () => {
+      setAutoImageError(null); setGenerationStep("draft");
+      const generated = await generation.run<ContentItem>(`/channels/${cid}/items/${d.item.id}/generate`, { version: d.item.version, provider, templateKey: draftTemplate });
+      // The first automatic creation continues to an actual saved image. A
+      // revision already being edited is regenerated through explicit proposals.
+      if (!d.current && workMode === "auto") {
+        await qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
+        setGenerationStep("image");
+        try {
+          const imageBody = {
+            version: generated.version, templateKey: draftTemplate,
+            coverMode: draftTemplate.startsWith("set:") && !collectionUsesArt(draftTemplate.slice(4)) ? "typography" : "ai",
+          };
+          if (imageGeneration && imageBody.coverMode === "ai") await imageGeneration.run(`/channels/${cid}/items/${d.item.id}/card`, imageBody);
+          else await api(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body: { ...imageBody, ...(imageBody.coverMode === "ai" ? { requestId: crypto.randomUUID() } : {}) } });
+        } catch (error) { setAutoImageError(error as Error); }
+      }
+      return generated;
+    },
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["ch", cid] }); void qc.invalidateQueries({ queryKey: ["studio"] }); },
+    onSettled: () => setGenerationStep(null),
   });
+  useEffect(() => { onDirtyChange?.(dirty || save.isPending || gen.isPending || !!mergeConflict || !!recovery.pending); }, [dirty, save.isPending, gen.isPending, mergeConflict, recovery.pending, onDirtyChange]);
 
   return (
     <section className="panel stack" id="edit-panel" tabIndex={-1}>
       <div className="row between">
         <h2 style={{ margin: 0 }}>초안 작성</h2>
       </div>
-      <details className="studio-more" open><summary>API 자동 작성 · Gemini·GPT</summary>
+      <RecoveryNotice recovery={recovery} formatValue={value => compareSourceRevisions(value, value ?? {}).filter(field => field.section === "source").map(field => `${field.label}\n${field.current}`).join("\n\n")} />
+      <div hidden={workMode !== "auto" && !generation.unresolved}><details className="studio-more" open><summary>자동 제작 · 원고와 카드 이미지</summary>
         <label className="field">작성 AI<select value={provider} disabled={gen.isPending || generation.unresolved} onChange={e => setProviderChoice(e.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}</option>)}</select></label>
         <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate || t.colors?.some(color => color.key === draftTemplate))?.name ?? "기본"} ▾</button>
         {showTemplates && templates.data && <TemplatePicker cid={cid} value={draftTemplate} items={templates.data.items} disabled={gen.isPending} onChange={key => { setLocalTemplate(key); onTemplateChange?.(key); }} />}
@@ -430,19 +470,19 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
         <AiUsageGuide provider={provider} />
         {ai.data?.integrations[provider] === false && <p className="notice warn small">선택한 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
         {!sourceReady && <p className="notice small">먼저 위에서 본문을 불러오거나 직접 붙여넣어 저장해 주세요.</p>}
-        <button className="btn sm" onClick={() => gen.mutate()} disabled={gen.isPending || (!generation.unresolved && (dirty || !sourceReady || !ai.data?.integrations[provider]))} title={dirty && !generation.unresolved ? "저장 후 사용할 수 있습니다" : undefined}>
-          {gen.isPending ? "생성 중…" : generation.unresolved ? "기존 AI 작업 결과 확인" : d.item.kind === "notice" ? `${aiProviderLabels[provider]}로 원문 추출` : `${aiProviderLabels[provider]}로 초안 생성`}
+        <button className="btn sm" onClick={() => gen.mutate()} disabled={!!recovery.pending || gen.isPending || (!generation.unresolved && (dirty || !sourceReady || !ai.data?.integrations[provider]))} title={dirty && !generation.unresolved ? "저장 후 사용할 수 있습니다" : undefined}>
+          {gen.isPending ? generationStep === "image" ? "이미지 만드는 중…" : "원고 만드는 중…" : generation.unresolved ? "기존 AI 작업 결과 확인" : !d.current ? "원고·이미지 자동 만들기" : d.item.kind === "notice" ? `${aiProviderLabels[provider]}로 원문 추출` : `${aiProviderLabels[provider]}로 초안 생성`}
         </button>
         {generation.unresolved && <div className="stack"><p className="small muted">같은 요청의 결과를 확인합니다. 응답이 없어도 새 유료 작업을 자동으로 시작하지 않습니다. 직접 입력은 계속할 수 있습니다.</p><div><button className="btn sm" disabled={generation.cancelling} onClick={() => void generation.cancel()}>{generation.cancelling ? "중단 확인 중…" : "AI 요청 중단"}</button></div></div>}
         {generation.cancelled && <p className="notice small" role="status">AI 요청을 중단했습니다. 기존 원고를 직접 편집하거나 새로 요청할 수 있습니다.</p>}
         {generation.cancelError && <ErrorBox error={generation.cancelError} />}
-      </details>
-      <details className="content-options"><summary>ChatGPT에서 초안 가져오기</summary><ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, source: d.primary ? {
+      </details></div>
+      <div hidden={workMode !== "manual"}><details className="content-options" open><summary>수동 · 외부에서 초안 가져오기</summary><ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, source: d.primary ? {
         title: d.primary.title ?? d.item.title, url: d.primary.originalUrl,
         text: d.primary.fetchStatus === "ok" ? d.primary.fetchedText ?? "" : "", snippet: d.primary.snippet ?? "",
         quotes: Array.isArray(d.primary.meta.quotes) ? d.primary.meta.quotes.filter((q): q is string => typeof q === "string") : [],
       } : null })} />
-      <p className="small muted">저장한 원문·근거로 초안을 요청합니다. 받은 초안은 아래 편집 칸에 옮겨 같은 화면에서 계속 작성하세요.</p></details>
+      <p className="small muted">API 한도나 연결 문제로 자동 제작을 사용할 수 없을 때 이용하세요. 받은 초안은 아래 편집 칸에 옮겨 저장합니다.</p></details></div>
       {d.current && (
         <p className="small muted">
           현재 버전 r{d.current.revisionNo} · {d.current.author === "operator" ? "운영자 편집본" : d.current.author === "llm" ? `자동 추출/초안 (${d.current.model ?? ""})` : "시스템"}
@@ -452,17 +492,19 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
       {d.item.version > version && dirty && <div className="notice warn">서버에 새 초안이 있습니다. 직접 입력한 내용은 유지했습니다. <button className="btn sm" onClick={() => guard.confirmLeave(() => { setBase(incoming); setDraft(incoming); setVersion(d.item.version); })}>새 초안 불러오기</button></div>}
       {gen.error && <ErrorBox error={gen.error} retry={generation.unresolved || (!dirty && sourceReady && !!ai.data?.integrations[provider]) ? () => gen.mutate() : undefined} />}
       {gen.isSuccess && <div className="notice ok small">새 버전을 만들었습니다. 생성 성공은 검토 완료가 아닙니다 — 내용을 확인하세요.</div>}
+      {autoImageError && <div className="notice warn stack" role="alert"><strong>원고는 저장했습니다. 이미지 생성은 완료를 확인하지 못했습니다.</strong><p className="small">{autoImageError.message}</p><p className="small">아래 카드 편집에서 저장된 이미지와 연결 상태를 확인하세요. 원고를 다시 생성할 필요는 없습니다.</p><GuardedLink href="/connections?service=openai">이미지 AI 연결 확인</GuardedLink></div>}
+      {generationStep === "image" && imageGeneration?.unresolved && <button className="btn" disabled={imageGeneration.cancelling} onClick={() => void imageGeneration.cancel()}>{imageGeneration.cancelling ? "중단 확인 중…" : "이미지 요청 중단"}</button>}
       {!draft ? (
-        <div className="stack"><p className="muted">AI 없이도 초안을 시작할 수 있습니다. 확보한 원문을 보면서 직접 쓰거나 ChatGPT 초안을 옮겨 적으세요.</p><div><button className="btn primary" disabled={beginDraft.isPending || (gen.isPending && !generation.cancelled)} onClick={() => beginDraft.mutate()}>{beginDraft.isPending ? "초안 여는 중…" : "직접 초안 작성"}</button></div>{beginDraft.error && <ErrorBox error={beginDraft.error} />}</div>
+        <div className="stack" hidden={workMode !== "manual"}><p className="muted">AI 없이도 초안을 시작할 수 있습니다. 확보한 원문을 보면서 직접 쓰거나 외부 초안을 옮겨 적으세요.</p><div><button className="btn primary" disabled={beginDraft.isPending || (gen.isPending && !generation.cancelled)} onClick={() => beginDraft.mutate()}>{beginDraft.isPending ? "초안 여는 중…" : "직접 초안 작성"}</button></div>{beginDraft.error && <ErrorBox error={beginDraft.error} />}</div>
       ) : (
         <form
           className="stack"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!save.isPending && !mergeConflict) save.mutate();
+            if (!save.isPending && !mergeConflict && !recovery.pending) save.mutate();
           }}
         >
-          <PayloadEditor kind={d.item.kind} value={draft} onChange={setDraft} />
+          <fieldset disabled={!!recovery.pending} style={{ margin: 0, padding: 0, border: 0, minWidth: 0 }}><PayloadEditor kind={d.item.kind} value={draft} onChange={setDraft} /></fieldset>
           {conflictMsg && (
             <div className="notice err" role="alert">
               {conflictMsg}{" "}
@@ -481,10 +523,10 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
           <div className="savebar">
             {saved && !dirty && <span className="small muted" role="status" style={{ marginRight: "auto" }}>저장됨 — 새 버전으로 기록했습니다.</span>}
             {dirty && <span className="small" style={{ marginRight: "auto", color: "var(--warning)" }}>저장하지 않은 변경</span>}
-            <button type="button" className="btn" disabled={!dirty} onClick={() => setDraft(base)}>
+            <button type="button" className="btn" disabled={!dirty} onClick={() => { recovery.clear(); setDraft(base); }}>
               되돌리기
             </button>
-            <button className="btn primary" disabled={!dirty || save.isPending || !!mergeConflict}>
+            <button className="btn primary" disabled={!dirty || save.isPending || !!mergeConflict || !!recovery.pending}>
               {save.isPending ? "저장 중…" : "새 버전으로 저장"}
             </button>
           </div>
@@ -536,12 +578,32 @@ function toLocalInput(date: Date) {
   return k.slice(0, 16);
 }
 
-function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTemplateChange, onApproved, runtime }: { d: Detail; cid: number; sourceDirty?: boolean; templateChoice?: string | null; onTemplateChange?: (key: string) => void; onApproved: () => void; runtime?: PublicationRuntime }) {
+type CoverRedrawDraft = { regenerateCover: boolean; coverInstruction: string };
+type CardRenderResponse = { id: number; itemVersion?: number; revisionId?: number; carousel: CarouselData; studioCardId: number };
+const emptyCoverRedraw: CoverRedrawDraft = { regenerateCover: false, coverInstruction: "" };
+function parseCoverRedraw(value: unknown): CoverRedrawDraft | null {
+  if (!value || typeof value !== "object") return null;
+  const draft = value as Partial<CoverRedrawDraft>;
+  return typeof draft.regenerateCover === "boolean" && typeof draft.coverInstruction === "string" && draft.coverInstruction.length <= 2000
+    ? { regenerateCover: draft.regenerateCover, coverInstruction: draft.coverInstruction } : null;
+}
+const coverRedrawText = (draft: CoverRedrawDraft) => `${draft.regenerateCover ? "표지 1장 다시 그리기 선택" : "새 그림 요청 안 함"}\n${draft.coverInstruction || "상세 요청 없음"}`;
+
+function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTemplateChange, onApproved, runtime, workMode = "auto", imageGeneration }: { d: Detail; cid: number; sourceDirty?: boolean; templateChoice?: string | null; onTemplateChange?: (key: string) => void; onApproved: () => void; runtime?: PublicationRuntime; workMode?: WorkMode; imageGeneration: ReturnType<typeof useGenerationRequest> }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
   const toast = useToast();
   const [coverChoice, setCoverChoice] = useState<"reuse" | "ai" | "typography" | null>(null);
+  const [coverDraft, setCoverDraft] = useState<CoverRedrawDraft>(emptyCoverRedraw);
+  const coverDraftRef = useRef(coverDraft); coverDraftRef.current = coverDraft;
+  const [coverOptionsOpen, setCoverOptionsOpen] = useState(false);
+  const renderedIntent = useRef<{ coverMode: unknown; templateKey: unknown; redraw: CoverRedrawDraft | null } | null>(null);
   const revCards = d.cards.filter((c) => c.revisionId === d.current?.id);
+  const latestImages = useRef({ itemVersion: d.item.version, revisionId: d.current?.id, newestAssetId: Math.max(0, ...revCards.map(card => card.id)) });
+  latestImages.current = { itemVersion: d.item.version, revisionId: d.current?.id, newestAssetId: Math.max(0, ...revCards.map(card => card.id)) };
+  const olderRender = (result: CardRenderResponse) => (typeof result.itemVersion === "number" && result.itemVersion < latestImages.current.itemVersion)
+    || (typeof result.revisionId === "number" && result.revisionId !== latestImages.current.revisionId)
+    || result.id < latestImages.current.newestAssetId;
   const [altDirty,setAltDirty]=useState(false);
   const [copyDirty, setCopyDirty] = useState(true);
   const [pickedCard, setPickedCard] = useState<number | null>(null);
@@ -549,7 +611,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
   const currentCard = altDirty && heldCard.current ? heldCard.current : revCards.find((c) => c.id === pickedCard) ?? revCards[0] ?? null;
   useEffect(() => { heldCard.current = currentCard; }, [currentCard]);
   const staleArtifact = !!currentCard && currentCard.revisionId !== d.current?.id;
-  const altVersion = useQuery<{ version: number }>({ queryKey: ["card-alt", currentCard?.id], enabled: false }).data?.version;
+  const altVersion = useQuery<{ version: number }>({ queryKey: ["card-alt", currentCard?.id], queryFn: () => api(`/channels/${cid}/media/${currentCard!.id}/alt-text`), enabled: false }).data?.version;
   const publicationRequestId = usePublicationRequestId();
   const currentApprovalIds = new Set(d.approvals.filter(approval => approval.revisionId === d.current?.id).map(approval => approval.id));
   const existingDeliveryState = d.deliveries.some(({ d: delivery }) => delivery.needsReconciliation) ? "unknown" : (["unknown", "processing", "succeeded", "scheduled"] as const).find(status => d.deliveries.some(({ d: delivery }) => (status === "unknown" || status === "processing" || currentApprovalIds.has(delivery.approvalId)) && delivery.status === status));
@@ -559,23 +621,37 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
     succeeded: "이 버전은 이미 게시됐습니다. 전송 상태에서 게시물을 확인해 주세요.",
     unknown: "이 콘텐츠의 이전 게시 여부를 먼저 확인해야 합니다. 전송 상태에서 실제 게시물을 확인해 주세요.",
   }[existingDeliveryState] : null;
-  const captionDraft = usePublicationDraft(cid, d.item.id, d.publicationDraft ?? { version: 0, captions: d.defaultCaptions ?? { instagram: "", telegram: "" } });
-  const caps = captionDraft.captions;
   const destinations = d.publicationReadiness?.destinations ?? [];
-  const [pickedDestinations, setPickedDestinations] = useState<number[] | null>(null);
   const defaultInstagram = destinations.filter(destination => destination.platform === "instagram" && destination.configured);
-  const destinationIds = (pickedDestinations ?? (defaultInstagram.length === 1 ? [defaultInstagram[0].id] : [])).filter(id => destinations.some(destination => destination.id === id && destination.configured));
+  const captionDraft = usePublicationDraft(cid, d.item.id, d.publicationDraft ?? { version: 0, captions: d.defaultCaptions ?? { instagram: "", telegram: "" } }, {
+    destinationIds: defaultInstagram.length === 1 ? [defaultInstagram[0].id] : [], timing: "now", scheduledAtKst: "",
+  });
+  const caps = captionDraft.captions;
+  const { destinationIds, timing, scheduledAtKst: when } = captionDraft.options;
+  const setPickedDestinations = (ids: number[]) => captionDraft.setOptions({ ...captionDraft.options, destinationIds: ids });
+  const setTiming = (timing: "now" | "later") => captionDraft.setOptions({ ...captionDraft.options, timing });
+  const setWhen = (scheduledAtKst: string) => captionDraft.setOptions({ ...captionDraft.options, scheduledAtKst });
+  const unavailableDestinations = destinationIds.filter(id => !destinations.some(destination => destination.id === id && destination.configured));
   const destinationsKey = destinationIds.join(",");
-  const [when, setWhen] = useState(() => toLocalInput(new Date(Date.now() + 3600_000)));
-  const [timing, setTiming] = useState<"now" | "later">("now");
   const [publishOpen, setPublishOpen] = useState(false);
+  useEffect(() => { if (captionDraft.recovery.pending) setPublishOpen(true); }, [captionDraft.recovery.pending]);
   const [confirmed, setConfirmed] = useState(false);
   const tpls = useTemplates(cid);
   const [tpl, setTpl] = useState<string | null>(null);
   const templateKey = templateChoice ?? tpl ?? currentCard?.templateKey ?? tpls.data?.current ?? "builtin:classic";
+  const templateKeyRef = useRef(templateKey); templateKeyRef.current = templateKey;
   const chooseTemplate = (key: string) => { setTpl(key); onTemplateChange?.(key); };
   const typographyOnly = templateKey.startsWith("set:") && !collectionUsesArt(templateKey.slice(4));
-  const coverMode = typographyOnly ? "typography" : coverChoice ?? (d.cards.length ? "reuse" : "typography");
+  // Manual work never starts a paid request, even if an earlier automatic redraw is still drafted.
+  const coverMode = typographyOnly ? "typography" : workMode === "manual" ? coverChoice === "typography" ? "typography" : "reuse" : coverDraft.regenerateCover ? "ai" : coverChoice ?? "ai";
+  const coverDirty = coverDraft.regenerateCover || !!coverDraft.coverInstruction;
+  const coverRecovery = useDraftRecovery<CoverRedrawDraft>({
+    recoveryKey: `item:${cid}:${d.item.id}:cover-redraw`, label: "표지 다시 그리기 요청",
+    version: `${d.current?.id ?? 0}:${currentCard?.id ?? 0}:${templateKey}`, serverValue: emptyCoverRedraw,
+    value: coverDraft, dirty: coverDirty, ready: !!d.current, parse: parseCoverRedraw,
+    onRestore: value => { setCoverDraft(value); setCoverOptionsOpen(true); },
+  });
+  const coverPending = coverDirty || !!coverRecovery.pending;
   const [showTpl, setShowTpl] = useState(false);
   const canva = useQuery({ queryKey: ["canva-status"], queryFn: () => api<{ connected: boolean }>("/canva/status") });
   const { channels } = useChannel();
@@ -584,17 +660,45 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
     setPickedCard(null);
   }, [d.current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const render = useMutation({
-    mutationFn: (saved: CardCopyResponse) => api<{ id: number; carousel: CarouselData; studioCardId: number }>(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body: { version: saved.version, templateKey: saved.copy.templateKey, coverMode } }),
+    mutationFn: (saved: CardCopyResponse | null) => {
+      if (!saved && !imageGeneration.unresolved) throw new Error("이미지에 반영할 문구를 먼저 저장해 주세요.");
+      if (saved && imageGeneration.unresolved) throw new Error("이전 이미지 요청의 결과를 먼저 확인해 주세요.");
+      if (saved && coverRecovery.pending) throw new Error("표지 요청의 기기 복구본을 먼저 확인해 주세요.");
+      const redraw = !!saved && workMode === "auto" && coverDraft.regenerateCover;
+      if (redraw && (coverMode !== "ai" || !d.imageAiAvailable)) throw new Error("표지를 다시 그리려면 그림이 있는 디자인과 이미지 AI 연결을 확인해 주세요.");
+      const body = saved ? { version: saved.version, templateKey: saved.copy.templateKey, coverMode, ...(redraw ? { regenerateCover: true, coverInstruction: coverDraft.coverInstruction.trim() } : {}) } : imageGeneration.pendingBody ?? {};
+      renderedIntent.current = { coverMode: body.coverMode, templateKey: body.templateKey, redraw: body.regenerateCover === true ? { regenerateCover: true, coverInstruction: typeof body.coverInstruction === "string" ? body.coverInstruction : "" } : null };
+      if (saved && coverMode !== "ai") return api<CardRenderResponse>(`/channels/${cid}/items/${d.item.id}/card`, { method: "POST", body });
+      return imageGeneration.run<CardRenderResponse>(`/channels/${cid}/items/${d.item.id}/card`, body);
+    },
     onSuccess: (a) => {
+      if (olderRender(a)) {
+        toast("info", "이전 이미지 요청의 완료를 확인했습니다. 더 최신 원고·이미지와 현재 표지 요청은 유지했습니다.");
+        qc.invalidateQueries({ queryKey: ["studio"] });
+        qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
+        return;
+      }
+      const submitted = renderedIntent.current;
+      const current = coverRecovery.pending?.value ?? coverDraftRef.current;
+      // A replay may finish an older request while a newer direction is already being drafted.
+      if (submitted?.redraw && current.regenerateCover && current.coverInstruction.trim() === submitted.redraw.coverInstruction && templateKeyRef.current === submitted.templateKey) {
+        coverRecovery.clear(); setCoverDraft(emptyCoverRedraw);
+      }
       setPickedCard(a.id);
-      toast("ok", `${a.carousel.pages.length}장에 수정 내용을 반영했습니다. 아래에서 게시할 글과 시점을 확인하세요.`);
-      setPublishOpen(true);
+      toast("ok", `${a.carousel.pages.length}장 이미지를 저장했습니다. 미리보기를 확인한 뒤 게시 준비를 열어 주세요.`);
       setConfirmed(false);
-      window.setTimeout(() => document.getElementById("publish-options")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
       qc.invalidateQueries({ queryKey: ["studio"] });
       qc.invalidateQueries({ queryKey: ["ch", cid, "item", d.item.id] });
     },
   });
+  useEffect(() => {
+    const key = `cover-redraw-${cid}-${d.item.id}`;
+    guard.setDirty(key, coverPending, async () => {
+      toast("info", "표지 다시 그리기 요청을 먼저 적용하거나 ‘요청 비우기’로 정리해 주세요.");
+      return false; // Leaving or saving text must never authorize a paid image call.
+    }, () => { coverRecovery.clear(); setCoverDraft(emptyCoverRedraw); });
+    return () => guard.setDirty(key, false);
+  }, [cid, d.item.id, coverPending, coverDraft, coverRecovery.pending, guard]);
   const canvaMake = useMutation({
     mutationFn: () => api<{ editUrl: string | null; usedFields: string[]; unusedTemplateFields: string[] }>(`/channels/${cid}/items/${d.item.id}/canva`, { method: "POST", body: {} }),
     onSuccess: (r) => {
@@ -614,16 +718,16 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
   });
   const approve = useMutation({
     mutationFn: () => {
-      if (sourceDirty || copyDirty || altDirty || staleArtifact || captionDraft.needsSave || captionDraft.saving || captionDraft.conflict || !destinationIds.length || !confirmed) throw new Error("변경 내용을 저장하고 이미지·캡션·게시 계정을 다시 확인해 주세요.");
+      if (sourceDirty || copyDirty || altDirty || coverPending || render.isPending || imageGeneration.unresolved || staleArtifact || captionDraft.needsSave || captionDraft.saving || captionDraft.conflict || captionDraft.recovery.pending || unavailableDestinations.length || !destinationIds.length || !confirmed) throw new Error("변경 내용을 저장하고 이미지·캡션·게시 계정을 다시 확인해 주세요.");
       const intent = { revisionId: d.current!.id, mediaAssetId: currentCard!.id, altTextVersion: altVersion, publicationDraftVersion: captionDraft.version, captions: caps, destinationIds: [...destinationIds].sort((a, b) => a - b), timing, ...(timing === "later" ? { scheduledAt: `${when}:00+09:00` } : {}) };
-      return api<{ destinations: number }>(`/channels/${cid}/items/${d.item.id}/approve`, {
+      return api<{ destinations: number; timing: "now" | "later" }>(`/channels/${cid}/items/${d.item.id}/approve`, {
         method: "POST",
         body: { ...intent, requestId: publicationRequestId({ ...intent, cancelledApprovals: d.approvals.filter(approval => approval.status === "cancelled").map(approval => approval.id).sort((a, b) => a - b) }) },
       });
     },
     onSuccess: async (result) => {
       publicationRequestId.complete();
-      toast(result.destinations === 0 ? "info" : "ok", result.destinations === 0 ? "전송할 계정을 확인해 주세요." : timing === "later" ? "예약했습니다. 전송 내역에서 취소할 수 있어요." : "바로 게시하도록 요청했습니다. 전송 내역에서 결과를 확인하세요.");
+      toast(result.destinations === 0 ? "info" : "ok", result.destinations === 0 ? "전송할 계정을 확인해 주세요." : result.timing === "later" ? "예약했습니다. 전송 내역에서 취소할 수 있어요." : "바로 게시하도록 요청했습니다. 전송 내역에서 결과를 확인하세요.");
       await qc.invalidateQueries({ queryKey: ["ch", cid] });
       onApproved();
     },
@@ -631,8 +735,8 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
   const len = (s: string) => [...s].length;
   const cd = d.item.canvaDesign;
   const SRC: Record<string, string> = { builtin: "기본 템플릿", custom: "내 배경 템플릿", canva: "Canva" };
-  const pendingChanges = sourceDirty || copyDirty || altDirty || staleArtifact || captionDraft.needsSave || captionDraft.saving || !!captionDraft.conflict || len(caps.instagram) > 2200 || len(caps.telegram) > 1024;
-  useEffect(() => { setConfirmed(false); }, [currentCard?.id, d.current?.id, caps, timing, when, copyDirty, altDirty, altVersion, sourceDirty, captionDraft.version, destinationsKey]);
+  const pendingChanges = sourceDirty || copyDirty || altDirty || coverPending || render.isPending || imageGeneration.unresolved || staleArtifact || captionDraft.needsSave || captionDraft.saving || !!captionDraft.conflict || !!captionDraft.recovery.pending || len(caps.instagram) > 2200 || len(caps.telegram) > 1024;
+  useEffect(() => { setConfirmed(false); }, [currentCard?.id, d.current?.id, caps, timing, when, copyDirty, altDirty, altVersion, sourceDirty, coverPending, coverDraft, captionDraft.version, destinationsKey]);
   const futureSchedule = timing === "now" || (!!when && Number.isFinite(Date.parse(`${when}:00+09:00`)) && Date.parse(`${when}:00+09:00`) > Date.now());
   return (
     <section className="stack content-card-editor" id="card-panel" tabIndex={-1}>
@@ -641,8 +745,24 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
       ) : (
         <>
           <div className="content-editor-toolbar"><h2>카드 편집</h2><span className="small muted">문구를 고치고, 디자인을 확인하세요.</span></div>
-          <details className="content-options"><summary>표지·이미지 설정</summary><label className="field">표지 이미지<select value={coverMode} disabled={render.isPending || typographyOnly} onChange={e => setCoverChoice(e.target.value as "reuse" | "ai" | "typography")}><option value="reuse">저장된 표지 그림 유지</option><option value="ai" disabled={!d.imageAiAvailable}>주제에 맞는 AI 일러스트</option><option value="typography">글자 중심 · 선택한 배경 템플릿</option></select><span className="hint">{typographyOnly ? "이 디자인은 타이포그래피 전용입니다. 이미지 생성 비용 없이 만듭니다." : coverMode === "ai" ? "OpenAI 이미지 API 비용이 발생합니다. 같은 원고로 다시 만들면 저장된 표지를 재사용합니다." : coverMode === "reuse" ? "글자만 수정해도 저장된 그림을 유지합니다. 저장된 그림이 없으면 글자 중심으로 만들며 이미지 생성 비용은 발생하지 않습니다." : "이미지 생성 비용 없이 만듭니다."}</span></label>
-          {!d.imageAiAvailable && !typographyOnly && <p className="small muted">AI 표지는 <GuardedLink href="/connections?service=openai">OpenAI 이미지 연결</GuardedLink> 후 선택할 수 있어요.</p>}</details>
+          {workMode === "auto" && typographyOnly && <div className="notice small"><span>현재 디자인은 글자 중심입니다. 그림이 필요한 콘텐츠는 일러스트 디자인으로 바꿔 주세요.</span> <button className="btn sm" disabled={render.isPending} onClick={() => { chooseTemplate("builtin:classic"); setCoverChoice("ai"); }}>그림이 있는 디자인 사용</button></div>}
+          <details className="content-options" open={coverOptionsOpen || !!coverRecovery.pending} onToggle={event => {
+            if (event.target !== event.currentTarget) return;
+            if (coverRecovery.pending && !event.currentTarget.open) event.currentTarget.open = true;
+            setCoverOptionsOpen(event.currentTarget.open);
+          }}><summary>표지·이미지 설정</summary><div className="stack">
+            <RecoveryNotice recovery={coverRecovery} formatValue={coverRedrawText} />
+            <label className="field">표지 이미지<select value={coverMode} disabled={render.isPending || !!coverRecovery.pending || typographyOnly || (workMode === "auto" && coverDraft.regenerateCover)} onChange={e => setCoverChoice(e.target.value as "reuse" | "ai" | "typography")}><option value="reuse">저장된 표지 그림 유지</option><option value="ai" disabled={!d.imageAiAvailable || workMode === "manual"}>주제에 맞는 AI 일러스트</option><option value="typography">글자 중심 · 선택한 배경 템플릿</option></select><span className="hint">{typographyOnly ? "이 디자인은 타이포그래피 전용입니다. 이미지 생성 비용 없이 만듭니다." : coverMode === "ai" ? "저장된 표지가 있으면 재사용합니다. 새 그림이 필요할 때만 아래의 다시 그리기를 선택하세요. 첫 그림 생성에는 OpenAI 이미지 API 비용이 발생합니다." : coverMode === "reuse" ? "글자만 수정해도 저장된 그림을 유지합니다. 저장된 그림이 없으면 글자 중심으로 만들며 이미지 생성 비용은 발생하지 않습니다." : "이미지 생성 비용 없이 만듭니다."}</span></label>
+            <label className="check"><input type="checkbox" aria-label="표지 그림 새로 그리기" checked={coverDraft.regenerateCover} disabled={render.isPending || !!coverRecovery.pending || (!coverDraft.regenerateCover && (workMode === "manual" || typographyOnly || !d.imageAiAvailable))} onChange={event => setCoverDraft(current => ({ ...current, regenerateCover: event.target.checked }))} /><span>표지 그림 새로 그리기 · 유료 이미지 1장</span></label>
+            {(coverDraft.regenerateCover || !!coverDraft.coverInstruction) && <>
+              <label className="field">표지 그림 상세 요청<textarea aria-label="표지 그림 상세 요청" rows={4} maxLength={2000} value={coverDraft.coverInstruction} disabled={render.isPending || !!coverRecovery.pending} onChange={event => setCoverDraft(current => ({ ...current, coverInstruction: event.target.value }))} placeholder="예: 배경은 밝은 실험실, 중심 사물은 크게, 글자가 놓일 위쪽은 비워 주세요." /><span className="hint">{coverDraft.coverInstruction.length} / 2000자 · 표지 그림 1장에만 적용합니다. 본문 페이지의 글과 배치는 유지합니다.</span></label>
+              <p className="small muted">{workMode === "manual" ? "자동 작업의 표지 요청을 보관하고 있습니다. 수동으로 이미지를 저장하면 기존 그림을 유지하며 새 유료 그림을 요청하지 않습니다." : coverDraft.regenerateCover ? "‘표지 1장 다시 그리기 · 이미지 갱신’을 누르면 저장된 표지 대신 새 그림 1장을 요청합니다. 입력한 문구는 함께 저장됩니다." : "상세 요청은 보관 중입니다. 적용하려면 다시 그리기를 선택하거나 요청을 비워 주세요."}</p>
+              {workMode === "auto" && coverDraft.regenerateCover && typographyOnly && <p className="notice warn small">현재 디자인은 글자 중심입니다. 그림이 있는 디자인으로 바꾸거나 다시 그리기 선택을 해제해 주세요.</p>}
+              <div><button type="button" className="btn sm" disabled={render.isPending || !!coverRecovery.pending} onClick={() => { coverRecovery.clear(); setCoverDraft(emptyCoverRedraw); }}>요청 비우기</button></div>
+            </>}
+          </div>
+          </details>
+          {!d.imageAiAvailable && !typographyOnly && coverMode === "ai" && <p className="notice warn small">자동 일러스트를 만들려면 <GuardedLink href="/connections?service=openai">이미지 AI 연결</GuardedLink>을 확인해 주세요. 문구 수정과 저장은 계속할 수 있습니다. 연결 문제일 때는 수동 작업이나 표지 설정의 글자 중심 디자인을 이용하세요.</p>}
           <div className="row">
             <button className="btn" disabled={render.isPending} onClick={() => setShowTpl((v) => !v)} aria-expanded={showTpl}>
               템플릿: {tpls.data?.items.find((t) => t.key === templateKey || t.colors?.some(color => color.key === templateKey))?.name ?? "기본"} ▾
@@ -657,10 +777,13 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
             <TemplatePicker cid={cid} value={templateKey} onChange={chooseTemplate} items={tpls.data.items} version={ch?.accentColor} disabled={render.isPending} />
           )}
           {sourceDirty && <p className="notice warn small" role="status">자료·초안에 저장하지 않은 변경이 있습니다. 먼저 저장한 뒤 이미지를 갱신하고 게시 준비를 완료해 주세요.</p>}
-          <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateChoice ?? tpl} onTemplateChange={chooseTemplate} coverMode={coverMode} disabled={render.isPending || altDirty} renderDisabled={sourceDirty} onDirtyChange={setCopyDirty} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel="게시 준비" />
-          {render.isPending && <p className="notice small" role="status">{coverMode === "ai" ? "표지 일러스트와 각 페이지를 만들고 있어요. 몇 분 정도 걸릴 수 있습니다." : "원고를 페이지로 나누고 보드에 저장하고 있어요."}</p>}
+          <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateChoice ?? tpl} onTemplateChange={chooseTemplate} coverMode={coverMode} previewRevision={`${currentCard?.id ?? ""}:${render.data && !olderRender(render.data) ? render.data.id : ""}`} showAi={workMode === "auto"} disabled={render.isPending || altDirty} renderDisabled={sourceDirty || imageGeneration.unresolved || !!coverRecovery.pending || (workMode === "auto" && coverDraft.regenerateCover && (typographyOnly || !d.imageAiAvailable))} onDirtyChange={setCopyDirty} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel={workMode === "auto" ? coverDraft.regenerateCover ? "표지 1장 다시 그리기 · 이미지 갱신" : "이미지 생성·갱신" : "카드 이미지 저장"} />
+          {render.isPending && <p className="notice small" role="status">{renderedIntent.current?.redraw ? "새 표지 그림 1장을 요청하고 있습니다. OpenAI 이미지 API 비용이 발생하며, 완료한 그림으로 카드 이미지를 갱신합니다." : renderedIntent.current?.coverMode === "ai" ? "표지 일러스트와 각 페이지를 만들고 있어요. 몇 분 정도 걸릴 수 있습니다." : "원고를 페이지로 나누고 보드에 저장하고 있어요."}</p>}
           {render.error && <ErrorBox error={render.error} />}
-          {render.data && <p className="small muted" role="status">{render.data.carousel.pages.length}장 이미지에 수정 내용을 반영했어요.</p>}
+          {imageGeneration.unresolved && <div className="notice warn stack" role="status"><strong>이미지 요청의 결과를 확인하고 있습니다.</strong><p className="small">저장된 문구는 유지합니다. 결과 확인은 같은 요청 ID를 사용하며 새 이미지 작업을 중복 시작하지 않습니다.</p><div className="row"><button className="btn" disabled={render.isPending} onClick={() => render.mutate(null)}>이전 이미지 결과 확인</button><button className="btn" disabled={imageGeneration.cancelling} onClick={() => void imageGeneration.cancel()}>{imageGeneration.cancelling ? "중단 확인 중…" : "이미지 요청 중단"}</button></div></div>}
+          {imageGeneration.cancelError && <ErrorBox error={imageGeneration.cancelError} />}
+          {render.data && <p className="small muted" role="status">{olderRender(render.data) ? "이전 이미지 요청의 완료를 확인했습니다. 현재의 더 최신 이미지와 표지 요청은 유지했습니다." : `${render.data.carousel.pages.length}장 이미지에 수정 내용을 반영했어요.`}</p>}
+          {currentCard && <button className="btn primary" disabled={sourceDirty || copyDirty || altDirty || coverPending || imageGeneration.unresolved || staleArtifact || render.isPending} onClick={() => { setPublishOpen(true); window.setTimeout(() => document.getElementById("publish-options")?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); }}>이미지 확인 · 게시 준비 열기</button>}
 
           {canva.data?.connected && (
             <details className="content-options"><summary>Canva로 작업하기</summary><div className="stack">
@@ -690,8 +813,12 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
             </div></details>
           )}
 
-          <details className="content-drawer publish-drawer" id="publish-options" open={publishOpen} onToggle={event => setPublishOpen(event.currentTarget.open)}><summary><strong>게시 준비</strong><span>캡션 · 지금 게시 · 예약</span></summary><div className="content-drawer-body stack">
-          <fieldset className="publication-destinations stack"><legend>게시 계정</legend>{destinations.map(destination => <label className="check" key={destination.id}><input type="checkbox" checked={destinationIds.includes(destination.id)} disabled={!destination.configured || approve.isPending} onChange={event => setPickedDestinations(event.target.checked ? [...destinationIds, destination.id] : destinationIds.filter(id => id !== destination.id))} /><span>{destination.label} · {destination.platform === "instagram" ? "Instagram" : destination.platform === "telegram" ? "Telegram" : destination.platform}{!destination.configured && " · 연결 확인 필요"}</span></label>)}{!destinations.length && <p className="notice warn small">연결한 게시 계정이 없습니다. <GuardedLink href="/instagram">게시 계정 연결</GuardedLink></p>}<p className="small muted">선택한 {destinationIds.length}개 계정에만 전송합니다. {destinations.filter(destination => destinationIds.includes(destination.id)).map(destination => destination.label).join(", ")}</p></fieldset>
+          <details className="content-drawer publish-drawer" id="publish-options" open={publishOpen || !!captionDraft.recovery.pending} onToggle={event => {
+            if (event.target !== event.currentTarget) return;
+            if (captionDraft.recovery.pending && !event.currentTarget.open) event.currentTarget.open = true;
+            setPublishOpen(event.currentTarget.open);
+          }}><summary><strong>게시 준비</strong><span>{captionDraft.recovery.pending ? "미저장 입력 복구 필요" : "캡션 · 지금 게시 · 예약"}</span></summary><div className="content-drawer-body stack">
+          <fieldset className="publication-destinations stack"><legend>게시 계정</legend>{destinations.map(destination => <label className="check" key={destination.id}><input type="checkbox" checked={destinationIds.includes(destination.id)} disabled={!destination.configured || approve.isPending || !!captionDraft.recovery.pending} onChange={event => setPickedDestinations(event.target.checked ? [...destinationIds, destination.id] : destinationIds.filter(id => id !== destination.id))} /><span>{destination.label} · {destination.platform === "instagram" ? "Instagram" : ["telegram", "telegram_channel"].includes(destination.platform) ? "Telegram" : destination.platform}{!destination.configured && " · 연결 확인 필요"}</span></label>)}{!destinations.length && <p className="notice warn small">연결한 게시 계정이 없습니다. <GuardedLink href="/instagram">게시 계정 연결</GuardedLink></p>}<p className="small muted">선택한 {destinationIds.length}개 계정에만 전송합니다. {destinations.filter(destination => destinationIds.includes(destination.id)).map(destination => destination.label).join(", ")}</p></fieldset>
           {revCards.length > 1 && (
             <div className="row" role="group" aria-label="승인할 카드 고르기">
               {revCards.map((c, i) => (
@@ -715,7 +842,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
             <span className="hint">
               {len(caps.instagram)} / 2200자 · 인스타그램 캡션의 URL은 클릭되는 링크가 아닙니다.
             </span>
-            <textarea rows={8} value={caps.instagram} aria-label="인스타그램 캡션" onChange={(e) => captionDraft.setCaptions({ ...caps, instagram: e.target.value })} />
+            <textarea rows={8} value={caps.instagram} disabled={approve.isPending || !!captionDraft.recovery.pending} aria-label="인스타그램 캡션" onChange={(e) => captionDraft.setCaptions({ ...caps, instagram: e.target.value })} />
           </label>
           {currentCard && (
             <details>
@@ -733,26 +860,27 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
           <details className="content-options"><summary>텔레그램 캡션</summary><label className="field">
             텔레그램 캡션
             <span className="hint">{len(caps.telegram)} / 1024자 (사진 캡션 제한)</span>
-            <textarea rows={6} value={caps.telegram} aria-label="텔레그램 캡션" onChange={(e) => captionDraft.setCaptions({ ...caps, telegram: e.target.value })} />
+            <textarea rows={6} value={caps.telegram} disabled={approve.isPending || !!captionDraft.recovery.pending} aria-label="텔레그램 캡션" onChange={(e) => captionDraft.setCaptions({ ...caps, telegram: e.target.value })} />
           </label>
           </details>
-          <div className="row publication-draft-save"><span className="small" role="status">{captionDraft.saving ? "캡션 저장 중…" : captionDraft.conflict ? "캡션 저장 충돌 · 입력 유지됨" : captionDraft.error ? "캡션 저장 실패 · 입력 유지됨" : captionDraft.needsSave ? "캡션을 저장해 주세요" : `캡션 저장됨 · v${captionDraft.version}`}</span><button className="btn" disabled={captionDraft.saving || !captionDraft.needsSave || !!captionDraft.conflict || len(caps.instagram) > 2200 || len(caps.telegram) > 1024} onClick={() => { void captionDraft.save().catch(() => {}); }}>캡션 저장</button></div>
           {(len(caps.instagram) > 2200 || len(caps.telegram) > 1024) && <p className="notice warn small">캡션 글자 수를 줄인 뒤 저장해 주세요.</p>}
-          {captionDraft.error && <ErrorBox error={captionDraft.error} />}
-          {captionDraft.conflict && <div className="notice warn stack"><strong>다른 곳에서 저장한 캡션이 있습니다. 내 입력은 유지했습니다.</strong><details><summary>최신 캡션과 비교</summary><div className="card-copy-compare"><div><h4>최신 저장본</h4><pre>{captionDraft.conflict.captions.instagram}</pre><pre>{captionDraft.conflict.captions.telegram}</pre></div><div><h4>내 입력</h4><pre>{caps.instagram}</pre><pre>{caps.telegram}</pre></div></div><div className="row"><button className="btn sm" disabled={captionDraft.saving} onClick={captionDraft.acceptServer}>최신 캡션 사용</button><button className="btn sm" disabled={captionDraft.saving} onClick={() => { void captionDraft.saveMine().catch(() => {}); }}>내 캡션으로 다시 저장</button></div></details></div>}
           <fieldset className="publish-timing"><legend>언제 게시할까요?</legend><div className="row">
-            <label className={`publish-timing-option ${timing === "now" ? "selected" : ""}`}><input type="radio" name={`publish-timing-${d.item.id}`} checked={timing === "now"} onChange={() => setTiming("now")} /><span><strong>지금 게시</strong><small>승인하면 바로 전송 요청</small></span></label>
-            <label className={`publish-timing-option ${timing === "later" ? "selected" : ""}`}><input type="radio" name={`publish-timing-${d.item.id}`} checked={timing === "later"} onChange={() => setTiming("later")} /><span><strong>예약 게시</strong><small>원하는 날짜·시간 선택</small></span></label>
+            <label className={`publish-timing-option ${timing === "now" ? "selected" : ""}`}><input type="radio" name={`publish-timing-${d.item.id}`} checked={timing === "now"} disabled={approve.isPending || !!captionDraft.recovery.pending} onChange={() => setTiming("now")} /><span><strong>지금 게시</strong><small>승인하면 바로 전송 요청</small></span></label>
+            <label className={`publish-timing-option ${timing === "later" ? "selected" : ""}`}><input type="radio" name={`publish-timing-${d.item.id}`} checked={timing === "later"} disabled={approve.isPending || !!captionDraft.recovery.pending} onChange={() => setTiming("later")} /><span><strong>예약 게시</strong><small>원하는 날짜·시간 선택</small></span></label>
           </div></fieldset>
-          {timing === "later" && <label className="field">예약 시각 (한국 시간)<input type="datetime-local" value={when} min={toLocalInput(new Date())} onChange={e => setWhen(e.target.value)} /><span className="hint">전송 시작 전에는 취소할 수 있습니다. 예약 시각 이후 처리되며 서버 휴면·재시작 시 지연될 수 있습니다. 발행함에서 실제 결과를 확인하세요.</span>{!futureSchedule && <span className="card-copy-error">현재보다 뒤의 시간을 선택해 주세요.</span>}</label>}
+          {timing === "later" && <label className="field">예약 시각 (한국 시간)<input type="datetime-local" value={when} disabled={approve.isPending || !!captionDraft.recovery.pending} min={toLocalInput(new Date())} onChange={e => setWhen(e.target.value)} /><span className="hint">전송 시작 전에는 취소할 수 있습니다. 예약 시각 이후 처리되며 서버 휴면·재시작 시 지연될 수 있습니다. 발행함에서 실제 결과를 확인하세요.</span>{!futureSchedule && <span className="card-copy-error">현재보다 뒤의 시간을 선택해 주세요.</span>}</label>}
+          {!!unavailableDestinations.length && <div className="notice warn small">저장한 게시 계정 중 사용할 수 없는 계정이 있습니다. 계정을 다시 연결하거나 선택을 해제해 주세요. <button type="button" className="btn sm" disabled={approve.isPending} onClick={() => setPickedDestinations(destinationIds.filter(id => !unavailableDestinations.includes(id)))}>사용할 수 없는 계정 선택 해제</button></div>}
+          {captionDraft.dirty && existingDeliveryState === "scheduled" && <p className="notice warn small">게시 준비를 저장하면 기존 대기 예약이 해제됩니다. 저장한 내용을 확인한 뒤 다시 승인해 주세요.</p>}
+          <PublicationDraftControls draft={captionDraft} destinations={destinations} disabled={approve.isPending || len(caps.instagram) > 2200 || len(caps.telegram) > 1024} />
           <ReviewPanel d={d} cid={cid} pendingChanges={pendingChanges} />
           <PublicationRuntimeNotice runtime={runtime} />
           {d.publicationReadiness && !d.publicationReadiness.ready && <div className="notice warn" role="alert"><strong>게시 전에 확인할 항목</strong><ul>{d.publicationReadiness.blockers.map(reason => <li key={reason}>{reason}</li>)}</ul><div className="row"><GuardedLink href="/instagram">인스타그램 연결 확인 →</GuardedLink><GuardedLink href="/connections">API 연결 확인 →</GuardedLink></div></div>}
           {existingDeliveryMessage && <div className="notice warn"><p className="small">{existingDeliveryMessage}</p><button className="btn sm" onClick={onApproved}>전송 상태 확인</button></div>}
-          {pendingChanges && <p className="notice warn small" role="status">저장하지 않은 변경을 먼저 저장해 주세요. 초안·카드 문구를 바꿨다면 게시 이미지도 다시 준비해야 합니다.</p>}
+          {coverPending && <p className="notice warn small" role="status">표지 다시 그리기 요청이 남아 있습니다. 자동 작업에서 표지를 갱신하거나 요청을 비운 뒤 게시 이미지를 확인해 주세요.</p>}
+          {pendingChanges && !coverPending && <p className="notice warn small" role="status">저장하지 않은 변경을 먼저 저장해 주세요. 초안·카드 문구를 바꿨다면 게시 이미지도 다시 준비해야 합니다.</p>}
           <label className="check publish-confirm"><input type="checkbox" checked={confirmed} disabled={approve.isPending || !currentCard || pendingChanges || !destinationIds.length} onChange={event => setConfirmed(event.target.checked)} />이미지 전체·저장된 캡션·선택한 게시 계정을 확인했습니다.</label>
           <div className="row">
-            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || !confirmed || !futureSchedule || pendingChanges || !destinationIds.length || !currentCard || d.item.reviewStatus !== "reviewed" || d.publicationReadiness?.ready === false || !!existingDeliveryState}>
+            <button className="btn primary" onClick={() => approve.mutate()} disabled={approve.isPending || !confirmed || !futureSchedule || pendingChanges || !destinationIds.length || !!unavailableDestinations.length || !currentCard || d.item.reviewStatus !== "reviewed" || d.publicationReadiness?.ready === false || !!existingDeliveryState}>
               {approve.isPending ? "전송 요청 중…" : timing === "later" ? "승인하고 예약 게시" : "승인하고 지금 게시"}
             </button>
           </div>
@@ -798,45 +926,6 @@ function ItemDeliveryPanel({ d, cid, runtime, runtimeError, refresh, refreshing 
     </ul>}
     <div className="row"><GuardedLink href="/publish">발행함 전체 보기 →</GuardedLink><GuardedLink href="/runs">실행 기록 보기 →</GuardedLink></div>
   </section>;
-}
-
-/* ───────────── 이력 ───────────── */
-function HistoryPanel({ d }: { d: Detail }) {
-  return (
-    <section className="panel stack" style={{ marginTop: 16 }}>
-      <h2>버전 이력</h2>
-      {d.revisions.length ? (
-        <table className="simple">
-          <thead>
-            <tr>
-              <th>버전</th>
-              <th>작성</th>
-              <th>시각</th>
-              <th>메모</th>
-            </tr>
-          </thead>
-          <tbody>
-            {d.revisions.map((r) => (
-              <tr key={r.id}>
-                <td>
-                  r{r.revisionNo}
-                  {d.item.currentRevisionId === r.id && " (현재)"}
-                </td>
-                <td>
-                  {r.author === "operator" ? "운영자" : r.author === "llm" ? `AI ${r.model ?? ""}` : "시스템"}
-                  {r.usage && <div className="small muted">토큰 입력 {r.usage.inputTokens} · 출력 {r.usage.outputTokens}</div>}
-                </td>
-                <td>{fmtDate(r.createdAt)}</td>
-                <td className="small">{r.note || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <p className="muted">버전이 없습니다.</p>
-      )}
-    </section>
-  );
 }
 
 /* ───────────── 글자 복사(망고보드·Canva 직접 편집용) ───────────── */
