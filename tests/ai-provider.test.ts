@@ -102,6 +102,26 @@ describe("Studio images", () => {
     expect(sent.images).toEqual([{ image_url: reference }]); expect(sent.n).toBe(1);
     expect(sent.model).toBe("gpt-image-2.5-sunburst");
   });
+  it("separates a cover revision instruction from source facts and makes one referenced image edit", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] })));
+    vi.stubGlobal("fetch", fetchMock);
+    const reference = `data:image/png;base64,${png.toString("base64")}`;
+    const topic = JSON.stringify({ title: "관찰하는 과학", summary: "확인한 사실" });
+    await generateStudioImage({ purpose: "cover", prompt: topic, instruction: "배경을 밝게 하고 대상을 가운데로 옮겨 주세요.", referenceImages: [reference] });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.openai.com/v1/images/edits");
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.prompt).toContain("<operator_revision>배경을 밝게 하고 대상을 가운데로 옮겨 주세요.</operator_revision>");
+    expect(sent.prompt).toContain(`<topic>${topic}</topic>`);
+    expect(sent.prompt.indexOf("</operator_revision>")).toBeLessThan(sent.prompt.indexOf("<topic>"));
+    expect(sent.images).toEqual([{ image_url: reference }]);
+    expect(sent.n).toBe(1);
+  });
+  it("rejects an oversized cover revision before spending an image call", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    await expect(generateStudioImage({ purpose: "cover", prompt: "과학", instruction: "가".repeat(2001) })).rejects.toThrow("2,000자");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("rejects remote reference URLs before any network call", async () => {
     const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
     await expect(generateStudioImage({ prompt: "edit", referenceImages: ["http://169.254.169.254/latest/meta-data"] })).rejects.toThrow("참조 이미지");

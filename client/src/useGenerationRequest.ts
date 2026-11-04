@@ -67,5 +67,6 @@ export function useGenerationRequest(channelId: number, itemId: number, kind: "d
     } catch (error) { setFailure({ key, error: error as Error }); }
     finally { setCancellingKey(current => current === key ? null : current); }
   }
-  return { run, cancel, cancelling, cancelError, unresolved: unresolved(request), cancelled: request?.status === "cancelled", requestId: request?.requestId };
+  return { run, cancel, cancelling, cancelError, unresolved: unresolved(request), cancelled: request?.status === "cancelled", requestId: request?.requestId,
+    pendingBody: unresolved(request) ? request?.body as Readonly<Record<string, unknown>> : undefined };
 }

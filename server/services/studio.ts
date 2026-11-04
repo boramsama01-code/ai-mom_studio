@@ -178,10 +178,13 @@ export async function saveStudioCard(db: DB, cardId: number, version: number, pa
   });
 }
 export async function studioDetail(db: DB, cardId: number) {
-  const card = await loadStudioCard(db, cardId);
-  const [revisions, cardJobs] = await Promise.all([
+  // A terminal job and its applied card/revision commit together. Read jobs first:
+  // subsequent reads must include that commit before the client stops polling.
+  // A job finishing after this read may still appear running for one extra poll.
+  const cardJobs = await db.select().from(jobs).where(and(eq(jobs.type, "studio_generate"), sql`${jobs.payload}->>'cardId' = ${String(cardId)}`)).orderBy(desc(jobs.id)).limit(20);
+  const [card, revisions] = await Promise.all([
+    loadStudioCard(db, cardId),
     db.select().from(studioRevisions).where(eq(studioRevisions.cardId, cardId)).orderBy(desc(studioRevisions.id)).limit(60),
-    db.select().from(jobs).where(and(eq(jobs.type, "studio_generate"), sql`${jobs.payload}->>'cardId' = ${String(cardId)}`)).orderBy(desc(jobs.id)).limit(20),
   ]);
   return { card: (await studioCardsWithOutput(db, [card]))[0], revisions: revisions.map(studioRevisionDto), jobs: cardJobs.map(studioJobDto) };
 }

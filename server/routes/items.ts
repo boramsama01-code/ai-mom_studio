@@ -621,16 +621,22 @@ itemRoutes.post(
   "/channels/:cid/items/:id/card",
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
-    const body = parse(z.object({ version: zVersion.optional(), requestId: z.string().uuid().optional(), templateKey: z.string().max(40).nullable().optional(), coverMode: z.enum(["ai", "typography", "reuse"]).optional() }).strict(), req.body ?? {});
+    const body = parse(z.object({
+      version: zVersion.optional(), requestId: z.string().uuid().optional(), templateKey: z.string().max(40).nullable().optional(),
+      coverMode: z.enum(["ai", "typography", "reuse"]).optional(), regenerateCover: z.boolean().optional(), coverInstruction: z.string().trim().max(2000).optional(),
+    }).strict().refine(value => !value.requestId || value.version !== undefined, "요청 ID와 함께 원고 버전을 보내 주세요.")
+      .refine(value => !value.regenerateCover || value.coverMode === "ai", "새 표지 생성은 AI 표지에서만 사용할 수 있습니다.")
+      .refine(value => !value.regenerateCover || (value.version !== undefined && value.requestId !== undefined), "새 표지를 만들려면 최신 원고 버전과 요청 ID가 필요합니다.")
+      .refine(value => !value.coverInstruction || value.regenerateCover, "표지 수정 지시는 새 표지 생성과 함께 요청해 주세요."), req.body ?? {});
     const render = async () => {
-      const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey, { version: body.version, coverMode: body.coverMode, actor: actorOf(req) });
-      if (!r.ok) throw new HttpError(r.code === "font" || r.code === "render" ? 500 : r.code === "template" ? 400 : r.code === "conflict" ? 409 : 422, r.error, { code: r.code, field: (r as { field?: string }).field });
+      const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey, { version: body.version, coverMode: body.coverMode, regenerateCover: body.regenerateCover, coverInstruction: body.coverInstruction, actor: actorOf(req) });
+      if (!r.ok) throw new HttpError(r.code === "font" || r.code === "render" ? 500 : r.code === "template" || r.code === "invalid_image_request" ? 400 : r.code === "conflict" ? 409 : 422, r.error, { code: r.code, field: (r as { field?: string }).field });
       await audit(getDb(), { actor: actorOf(req), action: "render_card", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { assetId: r.asset.id, sha256: r.asset.sha256 } });
       return r.asset;
     };
     const asset = body.requestId || body.coverMode === "ai" || body.coverMode === undefined ? await runSourceGeneration(getDb(), {
       type: "card_render", channelId: ch.id, itemId: item.id, version: body.version ?? item.version,
-      requestId: body.requestId, intent: { templateKey: body.templateKey ?? null, coverMode: body.coverMode ?? null }, actor: actorOf(req),
+      requestId: body.requestId, intent: { templateKey: body.templateKey ?? null, coverMode: body.coverMode ?? null, ...(body.regenerateCover ? { regenerateCover: true, coverInstruction: body.coverInstruction ?? "" } : {}) }, actor: actorOf(req),
     }, render) : await render();
     res.json(asset);
   }),

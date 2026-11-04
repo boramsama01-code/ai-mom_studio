@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { login, naverResponse, resetDb, setTestEnv } from "./helpers";
 setTestEnv();
@@ -138,17 +138,26 @@ describe("dynamic channels with real PostgreSQL and mocked external search", () 
   });
 
   it("validates every requested image panel before admitting a batch job", async () => {
-    const f = await fixture();
-    const panels = Array.from({ length: 4 }, (_, index) => ({ scene: index === 0 ? "지역 서점" : "", dialogue: "", imageId: null }));
-    const card = await f.agent.post("/api/studio/cards").set(f.headers).send({ title: "선택한 장면", channel: f.channel.slug, panels });
-    expect(card.status).toBe(201);
-    const endpoint = `/api/studio/cards/${card.body.id}/generate`;
-    const refused = await f.agent.post(endpoint).set(f.headers).send({ version: 1, kind: "image", panelIndexes: [0, 2], requestId: crypto.randomUUID() });
-    expect(refused.status).toBe(400); expect(refused.body.error).toContain("3컷");
-    expect((await f.agent.get(`/api/studio/cards/${card.body.id}`)).body.jobs).toHaveLength(0);
-    const admitted = await f.agent.post(endpoint).set(f.headers).send({ version: 1, kind: "image", panelIndexes: [0, 2], instruction: "같은 서점에서 대화하는 모습", requestId: crypto.randomUUID() });
-    expect(admitted.status).toBe(202);
-    const [queued] = await f.db.select().from(jobs).where(eq(jobs.id, admitted.body.job.id));
-    expect(queued.payload.panelIndexes).toEqual([0, 2]); expect(queued.status).toBe("queued");
+    const previousKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "isolated-batch-admission-test-key";
+    const outbound = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("External requests are blocked in batch admission tests"));
+    try {
+      const f = await fixture();
+      const panels = Array.from({ length: 4 }, (_, index) => ({ scene: index === 0 ? "지역 서점" : "", dialogue: "", imageId: null }));
+      const card = await f.agent.post("/api/studio/cards").set(f.headers).send({ title: "선택한 장면", channel: f.channel.slug, panels });
+      expect(card.status).toBe(201);
+      const endpoint = `/api/studio/cards/${card.body.id}/generate`;
+      const refused = await f.agent.post(endpoint).set(f.headers).send({ version: 1, kind: "image", panelIndexes: [0, 2], requestId: crypto.randomUUID() });
+      expect(refused.status).toBe(400); expect(refused.body.error).toContain("3컷");
+      expect((await f.agent.get(`/api/studio/cards/${card.body.id}`)).body.jobs).toHaveLength(0);
+      const admitted = await f.agent.post(endpoint).set(f.headers).send({ version: 1, kind: "image", panelIndexes: [0, 2], instruction: "같은 서점에서 대화하는 모습", requestId: crypto.randomUUID() });
+      expect(admitted.status).toBe(202);
+      const [queued] = await f.db.select().from(jobs).where(eq(jobs.id, admitted.body.job.id));
+      expect(queued.payload.panelIndexes).toEqual([0, 2]); expect(queued.status).toBe("queued");
+      expect(outbound).not.toHaveBeenCalled();
+    } finally {
+      outbound.mockRestore();
+      if (previousKey === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousKey;
+    }
   });
 });
