@@ -29,3 +29,5 @@
 - Explicit line breaks count toward `maxLines`. Overflow returns the exact field for editing; the renderer never shrinks type or clips excess text.
 
 Live master registration must validate an actual 8-page 1080×1350 design, page identities, version and exact 46-text/four-image dataset. Existing legacy masters keep their previous mapping and validation. Final Canva page ordering/save approval, registration and production deployment are separate from these source assets.
+
+The final source design must also match an approved profile/version/source binding in `shared/readingCanvaMasters.ts`. That list remains empty until final preview approval, save and dataset verification; identical field names alone do not prove that the selected visual style is the correct original.

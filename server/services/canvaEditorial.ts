@@ -5,6 +5,7 @@ import { canvaAssetUploads, canvaMasters, canvaRenderJobs, contentItems, content
 import { familyCardCopySchema, evidenceBindingSchema, pageDesignsSchema, type CardCopyV2, type PageDesigns } from '../../shared/familyDialogue';
 import { CANVA_PAGE_IDS, canvaTextFields, canvaDisplaySupportErrors, canvaVariant, validateCanvaDataset, snapshotCanvaProfile, storedCanvaProfileSnapshot, resolveCanvaProfile, type CanvaProfileSnapshot, type CanvaConceptMode, type CanvaJobDto, type CanvaMasterDto, type CanvaField, type CanvaDataset, type CanvaTextOptions } from '../../shared/canvaEditorial';
 import { readingProfileForTemplateKey, readingProfileForTemplateVersion, type ReadingCardProfile } from '../../shared/readingCardProfiles';
+import { readingMasterSourceApproved } from '../../shared/readingCanvaMasters';
 import { layoutReadingCard } from './readingCard';
 import { CardOverflowError } from './card';
 import { HttpError } from '../routes/util';
@@ -34,6 +35,9 @@ const active=['queued','running'];
 const submitting=['autofill_submitting','export_submitting'];
 const principalKey=(p:rest.CanvaPrincipal)=>`${p.teamId}:${p.userId}`;
 const asInput=(job:Job)=>job.input as unknown as Input;
+function assertReadingMasterSource(profile:ReadingCardProfile|undefined,sourceId:string) {
+  if(profile && !readingMasterSourceApproved(profile,sourceId)) throw new HttpError(422,'선택한 읽기 스타일의 승인된 Canva 원본이 아직 연결되지 않았습니다. 최종 8장 미리보기 승인·저장 후 같은 스타일의 원본을 등록해 주세요. Studio 원고와 미리보기는 유지합니다.',{code:'canva_profile_source_unapproved'});
+}
 function profileForInput(input:Input,master?:Master):ReadingCardProfile|undefined {
   let profile:ReadingCardProfile|undefined;
   try { profile=resolveCanvaProfile(input); }
@@ -42,6 +46,7 @@ function profileForInput(input:Input,master?:Master):ReadingCardProfile|undefine
       || !profile && master && readingProfileForTemplateVersion(master.templateVersion)) {
     throw new HttpError(409,'저장된 Canva 작업과 마스터의 읽기 디자인이 다릅니다. 기존 원고와 결과를 유지했습니다.',{code:'canva_profile_changed'});
   }
+  if(master) assertReadingMasterSource(profile,master.sourceId);
   return profile;
 }
 function assertCanvaTextFits(copy:CardCopyV2,master:Master,purpose:'create'|'import'|'autofill',profile?:ReadingCardProfile,options:CanvaTextOptions={}) {
@@ -80,6 +85,8 @@ export function canvaJobDto(job:Job):CanvaJobDto {
 }
 
 export async function registerCanvaMaster(db:DB,a:{channelId:number;sourceId:string;conceptMode:CanvaConceptMode;hasExternalActivity:boolean;templateVersion:string;actor:string}) {
+  const profile=readingProfileForTemplateVersion(a.templateVersion);
+  assertReadingMasterSource(profile,a.sourceId);
   const [capabilities,principal,design,pages,dataset]=await Promise.all([
     rest.getCanvaCapabilities(db),rest.getCanvaPrincipal(db),rest.getCanvaDesign(db,a.sourceId),rest.getCanvaPages(db,a.sourceId),rest.getCanvaDataset(db,{type:'design',id:a.sourceId}),
   ]);
@@ -87,7 +94,6 @@ export async function registerCanvaMaster(db:DB,a:{channelId:number;sourceId:str
   if(design.pageCount!==8 || !pages.validEightPageMaster) throw new HttpError(422,'등록할 마스터는 정확히 1080×1350 크기의 8장이어야 합니다.');
   if(design.updatedAt===null)throw new HttpError(422,'Canva 마스터의 수정 시각을 확인할 수 없습니다. 원본 버전을 확인한 뒤 등록해 주세요.',{code:'master_version_unavailable'});
   if(pages.items.some(p=>!p.id)) throw new HttpError(422,'Canva가 이 디자인의 고정 페이지 ID를 제공하지 않아 페이지 변경을 확인할 수 없습니다. 페이지 ID를 제공하는 새 디자인으로 마스터를 등록해 주세요.',{code:'page_identity_unavailable'});
-  const profile=readingProfileForTemplateVersion(a.templateVersion);
   const errors=validateCanvaDataset(dataset,a,profile);
   if(errors.length) throw new HttpError(422,'Canva 마스터의 자동 채우기 필드가 준비되지 않았습니다.',{code:'dataset_mismatch',details:errors});
   const result=await db.insert(canvaMasters).values({channelId:a.channelId,sourceId:a.sourceId,sourceUpdatedAt:String(design.updatedAt),sourceType:'design',conceptMode:a.conceptMode,hasExternalActivity:a.hasExternalActivity,templateVersion:a.templateVersion,principal:principalKey(principal),dataset,datasetHash:canvaInputHash(dataset),pageIds:pages.items.map(p=>p.id!),editUrl:design.editUrl,validatedAt:new Date()}).onConflictDoNothing().returning();
@@ -128,6 +134,7 @@ export async function enqueueCanvaRender(db:DB,a:{channelId:number;itemId:number
     const master=prior||a.masterId?masters[0]:masters.find(candidate=>readingProfileForTemplateVersion(candidate.templateVersion)?.id===selectedProfile?.id);
     if(!master) throw new HttpError(purpose==='import'?404:422,purpose==='import'?'이 콘텐츠의 기존 Canva 마스터 기록을 찾을 수 없습니다.':'선택한 디자인·개념·활동 구조에 맞는 Canva 마스터를 실제 페이지와 필드 검사 후 등록해 주세요.');
     if(purpose==='create' && readingProfileForTemplateVersion(master.templateVersion)?.id!==selectedProfile?.id) throw new HttpError(422,'편집기에서 선택한 디자인과 Canva 마스터의 디자인이 다릅니다. 원고를 유지했습니다.',{code:'canva_profile_mismatch'});
+    if(purpose==='create') assertReadingMasterSource(selectedProfile,master.sourceId);
     const priorInput=prior?asInput(prior):undefined;
     const artworkCredits=purpose==='create'?await loadCardPageArtworkCredits(tx as DB,item.id,a.channelId,parsed.data,designs.data):priorInput?.artworkCredits??{};
     const input:Input={payload,title:item.title,copy:parsed.data,pageDesigns:designs.data,evidenceSetId:evidence.data.evidenceSetId,

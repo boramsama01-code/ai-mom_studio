@@ -12,9 +12,10 @@ import { createFamilyPgFixture } from './fixtures/familyEvidencePg';
 import { resetDb, setTestEnv } from "./helpers";
 
 setTestEnv();
-const api = vi.hoisted(() => ({ principal: vi.fn(), capabilities: vi.fn(), design: vi.fn(), pages: vi.fn(), dataset: vi.fn(), submitAutofill: vi.fn(), getAutofill: vi.fn(), submitExport: vi.fn(), getExport: vi.fn(), submitUpload: vi.fn(), getUpload: vi.fn(), prepare: vi.fn(), download: vi.fn(), jpegs: vi.fn(), layout: vi.fn() }));
+const api = vi.hoisted(() => ({ principal: vi.fn(), capabilities: vi.fn(), design: vi.fn(), pages: vi.fn(), dataset: vi.fn(), submitAutofill: vi.fn(), getAutofill: vi.fn(), submitExport: vi.fn(), getExport: vi.fn(), submitUpload: vi.fn(), getUpload: vi.fn(), prepare: vi.fn(), download: vi.fn(), jpegs: vi.fn(), layout: vi.fn(), sourceApproved: vi.fn() }));
 vi.mock("../server/services/canvaRest", async original => ({ ...await original<object>(), getCanvaPrincipal: api.principal, getCanvaCapabilities: api.capabilities, getCanvaDesign: api.design, getCanvaPages: api.pages, getCanvaDataset: api.dataset, submitCanvaAutofill: api.submitAutofill, getCanvaAutofillJob: api.getAutofill, submitCanvaExport: api.submitExport, getCanvaExportJob: api.getExport, submitCanvaAssetUpload: api.submitUpload, getCanvaAssetUploadJob: api.getUpload }));
 vi.mock("../server/services/canvaEditorialAssets", async original => ({ ...await original<object>(), prepareCanvaImages: api.prepare, downloadCanvaExport: api.download, publicationJpegs: api.jpegs }));
+vi.mock("../shared/readingCanvaMasters", () => ({ readingMasterSourceApproved: api.sourceApproved }));
 vi.mock("../server/services/readingCard", async original => ({ ...await original<object>(), layoutReadingCard: api.layout }));
 const { getDb, closeDb } = await import("../server/db");
 const { createRevision } = await import("../server/content");
@@ -50,6 +51,8 @@ beforeEach(async () => {
   api.submitUpload.mockResolvedValue({ id: "upload_new", status: "in_progress" });
   api.download.mockResolvedValue(pngs); api.jpegs.mockResolvedValue(jpegs);
   api.layout.mockReturnValue({ svg: "<svg/>", textRuns: [] });
+  // Synthetic fixture identity only; production has no approved reading source yet.
+  api.sourceApproved.mockReturnValue(true);
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Unexpected external request in isolated Canva recovery test"); }));
 });
 
@@ -417,6 +420,16 @@ async function readingFixture(phase: string, patch: Partial<typeof canvaRenderJo
 }
 
 describe("reading profile admission and recovery with synthetic Canva datasets", () => {
+  it("rejects an unapproved profile/source pairing before registration or new create", async () => {
+    const f = await readingFixture("complete", { status: "failed" });
+    api.sourceApproved.mockReturnValue(false);
+    await expect(registerCanvaMaster(f.db, { channelId: 2, sourceId: f.master.sourceId, ...canvaVariant(f.copy), templateVersion: f.profile.templateVersion, actor: "test-operator" }))
+      .rejects.toMatchObject({ status: 422, extra: { code: "canva_profile_source_unapproved" } });
+    await expect(enqueueCanvaRender(f.db, { ...f.request, requestId: randomUUID() }))
+      .rejects.toMatchObject({ status: 422, extra: { code: "canva_profile_source_unapproved" } });
+    expect(api.design).not.toHaveBeenCalled(); expect(api.dataset).not.toHaveBeenCalled();
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
+  });
   it("does not register a reading master whose actual mocked dataset is missing its profile image", async () => {
     const profile = readingProfileForTemplateKey("reading-ink-lime-v1")!, copy = familyDialogueCardFixture();
     const dataset = expectedCanvaDataset(canvaVariant(copy), profile); delete dataset.P08_PROFILE_IMAGE;
@@ -483,4 +496,3 @@ describe("reading profile admission and recovery with synthetic Canva datasets",
     expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
   });
 });
-

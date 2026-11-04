@@ -10,6 +10,7 @@ import {
 } from "../shared/canvaEditorial";
 import { defaultPageDesigns } from "../shared/familyDialogue";
 import { READING_PROFILE_LOGO_ID, readingProfileDesigns, readingProfileForTemplateKey } from "../shared/readingCardProfiles";
+import { readingMasterSourceApproved } from "../shared/readingCanvaMasters";
 import { familyDialogueCardFixture, scientificFamilyCardFixture } from "./fixtures/familyDialogueCard";
 import { assertCanvaDesignSettings, prepareCanvaImages } from "../server/services/canvaEditorialAssets";
 import { prepareReadingArtwork } from "../server/services/readingCardImages";
@@ -31,6 +32,9 @@ function fixture(id: typeof profileIds[number] = profileIds[0], scientific = fal
 beforeEach(() => { assets.load.mockReset(); });
 
 describe("reading Canva contract without live readiness claims", () => {
+  it("rejects an arbitrary source that has not been approved for either reading style", () => {
+    for(const id of profileIds) expect(readingMasterSourceApproved(fixture(id).profile,"Dunapproved-source")).toBe(false);
+  });
   it.each(profileIds)("keeps the %s contract at 46 native texts and four independent images", id => {
     const { copy, profile } = fixture(id), dataset = expectedCanvaDataset(canvaVariant(copy), profile);
     expect(Object.entries(dataset).filter(([, value]) => value.type === "text")).toHaveLength(46);

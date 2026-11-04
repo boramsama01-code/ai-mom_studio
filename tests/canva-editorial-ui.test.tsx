@@ -8,7 +8,8 @@ import { ApiError } from "../client/src/api";
 import type { CanvaJobDto, CanvaMasterDto } from "../shared/canvaEditorial";
 import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
 import { READING_CARD_PROFILES } from "../shared/readingCardProfiles";
-const mocks = vi.hoisted(() => ({ api: vi.fn(), local: vi.fn() }));
+const mocks = vi.hoisted(() => ({ api: vi.fn(), local: vi.fn(), sourceApproved:vi.fn() }));
+vi.mock("../shared/readingCanvaMasters", () => ({ readingMasterSourceApproved:mocks.sourceApproved }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
 vi.mock("../client/src/ui", () => ({
   GuardedLink: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
@@ -27,6 +28,7 @@ function job(id = 11, status: CanvaJobDto["status"] = "queued", override: Partia
 }
 beforeEach(() => {
   vi.clearAllMocks(); sessionStorage.clear(); let sequence = 100;
+  mocks.sourceApproved.mockImplementation((_profile:unknown,sourceId:string)=>sourceId==="Dmaster_test");
   vi.spyOn(crypto, "randomUUID").mockImplementation(() => uuid(++sequence));
   jobs = []; enqueue = null; action = null; listJobs = null;
   masters = [{ id: 7, conceptMode: "value_definition", hasExternalActivity: false, templateVersion: "v1.1", sourceType: "design", sourceId: "Dmaster_test", status: "ready", editUrl: "https://www.canva.com/design/Dmaster_test/edit", validatedAt: "2026-11-04T00:00:00.000Z" }];
@@ -77,7 +79,10 @@ describe("Canva editorial request and import UI", () => {
     masters=[{...masters[0],id:8,templateVersion:READING_CARD_PROFILES[1].templateVersion}];
     await act(async()=>{await client.invalidateQueries({queryKey:['canva-masters',3]});});await settle();
     expect(button("Canva 8장 만들기").disabled).toBe(true);
-    masters=[{...masters[0],id:9,conceptMode:"scientific_explanation",hasExternalActivity:true,templateVersion:READING_CARD_PROFILES[0].templateVersion}];
+    masters=[{...masters[0],id:9,sourceId:"Dwrong_style_source",conceptMode:"scientific_explanation",hasExternalActivity:true,templateVersion:READING_CARD_PROFILES[0].templateVersion}];
+    await act(async()=>{await client.invalidateQueries({queryKey:['canva-masters',3]});});await settle();
+    expect(button("Canva 8장 만들기").disabled).toBe(true);
+    masters=[{...masters[0],sourceId:"Dmaster_test"}];
     await act(async()=>{await client.invalidateQueries({queryKey:['canva-masters',3]});});await settle();
     expect(button("Canva 8장 만들기").disabled).toBe(false);
     await click("Canva 8장 만들기");expect(writes()[0][1].body.masterId).toBe(9);
