@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NEWS_EDITORIAL_ROLES } from "../shared/newsEditorial";
 import { generateNewsCardCopy, proposeNewsDiscussion, validateNewsCardCopy } from "../server/services/newsEditorial";
 import { LlmBudget } from "../server/services/llm";
+import { resolveNewsEditorialResource } from "../shared/newsEditorialResource";
 import { editorialAnalysis, editorialCopy, editorialSource, editorialSummary, geminiEditorialResponse, openaiEditorialResponse } from "./fixtures/newsEditorial";
 
 beforeEach(() => {
@@ -157,6 +158,31 @@ describe("source-grounded eight-page news proposals", () => {
     const result = await proposeNewsDiscussion({ ...proposalArgs(), budget: new LlmBudget(1) });
     expect(result).toMatchObject({ ok: false, kind: "budget" }); expect(fetchMock).toHaveBeenCalledOnce();
   });
+
+  it("lets AI choose an actually supplied activity reference while the server owns its title and URL", async () => {
+    const source = { ...editorialSource(2), title: "국립중앙과학관 인공지능 전시 안내", url: "https://example.test/museum/ai", text: `국립중앙과학관은 평가 기준을 비교하는 전시회를 소개했습니다. ${editorialSource().text}` };
+    const copy: any = editorialCopy(); copy.pages[5].resourceSourceId = 2;
+    copy.pages[5].body = "국립중앙과학관에서 평가 기준을 비교해 보세요. 방문 전 공식 안내에서 운영 시간과 대상 연령을 확인해요.";
+    const fetchMock = vi.fn().mockResolvedValue(openaiEditorialResponse(copy)); vi.stubGlobal("fetch", fetchMock);
+    const result = await generateNewsCardCopy({ ...args(), sources: [editorialSource(), source] });
+    expect(result).toMatchObject({ ok: true }); if (!result.ok) throw new Error(result.error);
+    expect(result.data.pages[5]).toMatchObject({ resource: { sourceId: 2, title: source.title, url: source.url }, sourceIds: [2] });
+    expect(result.data.pages[5]).not.toHaveProperty("resourceSourceId");
+    const sent = JSON.parse(JSON.parse(fetchMock.mock.calls[0][1].body).input);
+    expect(sent.availableResources).toContainEqual(resolveNewsEditorialResource(2, [source]));
+    expect(sent.sources[1]).toMatchObject({ source_id: 2, title: source.title, url: source.url });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it.each(["unknown source", "RSS-only source", "model-authored metadata"])("rejects an invented or incomplete resource proposal without a paid retry: %s", async change => {
+    const copy: any = editorialCopy(), sources = [editorialSource(), { ...editorialSource(2), text: "확보하지 못한 짧은 요약" }];
+    if (change === "unknown source") copy.pages[5].resourceSourceId = 999;
+    if (change === "RSS-only source") copy.pages[5].resourceSourceId = 2;
+    if (change === "model-authored metadata") copy.pages[5].resource = { sourceId: 1, title: "허구의 논문", url: "https://invented.test" };
+    const fetchMock = vi.fn().mockResolvedValue(openaiEditorialResponse(copy)); vi.stubGlobal("fetch", fetchMock);
+    const result = await generateNewsCardCopy({ ...args(), sources });
+    expect(result).toMatchObject({ ok: false, kind: "parse" }); expect(result).not.toHaveProperty("data"); expect(fetchMock).toHaveBeenCalledOnce();
+  });
 });
 
 describe("news copy evidence guards", () => {
@@ -176,9 +202,9 @@ describe("news copy evidence guards", () => {
     expect(validateNewsCardCopy(copy, [editorialSource()], editorialAnalysis())).toBeNull();
     copy.pages[5].body = "상상의 미래과학관에서 AI 전시회를 보고 비교 기록을 적어 보세요.";
     copy.pages[5].sourceIds = [1];
-    expect(validateNewsCardCopy(copy, [editorialSource()], editorialAnalysis())).toContain("검증하는 기능이 아직 없습니다");
+    expect(validateNewsCardCopy(copy, [editorialSource()], editorialAnalysis())).toContain("참고자료로 선택");
     const unrelatedMuseum = { ...editorialSource(), text: `${editorialSource().text} 동네 박물관은 이름만 언급됐다.` };
-    expect(validateNewsCardCopy(copy, [unrelatedMuseum], editorialAnalysis())).toContain("검증하는 기능이 아직 없습니다");
+    expect(validateNewsCardCopy(copy, [unrelatedMuseum], editorialAnalysis())).toContain("참고자료로 선택");
     copy.pages[5].body = "이 개념을 다룬 논문에서 실험 조건을 찾아보세요. 조건이 바뀌면 결과도 달라질지 적어 보세요.";
     expect(validateNewsCardCopy(copy, [editorialSource()], editorialAnalysis())).toBeNull();
   });

@@ -46,6 +46,24 @@ export function cardPageArtworkIds(copy: CardCopy): number[] {
   return [...new Set(ids)];
 }
 
+/** Saving references must not transfer every JPEG out of PostgreSQL again. */
+export async function assertCardPageArtworkOwnership(db: DB, itemId: number, channelId: number, copy: CardCopy) {
+  const ids = cardPageArtworkIds(copy);
+  if (!ids.length) return;
+  const rows = await db.select({ id: mediaAssets.id, mime: mediaAssets.mime }).from(mediaAssets)
+    .innerJoin(contentRevisions, and(eq(contentRevisions.id, mediaAssets.revisionId), eq(contentRevisions.contentItemId, itemId)))
+    .where(and(inArray(mediaAssets.id, ids), eq(mediaAssets.contentItemId, itemId), eq(mediaAssets.channelId, channelId), eq(mediaAssets.kind, CARD_PAGE_ARTWORK_KIND)));
+  if (rows.length !== ids.length || rows.some(row => row.mime !== "image/jpeg")) throw new HttpError(404, "이 콘텐츠의 페이지 배경 이미지를 찾을 수 없습니다. 다른 콘텐츠의 이미지는 사용할 수 없습니다.");
+}
+
+/** The live preview only needs the selected page's bytes; final export loads all. */
+export async function loadCardPageArtworkForPage(db: DB, itemId: number, channelId: number, copy: CardCopy, pageIndex: number) {
+  return loadCardPageArtwork(db, itemId, channelId, { ...copy,
+    cover: pageIndex === 0 ? copy.cover : { ...copy.cover, background: undefined },
+    pages: copy.pages.map((page, index) => index + 1 === pageIndex ? page : { ...page, background: undefined }),
+  });
+}
+
 async function scopedArtwork(db: DB, itemId: number, channelId: number, ids: number[]) {
   if (!ids.length) return [];
   const rows = await db.select({ asset: mediaAssets }).from(mediaAssets)
@@ -156,7 +174,7 @@ export async function createCardPageArtwork(db: DB, input: CardPageArtworkInput)
       const previous = background ? await loadCardPageArtworkAsset(db, input.itemId, input.channelId, background.assetId) : null;
       try {
         const generated = await generateStudioImage({ provider: "openai", model: imageSelection!.model, purpose: "cover",
-          prompt: JSON.stringify({ use: "An original editorial background with a calm, uncluttered central area for separately rendered Korean text. No lettering, diagrams with invented values, logos, or documentary-style depictions of real events.", articleTitle: snapshot.item.title, pageTitle: snapshot.page.title, subtitle: snapshot.page.subtitle, body: "body" in snapshot.page ? snapshot.page.body : "" }),
+          prompt: JSON.stringify({ use: "An original editorial background with a calm, uncluttered central area for separately rendered Korean text. No lettering, diagrams with invented values, logos, or documentary-style depictions of real events.", articleTitle: snapshot.item.title, pageTitle: snapshot.page.title, subtitle: snapshot.page.subtitle, body: "body" in snapshot.page ? snapshot.page.body : "", role: "role" in snapshot.page ? snapshot.page.role : "cover", perspectives: "columns" in snapshot.page ? snapshot.page.columns : undefined }),
           instruction: input.instruction?.trim(),
           referenceImages: previous ? [`data:image/jpeg;base64,${previous.bytes.toString("base64")}`] : undefined,
           signal: currentGenerationSignal(),

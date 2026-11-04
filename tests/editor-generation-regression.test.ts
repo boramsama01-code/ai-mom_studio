@@ -10,7 +10,9 @@ import { emptyPayload } from "../shared/payloads";
 import { ApiError } from "../client/src/api";
 import { activateDraftRecoveryScope, readDraftRecovery } from "../client/src/draftRecovery";
 const mocks = vi.hoisted(() => ({ api: vi.fn(), toast: vi.fn(), guard: { setDirty: vi.fn(), confirmLeave: (f: () => void) => f() } }));
-vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => ({ allChannels: [{ id: 1, slug: "penguin", name: "웹툰", active: true, accentColor: "#285f6a" }], channels: [], selected: "all", select: vi.fn() }) }));
+vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => ({ allChannels: [{ id: 1, slug: "penguin", name: "웹툰", active: true, accentColor: "#285f6a", effectiveAiSettings: {
+  summary: { provider: "openai", model: "gpt-summary-fixture" }, copy: { provider: "openai", model: "gpt-copy-fixture" }, image: { provider: "openai", model: "gpt-image-fixture" },
+} }], channels: [], selected: "all", select: vi.fn() }) }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
 vi.mock("wouter", () => ({ useLocation: () => ["/studio/8", vi.fn()] }));
@@ -115,7 +117,8 @@ describe("webtoon API-first generation", () => {
     await act(async () => { button("원고·컷 구성 자동 작성").click(); button("원고·컷 구성 자동 작성").click(); }); await settle();
     const writes = mocks.api.mock.calls.filter(([, o]) => o?.method === "PATCH" || o?.method === "POST");
     expect(writes.map(([p]) => p)).toEqual(["/studio/cards/8", "/studio/cards/8/generate"]);
-    expect(writes[1][1].body).toMatchObject({ version: 2, kind: "text", textTarget: "fill", provider: "openai" });
+    expect(writes[1][1].body).toMatchObject({ version: 2, kind: "text", textTarget: "fill" });
+    expect(writes[1][1].body).not.toHaveProperty("provider"); // The server applies the channel's copy role.
     await finishJob(); expect(field("제목").value).toBe("직접 쓴 제목");
   });
   it("preserves edits made while generation is running", async () => {
@@ -146,7 +149,7 @@ describe("collected-item editor generation regression", () => {
   it("places API before ChatGPT and fills all fields when a new server revision arrives", async () => {
     await render(createElement(EditPanel, { d: itemDetail(), cid: 1 }));
     expect(host.querySelector("details summary")?.textContent).toContain("자동 제작 · 원고와 카드 이미지"); await click("GPT로 초안 생성");
-    expect(mocks.api).toHaveBeenCalledWith("/channels/1/items/9/generate", { method: "POST", body: { version: 1, provider: "openai", templateKey: "set:n04", requestId: expect.any(String) } });
+    expect(mocks.api).toHaveBeenCalledWith("/channels/1/items/9/generate", { method: "POST", body: { version: 1, templateKey: "set:n04", requestId: expect.any(String) } });
     await render(createElement(EditPanel, { d: itemDetail(science, 2), cid: 1 }));
     expect(field("핵심 질문").value).toBe(science.key_question); expect(field("과학적 근거").value).toBe(science.scientific_basis);
     expect(host.querySelector<HTMLTextAreaElement>('[aria-label="쉬운 배경 (3문장) 1"]')!.value).toBe(science.background[0]);

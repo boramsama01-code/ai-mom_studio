@@ -6,7 +6,8 @@ import { emptyPayload } from "../shared/payloads";
 import { cardCopyFixture } from "./fixtures/cardCopy";
 setTestEnv();
 const fakeExtract = vi.hoisted(() => vi.fn());
-vi.mock("../server/services/llm", async orig => ({ ...await orig<object>(), extractNotice: fakeExtract }));
+const fakeCopy = vi.hoisted(() => vi.fn());
+vi.mock("../server/services/llm", async orig => ({ ...await orig<object>(), extractNotice: fakeExtract, generateCardCopy: fakeCopy }));
 const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
 const { contentItems, sourceDocuments, contentSources, mediaAssets, approvals } = await import("../shared/schema");
@@ -22,6 +23,7 @@ beforeEach(async () => {
   const [doc] = await db.insert(sourceDocuments).values({ normalizedUrl: `https://press.example/${crypto.randomUUID()}`, originalUrl: "https://press.example/article", kind: "google_news_rss", fetchStatus: "failed", fetchError: "본문을 찾지 못함" }).returning();
   const rows = await db.insert(contentItems).values([{ channelId: 1, kind: "notice", title: "복사한 원문 테스트", primarySourceId: doc.id }, { channelId: 2, kind: "science_dialogue", title: "다른 채널 자료", primarySourceId: doc.id }]).returning();
   itemId = rows[0].id; otherId = rows[1].id; sharedId = doc.id; fakeExtract.mockReset();
+  fakeCopy.mockReset().mockResolvedValue({ ok: true, data: cardCopyFixture(), model: "gpt-copy-fixture", usage: { inputTokens: 0, outputTokens: 0 }, droppedEvidence: 0 });
 });
 const endpoint = () => `/api/channels/1/items/${itemId}/source-text`;
 const body = (extra = {}) => ({ version: 1, url: "https://press.example/article", text, ...extra });
@@ -77,8 +79,12 @@ it("편집 초안은 보존하고 기존 승인만 무효화하며 구버전 저
 it("후속 공고 추출은 실패한 RSS 대신 직접 저장한 본문을 사용한다", async () => {
   const { agent, csrf } = await login(app);
   const saved = await agent.post(endpoint()).set("x-csrf-token", csrf).send(body());
-  fakeExtract.mockResolvedValue({ ok: true, data: { ...emptyPayload("notice", "추출 제목"), cardCopy: cardCopyFixture(), evidence: [{ field: "audience", source_id: saved.body.sourceId, quote: text.split("\n")[1] }] }, model: "test", usage: { inputTokens: 0, outputTokens: 0 }, droppedEvidence: 0 });
-  expect((await extractForItem(getDb(), itemId, new LlmBudget(1), new Date())).ok).toBe(true);
+  fakeExtract.mockResolvedValue({ ok: true, data: { ...emptyPayload("notice", "추출 제목"), evidence: [{ field: "audience", source_id: saved.body.sourceId, quote: text.split("\n")[1] }] }, model: "gemini-summary-fixture", usage: { inputTokens: 0, outputTokens: 0 }, droppedEvidence: 0 });
+  expect((await extractForItem(getDb(), itemId, new LlmBudget(2), new Date())).ok).toBe(true);
+  expect(fakeExtract.mock.calls[0][0]).toMatchObject({ provider: "gemini" });
   expect(fakeExtract.mock.calls[0][0].sources[0]).toMatchObject({ source_id: saved.body.sourceId, text });
+  expect(fakeCopy).toHaveBeenCalledOnce();
+  expect(fakeCopy.mock.calls[0][0]).toMatchObject({ provider: "openai" });
+  expect(fakeCopy.mock.calls[0][0].sources[0]).toMatchObject({ source_id: saved.body.sourceId, text });
   expect((await agent.get(`/api/channels/1/items/${itemId}`)).body.item.evidenceStatus).toBe("needs_review");
 });

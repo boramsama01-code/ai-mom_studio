@@ -5,6 +5,7 @@ import { CardOverflowError, type CardStyle } from "../server/services/card";
 import { layoutEditorialCard } from "../server/services/editorialCard";
 import { cardApprovalHash, planCarousel, renderCarouselPage, renderCarouselPages, type CarouselPageImages } from "../server/services/cardCarousel";
 import { discussionCardCopyFixture } from "./fixtures/discussionCardCopy";
+import { studio28EditorialProposal } from "./fixtures/studio28EditorialProposal";
 import { cardCopyFixture } from "./fixtures/cardCopy";
 import { NEWS_EDITORIAL_BODY_LIMITS } from "../shared/newsEditorial";
 
@@ -62,6 +63,29 @@ describe("eight-page editorial structure", () => {
       }
     }
     expect(JSON.stringify(copy)).toBe(before);
+  });
+
+  it("keeps canonical activity references separate from model-selected source IDs and fits their full titles", () => {
+    const manual = discussionCardCopyFixture(), resource = { sourceId: 31, title: "가".repeat(180), url: "https://reference.example.org/paper/full-source-url" };
+    manual.pages[5].resource = resource;
+    manual.pages[5].body = "나".repeat(140);
+    const saved = cardCopySchema.parse(manual), model = planCarousel(input(saved), style).pages[5];
+    const runs = layoutEditorialCard(model, style).textRuns;
+    expect(runs.find(run => run.field === "cardCopy.pages.5.resource.title")?.text).toBe(resource.title);
+    expect(runs.find(run => run.field === "cardCopy.pages.5.resource.host")?.text).toBe("reference.example.org");
+    expect(runs.map(run => run.text)).not.toContain(resource.url);
+    expect(aiDiscussionCardCopySchema.safeParse(manual).success).toBe(false);
+    const proposal = { ...discussionCardCopyFixture(), pages: discussionCardCopyFixture().pages.map(page => ({ ...page })) };
+    Object.assign(proposal.pages[5], { resourceSourceId: 31 });
+    expect(aiDiscussionCardCopySchema.safeParse(proposal).success).toBe(true);
+    Object.assign(proposal.pages[4], { resourceSourceId: 31 });
+    expect(aiDiscussionCardCopySchema.safeParse(proposal).success).toBe(false);
+    manual.pages[4].resource = resource;
+    expect(cardCopySchema.safeParse(manual).success).toBe(false);
+    const sourceProposal = studio28EditorialProposal();
+    expect(aiDiscussionCardCopySchema.safeParse(sourceProposal).success).toBe(true);
+    expect(planCarousel(input(sourceProposal), style).count).toBe(8);
+    expect(sourceProposal.pages[0].body).toContain("전망");
   });
 
   it("reports the overflowing page field without truncating user text", () => {

@@ -48,6 +48,7 @@ import { audit } from "../audit";
 import { resolveStyle } from "../services/templates";
 import { cardApprovalHash, loadCardPages, planCarousel, renderCarouselPage, renderCarouselPages } from "../services/cardCarousel";
 import { loadCardPageArtwork } from "../services/cardPageArtwork";
+import { assertNewsEditorialResources } from "../services/newsEditorialSources";
 import { channelAiSelection } from "../services/channelAi";
 import type { AiSelection } from "../../shared/channelAi";
 import { generateStudioImage } from "../services/studioAi";
@@ -117,6 +118,10 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   const savedCopy = cardCopySchema.safeParse(rev.payload.cardCopy);
   const key = templateKey || (savedCopy.success ? savedCopy.data.templateKey : null) || ch.cardTemplate || "builtin:classic";
   const copy = savedCopy.success ? { ...savedCopy.data, templateKey: key } : undefined;
+  if (copy) {
+    try { await assertNewsEditorialResources(db, item, copy); }
+    catch (error) { return { ok: false as const, code: "invalid_payload", error: (error as Error).message }; }
+  }
   const payload = { ...rev.payload, ...(copy ? { cardCopy: copy } : {}) } as Record<string, any>;
   const title = copy?.cover.title || payload.title || payload.key_question;
   if (!title || !String(title).trim()) return { ok: false as const, code: "invalid_payload", error: "카드 제목(제목/핵심 질문)이 비어 있습니다." };
@@ -139,6 +144,10 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   try {
     const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
     const pageImages = copy ? await loadCardPageArtwork(db, item.id, ch.id, copy) : new Map<number, Buffer>();
+    if (copy?.cover.background) {
+      const [selectedArt] = await db.select({ source: mediaAssets.source, model: mediaAssets.templateKey }).from(mediaAssets).where(eq(mediaAssets.id, copy.cover.background.assetId));
+      cover = selectedArt.source === "ai" ? { kind: "ai", credit: "AI 일러스트 · OpenAI", ...(selectedArt.model ? { model: selectedArt.model } : {}) } : { kind: "upload", credit: "직접 등록 이미지" };
+    }
     // Check the title and source line before spending an image-generation call.
     await renderCarouselPage(plan, 0, style, null, cover.credit, pageImages);
     let art: Buffer | null = null;

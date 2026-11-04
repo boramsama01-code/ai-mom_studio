@@ -4,7 +4,7 @@ export type CardCarousel = {
   version: 1;
   pages: Array<{ id: number; sha256: string; title: string; altText?: string }>;
   altVersion?: number;
-  cover: { kind: "ai" | "typography"; credit: string; model?: string };
+  cover: { kind: "ai" | "upload" | "typography"; credit: string; model?: string };
   /** Immutable editorial snapshot of these exact rendered pages. Absent on legacy decks. */
   copy?: CardCopy;
 };

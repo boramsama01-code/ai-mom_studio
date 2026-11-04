@@ -14,7 +14,7 @@ import { Resvg } from "@resvg/resvg-js";
 import sharp from "sharp";
 import { TOKENS } from "../../shared/tokens";
 import { fitCardBody } from "./cardBodyFit";
-import type { CardCopyColumn, CardPageBackground, NewsEditorialRole } from "../../shared/cardCopy";
+import type { CardCopyColumn, CardCopyResource, CardPageBackground, NewsEditorialRole } from "../../shared/cardCopy";
 
 export const CARD_W = 1080;
 export const CARD_H = 1350;
@@ -104,6 +104,7 @@ export type CardModel = {
     page: number;
     count: number;
     columns?: CardCopyColumn[];
+    resource?: CardCopyResource;
     sourceIds?: number[];
     background?: CardPageBackground;
   };

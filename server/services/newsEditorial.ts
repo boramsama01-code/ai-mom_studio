@@ -1,25 +1,17 @@
 import { z } from "zod";
 import { aiDiscussionCardCopySchema, cardCopySchema, cardCopyTemplateInstruction, type CardCopy } from "../../shared/cardCopy";
 import { aiWorkflowSchema, articleAnalysisSchema, type ArticleAnalysis } from "../../shared/articleAnalysis";
+import { resolveNewsEditorialResource, validateNewsEditorialActivity, validateNewsEditorialResource } from "../../shared/newsEditorialResource";
 import { callTool, draftCurrent, draftScience, validateArticleAnalysis, type AiProvider, type LlmBudget, type LlmResult, type LlmSource } from "./llm";
 
 type Selection = { provider: AiProvider; model: string };
-export const NEWS_EDITORIAL_PROMPT_VERSION = "news-discussion8-v1-attribution";
+export const NEWS_EDITORIAL_PROMPT_VERSION = "news-discussion8-v2-source-resources";
 const norm = (value: string) => value.normalize("NFC").replace(/\s+/g, " ").trim();
 const quoteData = (value: unknown) => JSON.stringify(value).replace(/</g, "‹").replace(/>/g, "›");
 const SOURCE_REQUIRED = "뉴스 원문을 먼저 확보하거나 본문을 붙여넣어 주세요. 제목이나 RSS 요약만으로 8장 뉴스를 만들지 않습니다.";
 const UNKNOWN_SUMMARY_MODEL = "저장된 기사 분석의 AI 모델 기록이 없습니다. 새로 분석하면 이번 모델을 기록합니다.";
 const INCOMPLETE_COPY_WARNING = "기사 요약은 저장했습니다. 카드 문구는 완성하지 못했습니다:";
 const hasArticleText = (sources: LlmSource[]) => sources.some(source => source.text.trim().length >= 100);
-const unsupportedResource = /(?:논문|과학관|박물관|전시회|학술지|DOI|arxiv)/i;
-
-function recommendsUnverifiedResource(text: string) {
-  // Generic research instructions do not assert a particular paper or venue exists.
-  // Keep this narrow: named titles, journals, locations, DOIs and links need a future
-  // structured, independently verified resource contract, not keyword co-occurrence.
-  const genericResearchTask = /(?:이|기사의)\s*(?:핵심\s*)?(?:개념|주제)(?:을|를)\s*(?:다룬|다루는|설명한)\s*논문/g;
-  return unsupportedResource.test(text.replace(genericResearchTask, "관련 자료"));
-}
 
 function unverifiedUrl(text: string, sources: LlmSource[]) {
   const urls = text.match(/https?:\/\/[^\s<>"')]+/g) ?? [];
@@ -47,10 +39,14 @@ export function validateNewsCardCopy(copy: CardCopy, sources: LlmSource[], analy
     seen.add(combined);
     const text = `${page.title}\n${page.subtitle}\n${page.body}\n${page.columns?.map(column => `${column.title}\n${column.body}`).join("\n") ?? ""}`;
     if (unverifiedUrl(text, sources)) return "원문에서 확인되지 않은 링크가 포함돼 적용하지 않았습니다.";
-    if (page.role === "activity" && recommendsUnverifiedResource(text)) {
-      // A keyword elsewhere in a source does not verify a named paper, venue, or its availability.
-      // Until a verified-resource contract exists, generated activities stay self-contained.
-      return "추가 활동의 외부 자료·방문 장소를 검증하는 기능이 아직 없습니다. 원문 다시 읽기·근거 표시·집에서 하는 관찰·비교 활동으로 제안해 주세요.";
+    if (page.resource) {
+      if (page.role !== "activity") return "참고자료는 추가 활동 카드에서만 사용할 수 있습니다.";
+      const resourceError = validateNewsEditorialResource(page.resource, sources);
+      if (resourceError) return resourceError;
+    }
+    if (page.role === "activity") {
+      const activityError = validateNewsEditorialActivity(text, page.resource, sources);
+      if (activityError) return activityError;
     }
     if (page.role === "summary") {
       if (!page.sourceIds?.length) return "뉴스 요약의 출처가 빠져 있어 적용하지 않았습니다. 제공된 원문 ID를 연결해 주세요.";
@@ -80,6 +76,7 @@ export async function generateNewsCardCopy(args: {
     if (error) return { ok: false, kind: "parse", error };
   }
   const existing = cardCopySchema.safeParse(args.payload.cardCopy);
+  const availableResources = args.sources.map(source => resolveNewsEditorialResource(source.source_id, args.sources)).filter(resource => resource !== null);
   const schema = aiDiscussionCardCopySchema.refine(copy => copy.templateKey === args.templateKey, "선택한 디자인으로 작성해 주세요.");
   const { $schema: _schema, ...inputSchema } = z.toJSONSchema(schema, { unrepresentable: "any" });
   const result = await callTool({
@@ -95,17 +92,26 @@ ${cardCopyTemplateInstruction(args.templateKey, "discussion8")}
 - 4장은 집·학교에서 상상할 수 있는 구체 상황과 열린 질문 하나. '어떻게 생각하나요?'만으로 끝내지 않는다.
 - 5장은 같은 확인된 사실을 바라보는 두 기준을 각 columns에 쓴다. 찬성/반대 양을 억지로 맞추거나 거짓 주장에 같은 무게를 주지 않는다. 각 관점의 이유를 짧게 포함한다.
 - 6장은 기사 핵심 개념의 다른 정의 예시를 두 columns에 쓰고, body는 '나는 ___을 ___라고 생각한다. 이유는 ___.'처럼 독자의 기준을 완성하게 한다. 사전 정의를 강요하지 않는다.
-- 7장은 5~15분에 실행할 구체 행동과 남길 결과물을 제안한다. 현재 외부 자료·방문 장소의 검증 기능은 없으므로 특정 논문 제목·전시·과학관·학술지·DOI 추천은 하지 않는다. 원문 다시 읽기와 주장/근거 표시, 가족의 기준 비교, 집에서 하는 안전한 관찰 같은 자체 활동을 우선한다. '이 개념을 다룬 논문에서 실험 조건을 찾아보세요' 같은 일반 탐색 지시는 가능하되 실제 자원을 찾았다고 주장하지 않는다. 외부 조회나 자원 검증을 했다고 주장하지 않는다.
+- 7장은 5~15분에 실행할 구체 행동과 남길 결과물을 제안한다. availableResources에서 확보한 원문 하나를 참고자료로 선택하려면 activity에 resourceSourceId만 넣는다. 제목·URL·resource 객체를 만들지 않는다. 서버가 원문의 실제 제목과 주소를 별도 참고자료 영역에 표시한다. 원문 자체를 다시 읽는 활동도 가능하다.
+- 논문·전시·과학관이 실제 선택한 원문에 소개돼 있을 때 그 자료와 연결한 비교·관찰 활동을 제안할 수 있다. 자료 이름은 참고자료 영역에 표시되므로 카드 본문에는 '이 자료에서 실험 조건을 찾아 비교표를 만드세요'처럼 행동을 간결하게 쓴다. 구체 이름을 쓰면 선택한 원문에 정확히 있는 이름만 쓴다. 원문이 참고자료를 설명한다는 사실과 논문의 타당성·기관의 운영 시간·현재 방문 가능 여부를 검증했다는 주장을 구분한다. 방문 전 공식 안내 확인을 제안하고 운영 시간·비용·예약 조건은 새로 만들지 않는다.
+- 적절한 참고자료가 없으면 원문에서 주장/근거 표시, 가족의 기준 비교, 집에서 하는 안전한 관찰을 쓴다. '이 개념을 다룬 논문에서 실험 조건을 찾아보세요' 같은 일반 탐색 지시는 가능하되 실제 자료를 찾아 검증했다고 주장하지 않는다. 추가 웹 검색을 했다고 주장하지 않는다.
 - 8장은 채널 이름과 짧은 브랜드 문장, 저장/팔로우 중 핵심 행동 하나로 닫는다. 홍보 문구를 나열하지 않는다.
 - 제목과 본문을 같은 문장으로 반복하지 않는다. 한 장은 한 가지 메시지다. sourceIds에는 제공된 원문 ID만 넣는다.
 - 그림은 다른 기능에서 생성한다. background, assetId, 이미지URL은 반환하지 않는다.`,
-    user: quoteData({ channel: args.channelName ?? "Alligodang", title: args.title, editorialInstruction: args.instructions ?? "기사에 충실한 8장 뉴스 대화를 구성해 주세요.", selectedPage: args.selectedPage ?? null, articleAnalysis: parsedAnalysis.success ? parsedAnalysis.data : null, savedFacts: Object.fromEntries(Object.entries(args.payload).filter(([key]) => key !== "cardCopy")), existingCopy: existing.success ? existing.data : null, sources: args.sources.map(source => ({ source_id: source.source_id, title: source.title, published: source.published, text: source.text.slice(0, 14000) })) }),
+    user: quoteData({ channel: args.channelName ?? "Alligodang", title: args.title, editorialInstruction: args.instructions ?? "기사에 충실한 8장 뉴스 대화를 구성해 주세요.", selectedPage: args.selectedPage ?? null, articleAnalysis: parsedAnalysis.success ? parsedAnalysis.data : null, savedFacts: Object.fromEntries(Object.entries(args.payload).filter(([key]) => key !== "cardCopy")), existingCopy: existing.success ? existing.data : null, availableResources, sources: args.sources.map(source => ({ source_id: source.source_id, title: source.title, url: source.url, published: source.published, text: source.text.slice(0, 14000) })) }),
     toolName: "submit_news_cards", toolDescription: "표지와 7개 고정 역할을 가진 8장 뉴스 대화 카드 문구. 실제 게시·저장 없음.", inputSchema, zod: schema,
   });
   if (!result.ok) return result;
-  const error = validateNewsCardCopy(result.data, args.sources, parsedAnalysis.success ? parsedAnalysis.data : undefined);
+  const pages = [];
+  for (const { resourceSourceId, ...page } of result.data.pages) {
+    if (resourceSourceId === undefined) { pages.push(page); continue; }
+    const resource = resolveNewsEditorialResource(resourceSourceId, args.sources);
+    if (!resource) return { ok: false, kind: "parse", error: "선택한 추가 활동 참고자료를 확보한 원문에서 확인할 수 없습니다. 제공된 자료 ID만 사용해 주세요.", usage: result.usage };
+    pages.push({ ...page, resource, sourceIds: [...new Set([...(page.sourceIds ?? []), resource.sourceId])] });
+  }
+  const copy = cardCopySchema.parse({ ...result.data, pages });
+  const error = validateNewsCardCopy(copy, args.sources, parsedAnalysis.success ? parsedAnalysis.data : undefined);
   if (error) return { ok: false, kind: "parse", error, usage: result.usage };
-  const copy: CardCopy = result.data;
   // A wording proposal cannot erase art already selected by the operator.
   if (existing.success) {
     if (existing.data.cover.background) copy.cover.background = existing.data.cover.background;

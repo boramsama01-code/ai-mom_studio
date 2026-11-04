@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { cardDesign } from "./cardDesigns";
 import { discussionCardCopyInstruction, NEWS_EDITORIAL_AI_LIMITS, NEWS_EDITORIAL_BODY_LIMITS, NEWS_EDITORIAL_ROLES } from "./newsEditorial";
+import { newsEditorialResourceSchema } from "./newsEditorialResource";
 export { discussionCardCopyInstruction, NEWS_EDITORIAL_AI_LIMITS, NEWS_EDITORIAL_LABELS, NEWS_EDITORIAL_ROLES } from "./newsEditorial";
 export type { NewsEditorialRole } from "./newsEditorial";
 
@@ -23,11 +24,13 @@ export const cardPageBackgroundSchema = z.object({
 export type CardPageBackground = z.infer<typeof cardPageBackgroundSchema>;
 const manualColumnSchema = z.object({ title: copyText(120, true), body: copyText(1000, true) });
 export type CardCopyColumn = z.infer<typeof manualColumnSchema>;
+export type CardCopyResource = z.infer<typeof newsEditorialResourceSchema>;
 const editorialPageFields = {
   role: z.enum(NEWS_EDITORIAL_ROLES).optional(),
   columns: z.array(manualColumnSchema).length(2).optional(),
   sourceIds: z.array(z.number().int().positive()).max(12).optional(),
   background: cardPageBackgroundSchema.optional(),
+  resource: newsEditorialResourceSchema.optional(),
 };
 const copyShape = (limits: typeof CARD_COPY_MANUAL_LIMITS | typeof CARD_COPY_AI_LIMITS) => ({
   version: z.literal(1),
@@ -51,6 +54,7 @@ export const cardCopySchema = z.object(copyShape(CARD_COPY_MANUAL_LIMITS))
       copy.pages.forEach((page, index) => {
         if (page.role || page.columns) ctx.addIssue({ code: "custom", path: ["pages", index], message: "역할과 두 칸 구성은 8장 대화형 카드에서 사용하세요." });
         if (page.background) ctx.addIssue({ code: "custom", path: ["pages", index, "background"], message: "페이지별 배경은 8장 대화형 카드로 전환한 뒤 선택해 주세요." });
+        if (page.resource) ctx.addIssue({ code: "custom", path: ["pages", index, "resource"], message: "활동 참고자료는 8장 대화형 카드에서 사용하세요." });
       });
       return;
     }
@@ -59,6 +63,7 @@ export const cardCopySchema = z.object(copyShape(CARD_COPY_MANUAL_LIMITS))
       if (page.id !== `body-${index + 1}` || page.role !== NEWS_EDITORIAL_ROLES[index]) ctx.addIssue({ code: "custom", path: ["pages", index, "role"], message: "뉴스 요약부터 닫는 표지까지 순서를 유지해 주세요." });
       if (page.role === "perspectives" && !page.columns) ctx.addIssue({ code: "custom", path: ["pages", index, "columns"], message: "두 가지 시선의 문구를 각각 입력해 주세요." });
       if (page.columns && page.role !== "perspectives" && page.role !== "concept") ctx.addIssue({ code: "custom", path: ["pages", index, "columns"], message: "두 칸 문구는 시선 비교와 개념 정의에서 사용하세요." });
+      if (page.resource && page.role !== "activity") ctx.addIssue({ code: "custom", path: ["pages", index, "resource"], message: "추가 참고자료는 활동 카드에서 사용하세요." });
     });
   });
 export type CardCopy = z.infer<typeof cardCopySchema>;
@@ -74,11 +79,13 @@ export const aiDiscussionCardCopySchema = z.object({
     title: copyText(NEWS_EDITORIAL_AI_LIMITS.title, true), subtitle: copyText(NEWS_EDITORIAL_AI_LIMITS.subtitle), body: copyText(NEWS_EDITORIAL_AI_LIMITS.body, true),
     columns: z.array(z.object({ title: copyText(NEWS_EDITORIAL_AI_LIMITS.columnTitle, true), body: copyText(NEWS_EDITORIAL_AI_LIMITS.columnBody, true) }).strict()).length(2).optional(),
     sourceIds: z.array(z.number().int().positive()).max(12).optional(),
+    resourceSourceId: z.number().int().positive().optional(),
   }).strict()).length(7),
 }).strict().superRefine((copy, ctx) => {
   copy.pages.forEach((page, index) => {
     if (page.id !== `body-${index + 1}` || page.role !== NEWS_EDITORIAL_ROLES[index]) ctx.addIssue({ code: "custom", path: ["pages", index, "role"], message: "8장 카드의 역할과 페이지 순서를 확인해 주세요." });
     if ((page.role === "perspectives" || page.role === "concept") !== !!page.columns) ctx.addIssue({ code: "custom", path: ["pages", index, "columns"], message: "시선 비교와 개념 정의에만 두 칸 문구가 필요합니다." });
+    if (page.resourceSourceId && page.role !== "activity") ctx.addIssue({ code: "custom", path: ["pages", index, "resourceSourceId"], message: "참고자료 ID는 활동 카드에서만 선택해 주세요." });
     const max = NEWS_EDITORIAL_BODY_LIMITS[page.role];
     if (max && codepoints(page.body) > max) ctx.addIssue({ code: "custom", path: ["pages", index, "body"], message: `이 카드의 본문은 ${max}자 이내로 작성해 주세요.` });
   });

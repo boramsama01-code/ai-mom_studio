@@ -55,7 +55,7 @@ export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan 
       ...base, title: page.title, subtitle: page.subtitle,
       badge: `${String(i + 2).padStart(2, "0")} / ${String(count).padStart(2, "0")}`,
       blocks: [{ field: `cardCopy.pages.${i}.body`, label: page.subtitle, text: page.body, maxLines: 30 }],
-      ...(copy.storyFormat === "discussion8" ? { editorial: { role: page.role!, page: i + 2, count, columns: page.columns, sourceIds: page.sourceIds, background: page.background } } : {}),
+      ...(copy.storyFormat === "discussion8" ? { editorial: { role: page.role!, page: i + 2, count, columns: page.columns, sourceIds: page.sourceIds, background: page.background, resource: page.resource } } : {}),
     }));
     // A saved card has a stable identity. Overflow is actionable; it never silently splits or clips edited copy.
     if (cover.editorial) checkEditorialCard(cover, style);

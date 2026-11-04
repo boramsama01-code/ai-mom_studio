@@ -3,12 +3,13 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { login, naverResponse, resetDb, setTestEnv } from "./helpers";
-import { cardCopyFixture } from "./fixtures/cardCopy";
+import { discussionCardCopyFixture } from "./fixtures/discussionCardCopy";
 
 setTestEnv();
 
 const fakeCurate = vi.fn();
 const fakeScience = vi.fn();
+const fakeNewsCopy = vi.fn();
 const fakeReview = vi.fn();
 vi.mock("../server/services/telegram", async (orig) => {
   const mod = await orig<typeof import("../server/services/telegram")>();
@@ -18,6 +19,7 @@ vi.mock("../server/services/llm", async (orig) => {
   const mod = await orig<typeof import("../server/services/llm")>();
   return { ...mod, curateIssues: (...a: unknown[]) => fakeCurate(...a), draftScience: (...a: unknown[]) => fakeScience(...a) };
 });
+vi.mock("../server/services/newsEditorial", async original => ({ ...await original<object>(), generateNewsCardCopy: (...args: unknown[]) => fakeNewsCopy(...args) }));
 
 const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
@@ -25,6 +27,7 @@ const { runCollect } = await import("../server/worker/collect");
 const { clusterArticles, rankClusters, toArticle, tokenize, outletOf, blockedReason } = await import("../server/services/discover");
 const { mapNaverItem } = await import("../server/services/naver");
 const { __resetNaverProviderForTest } = await import("../server/services/naver");
+const { env } = await import("../server/env");
 const schema = await import("../shared/schema");
 const { eq } = await import("drizzle-orm");
 
@@ -146,7 +149,7 @@ describe("수집 실행 안의 자동 발굴", () => {
     expect(r.counts.discoveryPicked).toBe(0);
   });
 
-  it("Claude 연결 시: 선정 이유·질문 저장, 초안 자동 생성", async () => {
+  it("화제 선정 뒤 채널의 Gemini 요약·OpenAI 카드 문구를 별도 생성하고 호출 예산을 공유한다", async () => {
     // 앞 테스트에서 저장한 과학 채널 항목 지우기(세션 테이블은 유지)
     const { getPool } = await import("../server/db");
     await getPool().query(`delete from studio_revisions where card_id in (select id from studio_cards where source_item_id in (select id from content_items where channel_id = ${SCIENCE}));
@@ -154,22 +157,31 @@ describe("수집 실행 안의 자동 발굴", () => {
       delete from content_sources where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_revisions where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_items where channel_id = ${SCIENCE};`);
-    process.env.ANTHROPIC_API_KEY = "k";
-    process.env.ANTHROPIC_MODEL = "m";
-    process.env.AUTO_GENERATE = "true";
+    vi.stubEnv("AI_PROVIDER", "anthropic"); vi.stubEnv("ANTHROPIC_API_KEY", "curator-fixture-key"); vi.stubEnv("ANTHROPIC_MODEL", "claude-curator-fixture");
+    vi.stubEnv("GEMINI_API_KEY", "summary-fixture-key"); vi.stubEnv("OPENAI_API_KEY", "copy-fixture-key"); vi.stubEnv("AUTO_GENERATE", "true");
+    fakeCurate.mockClear(); fakeScience.mockClear(); fakeNewsCopy.mockClear();
     fakeCurate.mockImplementation(async (args: { candidates: Array<{ id: number; titles: string[] }>; budget: { take(): boolean } }) => {
       args.budget.take();
       const fossil = args.candidates.find((c) => c.titles[0].includes("공룡"))!;
-      return { ok: true, model: "m", usage: { inputTokens: 100, outputTokens: 50 }, droppedEvidence: 0, data: { picks: [{ candidate_id: fossil.id, reason: "화석으로 과거를 추론하는 과정을 이야기하기 좋음", angle: "뼈 몇 조각으로 어떻게 새 종이라고 알 수 있을까?" }] } };
+      return { ok: true, model: "claude-curator-fixture", usage: { inputTokens: 100, outputTokens: 50 }, droppedEvidence: 0, data: { picks: [{ candidate_id: fossil.id, reason: "화석으로 과거를 추론하는 과정을 이야기하기 좋음", angle: "뼈 몇 조각으로 어떻게 새 종이라고 알 수 있을까?" }] } };
     });
-    fakeScience.mockImplementation(async (args: { budget: { take(): boolean; inputTokens: number; outputTokens: number } }) => {
+    fakeScience.mockImplementation(async (args: { model: string; sources: Array<{ source_id: number; text: string }>; budget: { take(): boolean; inputTokens: number; outputTokens: number } }) => {
       if (!args.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달" };
       args.budget.inputTokens += 1000;
       args.budget.outputTokens += 500;
       return {
-      ok: true, model: "m", usage: { inputTokens: 1000, outputTokens: 500 }, droppedEvidence: 0,
-      data: { topic: "공룡 화석", age_band: "중1~3", key_question: "뼈 몇 조각으로 새 종을 알 수 있을까?", background: ["a", "b", "c"], discussion_questions: ["1", "2", "3"], scientific_basis: "x", misconceptions: [], parent_hints: [], safe_activity: null, sources: [], evidence: [], cardCopy: cardCopyFixture() },
+      ok: true, model: args.model, usage: { inputTokens: 1000, outputTokens: 500 }, droppedEvidence: 0,
+      data: { topic: "공룡 화석", age_band: "중1~3", key_question: "뼈 몇 조각으로 새 종을 알 수 있을까?", background: ["a", "b", "c"], discussion_questions: ["1", "2", "3"], scientific_basis: "x", misconceptions: [], parent_hints: [], safe_activity: null, sources: [], evidence: [], articleAnalysis: {
+        version: 1, articleType: "report", centralEvent: "새 화석의 발견을 다룬 보도입니다.",
+        claims: [{ id: "claim-1", kind: "reported_fact", statement: "기사가 화석 연구를 다룹니다.", speaker: null, source_id: args.sources[0].source_id, quote: args.sources[0].text.slice(0, 80) }],
+        limitations: ["확보한 기사 범위에서 검토했습니다."], keyConcepts: [{ term: "종", meaning: "분류의 기준을 검토할 개념" }],
+      } },
       };
+    });
+    fakeNewsCopy.mockImplementation(async (args: { model: string; budget: { take(): boolean; inputTokens: number; outputTokens: number } }) => {
+      if (!args.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달" };
+      args.budget.inputTokens += 800; args.budget.outputTokens += 400;
+      return { ok: true, data: discussionCardCopyFixture(), model: args.model, usage: { inputTokens: 800, outputTokens: 400 }, droppedEvidence: 0 };
     });
     try {
       const db = getDb();
@@ -177,6 +189,11 @@ describe("수집 실행 안의 자동 발굴", () => {
       expect(fakeCurate).toHaveBeenCalledOnce();
       expect(r.counts.discoveryPicked).toBe(1);
       expect(r.counts.drafted).toBe(1);
+      expect(fakeScience).toHaveBeenCalledOnce();
+      expect(fakeScience.mock.calls[0][0]).toMatchObject({ provider: "gemini", model: env.geminiModel, analyzeSource: true });
+      expect(fakeNewsCopy).toHaveBeenCalledOnce();
+      expect(fakeNewsCopy.mock.calls[0][0]).toMatchObject({ provider: "openai", model: env.openaiModel });
+      expect(fakeNewsCopy.mock.calls[0][0].budget).toBe(fakeScience.mock.calls[0][0].budget);
       const [item] = await db.select().from(schema.contentItems).where(eq(schema.contentItems.channelId, SCIENCE));
       expect(item.discovery).toMatchObject({ pickedBy: "claude", angle: "뼈 몇 조각으로 어떻게 새 종이라고 알 수 있을까?" });
       expect(item.currentRevisionId).not.toBeNull();
@@ -184,11 +201,14 @@ describe("수집 실행 안의 자동 발굴", () => {
       expect(item.title).toBe("뼈 몇 조각으로 새 종을 알 수 있을까?");
       expect((item.discovery as { headline: string }).headline).toContain("공룡");
       const [run] = await db.select().from(schema.runs).where(eq(schema.runs.id, r.runId));
-      expect(run.llmUsage).toMatchObject({ calls: 2 });
+      expect(run.llmUsage).toMatchObject({ calls: 3 }); // curation + summary + card copy share one allowance.
+      expect((run.snapshot as any).ai).toEqual({ summary: { provider: "gemini", model: env.geminiModel }, copy: { provider: "openai", model: env.openaiModel } });
+      const [revision] = await db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, item.currentRevisionId!));
+      expect(revision.payload.cardCopy).toEqual(discussionCardCopyFixture());
+      expect(revision.payload.articleAnalysis).toMatchObject({ articleType: "report" });
+      expect(revision.payload.aiWorkflow).toMatchObject({ summary: { provider: "gemini" }, copy: { provider: "openai" }, warnings: [] });
     } finally {
-      delete process.env.ANTHROPIC_API_KEY;
-      delete process.env.ANTHROPIC_MODEL;
-      process.env.AUTO_GENERATE = "false";
+      vi.unstubAllEnvs();
     }
   });
 
@@ -203,13 +223,14 @@ describe("수집 실행 안의 자동 발굴", () => {
     vi.stubEnv("AUTO_GENERATE", String(collectionOnly));
     vi.stubEnv("COLLECT_REVIEW_NOTIFICATIONS", String(collectionOnly));
     vi.stubEnv("TELEGRAM_REVIEW_CHAT_ID", "configured-test-destination");
-    fakeCurate.mockClear(); fakeScience.mockClear(); fakeReview.mockClear();
+    fakeCurate.mockClear(); fakeScience.mockClear(); fakeNewsCopy.mockClear(); fakeReview.mockClear();
     try {
       const r = await runCollect(getDb(), SCIENCE, { trigger: "schedule", now: NOW, naverFetch, fetchSource: okFetch, collectionOnly });
       expect(r.counts.discoveryPicked).toBe(2);
       expect(r.counts.draftSkippedAutoGenerateOff).toBe(2);
       expect(fakeCurate).not.toHaveBeenCalled();
       expect(fakeScience).not.toHaveBeenCalled();
+      expect(fakeNewsCopy).not.toHaveBeenCalled();
       expect(fakeReview).not.toHaveBeenCalled();
       const [run] = await getDb().select().from(schema.runs).where(eq(schema.runs.id, r.runId));
       expect(run.llmUsage).toMatchObject({ calls: 0 });

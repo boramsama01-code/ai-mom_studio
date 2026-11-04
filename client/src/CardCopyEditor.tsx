@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import { cardCopyLimits, cardCopySchema, cardPageBackgroundSchema, NEWS_EDITORIAL_LABELS, NEWS_EDITORIAL_ROLES, type CardCopy, type CardPageBackground } from "@shared/cardCopy";
 import type { AiSelection } from "@shared/channelAi";
+import { newsEditorialResourceSchema } from "@shared/newsEditorialResource";
 import { api, apiBlob, ApiError } from "./api";
 import { useDirtyGuard } from "./state";
 import { ErrorBox, GuardedLink, Loading } from "./ui";
@@ -37,13 +38,13 @@ const chars = (text: string) => [...text].length;
 const copyText = (copy: CardCopy) => [
   `템플릿: ${cardCopyLimits(copy.templateKey, copy.storyFormat).templateName} (${copy.templateKey})`,
   `표지\n${copy.cover.title}\n${copy.cover.subtitle}`,
-  ...copy.pages.map((page, i) => `${page.role ? `${i + 2}페이지 · ${NEWS_EDITORIAL_LABELS[page.role]}` : `${i + 1}번째 본문`}\n${page.title}\n${page.subtitle}\n${page.body}${page.columns ? `\n${page.columns.map(col => `${col.title}\n${col.body}`).join("\n\n")}` : ""}${page.background ? `\n배경 이미지 #${page.background.assetId}` : ""}`),
+  ...copy.pages.map((page, i) => `${page.role ? `${i + 2}페이지 · ${NEWS_EDITORIAL_LABELS[page.role]}` : `${i + 1}번째 본문`}\n${page.title}\n${page.subtitle}\n${page.body}${page.columns ? `\n${page.columns.map(col => `${col.title}\n${col.body}`).join("\n\n")}` : ""}${page.resource ? `\n함께 볼 자료: ${page.resource.title}\n${page.resource.url}` : ""}${page.background ? `\n배경 이미지 #${page.background.assetId}` : ""}`),
 ].join("\n\n");
 // Checkpoint incomplete edits too. Save-time nonempty/length checks remain in cardCopySchema.
 const recoveryCopySchema = z.object({
   version: z.literal(1), templateKey: z.string(), storyFormat: z.literal("discussion8").optional(),
   cover: z.object({ title: z.string(), subtitle: z.string(), background: cardPageBackgroundSchema.optional() }),
-  pages: z.array(z.object({ id: z.string(), title: z.string(), subtitle: z.string(), body: z.string(), role: z.enum(NEWS_EDITORIAL_ROLES).optional(), columns: z.array(z.object({ title: z.string(), body: z.string() })).length(2).optional(), sourceIds: z.array(z.number().int().positive()).max(12).optional(), background: cardPageBackgroundSchema.optional() })).min(1).max(9),
+  pages: z.array(z.object({ id: z.string(), title: z.string(), subtitle: z.string(), body: z.string(), role: z.enum(NEWS_EDITORIAL_ROLES).optional(), columns: z.array(z.object({ title: z.string(), body: z.string() })).length(2).optional(), sourceIds: z.array(z.number().int().positive()).max(12).optional(), resource: newsEditorialResourceSchema.optional(), background: cardPageBackgroundSchema.optional() })).min(1).max(9),
 });
 const parseRecoveryCopy = (value: unknown): CardCopy | null => { const parsed = recoveryCopySchema.safeParse(value); return parsed.success ? parsed.data : null; };
 
@@ -279,6 +280,7 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
         {bodyText !== null && <label className="field" htmlFor={`${uid}-body`}><span className="row between"><strong>카드 본문</strong><span className="hint">{chars(bodyText)}자 · {limits.recommended.body}자 권장</span></span><textarea ref={bodyRef} id={`${uid}-body`} rows={6} value={bodyText} disabled={busy} aria-invalid={!!issue("body")} aria-describedby={`${uid}-body-help`} onChange={event => update("body", event.target.value)} /><span id={`${uid}-body-help`} className={issue("body") ? "card-copy-error" : "hint"}>{issue("body") ?? (chars(bodyText) > limits.recommended.body ? `${limits.recommended.body}자를 넘었습니다. 글자가 잘리지 않도록 미리보기와 저장 안내를 확인해 주세요. 입력한 내용은 자동으로 자르지 않습니다.` : "이미지 안에 들어가는 본문입니다. 캡션·대체텍스트와 별도로 저장합니다.")}</span></label>}
         {editorialPage?.columns && <fieldset className="card-copy-columns"><legend>{editorialPage.role === "concept" ? "서로 다른 정의의 예시" : "두 가지 시선"}</legend>{editorialPage.columns.map((column, index) => <div className="stack" key={index}><label className="field">{index + 1}번 칸 제목<input id={`${uid}-column-${index}-title`} value={column.title} disabled={busy} onChange={event => updateColumn(index, "title", event.target.value)} /></label><label className="field">{index + 1}번 칸 설명<textarea id={`${uid}-column-${index}-body`} rows={4} value={column.body} disabled={busy} onChange={event => updateColumn(index, "body", event.target.value)} /><span className="hint">{chars(column.body)}자 · 100자 권장</span></label></div>)}</fieldset>}
         {copy.storyFormat === "discussion8" && <PageBackgroundEditor key={`${channelId}:${itemId}`} channelId={channelId} itemId={itemId} pageIndex={pageIndex} background={page.background} disabled={busy || saving || conflictLoading || !!conflicting || invalid} showAi={showAi} imageReady={!!status.data?.image} imageModel={base.ai?.image.model} save={saveNow} onApply={applyBackground} onChange={next => setBackground(pageIndex, next)} onBusyChange={setBackgroundBusy} />}
+        {editorialPage?.resource && <div className="notice small stack"><strong>함께 볼 자료 · 확보한 원문</strong><a href={editorialPage.resource.url} target="_blank" rel="noreferrer">{editorialPage.resource.title}</a><p className="hint">이 콘텐츠에 연결된 자료의 실제 제목과 주소입니다. 방문 일정·이용 조건은 원문에서 확인하세요.</p><button className="btn ghost sm" disabled={busy} onClick={() => put({ ...copy, pages: copy.pages.map((p, i) => i === pageIndex - 1 ? { ...p, resource: undefined } : p) })}>이 참고자료 빼기</button></div>}
       </div>
     </div>
     {invalid && <p className="notice warn small" role="alert">제목과 본문은 비울 수 없습니다. 제목·부제·본문의 글자 수 안내를 확인한 뒤 저장해 주세요. 입력한 내용은 그대로 유지됩니다.</p>}

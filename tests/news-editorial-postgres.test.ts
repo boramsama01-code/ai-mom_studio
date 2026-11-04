@@ -2,9 +2,10 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { channels, contentItems, contentRevisions, jobs, sourceDocuments } from "../shared/schema";
+import { channels, contentItems, contentRevisions, jobs, mediaAssets, sourceDocuments } from "../shared/schema";
 import { emptyPayload } from "../shared/payloads";
 import { defaultChannelAiSettings } from "../shared/channelAi";
+import { resolveNewsEditorialResource } from "../shared/newsEditorialResource";
 import { login, resetDb, setTestEnv } from "./helpers";
 import { editorialAnalysis, editorialCopy, editorialSource, editorialSummary, geminiEditorialResponse, openaiEditorialResponse } from "./fixtures/newsEditorial";
 
@@ -115,5 +116,33 @@ describe("two-stage news generation and partial recovery on PostgreSQL", () => {
     expect(saved.item.version).toBe(f.item.version); expect(saved.revision).toEqual(f.originalRevision);
     const again = await f.agent.post(`${f.endpoint}/generate`).set(f.headers).send(body);
     expect(again.status).toBe(409); expect(again.body.jobStatus).toBe("failed"); expect(outbound).toHaveBeenCalledOnce();
+  });
+
+  it("saves a canonical reference from this item's actually fetched primary source without calling AI", async () => {
+    const f = await fixture(true), copy = editorialCopy(f.doc.id);
+    copy.pages[5].resource = resolveNewsEditorialResource(f.doc.id, [{ source_id: f.doc.id, title: f.doc.title, url: f.doc.originalUrl, text: f.doc.fetchedText! }])!;
+    const saved = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send({ version: f.item.version, copy });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect((await latest(f.item.id)).revision.payload.cardCopy).toEqual(copy);
+    expect(outbound).not.toHaveBeenCalled();
+  });
+
+  it.each(["another item's source", "forged title", "forged URL"])("refuses %s in card save, preview and final rendering", async alteration => {
+    const f = await fixture(true), other = await fixture(true), copy = editorialCopy(f.doc.id);
+    const canonical = resolveNewsEditorialResource(f.doc.id, [{ source_id: f.doc.id, title: f.doc.title, url: f.doc.originalUrl, text: f.doc.fetchedText! }])!;
+    copy.pages[5].resource = alteration === "another item's source"
+      ? { sourceId: other.doc.id, title: other.doc.title, url: other.doc.originalUrl }
+      : { ...canonical, ...(alteration === "forged title" ? { title: "존재하지 않는 논문 제목" } : { url: "https://invented.test/false-resource" }) };
+    const saved = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send({ version: f.item.version, copy });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(409); expect(saved.body.error).toContain("참고자료");
+    const preview = await f.agent.post(`${f.endpoint}/card-copy/preview`).set(f.headers).send({ version: f.item.version, copy, page: 6, coverMode: "typography" });
+    expect(preview.status, JSON.stringify(preview.body)).toBe(409); expect(preview.body.error).toContain("참고자료");
+    expect((await latest(f.item.id)).revision.id).toBe(f.originalRevision.id);
+    // Simulate a legacy/tampered stored revision: rendering must independently recheck ownership.
+    await getDb().transaction(async tx => createRevision(tx, { contentItemId: f.item.id, author: "operator", payload: { ...f.payload, cardCopy: copy } }));
+    const render = await f.agent.post(`${f.endpoint}/card`).set(f.headers).send({ version: f.item.version, coverMode: "typography" });
+    expect(render.status, JSON.stringify(render.body)).toBe(422); expect(render.body.error).toContain("참고자료");
+    expect(await getDb().select().from(mediaAssets).where(eq(mediaAssets.contentItemId, f.item.id))).toHaveLength(0);
+    expect(outbound).not.toHaveBeenCalled();
   });
 });

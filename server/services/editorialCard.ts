@@ -147,6 +147,19 @@ export function layoutEditorialCard(model: CardModel, style: CardStyle, options:
       line(486, 485, 108, p.accent, 1, 6);
       centered(body, 540, 433, { field: bodyField, size: meta.role === "implication" ? 78 : 70, min: 44, weight: "bold", maxLines: 7, leading: 1.3 }, 860);
       subtitle(1031, 132, 32, 27);
+    } else if (meta.role === "activity" && meta.resource) {
+      centered(model.title, 292, 168, { field: titleField, size: 60, min: 40, weight: "bold", maxLines: 3, leading: 1.24 }, 872);
+      subtitle(469, 84, 30, 26);
+      line(489, 585, 102, p.accent, 1, 6);
+      centered(body, 623, 294, { field: bodyField, size: 45, min: 32, maxLines: 7, leading: 1.38 }, 864);
+      rect(68, 931, 944, 245, p.panel, 22);
+      const resourceInk = readable(p.panel, p.ink), resourceField = `cardCopy.pages.${meta.page - 2}.resource`;
+      centered("함께 볼 자료", 941, 30, { field: `${resourceField}.label`, size: 22, weight: "semibold", color: resourceInk, maxLines: 1 });
+      centered(meta.resource.title, 977, 125, { field: `${resourceField}.title`, size: 28, min: 18, weight: "semibold", color: resourceInk, maxLines: 5, leading: 1.3 }, 860);
+      // The canonical URL remains clickable in the editor. Render only its host
+      // here: copying or visually shortening a long URL would be misleading.
+      const host = new URL(meta.resource.url).hostname.replace(/^www\./, "");
+      centered(host, 1107, 64, { field: `${resourceField}.host`, size: 21, min: 16, color: resourceInk, maxLines: 3, leading: 1.25 }, 860);
     } else {
       centered(model.title, 302, 212, { field: titleField, size: 65, min: 42, weight: "bold", maxLines: 3, leading: 1.24 }, 872);
       subtitle(535, 107, 32, 27);

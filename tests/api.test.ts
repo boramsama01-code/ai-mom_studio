@@ -8,11 +8,12 @@ import { cardCopyFixture } from "./fixtures/cardCopy";
 
 setTestEnv();
 
-// Claude 호출은 가짜 추출 결과로 대체(키 없이 흐름 검증)
+// The summary and copy roles are mocked independently; no provider is called.
 const fakeExtract = vi.fn();
+const fakeCopy = vi.fn();
 vi.mock("../server/services/llm", async (orig) => {
   const mod = await orig<typeof import("../server/services/llm")>();
-  return { ...mod, extractNotice: (...a: unknown[]) => fakeExtract(...a) };
+  return { ...mod, extractNotice: (...a: unknown[]) => fakeExtract(...a), generateCardCopy: (...a: unknown[]) => fakeCopy(...a) };
 });
 
 const { createApp } = await import("../server/app");
@@ -21,6 +22,7 @@ const { runCollect, extractForItem } = await import("../server/worker/collect");
 const { publishDue, renderCardForItem } = await import("../server/worker/publish");
 const { enqueueJob, claimJob, recoverExpired } = await import("../server/worker/queue");
 const { LlmBudget } = await import("../server/services/llm");
+const { env } = await import("../server/env");
 const schema = await import("../shared/schema");
 const { eq, sql } = await import("drizzle-orm");
 
@@ -60,6 +62,7 @@ afterAll(async () => {
 });
 beforeEach(() => {
   fakeExtract.mockReset();
+  fakeCopy.mockReset().mockResolvedValue({ ok: true, data: cardCopyFixture(), model: "gpt-copy-fixture", usage: { inputTokens: 6, outputTokens: 4 }, droppedEvidence: 0 });
   vi.unstubAllGlobals();
 });
 
@@ -207,16 +210,20 @@ describe("공식 게시판 수집", () => {
 
 describe("추출·운영자 편집 보존·채널 격리", () => {
   it("운영자 편집본은 재추출로 덮어쓰지 않고, 일정 변경은 재검토로", async () => {
-    process.env.ANTHROPIC_API_KEY = "k";
-    process.env.ANTHROPIC_MODEL = "m";
     const db = getDb();
     const [item] = await db.select().from(schema.contentItems).where(sql`${schema.contentItems.excluded} = false and ${schema.contentItems.channelId} = 1`).limit(1);
-    fakeExtract.mockResolvedValueOnce({ ok: true, data: { ...payload(), cardCopy: cardCopyFixture() }, model: "fake", usage: { inputTokens: 10, outputTokens: 5 }, droppedEvidence: 0 });
+    fakeExtract.mockResolvedValueOnce({ ok: true, data: payload(), model: "gemini-summary-fixture", usage: { inputTokens: 10, outputTokens: 5 }, droppedEvidence: 0 });
     const r = await extractForItem(db, item.id, new LlmBudget(2), NOW);
     expect(r.ok).toBe(true);
     let [cur] = await db.select().from(schema.contentItems).where(eq(schema.contentItems.id, item.id));
     expect(cur.scheduleStatus).toBe("upcoming");
     expect(cur.evidenceStatus).toBe("secondary_only");
+    expect(fakeExtract.mock.calls[0][0]).toMatchObject({ provider: "gemini", model: env.geminiModel });
+    expect(fakeCopy).toHaveBeenCalledOnce();
+    expect(fakeCopy.mock.calls[0][0]).toMatchObject({ provider: "openai", model: env.openaiModel });
+    const [generated] = await db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, cur.currentRevisionId!));
+    expect(generated.payload.cardCopy).toEqual(cardCopyFixture());
+    expect(generated.payload.aiWorkflow).toMatchObject({ summary: { provider: "gemini", model: "gemini-summary-fixture" }, copy: { provider: "openai", model: "gpt-copy-fixture" }, warnings: [] });
 
     const { agent, csrf } = await login(app);
     const H = { "x-csrf-token": csrf };
@@ -224,14 +231,15 @@ describe("추출·운영자 편집 보존·채널 격리", () => {
     expect(edited.status).toBe(200);
     await agent.post(`/api/channels/1/items/${item.id}/review`).set(H).send({ version: edited.body.version, status: "reviewed" });
 
-    fakeExtract.mockResolvedValueOnce({ ok: true, data: { ...payload({ schedules: [{ kind: "apply", start: { date: "2026-10-21" }, end: { date: "2026-10-25" } }] }), cardCopy: cardCopyFixture() }, model: "fake", usage: { inputTokens: 1, outputTokens: 1 }, droppedEvidence: 0 });
+    fakeExtract.mockResolvedValueOnce({ ok: true, data: payload({ schedules: [{ kind: "apply", start: { date: "2026-10-21" }, end: { date: "2026-10-25" } }] }), model: "gemini-summary-fixture", usage: { inputTokens: 1, outputTokens: 1 }, droppedEvidence: 0 });
     await extractForItem(db, item.id, new LlmBudget(2), NOW);
     [cur] = await db.select().from(schema.contentItems).where(eq(schema.contentItems.id, item.id));
     const [rev] = await db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, cur.currentRevisionId!));
     expect(rev.author).toBe("operator");
     expect((rev.payload as { audience: string }).audience).toBe("운영자 수정 대상");
+    expect(rev.payload.cardCopy).toEqual(cardCopyFixture());
+    expect(fakeCopy).toHaveBeenCalledOnce(); // Re-extraction does not spend another copy call or replace saved pages.
     expect(cur.reviewStatus).toBe("review_required");
-    delete process.env.ANTHROPIC_API_KEY;
   });
 
   it("다른 채널 경로로는 항목 조회·수정 불가", async () => {

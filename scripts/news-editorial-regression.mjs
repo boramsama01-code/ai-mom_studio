@@ -203,7 +203,7 @@ try {
       assert.deepEqual(state.saved.copy, beforeUpload, 'upload must not silently replace saved page metadata');
       await saveCopy(page); assert.equal(state.saved.copy.pages[3].background.assetId, 9000);
       for (const index of [0, 1, 2, 4, 5, 6]) assert.deepEqual(state.saved.copy.pages[index], beforeUpload.pages[index]);
-      await page.getByRole('button', { name: '6페이지 내 개념 정의 문구 편집', exact: true }).click();
+      await page.getByRole('button', { name: '6페이지 나만의 개념 정의 문구 편집', exact: true }).click();
       backgroundEditor = await openBackground(page); await pasteBackground(page);
       await backgroundEditor.getByAltText('선택한 페이지 배경').waitFor(); await saveCopy(page);
       assert.equal(state.saved.copy.pages[4].background.assetId, 9001); assert.equal(state.saved.copy.pages[3].background.assetId, 9000);
@@ -230,7 +230,7 @@ try {
       assert.equal(state.writes.filter(write => write.path.endsWith('/background')).length, 2);
       assert.equal(state.writes.filter(write => /\/(approve|publish|deliveries)(\/|$)/.test(write.path)).length, 0);
       assert.deepEqual(errors, []); assert.deepEqual(external, []);
-      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'no horizontal overflow or covered save action'], summaryCalls: state.aiAttempts, uploadedBackgrounds: 2, actualPaidCalls: 0, publicationRequests: 0 });
+      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'no horizontal overflow or covered save action'], mockRebuildRequests: state.aiAttempts, uploadedBackgrounds: 2, actualPaidCalls: 0, publicationRequests: 0 });
       await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2)); console.log(`News editorial regression passed at ${width}px (${engine}).`);
     } catch (error) {
       results.push({ width, engine, passed: false, error: error.message, apiErrors: errors }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));

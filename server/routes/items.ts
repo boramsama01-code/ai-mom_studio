@@ -4,7 +4,8 @@ import { cardCopyFromPayload, loadCardPages, planCarousel, renderCarouselPage } 
 import { channelAiSelection } from "../services/channelAi";
 import { proposeNewsDiscussion } from "../services/newsEditorial";
 import { articleAnalysisSchema, aiWorkflowSchema } from "../../shared/articleAnalysis";
-import { loadCardPageArtwork } from "../services/cardPageArtwork";
+import { assertNewsEditorialResources, loadNewsEditorialSources } from "../services/newsEditorialSources";
+import { assertCardPageArtworkOwnership, loadCardPageArtworkForPage } from "../services/cardPageArtwork";
 import { zipFiles } from "../services/zip";
 import { studioAiStatus } from "../services/studioAi";
 import { aiProviders } from "../../shared/aiProviders";
@@ -44,7 +45,7 @@ import { fetchPublisherArticle as fetchAndExtract } from "../services/publisherL
 import { sourceFetchUrl } from "../services/sourceFetchUrl";
 import { normalizeUrl } from "../services/url";
 import { extractForItem } from "../worker/collect";
-import { generateCardCopy, LlmBudget, type LlmSource } from "../services/llm";
+import { generateCardCopy, LlmBudget } from "../services/llm";
 import { generateDialogueDraft } from "../worker/generate";
 import { approveItem, cancelApproval, findReusableCardCover, renderCardForItem, retryDelivery, sourceOrgFor, reconcileDelivery, confirmDeliveryPosted, confirmDeliveryNotPosted } from "../worker/publish";
 import { kickInlinePublish } from "../worker/inlinePublish";
@@ -60,8 +61,7 @@ import { SOURCE_TEXT_LIMIT, SOURCE_QUOTE_LIMIT, SOURCE_QUOTE_COUNT, suggestSourc
 import { sourceRecovery } from "../../shared/sourceRecovery";
 import { cardCopySchema } from "../../shared/cardCopy";
 import { resolveStyle, TemplateNotFound } from "../services/templates";
-import { CardFontError, CardOverflowError, renderCardJpeg } from "../services/card";
-import { renderCollectionBody } from "../services/cardCollection";
+import { CardFontError, CardOverflowError } from "../services/card";
 import { assertStudioActive } from "../services/studio";
 import { getSetting } from "../seed";
 import type { PublicationOrphan } from "../../shared/publicationReadiness";
@@ -559,7 +559,8 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     if (board) assertStudioActive(board);
     const [current] = fresh.currentRevisionId ? await tx.select().from(contentRevisions).where(and(eq(contentRevisions.id, fresh.currentRevisionId), eq(contentRevisions.contentItemId, item.id))) : [];
     if (!current) throw new HttpError(409, "현재 초안이 없습니다. 먼저 원문 초안을 저장해 주세요.");
-    await loadCardPageArtwork(tx as unknown as import("../db").DB, item.id, ch.id, body.copy);
+    await assertCardPageArtworkOwnership(tx as unknown as import("../db").DB, item.id, ch.id, body.copy);
+    await assertNewsEditorialResources(tx as unknown as import("../db").DB, fresh, body.copy);
     const payload: Record<string, unknown> = { ...current.payload, cardCopy: body.copy };
     if (body.proposalJobId) {
       const [proposal] = await tx.select().from(jobs).where(and(eq(jobs.id, body.proposalJobId), eq(jobs.channelId, ch.id), eq(jobs.type, "card_copy_generate"), eq(jobs.status, "succeeded")));
@@ -593,12 +594,7 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
   const [board] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
   if (board) assertStudioActive(board);
   if (await getSetting(db, "global_stop", false)) throw new HttpError(409, "전역 정지 상태입니다. 정지를 해제한 뒤 AI 문구를 만들어 주세요.");
-  const primary = await itemPrimarySource(db, item);
-  const links = await db.select().from(contentSources).where(eq(contentSources.contentItemId, item.id));
-  const ids = new Set<number>(primary ? [primary.id] : []);
-  links.filter(link => link.role !== "previous_manual" && (primary?.kind !== "manual_text" || (link.sourceDocumentId !== item.primarySourceId && link.role !== "merged_primary"))).forEach(link => ids.add(link.sourceDocumentId));
-  const docs = ids.size ? await db.select().from(sourceDocuments).where(inArray(sourceDocuments.id, [...ids])) : [];
-  const sources: LlmSource[] = docs.filter(doc => doc.fetchStatus === "ok" && doc.fetchedText).map(doc => ({ source_id: doc.id, kind: doc.kind, url: doc.originalUrl, title: doc.title, published: doc.publishedRaw, text: doc.fetchedText! }));
+  const sources = await loadNewsEditorialSources(db, item);
   if (!sources.length && item.kind === "current_dialogue") throw new HttpError(400, "뉴스 원문을 먼저 확보하거나 본문을 붙여넣어 주세요. 제목만으로 카드 문구를 생성하지 않습니다.");
   const existingCopy = cardCopySchema.safeParse(revision.payload.cardCopy);
   if (body.selectedPage !== undefined && existingCopy.success && body.selectedPage > existingCopy.data.pages.length) throw new HttpError(400, "수정할 카드 페이지를 확인해 주세요.");
@@ -624,9 +620,10 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/preview", ah(async (req, res
   if (body.page > body.copy.pages.length) throw new HttpError(400, "카드 페이지를 확인해 주세요.");
   const revision = await cardCopyRevision(item);
   const style = await resolveCardCopyStyle(body.copy.templateKey, ch.id);
+  await assertNewsEditorialResources(getDb(), item, body.copy);
   try {
     const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, cardCopy: body.copy }, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style);
-    const pageImages = await loadCardPageArtwork(getDb(), item.id, ch.id, body.copy);
+    const pageImages = await loadCardPageArtworkForPage(getDb(), item.id, ch.id, body.copy, body.page);
     const savedArt = body.coverMode === "typography" ? null : await findReusableCardCover(getDb(), item.id, revision.payload);
     const credit = savedArt ? "표지: AI 생성 · OpenAI" : style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오";
     const bytes = await renderCarouselPage(plan, body.page, style, savedArt?.bytes ?? null, credit, pageImages);
