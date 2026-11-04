@@ -18,7 +18,8 @@ describe('14-style handoff identity and actual read-only Canva contracts',()=>{
   expect(profiles.reduce((n,p)=>n+p.images.length,0)).toBe(89);
   for(const styleId of CARDNEWS14_STYLE_IDS){
    const p=profiles.find(p=>p.sourceStyleId===styleId)!,source=cardnews14Source(styleId);
-   const verified=live.designs.find(d=>d.sourceId===source.sourceId)!;
+   // Keep the original handoff evidence when the editor link points to its saved derivative.
+   const verified=live.designs.find(d=>d.sourceId===source.originalSourceId)!;
    expect(p.id).toBe(`cardnews14-${styleId}-v1`);expect(p.templateVersion).toBe(`${p.id}-20261104${styleId==='amber-cream'?'-r2':''}`);
    expect(verified.pageCount).toBe(8);expect(verified.fields).toEqual(expectedCanvaDataset({conceptMode:'value_definition',hasExternalActivity:false},p));
    expect(source.productionEnabled).toBe(false);expect(readingMasterSourceApproved(p,source.sourceId)).toBe(false);

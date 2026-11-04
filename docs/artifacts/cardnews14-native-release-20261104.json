@@ -1,0 +1,2427 @@
+{
+  "status": "all-14-saved-and-verified",
+  "folderId": "FAHZ9dTp-H8",
+  "folderUrl": "https://www.canva.com/folder/FAHZ9dTp-H8",
+  "folderVerifiedAtUtc": "2026-11-04 13:33:36 UTC",
+  "totals": {
+    "designs": 14,
+    "pages": 112,
+    "textFields": 644,
+    "imageFields": 89
+  },
+  "productionAutofillEnabled": false,
+  "studioProductionDeployed": false,
+  "previewKind": "Canva native transaction thumbnails; not export files",
+  "canvaUiExportCheck": {
+    "designId": "DAHZ9YzSAv4",
+    "format": "PNG",
+    "sizeShown": "1080x1350",
+    "pagesSelected": "all",
+    "completionToastObserved": true,
+    "downloadFileBytesAvailable": false,
+    "reason": "Browser-reported download path did not synchronize within 5 seconds; no file count or pixel claim."
+  },
+  "designs": [
+    {
+      "styleId": "cinematic",
+      "designId": "DAHZ9TMtgv8",
+      "title": "01 시네마틱 · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/_Lwz5y7Yhnr5eGQ",
+      "viewUrl": "https://www.canva.com/d/DPLPznAgmdwXfQb",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:24:57 UTC",
+      "originalSourceId": "DAHZ7x2nTrg"
+    },
+    {
+      "styleId": "monochrome-coral",
+      "designId": "DAHZ9fHI418",
+      "title": "02 흑백코랄 · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/gTzOrLDKlrVUwFP",
+      "viewUrl": "https://www.canva.com/d/Ar2gHXUw7cDd8Wv",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:25:46 UTC",
+      "originalSourceId": "DAHZ77WyFFc"
+    },
+    {
+      "styleId": "amber-cream",
+      "designId": "DAHZ9YzSAv4",
+      "title": "03 앰버크림 r2 · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/KHc_m61t8-xUSiE",
+      "viewUrl": "https://www.canva.com/d/P0wv8bs5gsb4e0g",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:25:15 UTC",
+      "originalSourceId": "DAHZ7w_VOXw"
+    },
+    {
+      "styleId": "cobalt-paper",
+      "designId": "DAHZ9UpAYzo",
+      "title": "04 코발트페이퍼 · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/LwfG6VmPnSMu61X",
+      "viewUrl": "https://www.canva.com/d/hXfImwIKxXgYBPT",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:28:47 UTC",
+      "originalSourceId": "DAHZ77ioKBQ"
+    },
+    {
+      "styleId": "ink-lime",
+      "designId": "DAHZ9akH8KQ",
+      "title": "05 검정라임 · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/56N0cOI_bYgNut6",
+      "viewUrl": "https://www.canva.com/d/J_KDEVxTT1aGkYa",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:31:30 UTC",
+      "originalSourceId": "DAHZ75gK2o8"
+    },
+    {
+      "styleId": "swiss-modernism",
+      "designId": "DAHZ9f8a6pQ",
+      "title": "06 Swiss Modernism · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/8u0sYbtOzH4hYXh",
+      "viewUrl": "https://www.canva.com/d/shsrBZgrr4rVjtk",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:31:40 UTC",
+      "originalSourceId": "DAHZ7_pJigM"
+    },
+    {
+      "styleId": "studio-2am",
+      "designId": "DAHZ9d5EEac",
+      "title": "07 Studio 2am · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/1iGPtwDsSigxIf_",
+      "viewUrl": "https://www.canva.com/d/4qSMfTC1TZ0q-pM",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:32:33 UTC",
+      "originalSourceId": "DAHZ7xFMR2I"
+    },
+    {
+      "styleId": "ichestyime",
+      "designId": "DAHZ9VrdeQo",
+      "title": "08 Ichestyime · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/r9xYSE9kJWMVTpc",
+      "viewUrl": "https://www.canva.com/d/-92UUnuPSbbIBYV",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:25:05 UTC",
+      "originalSourceId": "DAHZ713lepM"
+    },
+    {
+      "styleId": "sharp-serif",
+      "designId": "DAHZ9dZOsRo",
+      "title": "09 Sharp Serif · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/WPDLVOSgnzr7RjA",
+      "viewUrl": "https://www.canva.com/d/EOUDDC3sCWlMPLk",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:25:55 UTC",
+      "originalSourceId": "DAHZ75naDWI"
+    },
+    {
+      "styleId": "bang-bang",
+      "designId": "DAHZ9Q7pbec",
+      "title": "10 BANG BANG · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/4XNgwqkcNvvDY6G",
+      "viewUrl": "https://www.canva.com/d/ILP1V7F5983LgeW",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:27:16 UTC",
+      "originalSourceId": "DAHZ73hpbLs"
+    },
+    {
+      "styleId": "hello",
+      "designId": "DAHZ9a3kGO4",
+      "title": "11 HELLO · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/v6BZ1flMuAe1dGr",
+      "viewUrl": "https://www.canva.com/d/s8H0q7KRoth3Iyl",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:27:25 UTC",
+      "originalSourceId": "DAHZ7w5jqIQ"
+    },
+    {
+      "styleId": "ekiden-pack",
+      "designId": "DAHZ9d76By0",
+      "title": "12 EKIDEN Pack · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/B2hK6f1LCP16CrI",
+      "viewUrl": "https://www.canva.com/d/cbQZb8UFO8Ibw6A",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:28:56 UTC",
+      "originalSourceId": "DAHZ7zhq7OA"
+    },
+    {
+      "styleId": "you-and-me",
+      "designId": "DAHZ9f8T-zs",
+      "title": "13 YOU & ME · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/zz7txMleiYUibI1",
+      "viewUrl": "https://www.canva.com/d/pDIBWqdGggcG0Bp",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:30:34 UTC",
+      "originalSourceId": "DAHZ8I9YNnY"
+    },
+    {
+      "styleId": "ott-recommendation",
+      "designId": "DAHZ9bmpgiM",
+      "title": "14 OTT 추천카드 · Studio 연결본 · 2026-11-04",
+      "pageCount": 8,
+      "editUrl": "https://www.canva.com/d/dUvNhYYRBpEs_CK",
+      "viewUrl": "https://www.canva.com/d/VHerhikIBH79pqY",
+      "committed": true,
+      "moved": true,
+      "dataset": {
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        }
+      },
+      "verifiedAtUtc": "2026-11-04 13:32:43 UTC",
+      "originalSourceId": "DAHZ8P4K3dw"
+    }
+  ],
+  "knownLimitations": [
+    "Native edit previews are thumbnails, not final export bytes.",
+    "Real new-article Autofill -> PNG export -> Studio import remains unverified.",
+    "Production bindings remain empty. No main merge or Render deployment was performed.",
+    "YOU & ME source-native square ornament is preserved; some native text-height differences are recorded separately."
+  ]
+}
