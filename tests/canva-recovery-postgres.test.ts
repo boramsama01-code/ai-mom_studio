@@ -4,18 +4,21 @@ import { and, desc, eq, getTableName } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
 import { approvals, canvaAssetUploads, canvaMasters, canvaRenderJobs, contentItems, contentRevisions, mediaAssets } from "../shared/schema";
-import { CANVA_MAPPING_VERSION, canvaDisplayTextFields, canvaVariant, expectedCanvaDataset } from "../shared/canvaEditorial";
+import { CANVA_MAPPING_VERSION, canvaDisplayTextFields, canvaVariant, expectedCanvaDataset, snapshotCanvaProfile } from "../shared/canvaEditorial";
+import { READING_PROFILE_LOGO_ID, readingProfileDesigns, readingProfileForTemplateKey } from "../shared/readingCardProfiles";
+import { CardOverflowError } from "../server/services/card";
 import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
 import { createFamilyPgFixture } from './fixtures/familyEvidencePg';
 import { resetDb, setTestEnv } from "./helpers";
 
 setTestEnv();
-const api = vi.hoisted(() => ({ principal: vi.fn(), capabilities: vi.fn(), design: vi.fn(), pages: vi.fn(), dataset: vi.fn(), submitAutofill: vi.fn(), getAutofill: vi.fn(), submitExport: vi.fn(), getExport: vi.fn(), submitUpload: vi.fn(), getUpload: vi.fn(), prepare: vi.fn(), download: vi.fn(), jpegs: vi.fn() }));
+const api = vi.hoisted(() => ({ principal: vi.fn(), capabilities: vi.fn(), design: vi.fn(), pages: vi.fn(), dataset: vi.fn(), submitAutofill: vi.fn(), getAutofill: vi.fn(), submitExport: vi.fn(), getExport: vi.fn(), submitUpload: vi.fn(), getUpload: vi.fn(), prepare: vi.fn(), download: vi.fn(), jpegs: vi.fn(), layout: vi.fn() }));
 vi.mock("../server/services/canvaRest", async original => ({ ...await original<object>(), getCanvaPrincipal: api.principal, getCanvaCapabilities: api.capabilities, getCanvaDesign: api.design, getCanvaPages: api.pages, getCanvaDataset: api.dataset, submitCanvaAutofill: api.submitAutofill, getCanvaAutofillJob: api.getAutofill, submitCanvaExport: api.submitExport, getCanvaExportJob: api.getExport, submitCanvaAssetUpload: api.submitUpload, getCanvaAssetUploadJob: api.getUpload }));
 vi.mock("../server/services/canvaEditorialAssets", async original => ({ ...await original<object>(), prepareCanvaImages: api.prepare, downloadCanvaExport: api.download, publicationJpegs: api.jpegs }));
+vi.mock("../server/services/readingCard", async original => ({ ...await original<object>(), layoutReadingCard: api.layout }));
 const { getDb, closeDb } = await import("../server/db");
 const { createRevision } = await import("../server/content");
-const { enqueueCanvaRender, resumeCanvaJob, runCanvaJobs, acceptCanvaImport } = await import("../server/services/canvaEditorial");
+const { registerCanvaMaster, enqueueCanvaRender, resumeCanvaJob, runCanvaJobs, acceptCanvaImport } = await import("../server/services/canvaEditorial");
 const { reconcileCanvaJob, canvaRecoveryToken } = await import("../server/services/canvaReconciliation");
 const { canvaInputHash } = await import("../server/services/canvaEditorialAssets");
 const { CanvaRestError } = await import("../server/services/canvaRest");
@@ -46,6 +49,7 @@ beforeEach(async () => {
   api.submitExport.mockResolvedValue({ id: "export_new", status: "in_progress" });
   api.submitUpload.mockResolvedValue({ id: "upload_new", status: "in_progress" });
   api.download.mockResolvedValue(pngs); api.jpegs.mockResolvedValue(jpegs);
+  api.layout.mockReturnValue({ svg: "<svg/>", textRuns: [] });
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Unexpected external request in isolated Canva recovery test"); }));
 });
 
@@ -380,3 +384,103 @@ describe("Canva durable dispatch and recovery on PostgreSQL", () => {
     await runCanvaJobs(f.db, 1); expect(api.download).toHaveBeenCalledOnce(); expect(api.submitAutofill).not.toHaveBeenCalled();
   });
 });
+
+
+/** Synthetic ready masters and mocked provider/layout responses exercise only
+ * durable profile routing. They are not evidence of live Canva registration. */
+async function readingFixture(phase: string, patch: Partial<typeof canvaRenderJobs.$inferInsert> = {}, key = "reading-ink-lime-v1") {
+  const f = await fixture(phase, patch), profile = readingProfileForTemplateKey(key);
+  if (!profile) throw new Error("Reading profile fixture missing");
+  f.copy.templateKey = profile.templateKey;
+  f.copy.pages.find(page => page.id === "outro")!.fields.logoAssetId = READING_PROFILE_LOGO_ID;
+  f.metadata.pageDesigns = readingProfileDesigns(profile, f.metadata.pageDesigns);
+  Object.assign(f.revision.payload, f.metadata, { cardCopy: f.copy });
+  await f.db.update(contentRevisions).set({ payload: f.revision.payload }).where(eq(contentRevisions.id, f.revision.id));
+  await f.db.update(contentItems).set({ edited: f.revision.payload }).where(eq(contentItems.id, f.item.id));
+  const dataset = expectedCanvaDataset(canvaVariant(f.copy), profile), datasetHash = canvaInputHash(dataset);
+  const [existing] = await f.db.select().from(canvaMasters).where(and(
+    eq(canvaMasters.channelId, 2), eq(canvaMasters.templateVersion, profile.templateVersion),
+    eq(canvaMasters.conceptMode, canvaVariant(f.copy).conceptMode), eq(canvaMasters.hasExternalActivity, false),
+  )).limit(1);
+  const [master] = await f.db.update(canvaMasters).set({ templateVersion: profile.templateVersion, status: "ready", sourceUpdatedAt: "123", dataset, datasetHash })
+    .where(eq(canvaMasters.id, existing?.id ?? f.master.id)).returning();
+  const request = { ...f.request, masterId: master.id };
+  const intent = { channelId: 2, itemId: f.item.id, version: f.item.version, masterId: master.id, importFromJobId: null };
+  const uploadedImages = Object.fromEntries(profile.images.map(slot => [slot.field, { assetId: "asset_" + slot.field, hash: f.image.hash }]));
+  const input = { payload: f.revision.payload, title: f.item.title, copy: f.copy, pageDesigns: f.metadata.pageDesigns,
+    evidenceSetId: f.metadata.evidenceBinding.evidenceSetId, ...snapshotCanvaProfile(profile), datasetHash, artworkCredits: {} };
+  const [job] = await f.db.update(canvaRenderJobs).set({ masterId: master.id, requestHash: canvaInputHash(intent), input,
+    result: phase === "images" ? null : { uploadedImages }, updatedAt: new Date() }).where(eq(canvaRenderJobs.id, f.job.id)).returning();
+  api.dataset.mockResolvedValue(dataset);
+  api.prepare.mockResolvedValue(profile.images.map(slot => ({ ...f.image, field: slot.field })));
+  return { ...f, profile, master, job, request, uploadedImages };
+}
+
+describe("reading profile admission and recovery with synthetic Canva datasets", () => {
+  it("does not register a reading master whose actual mocked dataset is missing its profile image", async () => {
+    const profile = readingProfileForTemplateKey("reading-ink-lime-v1")!, copy = familyDialogueCardFixture();
+    const dataset = expectedCanvaDataset(canvaVariant(copy), profile); delete dataset.P08_PROFILE_IMAGE;
+    api.dataset.mockResolvedValue(dataset);
+    const sourceId = "Dmissing_profile_" + randomUUID();
+    await expect(registerCanvaMaster(getDb(), { channelId: 2, sourceId, ...canvaVariant(copy), templateVersion: profile.templateVersion, actor: "test-operator" }))
+      .rejects.toMatchObject({ status: 422, extra: { code: "dataset_mismatch" } });
+    expect(await getDb().select().from(canvaMasters).where(eq(canvaMasters.sourceId, sourceId))).toHaveLength(0);
+    expect(api.submitAutofill).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled();
+  });
+  it("pins the selected profile at admission and submits 46 texts plus four uploaded image fields", async () => {
+    const f = await readingFixture("complete", { status: "failed" });
+    // This same 46/4 master serves both concept modes and activity variants.
+    // Only legacy masters require separate variant registrations.
+    await f.db.update(canvaMasters).set({ conceptMode: "scientific_explanation", hasExternalActivity: true }).where(eq(canvaMasters.id, f.master.id));
+    const admitted = await enqueueCanvaRender(f.db, { ...f.request, requestId: randomUUID() });
+    expect(admitted.input).toMatchObject(snapshotCanvaProfile(f.profile));
+    expect(api.layout).toHaveBeenCalledTimes(8);
+    await f.db.update(canvaRenderJobs).set({ phase: "autofill_prepare", result: { uploadedImages: f.uploadedImages } }).where(eq(canvaRenderJobs.id, admitted.id));
+    const submitted = await runNow(admitted.id);
+    expect(submitted).toMatchObject({ status: "queued", phase: "autofill_polling", autofillJobId: "autofill_new" });
+    const data = api.submitAutofill.mock.calls[0][1].data as Record<string, { type: string; asset_id?: string }>;
+    expect(Object.values(data).filter(value => value.type === "text")).toHaveLength(46);
+    expect(Object.keys(data).filter(name => data[name].type === "image")).toEqual([
+      "P01_COVER_IMAGE", "P04_CONTEXT_IMAGE", "P07_ACTIVITY_IMAGE", "P08_PROFILE_IMAGE",
+    ]);
+    expect(data.P08_PROFILE_IMAGE.asset_id).toBe("asset_P08_PROFILE_IMAGE");
+    expect(data).not.toHaveProperty("P01_IMAGE"); expect(data).not.toHaveProperty("P01_HEADER_BRAND");
+    expect(api.submitAutofill).toHaveBeenCalledOnce(); expect(api.submitUpload).not.toHaveBeenCalled();
+  });
+  it("checks real-layout overflow before admitting an upload or autofill job", async () => {
+    const f = await readingFixture("complete", { status: "failed" }, "reading-cobalt-paper-v1");
+    api.layout.mockImplementation(() => { throw new CardOverflowError("P02_READING_BODY", "fixture overflow"); });
+    await expect(enqueueCanvaRender(f.db, { ...f.request, requestId: randomUUID() }))
+      .rejects.toMatchObject({ status: 422, extra: { code: "canva_text_overflow", field: "P02_READING_BODY" } });
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
+  });
+  it("passes the pinned profile to image retry and rejects a changed snapshot before preparing images", async () => {
+    const f = await readingFixture("images", { status: "failed" });
+    await resumeCanvaJob(f.db, 2, f.item.id, f.job.id);
+    expect(api.prepare).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ profile: expect.objectContaining({ id: f.profile.id }), copy: f.copy }));
+    api.prepare.mockClear();
+    const current = await saved(f.job.id);
+    await f.db.update(canvaRenderJobs).set({ status: "failed", input: { ...current.input, profileTemplateVersion: "different-version" } }).where(eq(canvaRenderJobs.id, f.job.id));
+    await expect(resumeCanvaJob(f.db, 2, f.item.id, f.job.id))
+      .rejects.toMatchObject({ status: 409, extra: { code: "canva_profile_changed" } });
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled();
+  });
+  it("keeps the original profile through reconciliation after the editor selects a different profile", async () => {
+    const f = await readingFixture("autofill_submitting", { status: "result_unknown" });
+    const changed = structuredClone(f.copy), other = readingProfileForTemplateKey("reading-cobalt-paper-v1")!;
+    changed.templateKey = other.templateKey;
+    const revision = await createRevision(f.db, { contentItemId: f.item.id, author: "operator",
+      payload: { ...f.revision.payload, cardCopy: changed, pageDesigns: readingProfileDesigns(other, f.metadata.pageDesigns) } });
+    await f.db.update(contentItems).set({ version: f.item.version + 1 }).where(eq(contentItems.id, f.item.id));
+    api.design.mockResolvedValue({ id: recoveryDesignId, title: f.item.title, owner: { userId: "user_test", teamId: "team_test" }, pageCount: 8, updatedAt: 123, editUrl: null });
+    const linked = await reconcileCanvaJob(f.db, { channelId: 2, itemId: f.item.id, jobId: f.job.id, version: f.item.version + 1,
+      designId: recoveryDesignId, confirmed: true, expectedRecoveryToken: canvaRecoveryToken(f.job)!, actor: "test-operator" });
+    expect(linked.input).toMatchObject({ ...snapshotCanvaProfile(f.profile), copy: { templateKey: other.templateKey } });
+    expect(linked).toMatchObject({ purpose: "import", sourceRevisionId: revision.id, phase: "export_prepare" });
+    expect(linked.result).toMatchObject({ reconciliation: { datasetCheck: "matches", sourceInputHash: canvaInputHash(linked.input) } });
+    await runNow(f.job.id);
+    expect(api.submitExport).toHaveBeenCalledOnce();
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
+  });
+});
+

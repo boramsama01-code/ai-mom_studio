@@ -12,6 +12,7 @@ vi.mock("../server/services/familyEditorialImage", () => ({ generateFamilyCoverA
 import type { DB } from "../server/db";
 import type { Channel, ContentItem } from "../shared/schema";
 import { defaultChannelRoleSettings } from "../shared/channelAi";
+import { readingProfileForTemplateKey, READING_PROFILE_LOGO_ID } from "../shared/readingCardProfiles";
 import { familyExecutionPlan, proposeFamilyDialogue, type FamilyGenerateInput } from "../server/services/familyEditorial";
 import { familyEvidenceFixture } from "./fixtures/familyEvidence";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
@@ -41,6 +42,27 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("family editorial pipeline with mock provider HTTP", () => {
+  it("pins the reading layout and approved profile asset while preserving manual text and photos on regeneration", async () => {
+    const f = fixture(true), payload = f.revision.payload as any, profile = readingProfileForTemplateKey("reading-ink-lime-v1")!;
+    f.input.templateKey = profile.templateKey;
+    payload.cardCopy.pages[1].displayOverrides = { sourceCredit: "직접 확인한 기사", kicker: "오늘 함께 읽기" };
+    payload.cardCopy.pages[7].fields.brandLine = "서로의 판단 기준을 나눠요";
+    payload.pageDesigns.cover.background = { ...payload.pageDesigns.cover.background, kind: "image", assetId: 700 };
+    const mock = createFamilyProviderMock(); vi.stubGlobal("fetch", vi.fn(mock.fetch));
+    const result = await proposeFamilyDialogue(db, f.item, f.channel, f.revision, f.input, f.plan);
+    expect(result.copy?.templateKey).toBe(profile.templateKey);
+    expect(result.copy?.pages[7].fields).toMatchObject({ logoAssetId: READING_PROFILE_LOGO_ID, brandLine: "서로의 판단 기준을 나눠요" });
+    expect(result.copy?.pages[1].displayOverrides).toEqual(payload.cardCopy.pages[1].displayOverrides);
+    expect(result.pageDesigns?.cover).toMatchObject({ alignment: "left", background: { kind: "image", assetId: 700, color: "#171918" } });
+    expect(result.pageDesigns?.news_summary.background).toMatchObject({ kind: "brand", color: "#F4F3E9" });
+    const contract = mock.calls.find(call => call.stage === "card_copy")?.input.templateContract;
+    expect(contract.fixedTypography).toMatchObject({ doNotShrink: true, countExplicitLineBreaks: true });
+    expect(contract.fixedTypography.fields).toHaveLength(46);
+    expect(contract.fixedTypography.fields.find((field: any) => field.field === "P01_HEADLINE")).toMatchObject({ fontSize: 112, maxLines: 2 });
+    expect(controlled.image).not.toHaveBeenCalled();
+    expect(payload.cardCopy.templateKey).toBe("set:n03");
+  });
+
   it("preserves display overrides and manual brand values during full regeneration", async () => {
     const f = fixture(true), copy = (f.revision.payload as any).cardCopy;
     copy.pages[1].displayOverrides = { kicker: "", pageNumber: "두 번째", sourceCredit: "직접 대조한 출처" };

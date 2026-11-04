@@ -3,7 +3,7 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { DB } from "../db";
 import { canvaMasters, canvaRenderJobs, contentItems, contentRevisions } from "../../shared/schema";
 import { evidenceBindingSchema, familyCardCopySchema, pageDesignsSchema } from "../../shared/familyDialogue";
-import { canvaVariant, validateCanvaDataset } from "../../shared/canvaEditorial";
+import { canvaVariant, validateCanvaDataset, resolveCanvaProfile, storedCanvaProfileSnapshot, type CanvaProfileSnapshot } from "../../shared/canvaEditorial";
 import { canvaReconcileRequestSchema, canvaReconciliations, type CanvaReconcileRequest, type CanvaReconciliation } from "../../shared/canvaReconciliation";
 import { audit } from "../audit";
 import { HttpError } from "../routes/util";
@@ -72,15 +72,21 @@ export async function reconcileCanvaJob(db: DB, request: Request): Promise<Job> 
     if (!revision) throw new HttpError(409, "현재 원고 저장본을 찾을 수 없습니다.");
     const copy = familyCardCopySchema.safeParse(revision.payload.cardCopy), pageDesigns = pageDesignsSchema.safeParse(revision.payload.pageDesigns), evidence = evidenceBindingSchema.safeParse(revision.payload.evidenceBinding);
     if (!copy.success || !pageDesigns.success || !evidence.success) throw new HttpError(422, "현재 8장 원고와 근거·이미지 설정을 먼저 저장해 주세요.");
-    const source = job.input as { mappingVersion: string; datasetHash: string };
-    const input = { payload: revision.payload, title: item.title, copy: copy.data, pageDesigns: pageDesigns.data, evidenceSetId: evidence.data.evidenceSetId, mappingVersion: source.mappingVersion, datasetHash: source.datasetHash };
+    const source = job.input as CanvaProfileSnapshot & { datasetHash: string; artworkCredits?: Record<string, string> };
+    const input = { payload: revision.payload, title: item.title, copy: copy.data, pageDesigns: pageDesigns.data, evidenceSetId: evidence.data.evidenceSetId,
+      ...storedCanvaProfileSnapshot(source), datasetHash: source.datasetHash, ...(source.artworkCredits ? { artworkCredits: source.artworkCredits } : {}) };
+    // Reconciliation only exports a user-confirmed existing design. An older
+    // profile becoming unavailable must not launch Autofill or block recovery.
+    let matchesProfile = true, profile: ReturnType<typeof resolveCanvaProfile>;
+    try { profile = resolveCanvaProfile(source); }
+    catch { matchesProfile = false; }
     const history = canvaReconciliations(job.result);
     if (history.length >= 20) throw new HttpError(422, "이 작업의 명시적 복구 한도에 도달했습니다. 연결·디자인 상태를 확인해 주세요.");
     const firstOriginal = history.at(-1)?.original;
     const reconciliation: CanvaReconciliation = {
       version: 1, recoveryToken: request.expectedRecoveryToken, designId: request.designId, sourceRevisionId: revision.id, sourceVersion: item.version, sourceInputHash: canvaInputHash(input),
       requestTitleMatched: !!design.title?.trim().endsWith(` · ${job.requestId.slice(0, 8)}`),
-      datasetCheck: dataset === null ? "unavailable" : canvaInputHash(dataset) === source.datasetHash && !validateCanvaDataset(dataset, canvaVariant(copy.data)).length ? "matches" : "different",
+      datasetCheck: dataset === null ? "unavailable" : matchesProfile && canvaInputHash(dataset) === source.datasetHash && !validateCanvaDataset(dataset, canvaVariant(copy.data), profile).length ? "matches" : "different",
       original: firstOriginal ?? { sourceRevisionId: job.sourceRevisionId, sourceVersion: job.sourceVersion, purpose: job.purpose as "create" | "import", requestId: job.requestId, requestHash: job.requestHash, inputHash: canvaInputHash(job.input) },
       reconciledAt: new Date().toISOString(),
     };

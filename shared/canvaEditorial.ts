@@ -1,6 +1,7 @@
 /** Flat Canva fields are a boundary adapter, never the authoring schema. */
 import type { CardCopyV2, FamilyPageId } from './familyDialogue';
 import { familyDisplayDescriptors, familyReadingTextValues, resolveFamilyDisplay, type FamilyDisplayContext } from './familyDisplay';
+import { readingProfileForTemplateKey, type ReadingCardProfile } from './readingCardProfiles';
 
 export const CANVA_MAPPING_VERSION = 'family-dialogue-8/v1.1';
 export const CANVA_PAGE_IDS = ['cover','news_summary','implication','discussion','perspectives','concept','activity','outro'] as const;
@@ -13,6 +14,51 @@ export type CanvaVariant = { conceptMode:CanvaConceptMode; hasExternalActivity:b
 const commonText = ['P01_HEADLINE','P01_SUBTITLE','P02_TITLE','P02_FACTS','P02_CAVEAT','P03_TITLE','P03_TAKEAWAY','P04_TITLE','P04_SCENARIO','P04_QUESTION','P05_TITLE','P05_A_LABEL','P05_A_BODY','P05_B_LABEL','P05_B_BODY','P06_TITLE','P06_CONCEPT','P06_FILL_IN','P07_TITLE','P07_HOME_LABEL','P07_HOME_ACTION','P08_BRAND_NAME','P08_PARENT_BRAND','P08_BRAND_LINE','P08_CTA','P08_HANDLE'];
 const commonImages = ['P01_IMAGE','P02_BACKGROUND','P03_BACKGROUND','P04_BACKGROUND','P05_BACKGROUND','P06_BACKGROUND','P07_BACKGROUND','P08_LOGO'];
 
+/** The reading profiles have their own native Canva contract. These labels do
+ * not imply that a design has been created, bound or validated in Canva. */
+export const CANVA_READING_TEXT_FIELDS = [
+  'P01_TOPIC_TAG','P01_HEADLINE','P01_SUBTITLE','P01_IMAGE_CREDIT','P01_PAGE_NUMBER',
+  'P02_KICKER','P02_TITLE','P02_READING_BODY','P02_SOURCE','P02_PAGE_NUMBER',
+  'P03_KICKER','P03_READING_BODY','P03_SOURCE','P03_PAGE_NUMBER',
+  'P04_KICKER','P04_SCENARIO','P04_QUESTION','P04_IMAGE_CREDIT','P04_PAGE_NUMBER',
+  'P05_KICKER','P05_VIEW_A_LABEL','P05_VIEW_A_BODY','P05_VIEW_B_LABEL','P05_VIEW_B_BODY','P05_PAGE_NUMBER',
+  'P06_KICKER','P06_CONCEPT','P06_DEFINITION_INDEX_A','P06_DEFINITION_A','P06_DEFINITION_INDEX_B','P06_DEFINITION_B','P06_BOUNDARY_CASE','P06_FILL_IN','P06_PAGE_NUMBER',
+  'P07_KICKER','P07_DURATION','P07_ACTIVITY_LABEL','P07_ACTIVITY_ACTIONS','P07_ACTIVITY_HELP','P07_IMAGE_CREDIT','P07_PAGE_NUMBER',
+  'P08_PARENT_BRAND','P08_BRAND_LINE','P08_CTA','P08_HANDLE','P08_PAGE_NUMBER',
+] as const;
+
+export type CanvaProfileSnapshot = {
+  mappingVersion: string; profileId?: string; profileTemplateVersion?: string; profileImageSha256?: string;
+};
+export function snapshotCanvaProfile(profile?: ReadingCardProfile): CanvaProfileSnapshot {
+  return profile ? {
+    mappingVersion: profile.mappingVersion, profileId: profile.id,
+    profileTemplateVersion: profile.templateVersion, profileImageSha256: profile.profileImageSha256,
+  } : { mappingVersion: CANVA_MAPPING_VERSION };
+}
+/** Import/reconciliation retains the original renderer binding. It must never
+ * select a new profile from the current editor or the latest master catalog. */
+export function storedCanvaProfileSnapshot(input: CanvaProfileSnapshot): CanvaProfileSnapshot {
+  return {
+    mappingVersion: input.mappingVersion,
+    ...(input.profileId !== undefined ? { profileId: input.profileId } : {}),
+    ...(input.profileTemplateVersion !== undefined ? { profileTemplateVersion: input.profileTemplateVersion } : {}),
+    ...(input.profileImageSha256 !== undefined ? { profileImageSha256: input.profileImageSha256 } : {}),
+  };
+}
+/** Jobs created before profiles existed are legacy jobs. A pinned new profile
+ * must remain available at the exact contract and approved-image version. */
+export function resolveCanvaProfile(input: CanvaProfileSnapshot): ReadingCardProfile | undefined {
+  if (input.profileId === undefined) return undefined;
+  const profile = readingProfileForTemplateKey(input.profileId);
+  if (!profile || profile.id !== input.profileId || profile.mappingVersion !== input.mappingVersion
+      || profile.templateVersion !== input.profileTemplateVersion || profile.profileImageSha256 !== input.profileImageSha256) {
+    throw new Error('이 Canva 작업에 저장된 읽기 디자인·매핑·프로필 이미지 버전을 확인할 수 없습니다. 기존 결과를 유지했습니다.');
+  }
+  return profile;
+}
+
+
 export function canvaVariant(copy:CardCopyV2):CanvaVariant {
   const concept=copy.pages.find(p=>p.type==='concept')!;
   const activity=copy.pages.find(p=>p.type==='activity')!;
@@ -20,17 +66,25 @@ export function canvaVariant(copy:CardCopyV2):CanvaVariant {
   return { conceptMode:concept.fields.mode, hasExternalActivity:activity.fields.optionalActivity !== null };
 }
 
-export function expectedCanvaDataset(variant:CanvaVariant):CanvaDataset {
+export function expectedCanvaDataset(variant:CanvaVariant,profile?:ReadingCardProfile):CanvaDataset {
+  if(profile) return Object.fromEntries([
+    ...CANVA_READING_TEXT_FIELDS.map(name=>[name,{type:'text'}]),
+    ...profile.images.map(slot=>[slot.field,{type:'image'}]),
+  ]);
   const text=[...commonText,...(variant.conceptMode==='value_definition' ? ['P06_DEFINITION_A','P06_DEFINITION_B','P06_BOUNDARY_CASE'] : ['P06_ACCEPTED_DEFINITION','P06_EXAMPLE_OR_NON_EXAMPLE']),...(variant.hasExternalActivity ? ['P07_OPTIONAL_LABEL','P07_OPTIONAL_ACTION'] : [])];
   return Object.fromEntries([...text.map(k=>[k,{type:'text'}]),...commonImages.map(k=>[k,{type:'image'}])]);
 }
 
 /** Unknown supplied labels are silently skipped by Canva, so check every field before POST. */
-export function validateCanvaDataset(dataset:CanvaDataset,variant:CanvaVariant) {
-  const required=expectedCanvaDataset(variant), errors:string[]=[];
+export function validateCanvaDataset(dataset:CanvaDataset,variant:CanvaVariant,profile?:ReadingCardProfile) {
+  const required=expectedCanvaDataset(variant,profile), errors:string[]=[];
   for(const [name,expected] of Object.entries(required)) {
     if(!dataset[name]) errors.push(`${name}: 필드 없음`);
     else if(dataset[name].type!==expected.type) errors.push(`${name}: ${expected.type} 형식 필요`);
+  }
+  if(profile) {
+    for(const name of Object.keys(dataset)) if(!required[name]) errors.push(name+': 선택한 읽기 디자인에 없는 필드');
+    return errors;
   }
   const forbidden=variant.conceptMode==='value_definition' ? ['P06_ACCEPTED_DEFINITION','P06_EXAMPLE_OR_NON_EXAMPLE'] : ['P06_DEFINITION_A','P06_DEFINITION_B','P06_BOUNDARY_CASE'];
   if(!variant.hasExternalActivity) forbidden.push('P07_OPTIONAL_LABEL','P07_OPTIONAL_ACTION');
@@ -41,7 +95,7 @@ export function validateCanvaDataset(dataset:CanvaDataset,variant:CanvaVariant) 
   return errors;
 }
 
-export type CanvaTextOptions = { context?: FamilyDisplayContext; pageContexts?: Partial<Record<FamilyPageId, FamilyDisplayContext>>; dataset?: CanvaDataset; requireDisplayFields?: boolean };
+export type CanvaTextOptions = { context?: FamilyDisplayContext; pageContexts?: Partial<Record<FamilyPageId, FamilyDisplayContext>>; dataset?: CanvaDataset; requireDisplayFields?: boolean; profile?: ReadingCardProfile };
 export function canvaDisplayTextFields(copy:CardCopyV2,options:CanvaTextOptions={}):Record<string,{type:'text';text:string}> {
   const fields:Record<string,{type:'text';text:string}>={};
   for(const page of copy.pages) {
@@ -51,21 +105,37 @@ export function canvaDisplayTextFields(copy:CardCopyV2,options:CanvaTextOptions=
   return fields;
 }
 /** Never silently export a template's old static label after the user edits it. */
-export function canvaDisplaySupportErrors(copy:CardCopyV2,dataset:CanvaDataset,requireDefaults=false):string[] {
+export function canvaDisplaySupportErrors(copy:CardCopyV2,dataset:CanvaDataset,requireDefaults=false,profile?:ReadingCardProfile):string[] {
   const errors:string[]=[];
+  const readingFields=new Set<string>(CANVA_READING_TEXT_FIELDS);
   for(const page of copy.pages) for(const descriptor of familyDisplayDescriptors(page)) {
-    if((requireDefaults || Object.hasOwn(page.displayOverrides??{},descriptor.key)) && dataset[descriptor.canvaField]?.type!=='text') errors.push(page.page+'페이지 '+descriptor.label+' ('+descriptor.canvaField+'): 편집 가능한 텍스트 필드가 필요합니다.');
+    const overridden=Object.hasOwn(page.displayOverrides??{},descriptor.key);
+    if(profile && !readingFields.has(descriptor.canvaField)) {
+      // A deliberately absent label does not need a fake blank text element.
+      // An explicit nonempty edit cannot silently disappear in the new layout.
+      if(overridden && page.displayOverrides?.[descriptor.key] !== '') errors.push(page.page+'페이지 '+descriptor.label+': 이 읽기 디자인에 표시 칸이 없습니다. 문구를 기본값으로 되돌리거나 표시 가능한 디자인을 선택해 주세요.');
+      continue;
+    }
+    if((requireDefaults || overridden) && dataset[descriptor.canvaField]?.type!=='text') errors.push(page.page+'페이지 '+descriptor.label+' ('+descriptor.canvaField+'): 편집 가능한 텍스트 필드가 필요합니다.');
   }
   return errors;
 }
 /** Only a prepared 46-text contract. Runtime registration must still validate the
  * actual profile, every image slot and the live Canva dataset. */
 export function canvaReadingTextFields(copy:CardCopyV2,options:CanvaTextOptions={}):Record<string,{type:'text';text:string}> {
+  if(options.dataset && options.profile) {
+    const errors=[...validateCanvaDataset(options.dataset,canvaVariant(copy),options.profile),...canvaDisplaySupportErrors(copy,options.dataset,options.requireDisplayFields,options.profile)];
+    if(errors.length) throw new Error('현재 읽기 디자인에 문구를 반영할 수 없습니다. '+errors.join(' '));
+  }
   return Object.fromEntries(Object.entries(familyReadingTextValues(copy,options.context,options.pageContexts)).map(([key,text])=>[key,{type:'text' as const,text}]));
 }
 
 export function canvaTextFields(copy:CardCopyV2,options:CanvaTextOptions={}):Record<string,{type:'text';text:string}> {
   const byType=new Map(copy.pages.map(p=>[p.type,p]));
+  if(options.profile) {
+    if(byType.size!==8 || copy.pages.some((p,i)=>p.id!==CANVA_PAGE_IDS[i] || p.type!==CANVA_PAGE_IDS[i])) throw new Error('표지부터 닫는 표지까지 8장 순서가 맞지 않습니다.');
+    return canvaReadingTextFields(copy,options);
+  }
   const fields:Record<string,string>={};
   // All fields visible on the master are mapped, including labels and optional text.
   for(const page of copy.pages) {

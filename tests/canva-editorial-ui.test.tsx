@@ -7,6 +7,7 @@ import { CanvaEditorial } from "../client/src/CanvaEditorial";
 import { ApiError } from "../client/src/api";
 import type { CanvaJobDto, CanvaMasterDto } from "../shared/canvaEditorial";
 import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
+import { READING_CARD_PROFILES } from "../shared/readingCardProfiles";
 const mocks = vi.hoisted(() => ({ api: vi.fn(), local: vi.fn() }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
 vi.mock("../client/src/ui", () => ({
@@ -68,6 +69,19 @@ function reconciled(source: CanvaJobDto, body: any, status: string = 'needs_revi
 }
 
 describe("Canva editorial request and import UI", () => {
+  it("keeps a new reading profile previewable but blocks Canva creation until a matching master is registered", async () => {
+    props.copy.templateKey=READING_CARD_PROFILES[0].templateKey;
+    await render();
+    expect(host.querySelector('[data-testid="reading-canva-readiness"]')?.textContent).toContain("Canva 전송 준비 중");
+    expect(button("Canva 8장 만들기").disabled).toBe(true);expect(writes()).toHaveLength(0);
+    masters=[{...masters[0],id:8,templateVersion:READING_CARD_PROFILES[1].templateVersion}];
+    await act(async()=>{await client.invalidateQueries({queryKey:['canva-masters',3]});});await settle();
+    expect(button("Canva 8장 만들기").disabled).toBe(true);
+    masters=[{...masters[0],id:9,conceptMode:"scientific_explanation",hasExternalActivity:true,templateVersion:READING_CARD_PROFILES[0].templateVersion}];
+    await act(async()=>{await client.invalidateQueries({queryKey:['canva-masters',3]});});await settle();
+    expect(button("Canva 8장 만들기").disabled).toBe(false);
+    await click("Canva 8장 만들기");expect(writes()[0][1].body.masterId).toBe(9);
+  });
   it("can import an existing design after its original master is no longer ready", async () => {
     masters = []; connection.autofill = false; connection.capabilities = [];
     jobs = [job(25, "ready")];

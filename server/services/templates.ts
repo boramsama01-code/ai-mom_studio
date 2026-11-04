@@ -9,10 +9,14 @@ import { BUILTIN_LAYOUTS, renderCardJpeg, type CardLayout, type CardStyle } from
 import { buildCardModel } from "./cardModel";
 import { cardDesignOptions, cardDesign } from "../../shared/cardDesigns";
 import { renderCollectionPreview } from "./cardDesignSamples";
+import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
 
 export class TemplateNotFound extends Error {}
 
 export async function resolveStyle(db: DB, key: string, channelId: number): Promise<CardStyle> {
+  // Reading profiles render from their versioned 8-page contract. Their keys
+  // are valid for saved V2 copies without pretending to be Canva registrations.
+  if (readingProfileForTemplateKey(key)) return { layout: "minimal" };
   if (key.startsWith("set:")) {
     const id = key.slice(4);
     if (!cardDesign(id)) throw new TemplateNotFound(`알 수 없는 템플릿: ${key}`);

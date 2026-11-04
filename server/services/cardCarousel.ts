@@ -16,6 +16,8 @@ import { cardCopyFromStored, cardCopySchema, type CardCopy } from "../../shared/
 import { checkEditorialCard, renderEditorialCard } from "./editorialCard";
 import { defaultPageDesigns, familyCardCopySchema, pageDesignsSchema, type CardCopyV2, type PageDesigns } from "../../shared/familyDialogue";
 import { checkFamilyDialogueCard, familyBrandName, familyPageText, familyPageTitle, renderFamilyDialogueCard, type FamilyCardContext } from "./familyDialogueCard";
+import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
+import { layoutReadingCard, readingPageText, renderReadingCard } from "./readingCard";
 
 type Block = CardModel["blocks"][number];
 type Section = { title: string; blocks: Block[] };
@@ -57,10 +59,11 @@ export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan 
     const copy = parsed.data, designs = designResult.data;
     const caption = captionPackageSchema.safeParse(input.payload.captionPackage);
     const context: FamilyCardContext = { ...familyDisplayContext(copy, caption.success ? caption.data : null), brandName: familyBrandName(copy, input.channelName), accent: input.accent };
+    const readingProfile = readingProfileForTemplateKey(copy.templateKey);
     const models = copy.pages.map(page => {
-      checkFamilyDialogueCard(page, designs[page.id], context, style);
+      if (readingProfile) layoutReadingCard(copy, page, context); else checkFamilyDialogueCard(page, designs[page.id], context, style);
       return { ...base, title: familyPageTitle(page), subtitle: undefined,
-        blocks: familyPageText(page, context).map((text, i) => ({ field: `cardCopy.pages.${page.page - 1}.fields.${i}`, text, maxLines: 30 })),
+        blocks: (readingProfile ? readingPageText(copy, page, context) : familyPageText(page, context)).map((text, i) => ({ field: `cardCopy.pages.${page.page - 1}.fields.${i}`, text, maxLines: 30 })),
         badge: `${String(page.page).padStart(2, "0")} / 08`,
       };
     });
@@ -179,7 +182,10 @@ export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, 
     const assetId = design.background.kind === "image" ? design.background.assetId : undefined;
     const image = assetId ? pageImages.get(assetId) : undefined;
     if (design.background.kind === "image" && (!assetId || !image)) throw new HttpError(422, "이 페이지에 선택한 배경을 불러올 수 없습니다. 저장한 원고는 유지했습니다. 배경을 다시 선택해 주세요.");
-    return renderFamilyDialogueCard(page, design, context, style, image ?? null, assetId ? pageImages.credits?.get(assetId) ?? "배경 이미지" : "");
+    const imageCredit = assetId ? pageImages.credits?.get(assetId) ?? "배경 이미지" : "";
+    return readingProfileForTemplateKey(copy.templateKey)
+      ? renderReadingCard(copy, page, design, context, image ?? null, imageCredit)
+      : renderFamilyDialogueCard(page, design, context, style, image ?? null, imageCredit);
   }
   const model = pageIndex === 0 ? plan.base : plan.pages[pageIndex - 1];
   const background = pageIndex === 0 ? plan.copy?.cover.background : plan.copy?.pages[pageIndex - 1].background;
@@ -192,9 +198,15 @@ export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, 
 }
 
 export async function renderCarouselPages(plan: CarouselPlan, style: CardStyle, art: Buffer | null, credit: string, pageImages: CarouselPageImages = new Map()) {
-  const output = [{ title: plan.base.title, altText:conciseAlt([`카드뉴스 표지. ${plan.base.title}`,plan.base.subtitle ?? "",plan.base.brandLine,plan.base.footer]), bytes: await renderCarouselPage(plan, 0, style, art, credit, pageImages) }];
+  const visibleAlt = (index:number,fallback:string[]) => {
+    if(!plan.family) return conciseAlt(fallback);
+    const {copy,designs,context}=plan.family,page=copy.pages[index],bg=designs[page.id].background;
+    const displayContext={...context,imageCredit:bg.kind==='image'&&bg.assetId?pageImages.credits?.get(bg.assetId)??'배경 이미지':''};
+    return conciseAlt([`${index+1}페이지.`,...(readingProfileForTemplateKey(copy.templateKey)?readingPageText(copy,page,displayContext):familyPageText(page,displayContext))]);
+  };
+  const output = [{ title: plan.base.title, altText:visibleAlt(0,[`카드뉴스 표지. ${plan.base.title}`,plan.base.subtitle ?? "",plan.base.brandLine,plan.base.footer]), bytes: await renderCarouselPage(plan, 0, style, art, credit, pageImages) }];
   // Sequential rendering keeps the free instance's peak memory bounded.
-  for (const [index, model] of plan.pages.entries()) output.push({ title: model.title, altText:conciseAlt([model.title,...model.blocks.map(b=>[b.label,b.text].filter(Boolean).join(": ")),...(model.editorial?.columns ?? []).map(column => `${column.title}: ${column.body}`),model.footer]), bytes: await renderCarouselPage(plan, index + 1, style, art, credit, pageImages) });
+  for (const [index, model] of plan.pages.entries()) output.push({ title: model.title, altText:visibleAlt(index+1,[model.title,...model.blocks.map(b=>[b.label,b.text].filter(Boolean).join(": ")),...(model.editorial?.columns ?? []).map(column => `${column.title}: ${column.body}`),model.footer]), bytes: await renderCarouselPage(plan, index + 1, style, art, credit, pageImages) });
   // Bind the cover's identity to every body page, even when only a body template changes.
   // A standard JPEG comment preserves pixels while preventing a saved manifest being overwritten.
   const comment = Buffer.from(`cardnews-v1:${sha256(output.slice(1).map(p => sha256(p.bytes)).join(":"))}`);

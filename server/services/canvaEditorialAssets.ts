@@ -10,6 +10,8 @@ import { sha256 } from './text';
 import type { CardCopyV2, PageDesigns } from '../../shared/familyDialogue';
 import { FAMILY_PAGE_COLORS } from '../../shared/familyDialogueTheme';
 import { CANVA_APPROVED_PARENT_LOGO, CANVA_PAGE_IDS } from '../../shared/canvaEditorial';
+import { READING_PROFILE_LOGO_ID, readingProfileDesignErrors, type ReadingCardProfile } from '../../shared/readingCardProfiles';
+import { prepareReadingArtwork } from './readingCardImages';
 
 export function canonicalJson(value:unknown):string {
   if(Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -20,7 +22,12 @@ export const canvaInputHash=(value:unknown)=>sha256(canonicalJson(value));
 
 /** The fixed masters have light type and an approved static outro. Reject
  * unsupported studio options instead of silently dropping them at Autofill. */
-export function assertCanvaDesignSettings(pageDesigns:PageDesigns) {
+export function assertCanvaDesignSettings(pageDesigns:PageDesigns,profile?:ReadingCardProfile) {
+  if(profile) {
+    const errors=readingProfileDesignErrors(profile,pageDesigns);
+    if(errors.length) throw new HttpError(422,'선택한 읽기 디자인의 배경·정렬과 저장된 페이지 설정이 다릅니다. 현재 원고는 유지했습니다. '+errors.join(' '),{code:'canva_layout_unsupported',details:errors});
+    return;
+  }
   for(const [index,id] of CANVA_PAGE_IDS.entries()) {
     const design=pageDesigns[id],bg=design.background;
     if(design.alignment!=='center')throw new HttpError(422,`${index+1}장: 등록된 Canva 마스터는 중앙 정렬입니다. 원고는 보존했습니다. 중앙 정렬을 선택하거나 자체 이미지·Canva 직접 편집을 사용해 주세요.`,{code:'canva_layout_unsupported'});
@@ -39,9 +46,29 @@ export function assertCanvaDesignSettings(pageDesigns:PageDesigns) {
 }
 
 /** Text remains in Canva. Only the selected photograph/background is prepared here. */
-export async function prepareCanvaImages(db:DB,a:{itemId:number;channelId:number;copy:CardCopyV2;pageDesigns:PageDesigns}) {
-  assertCanvaDesignSettings(a.pageDesigns);
+export async function prepareCanvaImages(db:DB,a:{itemId:number;channelId:number;copy:CardCopyV2;pageDesigns:PageDesigns;profile?:ReadingCardProfile}) {
+  assertCanvaDesignSettings(a.pageDesigns,a.profile);
   const images:Array<{field:string;bytes:Buffer;hash:string}>=[];
+  if(a.profile) {
+    const profile=a.profile, outro=a.copy.pages.find(page=>page.id==='outro');
+    if(outro?.id!=='outro' || outro.fields.logoAssetId!==READING_PROFILE_LOGO_ID) throw new HttpError(422,'선택한 읽기 디자인의 승인된 ALL 프로필 이미지를 확인해 주세요. 기존 로고를 임의로 교체하지 않았습니다.',{code:'canva_profile_asset_mismatch'});
+    const logo=await fs.readFile(path.resolve(process.cwd(),profile.profileImagePath));
+    if(sha256(logo)!==profile.profileImageSha256) throw new HttpError(422,'승인된 ALL 프로필 이미지 파일이 변경됐습니다. 원고와 기존 Canva 결과를 유지했습니다.',{code:'canva_profile_asset_changed'});
+    for(const slot of profile.images) {
+      let bytes:Buffer;
+      if(slot.kind==='profile') bytes=logo;
+      else {
+        const design=a.pageDesigns[slot.pageId],bg=design.background;
+        const image=bg.kind==='image'?await loadCardPageArtworkAsset(db,a.itemId,a.channelId,bg.assetId!):null;
+        const pageIndex=CANVA_PAGE_IDS.indexOf(slot.pageId);
+        // Studio preview and Canva use the same source bytes, slot ratio,
+        // focal point, contain/cover, brightness and overlay preparation.
+        bytes=await prepareReadingArtwork(image?.bytes??null,design,slot,profile.pages[pageIndex].background);
+      }
+      images.push({field:slot.field,bytes,hash:sha256(bytes)});
+    }
+    return images;
+  }
   for(const [index,id] of CANVA_PAGE_IDS.entries()){
     if(id==='outro') continue;
     const design=a.pageDesigns[id],bg=design.background;

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { preserveFamilyDisplayOverrides } from "../../shared/familyDisplay";
+import { readingProfileForTemplateKey, readingProfileDesigns, readingImageSlot, READING_PROFILE_LOGO_ID } from "../../shared/readingCardProfiles";
 import { z } from "zod";
 import type { DB } from "../db";
 import type { Channel, ContentItem } from "../../shared/schema";
@@ -169,9 +170,10 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
     bundle = { snapshot, analysis, research: researched.data, evidenceSet, researchedSources: researched.sources };
     const evidenceBinding = { evidenceSetId: evidenceSet.evidenceSetId, sourceSnapshotId: snapshot.id, sourceAnalysisId: analysis.sourceAnalysisId, resourceResearchId: researched.data.resourceResearchId };
     if (existing && savedMetadata && Object.values(savedMetadata.fieldLocks).some(Boolean) && familyHash(savedMetadata.evidenceBinding) !== familyHash(evidenceBinding)) return failure(input, revision.id, "needs_review", [flag("fieldLocks", "locked_evidence_changed", "원문·근거 버전이 바뀌었습니다. 잠긴 문구의 근거를 바꾸지 않도록 전체 제안을 중단했습니다. 잠금을 유지한 부분 수정 또는 확인 후 잠금 해제를 선택해 주세요.")], { generationRuns: runs });
-    const brand = brandFor(channel, existing);
+    const readingProfile = readingProfileForTemplateKey(input.templateKey);
+    const brand = { ...brandFor(channel, existing), ...(readingProfile ? { logoAssetId: READING_PROFILE_LOGO_ID } : {}) };
     const generated = await runFamilyEditorialStage(context, { stage: "card_copy", role: "card_copy", schema: draftSchema, prompt: FAMILY_EDITORIAL_PROMPTS.copy,
-      data: { articleBody: sourceInput.articleBody, sourceSnapshotId: snapshot.id, evidenceBinding, sourceAnalysis: analysis, editorialPlan: planned.data, resourceResearch: researched.data, visitSettings: context.plan.editorial, channelSettings: brand, brandAssets: [brand.logoAssetId], templateContract: { templateKey: input.templateKey, formatId: FAMILY_FORMAT_ID }, existingCopyAndLocks: existing ? { copy: existing, fieldLocks: savedMetadata?.fieldLocks ?? {} } : null, instructions: input.instructions ?? "" },
+      data: { articleBody: sourceInput.articleBody, sourceSnapshotId: snapshot.id, evidenceBinding, sourceAnalysis: analysis, editorialPlan: planned.data, resourceResearch: researched.data, visitSettings: context.plan.editorial, channelSettings: brand, brandAssets: [brand.logoAssetId], templateContract: { templateKey: input.templateKey, formatId: FAMILY_FORMAT_ID, ...(readingProfile ? { fixedTypography: { fontFamily: "Noto Sans KR / Pretendard", doNotShrink: true, countExplicitLineBreaks: true, overflowAction: "문구를 다시 작성하되 발언·전망의 조건과 핵심 근거는 보존한다.", fields: readingProfile.pages.flatMap(page => page.textBoxes.map(box => ({ field: box.field, width: box.width, height: box.height, fontSize: box.fontSize, lineHeight: box.lineHeight, maxLines: box.maxLines }))) }, readingBodyMapping: "2장 사실과 caveat를 빈 줄로 이어 본문에 표시한다. 3장은 takeaway를 본문으로 표시한다. 7장 추가 활동이 있으면 homeActivity.action 뒤에 label/action을 빈 줄로 이어 같은 영역에 표시한다. 전체 합산 길이를 고려한다." } : {}) }, existingCopyAndLocks: existing ? { copy: existing, fieldLocks: savedMetadata?.fieldLocks ?? {} } : null, instructions: input.instructions ?? "" },
       force: !!input.instructions, validate: data => {
         const errors = validateFamilyEvidenceReferences(data.cardCopy, bundle, planned.data!, data.parentGuide);
         if (familyHash(data.editorialPlan) !== familyHash(planned.data)) errors.push(flag("editorialPlan", "plan_changed", "확정한 중심 질문·개념·사고 기능을 문구 단계에서 임의로 바꾸지 않았는지 확인해 주세요."));
@@ -185,6 +187,7 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
     const outro = copy.pages.find(page => page.id === "outro")!;
     if (outro.id === "outro") outro.fields = { ...outro.fields, ...brand };
     metadata = { editorialPlan: planned.data, evidenceBinding, parentGuide: generated.data.parentGuide, pageDesigns: savedMetadata?.pageDesigns ?? defaultPageDesigns(), fieldLocks: savedMetadata?.fieldLocks ?? {}, captionPackage: null, visualBriefs: savedMetadata?.visualBriefs ?? {}, editorialReview: null, generationRuns: [], dependencies: { caption: "not_generated", visuals: savedMetadata && Object.keys(savedMetadata.visualBriefs).length ? "needs_review" : "not_generated", review: "not_generated", render: "needs_review" } };
+    if (readingProfile && (!existing || existing.templateKey !== readingProfile.templateKey)) metadata.pageDesigns = readingProfileDesigns(readingProfile, metadata.pageDesigns);
     if (existing && savedMetadata) {
       const lockedChanges = validateFamilyLockedFields(existing, copy, metadata.fieldLocks);
       if (lockedChanges.length) return failure(input, revision.id, "needs_review", lockedChanges, { generationRuns: runs, sourceAnalysis: analysis });
@@ -221,9 +224,14 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
   }
   if (input.scope === "all" || input.scope === "image_brief") {
     const pageId = input.pageId ?? "cover";
+    const readingProfile = readingProfileForTemplateKey(copy.templateKey), slot = readingProfile && readingImageSlot(readingProfile, pageId);
     if (pageId === "outro") flags.push(flag("visualBriefs.outro", "approved_logo_only", "닫는 표지는 승인된 로고 자산을 사용합니다. 새 로고·마스코트를 생성하지 않았습니다."));
+    else if (readingProfile && slot?.kind !== "artwork") flags.push(flag(`visualBriefs.${pageId}`, "reading_photo_slot_missing", "이 스타일의 사진은 1·4·7장에 배치합니다. 선택한 장은 글과 색으로 구성하므로 이미지를 요청하지 않았습니다."));
     else {
-      const visual = await runFamilyEditorialStage(context, { stage: "image_brief", role: "image_brief", schema: visualBriefSchema, prompt: `${FAMILY_EDITORIAL_PROMPTS.visual}\n알리고당의 새 기본 시각 방향: full-bleed 사진 감각의 절제된 conceptual art, 차콜·딥그린 바탕과 버터옐로(#F4D66A)의 작은 강조. 자연스러운 빛과 미세한 grain, 주 피사체는 하단 또는 측면에 두고 상단·중앙의 제목 안전 영역을 비운다. 과한 3D 스티커와 알록달록한 면분할을 피한다. 기존 사용자가 저장한 색·이미지 취향과 명시 지시가 우선한다. 실제 뉴스 현장 사진처럼 증거를 꾸미지 않으며 글자·로고를 이미지에 굽지 않는다.`,
+      const visualDirection = readingProfile && slot
+        ? `선택한 카드뉴스 스타일은 ${readingProfile.label}이다. 사진은 텍스트와 분리된 ${slot.width}×${slot.height} 고정 사진창에 들어간다. 제목용 빈 공간을 그림 안에 만들 필요는 없다. 중·고등학생과 학부모가 기사 쟁점을 생각할 수 있는 선명한 피사체·질감·대비를 사용한다. 사진이 교체되어도 타이포와 색면의 힘은 고정된다. 실제 뉴스 현장 사진처럼 증거를 꾸미지 않으며 글자·로고를 이미지에 굽지 않는다.`
+        : "알리고당의 기존 시각 방향: full-bleed 사진 감각의 절제된 conceptual art, 차콜·딥그린 바탕과 버터옐로(#F4D66A)의 작은 강조. 자연스러운 빛과 미세한 grain, 주 피사체는 하단 또는 측면에 두고 상단·중앙의 제목 안전 영역을 비운다. 과한 3D 스티커와 알록달록한 면분할을 피한다. 기존 사용자가 저장한 색·이미지 취향과 명시 지시가 우선한다. 실제 뉴스 현장 사진처럼 증거를 꾸미지 않으며 글자·로고를 이미지에 굽지 않는다.";
+      const visual = await runFamilyEditorialStage(context, { stage: "image_brief", role: "image_brief", schema: visualBriefSchema, prompt: `${FAMILY_EDITORIAL_PROMPTS.visual}\n${visualDirection}`,
         data: { editorialPlan: metadata.editorialPlan, cardCopy: copy, page: copy.pages.find(page => page.id === pageId), pageId, pageDesign: metadata.pageDesigns[pageId], referenceAssetIds: metadata.pageDesigns[pageId].background.assetId ? [String(metadata.pageDesigns[pageId].background.assetId)] : [], instructions: input.scope === "image_brief" ? input.instructions ?? "" : "" }, force: input.scope === "image_brief", validate: brief => brief.pageId === pageId ? [] : [flag("visualBriefs", "wrong_page", "선택한 페이지와 이미지 브리프의 페이지가 다릅니다.")] });
       if (visual.status === "ready" && visual.data) { metadata.visualBriefs = { ...metadata.visualBriefs, [pageId]: visual.data }; metadata.dependencies.visuals = "current"; }
       else flags.push(...visual.reviewFlags);

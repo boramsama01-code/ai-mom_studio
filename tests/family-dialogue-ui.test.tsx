@@ -9,6 +9,7 @@ import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixt
 import { cardCopyFixture } from "./fixtures/cardCopy";
 import { ApiError } from "../client/src/api";
 import { activateDraftRecoveryScope } from "../client/src/draftRecovery";
+import { READING_CARD_PROFILES, READING_PROFILE_LOGO_ID } from "../shared/readingCardProfiles";
 import { defaultPageDesigns, familyFieldValue } from "../shared/familyDialogue";
 import type { FamilyEvidenceView } from "../shared/familyEvidence";
 import { familyEvidenceFixture } from "./fixtures/familyEvidence";
@@ -95,6 +96,27 @@ async function connectEvidence(path: string, evidenceId: string) {
 }
 
 describe("family dialogue v2 editor", () => {
+  it("selects a reading profile, preserves manual text, exposes its photo slots, and reopens the saved style", async () => {
+    await render();
+    await input("fields.headline", "서로의 판단 기준");
+    const picker = host.querySelector<HTMLSelectElement>('[aria-label="카드뉴스 스타일"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(picker, READING_CARD_PROFILES[0].templateKey); picker.dispatchEvent(new Event("change", { bubbles: true })); }); await settle();
+    expect(field("fields.headline").value).toBe("서로의 판단 기준");
+    expect(host.querySelector('.page-background-editor')).not.toBeNull();
+    await selectPage("2페이지 · 뉴스 요약");
+    expect(host.querySelector('.page-background-editor')).toBeNull();
+    expect(host.textContent).toContain("사진은 1·4·7장");
+    expect(field("displayOverrides.sourceCredit").value).toContain("테스트용 원문");
+    await selectPage("4페이지 · 중심 질문");expect(host.querySelector('.page-background-editor')).not.toBeNull();
+    await selectPage("8페이지 · 닫는 표지");expect(host.querySelector('[data-testid="family-reading-outro-design"]')).not.toBeNull();
+    await input("fields.brandLine", "오늘 서로의 생각은?");await click("문구·디자인 저장");
+    expect(saved.copy.templateKey).toBe(READING_CARD_PROFILES[0].templateKey);
+    expect(saved.copy.pages[7]).toMatchObject({fields:{logoAssetId:READING_PROFILE_LOGO_ID,brandLine:"오늘 서로의 생각은?"}});
+    await render(null);client.clear();await render();
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="카드뉴스 스타일"]')!.value).toBe(READING_CARD_PROFILES[0].templateKey);
+    expect(field("fields.headline").value).toBe("서로의 판단 기준");
+  });
+
   it("keeps a new image credit in unsaved recovery, preview inputs and copied text", async () => {
     const session = { user: "operator", recoveryScope: "a".repeat(64) };
     expect(activateDraftRecoveryScope(session.recoveryScope).ok).toBe(true);

@@ -8,6 +8,7 @@ import { emptyPayload } from "../shared/payloads";
 import type { CardCopy } from "../shared/cardCopy";
 import { discussionCardCopyFixture } from "./fixtures/discussionCardCopy";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
+import { READING_CARD_PROFILES, READING_PROFILE_LOGO_ID, readingProfileDesigns } from "../shared/readingCardProfiles";
 import { login, resetDb, setTestEnv } from "./helpers";
 
 setTestEnv();
@@ -59,6 +60,21 @@ async function enteredWithin(promise: Promise<void>) {
 }
 
 describe("page-specific backgrounds on PostgreSQL", () => {
+  it("uses fixed reading-photo geometry and blocks artwork requests on text-only pages", async () => {
+    const f=await fixture(),copy=familyDialogueCardFixture(),metadata=familyDialogueMetadataFixture(),profile=READING_CARD_PROFILES[0];
+    copy.templateKey=profile.templateKey;const outro=copy.pages[7];if(outro.id==='outro')outro.fields.logoAssetId=READING_PROFILE_LOGO_ID;
+    metadata.pageDesigns=readingProfileDesigns(profile,metadata.pageDesigns);
+    await getDb().transaction(tx=>createRevision(tx,{contentItemId:f.item.id,author:'operator',payload:{...f.payload,...metadata,cardCopy:copy}}));
+    const [item]=await getDb().select().from(contentItems).where(eq(contentItems.id,f.item.id));
+    makeImage.mockReset();makeImage.mockResolvedValue({bytes:generatedPng,mimeType:'image/png',provider:'openai',model:'gpt-image-1'});
+    const rejected=await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f,{version:item.version,pageId:'news_summary',mode:'ai',imageData:undefined}));
+    expect(rejected.status).toBe(422);expect(makeImage).not.toHaveBeenCalled();
+    const created=await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f,{version:item.version,pageId:'discussion',mode:'ai',imageData:undefined}));
+    expect(created.status,JSON.stringify(created.body)).toBe(200);expect(makeImage).toHaveBeenCalledTimes(1);
+    expect(makeImage.mock.calls[0][0].prompt).toContain('936x360');
+    expect(makeImage.mock.calls[0][0].prompt).toContain('text is entirely outside');
+    expect(created.body).toMatchObject({pageId:'discussion',source:'ai',credit:'AI 일러스트 · OpenAI'});
+  });
   it("uses v2 semantic IDs and scopes both current and recoverable images to the owning item", async () => {
     const f = await fixture(), copy = familyDialogueCardFixture(), metadata = familyDialogueMetadataFixture();
     const revision = await getDb().transaction(tx => createRevision(tx, { contentItemId: f.item.id, author: "operator", payload: { ...f.payload, ...metadata, cardCopy: copy } }));

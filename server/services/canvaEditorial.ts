@@ -3,7 +3,10 @@ import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { DB } from '../db';
 import { canvaAssetUploads, canvaMasters, canvaRenderJobs, contentItems, contentRevisions, mediaAssets } from '../../shared/schema';
 import { familyCardCopySchema, evidenceBindingSchema, pageDesignsSchema, type CardCopyV2, type PageDesigns } from '../../shared/familyDialogue';
-import { CANVA_MAPPING_VERSION, CANVA_PAGE_IDS, canvaTextFields, canvaDisplaySupportErrors, canvaVariant, validateCanvaDataset, type CanvaConceptMode, type CanvaJobDto, type CanvaMasterDto, type CanvaField, type CanvaDataset, type CanvaTextOptions } from '../../shared/canvaEditorial';
+import { CANVA_PAGE_IDS, canvaTextFields, canvaDisplaySupportErrors, canvaVariant, validateCanvaDataset, snapshotCanvaProfile, storedCanvaProfileSnapshot, resolveCanvaProfile, type CanvaProfileSnapshot, type CanvaConceptMode, type CanvaJobDto, type CanvaMasterDto, type CanvaField, type CanvaDataset, type CanvaTextOptions } from '../../shared/canvaEditorial';
+import { readingProfileForTemplateKey, readingProfileForTemplateVersion, type ReadingCardProfile } from '../../shared/readingCardProfiles';
+import { layoutReadingCard } from './readingCard';
+import { CardOverflowError } from './card';
 import { HttpError } from '../routes/util';
 import { createRevision, invalidateApprovals } from '../content';
 import { audit } from '../audit';
@@ -23,7 +26,7 @@ import { loadCardPageArtworkCredits } from './cardPageArtwork';
 type Job=typeof canvaRenderJobs.$inferSelect;
 type Master=typeof canvaMasters.$inferSelect;
 type Tx=Parameters<Parameters<DB['transaction']>[0]>[0];
-type Input={payload:Record<string,unknown>;title:string;copy:CardCopyV2;pageDesigns:PageDesigns;evidenceSetId:string;mappingVersion:string;datasetHash:string;artworkCredits?:Record<string,string>};
+type Input=CanvaProfileSnapshot & {payload:Record<string,unknown>;title:string;copy:CardCopyV2;pageDesigns:PageDesigns;evidenceSetId:string;datasetHash:string;artworkCredits?:Record<string,string>};
 class CanvaAssetPersistenceError extends rest.CanvaRestError {
   constructor(public uploadRowId:number,public imageHash:string,providerJobId:string){super('Canva 이미지 작업 ID를 저장하는 중 연결이 끊겼습니다. 같은 요청을 다시 보내지 않았습니다.',undefined,'result_unknown',true,providerJobId);}
 }
@@ -31,27 +34,49 @@ const active=['queued','running'];
 const submitting=['autofill_submitting','export_submitting'];
 const principalKey=(p:rest.CanvaPrincipal)=>`${p.teamId}:${p.userId}`;
 const asInput=(job:Job)=>job.input as unknown as Input;
-function assertCanvaTextFits(copy:CardCopyV2,master:Master,purpose:'create'|'import'|'autofill') {
+function profileForInput(input:Input,master?:Master):ReadingCardProfile|undefined {
+  let profile:ReadingCardProfile|undefined;
+  try { profile=resolveCanvaProfile(input); }
+  catch(error) { throw new HttpError(409,(error as Error).message,{code:'canva_profile_changed'}); }
+  if(profile && (input.copy.templateKey!==profile.templateKey || master && master.templateVersion!==profile.templateVersion)
+      || !profile && master && readingProfileForTemplateVersion(master.templateVersion)) {
+    throw new HttpError(409,'저장된 Canva 작업과 마스터의 읽기 디자인이 다릅니다. 기존 원고와 결과를 유지했습니다.',{code:'canva_profile_changed'});
+  }
+  return profile;
+}
+function assertCanvaTextFits(copy:CardCopyV2,master:Master,purpose:'create'|'import'|'autofill',profile?:ReadingCardProfile,options:CanvaTextOptions={}) {
+  if(profile && purpose!=='import') {
+    try {
+      for(const page of copy.pages) {
+        const context={...options.context,...options.pageContexts?.[page.id]};
+        layoutReadingCard(copy,page,context,{imageCredit:context.imageCredit});
+      }
+    } catch(error) {
+      if(!(error instanceof CardOverflowError)) throw error;
+      throw new HttpError(422,'문구는 저장되어 있습니다. 선택한 읽기 디자인의 칸을 넘는 문구를 줄이거나 줄바꿈을 조정해 주세요. '+error.message,{code:'canva_text_overflow',field:error.field});
+    }
+    return;
+  }
   const fit=checkCanvaTextLimits(copy,{sourceId:master.sourceId,templateVersion:master.templateVersion,purpose});
   if(!fit.ok)throw new HttpError(422,`문구는 저장되어 있습니다. Canva로 만들기 전에 다음 칸을 줄이거나 줄바꿈을 정리해 주세요. ${fit.issues.slice(0,3).map(issue=>issue.message).join(' ')}`,{code:'canva_text_overflow',details:fit.issues});
 }
-function canvaDisplayOptions(input:Input,dataset:CanvaDataset):CanvaTextOptions {
+function canvaDisplayOptions(input:Input,dataset:CanvaDataset,profile?:ReadingCardProfile):CanvaTextOptions {
   const caption=captionPackageSchema.safeParse(input.payload.captionPackage);
-  return { dataset,requireDisplayFields:true,context:familyDisplayContext(input.copy,caption.success?caption.data:null),
+  return { dataset,profile,requireDisplayFields:true,context:familyDisplayContext(input.copy,caption.success?caption.data:null),
     pageContexts:Object.fromEntries(input.copy.pages.map(page=>{
       const bg=input.pageDesigns[page.id].background;
       return [page.id,{imageCredit:bg.kind==='image'?input.artworkCredits?.[String(bg.assetId)]??'배경 이미지':''}];
     })) };
 }
-function assertCanvaDisplaySupported(copy:CardCopyV2,dataset:CanvaDataset) {
-  const errors=canvaDisplaySupportErrors(copy,dataset,true);
-  if(errors.length)throw new HttpError(422,'뉴스 읽기·STEP·상단 표기·출처·번호를 현재 원고와 같게 채울 수 없는 마스터입니다. 표시 문구 필드를 갖춘 버전이 필요하며 원고는 그대로 저장되어 있습니다.',{code:'canva_display_profile_unsupported',details:errors});
+function assertCanvaDisplaySupported(copy:CardCopyV2,dataset:CanvaDataset,profile?:ReadingCardProfile) {
+  const errors=[...(profile?validateCanvaDataset(dataset,canvaVariant(copy),profile):[]),...canvaDisplaySupportErrors(copy,dataset,true,profile)];
+  if(errors.length)throw new HttpError(422,'선택한 디자인의 문구·출처·번호·이미지 필드를 현재 원고와 같게 채울 수 없습니다. 필드를 갖춘 버전을 확인해 주세요. 원고는 그대로 저장되어 있습니다.',{code:'canva_display_profile_unsupported',details:errors});
 }
 export const canvaMasterDto=(m:Master):CanvaMasterDto=>({id:m.id,conceptMode:m.conceptMode,hasExternalActivity:m.hasExternalActivity,templateVersion:m.templateVersion,sourceType:m.sourceType,sourceId:m.sourceId,status:m.status,editUrl:m.editUrl,validatedAt:m.validatedAt.toISOString()});
 export function canvaJobDto(job:Job):CanvaJobDto {
   const result=job.result;
   const reconciliations=canvaReconciliations(result);
-  return {id:job.id,requestId:job.requestId,purpose:job.purpose,status:job.status,phase:job.phase,sourceRevisionId:job.sourceRevisionId,sourceVersion:job.sourceVersion,designId:job.designId,editUrl:job.editUrl,exportJobId:job.exportJobId,outputAssetId:job.outputAssetId,outputRevisionId:job.outputRevisionId,errorCode:job.errorCode,errorMessage:job.errorMessage,createdAt:job.createdAt.toISOString(),recoveryToken:canvaRecoveryToken(job),result:result?{pages:result.pages,originals:result.originals,templateVersion:result.templateVersion,datasetHash:result.datasetHash,mappingVersion:result.mappingVersion,exportedAt:result.exportedAt,contentRevision:result.contentRevision,evidenceSetId:result.evidenceSetId,...(reconciliations.length?{reconciled:true,reconciliation:reconciliations[0],reconciliationHistory:reconciliations.slice(1)}:{}),...(result.reuseReason==='caption_only'?{reusedFromJobId:result.reusedFromJobId,reuseReason:result.reuseReason,reusedAt:result.reusedAt}:{})}:null};
+  return {id:job.id,requestId:job.requestId,purpose:job.purpose,status:job.status,phase:job.phase,sourceRevisionId:job.sourceRevisionId,sourceVersion:job.sourceVersion,designId:job.designId,editUrl:job.editUrl,exportJobId:job.exportJobId,outputAssetId:job.outputAssetId,outputRevisionId:job.outputRevisionId,errorCode:job.errorCode,errorMessage:job.errorMessage,createdAt:job.createdAt.toISOString(),recoveryToken:canvaRecoveryToken(job),result:result?{...(typeof result.profileId==='string'?{profileId:result.profileId,profileTemplateVersion:result.profileTemplateVersion,profileImageSha256:result.profileImageSha256}:{}),pages:result.pages,originals:result.originals,templateVersion:result.templateVersion,datasetHash:result.datasetHash,mappingVersion:result.mappingVersion,exportedAt:result.exportedAt,contentRevision:result.contentRevision,evidenceSetId:result.evidenceSetId,...(reconciliations.length?{reconciled:true,reconciliation:reconciliations[0],reconciliationHistory:reconciliations.slice(1)}:{}),...(result.reuseReason==='caption_only'?{reusedFromJobId:result.reusedFromJobId,reuseReason:result.reuseReason,reusedAt:result.reusedAt}:{})}:null};
 }
 
 export async function registerCanvaMaster(db:DB,a:{channelId:number;sourceId:string;conceptMode:CanvaConceptMode;hasExternalActivity:boolean;templateVersion:string;actor:string}) {
@@ -62,7 +87,8 @@ export async function registerCanvaMaster(db:DB,a:{channelId:number;sourceId:str
   if(design.pageCount!==8 || !pages.validEightPageMaster) throw new HttpError(422,'등록할 마스터는 정확히 1080×1350 크기의 8장이어야 합니다.');
   if(design.updatedAt===null)throw new HttpError(422,'Canva 마스터의 수정 시각을 확인할 수 없습니다. 원본 버전을 확인한 뒤 등록해 주세요.',{code:'master_version_unavailable'});
   if(pages.items.some(p=>!p.id)) throw new HttpError(422,'Canva가 이 디자인의 고정 페이지 ID를 제공하지 않아 페이지 변경을 확인할 수 없습니다. 페이지 ID를 제공하는 새 디자인으로 마스터를 등록해 주세요.',{code:'page_identity_unavailable'});
-  const errors=validateCanvaDataset(dataset,a);
+  const profile=readingProfileForTemplateVersion(a.templateVersion);
+  const errors=validateCanvaDataset(dataset,a,profile);
   if(errors.length) throw new HttpError(422,'Canva 마스터의 자동 채우기 필드가 준비되지 않았습니다.',{code:'dataset_mismatch',details:errors});
   const result=await db.insert(canvaMasters).values({channelId:a.channelId,sourceId:a.sourceId,sourceUpdatedAt:String(design.updatedAt),sourceType:'design',conceptMode:a.conceptMode,hasExternalActivity:a.hasExternalActivity,templateVersion:a.templateVersion,principal:principalKey(principal),dataset,datasetHash:canvaInputHash(dataset),pageIds:pages.items.map(p=>p.id!),editUrl:design.editUrl,validatedAt:new Date()}).onConflictDoNothing().returning();
   if(!result.length) throw new HttpError(409,'이 변형의 같은 템플릿 버전이 이미 등록되어 있습니다. 새 버전 이름으로 등록해 주세요.');
@@ -90,25 +116,30 @@ export async function enqueueCanvaRender(db:DB,a:{channelId:number;itemId:number
     // Do not spend an external upload/autofill/export request on an unbound or
     // foreign evidence set. Final approval repeats this check for its revision.
     await assertFamilyEvidenceForCopy(tx as DB,item,parsed.data,metadata);
-    const variant=canvaVariant(parsed.data);
-    if(purpose==='create'&&parsed.data.pages.find(p=>p.id==='perspectives')!.layout==='columns') throw new HttpError(422,'등록된 Canva 마스터는 두 시선의 상하 배치입니다. 상하 배치를 선택하거나 자체 이미지로 만들어 주세요.');
+    const variant=canvaVariant(parsed.data),selectedProfile=purpose==='create'?readingProfileForTemplateKey(parsed.data.templateKey):undefined;
+    if(purpose==='create'&&!selectedProfile&&parsed.data.pages.find(p=>p.id==='perspectives')!.layout==='columns') throw new HttpError(422,'등록된 Canva 마스터는 두 시선의 상하 배치입니다. 상하 배치를 선택하거나 자체 이미지로 만들어 주세요.');
     const [prior]=a.importFromJobId?await tx.select().from(canvaRenderJobs).where(and(eq(canvaRenderJobs.id,a.importFromJobId),eq(canvaRenderJobs.contentItemId,item.id),eq(canvaRenderJobs.channelId,a.channelId))):[];
     if(a.importFromJobId && !prior?.designId) throw new HttpError(404,'이 콘텐츠의 Canva 디자인을 찾을 수 없습니다.');
     // Import keeps the existing copy's provenance. A later master change, or a
     // different current authoring layout, must not prevent comparing that copy.
-    const [master]=prior
+    const masters=prior
       ?await tx.select().from(canvaMasters).where(and(eq(canvaMasters.channelId,a.channelId),eq(canvaMasters.id,prior.masterId))).limit(1)
-      :await tx.select().from(canvaMasters).where(and(eq(canvaMasters.channelId,a.channelId),eq(canvaMasters.status,'ready'),eq(canvaMasters.conceptMode,variant.conceptMode),eq(canvaMasters.hasExternalActivity,variant.hasExternalActivity),...(a.masterId?[eq(canvaMasters.id,a.masterId)]:[]))).orderBy(desc(canvaMasters.id)).limit(1);
-    if(!master) throw new HttpError(purpose==='import'?404:422,purpose==='import'?'이 콘텐츠의 기존 Canva 마스터 기록을 찾을 수 없습니다.':'이 개념·활동 구조에 맞는 Canva 마스터를 먼저 등록해 주세요.');
-    assertCanvaTextFits(parsed.data,master,purpose);
+      :await tx.select().from(canvaMasters).where(and(eq(canvaMasters.channelId,a.channelId),eq(canvaMasters.status,'ready'),...(!selectedProfile?[eq(canvaMasters.conceptMode,variant.conceptMode),eq(canvaMasters.hasExternalActivity,variant.hasExternalActivity)]:[]),...(a.masterId?[eq(canvaMasters.id,a.masterId)]:[]))).orderBy(desc(canvaMasters.id));
+    const master=prior||a.masterId?masters[0]:masters.find(candidate=>readingProfileForTemplateVersion(candidate.templateVersion)?.id===selectedProfile?.id);
+    if(!master) throw new HttpError(purpose==='import'?404:422,purpose==='import'?'이 콘텐츠의 기존 Canva 마스터 기록을 찾을 수 없습니다.':'선택한 디자인·개념·활동 구조에 맞는 Canva 마스터를 실제 페이지와 필드 검사 후 등록해 주세요.');
+    if(purpose==='create' && readingProfileForTemplateVersion(master.templateVersion)?.id!==selectedProfile?.id) throw new HttpError(422,'편집기에서 선택한 디자인과 Canva 마스터의 디자인이 다릅니다. 원고를 유지했습니다.',{code:'canva_profile_mismatch'});
+    const priorInput=prior?asInput(prior):undefined;
+    const artworkCredits=purpose==='create'?await loadCardPageArtworkCredits(tx as DB,item.id,a.channelId,parsed.data,designs.data):priorInput?.artworkCredits??{};
+    const input:Input={payload,title:item.title,copy:parsed.data,pageDesigns:designs.data,evidenceSetId:evidence.data.evidenceSetId,
+      ...(priorInput?storedCanvaProfileSnapshot(priorInput):snapshotCanvaProfile(selectedProfile)),datasetHash:priorInput?.datasetHash??master.datasetHash,artworkCredits};
+    const displayOptions=canvaDisplayOptions(input,master.dataset as CanvaDataset,selectedProfile);
+    assertCanvaTextFits(parsed.data,master,purpose,selectedProfile,displayOptions);
     if(purpose==='create'){
-      assertCanvaDesignSettings(designs.data);
-      assertCanvaDisplaySupported(parsed.data,master.dataset as CanvaDataset);
+      assertCanvaDesignSettings(designs.data,selectedProfile);
+      assertCanvaDisplaySupported(parsed.data,master.dataset as CanvaDataset,selectedProfile);
     }
     const [pending]=await tx.select().from(canvaRenderJobs).where(and(eq(canvaRenderJobs.contentItemId,item.id),inArray(canvaRenderJobs.status,active))).limit(1);
     if(pending){if(pending.sourceVersion===a.version&&pending.masterId===master.id&&pending.purpose===purpose&&(purpose==='create'||pending.designId===prior?.designId))return pending;throw new HttpError(409,'진행 중인 Canva 작업을 먼저 확인하거나 대기를 취소해 주세요.');}
-    const artworkCredits=purpose==='create'?await loadCardPageArtworkCredits(tx as DB,item.id,a.channelId,parsed.data,designs.data):{};
-    const input:Input={payload,title:item.title,copy:parsed.data,pageDesigns:designs.data,evidenceSetId:evidence.data.evidenceSetId,mappingVersion:CANVA_MAPPING_VERSION,datasetHash:master.datasetHash,artworkCredits};
     const [job]=await tx.insert(canvaRenderJobs).values({channelId:a.channelId,contentItemId:item.id,sourceRevisionId:revision.id,sourceVersion:item.version,masterId:master.id,requestId:a.requestId,requestHash,purpose,principal:prior?.principal??master.principal,input:input as unknown as Record<string,unknown>,designId:prior?.designId ?? null}).returning();
     await audit(tx as DB,{actor:a.actor,action:'canva_render_requested',entity:'canva_render',entityId:job.id,channelId:a.channelId,detail:{purpose,sourceRevisionId:revision.id,masterId:master.id}});
     return job;
@@ -181,6 +212,7 @@ async function processCanvaStep(db:DB,job:Job){
   }
   const [master]=await db.select().from(canvaMasters).where(eq(canvaMasters.id,job.masterId));
   if(!master) throw new HttpError(404,'Canva 마스터 등록을 찾을 수 없습니다.');
+  const profile=job.purpose!=='import'&&['validate','images','autofill_prepare'].includes(job.phase)?profileForInput(input,master):undefined;
   if(job.phase==='validate'){
     await checkedPrincipal(db,job);
     // An existing copy is independently editable. A later change or loss of
@@ -193,9 +225,9 @@ async function processCanvaStep(db:DB,job:Job){
     const capabilities=await rest.getCanvaCapabilities(db);
     if(!capabilities.capabilities.includes('autofill')&&job.purpose==='create')throw new HttpError(422,'현재 Canva 계정에서 자동 채우기를 사용할 수 없습니다.',{code:'capability_missing'});
     const dataset=await rest.getCanvaDataset(db,{type:master.sourceType as 'design'|'brand_template',id:master.sourceId});
-    const errors=validateCanvaDataset(dataset,canvaVariant(input.copy));
+    const errors=validateCanvaDataset(dataset,canvaVariant(input.copy),profile);
     if(errors.length || canvaInputHash(dataset)!==input.datasetHash){await db.update(canvaMasters).set({status:'field_changed'}).where(eq(canvaMasters.id,master.id));throw new HttpError(409,'Canva 마스터의 필드가 변경됐습니다. 설정에서 새 버전을 검사·등록해 주세요.',{code:'dataset_changed'});}
-    assertCanvaDisplaySupported(input.copy,dataset);
+    assertCanvaDisplaySupported(input.copy,dataset,profile);
     const [pages,design]=await Promise.all([rest.getCanvaPages(db,master.sourceId),rest.getCanvaDesign(db,master.sourceId)]);
     if(!pages.validEightPageMaster)throw new HttpError(422,'Canva 디자인은 1080×1350 크기의 8장이어야 합니다.',{code:'page_mismatch'});
     if(canvaInputHash(pages.items.map(p=>p.id))!==canvaInputHash(master.pageIds))throw new HttpError(409,'Canva 마스터의 페이지가 바뀌었습니다. 새 버전으로 등록해 주세요.',{code:'page_changed'});
@@ -203,8 +235,8 @@ async function processCanvaStep(db:DB,job:Job){
     return saveStep(db,job,{phase:'images'});
   }
   if(job.phase==='images'){
-    assertCanvaDisplaySupported(input.copy,master.dataset as CanvaDataset);
-    const images=await prepareCanvaImages(db,{itemId:job.contentItemId,channelId:job.channelId,copy:input.copy,pageDesigns:input.pageDesigns});
+    assertCanvaDisplaySupported(input.copy,master.dataset as CanvaDataset,profile);
+    const images=await prepareCanvaImages(db,{itemId:job.contentItemId,channelId:job.channelId,copy:input.copy,pageDesigns:input.pageDesigns,profile});
     const uploaded={...(job.result?.uploadedImages as Record<string,{assetId:string;hash:string}>??{})};
     const next=images.find(image=>uploaded[image.field]?.hash!==image.hash);
     if(!next) return saveStep(db,job,{phase:'autofill_prepare'});
@@ -215,14 +247,14 @@ async function processCanvaStep(db:DB,job:Job){
   if(job.phase==='autofill_prepare'){
     await checkedPrincipal(db,job);
     const dataset=await rest.getCanvaDataset(db,{type:master.sourceType as 'design'|'brand_template',id:master.sourceId});
-    if(canvaInputHash(dataset)!==input.datasetHash || validateCanvaDataset(dataset,canvaVariant(input.copy)).length)throw new HttpError(409,'자동 채우기 직전에 마스터 필드 변경을 감지했습니다. 기존 작업을 보존합니다.',{code:'dataset_changed'});
+    if(canvaInputHash(dataset)!==input.datasetHash || validateCanvaDataset(dataset,canvaVariant(input.copy),profile).length)throw new HttpError(409,'자동 채우기 직전에 마스터 필드 변경을 감지했습니다. 기존 작업을 보존합니다.',{code:'dataset_changed'});
     const masterNow=await rest.getCanvaDesign(db,master.sourceId);
     if(String(masterNow.updatedAt)!==master.sourceUpdatedAt){await db.update(canvaMasters).set({status:'design_changed'}).where(eq(canvaMasters.id,master.id));throw new HttpError(409,'이미지를 준비하는 동안 Canva 마스터가 바뀌었습니다. 새 버전으로 검사·등록해 주세요.',{code:'master_changed'});}
-    assertCanvaTextFits(input.copy,master,'autofill');
-    assertCanvaDisplaySupported(input.copy,dataset);
-    const data:Record<string,CanvaField>={...canvaTextFields(input.copy,canvaDisplayOptions(input,dataset))};
+    assertCanvaTextFits(input.copy,master,'autofill',profile,canvaDisplayOptions(input,dataset,profile));
+    assertCanvaDisplaySupported(input.copy,dataset,profile);
+    const data:Record<string,CanvaField>={...canvaTextFields(input.copy,canvaDisplayOptions(input,dataset,profile))};
     for(const [field,value] of Object.entries(job.result?.uploadedImages as Record<string,{assetId:string}>??{})) data[field]={type:'image',asset_id:value.assetId};
-    if(Object.entries(validateExpected(input.copy)).some(([name,field])=>data[name]?.type!==field.type) || Object.entries(data).some(([name,field])=>dataset[name]?.type!==field.type))throw new HttpError(422,'Canva로 보낼 텍스트·이미지 필드가 아직 준비되지 않았습니다.');
+    if(Object.entries(validateExpected(input.copy,profile)).some(([name,field])=>data[name]?.type!==field.type) || Object.entries(data).some(([name,field])=>dataset[name]?.type!==field.type))throw new HttpError(422,'Canva로 보낼 텍스트·이미지 필드가 아직 준비되지 않았습니다.');
     await markSubmitting(db,job,'autofill_submitting');
     const submitted=await rest.submitCanvaAutofill(db,{type:master.sourceType as 'design'|'brand_template',id:master.sourceId,title:`${input.title.slice(0,180)} · ${job.requestId.slice(0,8)}`,data});
     return persistProviderId(db,job,'autofill',submitted.id);
@@ -264,7 +296,7 @@ async function processCanvaStep(db:DB,job:Job){
   throw new HttpError(409,'Canva 요청의 접수 결과를 확인해야 합니다. 자동으로 중복 실행하지 않았습니다.',{code:'result_unknown'});
 }
 import { expectedCanvaDataset as validateExpectedForVariant } from '../../shared/canvaEditorial';
-const validateExpected=(copy:CardCopyV2)=>validateExpectedForVariant(canvaVariant(copy));
+const validateExpected=(copy:CardCopyV2,profile?:ReadingCardProfile)=>validateExpectedForVariant(canvaVariant(copy),profile);
 
 async function saveCanvaOutput(db:DB,job:Job,master:Master,pngs:Buffer[],jpegs:Buffer[]){
   return db.transaction(async tx=>{
@@ -274,7 +306,8 @@ async function saveCanvaOutput(db:DB,job:Job,master:Master,pngs:Buffer[],jpegs:B
     const input=asInput(job),stale=item.version!==job.sourceVersion||item.currentRevisionId!==job.sourceRevisionId;
     const apply=!stale&&job.purpose==='create';
     const exportedAt=new Date().toISOString();
-    const metadata={rendererProvider:'canva',canvaDesignId:job.designId,templateVersion:master.templateVersion,sourceDesignId:master.sourceId,dataFieldMappingVersion:input.mappingVersion,datasetHash:input.datasetHash,contentRevision:job.sourceRevisionId,evidenceSetId:input.evidenceSetId,requestHash:job.requestHash,autofillJobId:job.autofillJobId,exportJobId:job.exportJobId,designUpdatedAt:job.designUpdatedAt,exportedAt};
+    const profileTrace=input.profileId?{profileId:input.profileId,profileTemplateVersion:input.profileTemplateVersion,profileImageSha256:input.profileImageSha256}:{};
+    const metadata={...profileTrace,rendererProvider:'canva',canvaDesignId:job.designId,templateVersion:master.templateVersion,sourceDesignId:master.sourceId,dataFieldMappingVersion:input.mappingVersion,datasetHash:input.datasetHash,contentRevision:job.sourceRevisionId,evidenceSetId:input.evidenceSetId,requestHash:job.requestHash,autofillJobId:job.autofillJobId,exportJobId:job.exportJobId,designUpdatedAt:job.designUpdatedAt,exportedAt};
     const outputPayload={...input.payload,rendererProvider:'canva',canvaExport:metadata,dependencies:{...(input.payload.dependencies as Record<string,unknown>),render:apply?'current':'needs_review'}};
     const revision=await createRevision(tx,{contentItemId:item.id,author:'operator',payload:outputPayload,note:job.purpose==='import'?'Canva 최신 디자인 가져오기 · 문구 대조 필요':'Canva 8장 생성·출력 저장',makeCurrent:apply});
     const caption=input.payload.captionPackage as {contentRevision?:number}|null|undefined;
@@ -287,7 +320,7 @@ async function saveCanvaOutput(db:DB,job:Job,master:Master,pngs:Buffer[],jpegs:B
       originals.push({...png,page:i+1});pages.push({...jpeg,title,altText:`${i+1}장. ${title}`});
     }
     await tx.update(mediaAssets).set({carousel:{version:1,pages,copy:input.copy,cover:{kind:'upload',credit:'Canva에서 내보낸 8장 · 게시용 JPEG'},rendererProvider:'canva'} as typeof mediaAssets.$inferInsert.carousel}).where(eq(mediaAssets.id,pages[0].id));
-    const result={pages,originals,templateVersion:master.templateVersion,datasetHash:input.datasetHash,mappingVersion:input.mappingVersion,exportedAt,contentRevision:job.sourceRevisionId,evidenceSetId:input.evidenceSetId,uploadedImages:job.result?.uploadedImages,previousExportJobIds:job.result?.previousExportJobIds,...(job.result?.reconciled?{reconciled:true,reconciliation:job.result.reconciliation,reconciliationHistory:job.result.reconciliationHistory,reconciledProviderIds:job.result.reconciledProviderIds}:{})};
+    const result={...profileTrace,pages,originals,templateVersion:master.templateVersion,datasetHash:input.datasetHash,mappingVersion:input.mappingVersion,exportedAt,contentRevision:job.sourceRevisionId,evidenceSetId:input.evidenceSetId,uploadedImages:job.result?.uploadedImages,previousExportJobIds:job.result?.previousExportJobIds,...(job.result?.reconciled?{reconciled:true,reconciliation:job.result.reconciliation,reconciliationHistory:job.result.reconciliationHistory,reconciledProviderIds:job.result.reconciledProviderIds}:{})};
     if(apply)await tx.update(contentItems).set({version:item.version+1,canvaDesign:{designId:job.designId!,editUrl:job.editUrl,viewUrl:null,revisionId:revision.id,createdAt:exportedAt},updatedAt:new Date()}).where(eq(contentItems.id,item.id));
     await tx.update(canvaRenderJobs).set({status:stale?'superseded':apply?'ready':'needs_review',phase:'complete',result,outputAssetId:pages[0].id,outputRevisionId:revision.id,leaseOwner:null,leaseUntil:null,errorCode:stale?'source_changed':null,errorMessage:stale?'완료 중 원고가 바뀌어 현재 저장본에 적용하지 않았습니다. Canva 출력은 별도로 보존했습니다.':null,updatedAt:new Date()}).where(eq(canvaRenderJobs.id,job.id));
     await audit(tx as DB,{actor:'canva-worker',action:'canva_export_saved',entity:'canva_render',entityId:job.id,channelId:job.channelId,detail:{revisionId:revision.id,applied:apply,originalHashes:originals.map(p=>p.sha256),publicationHashes:pages.map(p=>p.sha256)}});
@@ -345,7 +378,7 @@ export async function resumeCanvaJob(db:DB,channelId:number,itemId:number,id:num
       phase=phase==='autofill_submitting'?'autofill_prepare':'export_prepare';
     }
     if(phase==='images'){
-      const input=asInput(job),images=await prepareCanvaImages(tx as DB,{itemId:job.contentItemId,channelId:job.channelId,copy:input.copy,pageDesigns:input.pageDesigns});
+      const input=asInput(job),profile=profileForInput(input),images=await prepareCanvaImages(tx as DB,{itemId:job.contentItemId,channelId:job.channelId,copy:input.copy,pageDesigns:input.pageDesigns,profile});
       const uploads=await tx.select().from(canvaAssetUploads).where(and(eq(canvaAssetUploads.principal,job.principal),inArray(canvaAssetUploads.sha256,images.map(image=>image.hash)))).for('update');
       if(uploads.some(upload=>!upload.uploadJobId&&['unknown','submitting'].includes(upload.status)))throw new HttpError(409,'접수 여부가 미확정인 이미지 업로드가 남아 있습니다. 같은 파일을 다시 올리지 않고 Canva에서 결과 확인을 기다립니다.',{code:'asset_result_unknown'});
       // This is a deliberate user retry, never an automatic replay. Only confirmed
