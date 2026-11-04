@@ -41,6 +41,19 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("family editorial pipeline with mock provider HTTP", () => {
+  it("preserves display overrides and manual brand values during full regeneration", async () => {
+    const f = fixture(true), copy = (f.revision.payload as any).cardCopy;
+    copy.pages[1].displayOverrides = { kicker: "", pageNumber: "두 번째", sourceCredit: "직접 대조한 출처" };
+    copy.pages[7].fields.brandLine = "현재 콘텐츠에서 직접 쓴 브랜드 문구";
+    copy.pages[7].fields.handle = "@current_content";
+    const before = structuredClone(copy);
+    const mock = createFamilyProviderMock(); vi.stubGlobal("fetch", vi.fn(mock.fetch));
+    const result = await proposeFamilyDialogue(db, f.item, f.channel, f.revision, f.input, f.plan);
+    expect(result.copy?.pages[1].displayOverrides).toEqual(before.pages[1].displayOverrides);
+    expect(result.copy?.pages[7]).toMatchObject({ fields: { brandLine: before.pages[7].fields.brandLine, handle: "@current_content" } });
+    expect((f.revision.payload as any).cardCopy).toEqual(before);
+  });
+
   it("requires the actual main article before any paid stage", async () => {
     controlled.capture.mockResolvedValue(null); const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
     const f = fixture(), result = await proposeFamilyDialogue(db, f.item, f.channel, f.revision, f.input, f.plan);

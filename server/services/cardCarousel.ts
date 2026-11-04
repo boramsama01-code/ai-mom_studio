@@ -1,4 +1,6 @@
 import { conciseAlt } from "../../shared/altText";
+import { familyDisplayContext } from "../../shared/familyDisplay";
+import { captionPackageSchema } from "../../shared/familyDialogue";
 import sharp from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import { and, eq, inArray } from "drizzle-orm";
@@ -53,11 +55,12 @@ export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan 
     const designResult = pageDesignsSchema.safeParse(input.payload.pageDesigns ?? defaultPageDesigns());
     if (!designResult.success) throw new HttpError(422, "페이지 디자인 저장값을 확인해 주세요. 기존 문구와 배경은 유지했습니다.");
     const copy = parsed.data, designs = designResult.data;
-    const context: FamilyCardContext = { brandName: familyBrandName(copy, input.channelName), accent: input.accent, sourceCredit: base.footer };
+    const caption = captionPackageSchema.safeParse(input.payload.captionPackage);
+    const context: FamilyCardContext = { ...familyDisplayContext(copy, caption.success ? caption.data : null), brandName: familyBrandName(copy, input.channelName), accent: input.accent };
     const models = copy.pages.map(page => {
       checkFamilyDialogueCard(page, designs[page.id], context, style);
       return { ...base, title: familyPageTitle(page), subtitle: undefined,
-        blocks: familyPageText(page).map((text, i) => ({ field: `cardCopy.pages.${page.page - 1}.fields.${i}`, text, maxLines: 30 })),
+        blocks: familyPageText(page, context).map((text, i) => ({ field: `cardCopy.pages.${page.page - 1}.fields.${i}`, text, maxLines: 30 })),
         badge: `${String(page.page).padStart(2, "0")} / 08`,
       };
     });

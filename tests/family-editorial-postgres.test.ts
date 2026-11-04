@@ -118,6 +118,23 @@ describe("v2 article generation and durable proposal application", () => {
 });
 
 describe("v2 PostgreSQL ownership and compatibility boundaries", () => {
+  it("persists manual display labels and outro wording without restoring channel defaults", async () => {
+    const f = await fixture(), copy = structuredClone(f.copy);
+    const summary = copy.pages.find(page => page.id === "news_summary"), outro = copy.pages.find(page => page.id === "outro");
+    if (!summary || !outro) throw new Error("family fixture pages missing");
+    summary.displayOverrides = { sourceCredit: "출처: 직접 확인한 기사", pageNumber: "둘째 장" };
+    outro.fields.brandLine = "우리 가족의 생각을 잇는 뉴스"; outro.fields.handle = "@family_notes";
+    const saved = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send(saveBody(f, { copy }));
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200); expect(saved.body.copy).toEqual(copy);
+    expect(saved.body.dependencies.render).toBe("needs_review");
+    const current = await latest(f.item.id);
+    expect(current.revision.id).not.toBe(f.revision.id); expect(current.revision.payload.cardCopy).toEqual(copy);
+    const reread = await f.agent.get(`${f.endpoint}/card-copy`);
+    expect(reread.status, JSON.stringify(reread.body)).toBe(200); expect(reread.body.copy).toEqual(copy);
+    const [original] = await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id));
+    expect(original).toEqual(f.revision); expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("saves manually edited facts only after explicitly reconnecting the current owned evidence", async () => {
     const f = await fixture(), read = await f.agent.get(`${f.endpoint}/card-copy`); expect(read.status).toBe(200);
     const fact = read.body.evidence.facts.find((value: any) => value.id === "F1");

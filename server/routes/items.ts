@@ -11,7 +11,7 @@ import { completeGenerationResult } from "../services/generationContext";
 import { proposeNewsDiscussion } from "../services/newsEditorial";
 import { articleAnalysisSchema, aiWorkflowSchema } from "../../shared/articleAnalysis";
 import { assertNewsEditorialResources, loadNewsEditorialSources } from "../services/newsEditorialSources";
-import { assertCardPageArtworkOwnership, loadCardPageArtworkForPage } from "../services/cardPageArtwork";
+import { assertCardPageArtworkOwnership, loadCardPageArtworkCredits, loadCardPageArtworkForPage } from "../services/cardPageArtwork";
 import { zipFiles } from "../services/zip";
 import { studioAiStatus } from "../services/studioAi";
 import { aiProviders } from "../../shared/aiProviders";
@@ -551,7 +551,8 @@ itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     const copy = query.templateKey ? { ...savedFamily, templateKey: query.templateKey } : savedFamily;
     await resolveCardCopyStyle(copy.templateKey, ch.id);
     const evidence = familyEvidenceView(await loadFamilyEvidence(getDb(), item, metadata.evidenceBinding));
-    res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, ...metadata, evidence, hasSavedCopy: true, recommendedStoryFormat: "family_dialogue_8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") } });
+    const artworkCredits = await loadCardPageArtworkCredits(getDb(), item.id, ch.id, copy, metadata.pageDesigns, true);
+    res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, ...metadata, evidence, artworkCredits, hasSavedCopy: true, recommendedStoryFormat: "family_dialogue_8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") } });
     return;
   }
   const saved = cardCopySchema.safeParse(revision.payload.cardCopy);
@@ -583,7 +584,8 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   if (req.body?.copy?.version === 2) {
     const body = parse(familySaveSchema, req.body);
     await resolveCardCopyStyle(body.copy.templateKey, ch.id);
-    res.json(await saveFamilyCardCopy(getDb(), item.id, ch.id, body, actorOf(req)));
+    const artworkCredits = await loadCardPageArtworkCredits(getDb(), item.id, ch.id, body.copy, body.pageDesigns, true);
+    res.json({ ...await saveFamilyCardCopy(getDb(), item.id, ch.id, body, actorOf(req)), artworkCredits });
     return;
   }
   const body = parse(z.object({ version: zVersion, copy: cardCopySchema, proposalJobId: z.number().int().positive().optional() }).strict(), req.body);

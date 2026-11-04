@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { defaultPageDesigns, familyCardCopySchema, familyDialogueMetadataSchema, familyFieldDescriptors, familyFieldValue, FAMILY_PAGE_LABELS, type CardCopyV2, type ClaimRef, type FamilyDialogueMetadata, type FamilyFieldDescriptor, type FamilyPage, type FamilyPageId, type PageDesign, type ReviewFlag } from "@shared/familyDialogue";
 import type { AiSelection } from "@shared/channelAi";
+import { familyDisplayContext, familyDisplayDescriptors, preserveFamilyDisplayOverrides, resolveFamilyDisplay, type FamilyDisplayKey } from "@shared/familyDisplay";
 import type { FamilyEvidenceView } from "@shared/familyEvidence";
 import { api, apiBlob, ApiError } from "./api";
 import { ErrorBox, fmtDate } from "./ui";
@@ -13,7 +14,7 @@ import { PageBackgroundEditor, type PageArtworkResult } from "./PageBackgroundEd
 import type { CardCopyEditorProps, StoredCardCopyResponse } from "./CardCopyEditor";
 import "./familyDialogue.css";
 
-export type FamilyDialogueResponse = FamilyDialogueMetadata & { version: number; revisionId: number; copy: CardCopyV2; hasSavedCopy: boolean; ai?: Record<"summary" | "copy" | "image", AiSelection>; recoveryNotice?: string; evidence?: FamilyEvidenceView };
+export type FamilyDialogueResponse = FamilyDialogueMetadata & { version: number; revisionId: number; copy: CardCopyV2; hasSavedCopy: boolean; ai?: Record<"summary" | "copy" | "image", AiSelection>; recoveryNotice?: string; evidence?: FamilyEvidenceView; artworkCredits?: Record<string, string> };
 export type FamilyProposal = Partial<FamilyDialogueMetadata> & { copy: CardCopyV2 | null; version: number; revisionId?: number; baseRevision?: number; jobId?: number; fieldPath?: string; targetFieldHash?: string; scope?: string; model?: string; status: "ready" | "needs_source" | "needs_review"; reviewFlags: ReviewFlag[]; lateResult?: boolean; evidence?: FamilyEvidenceView };
 type Preview = { url: string; signature: string };
 const stable = (value: unknown): string => JSON.stringify(value, (_key, entry) => entry && typeof entry === "object" && !Array.isArray(entry) ? Object.fromEntries(Object.keys(entry).sort().map(key => [key, entry[key]])) : entry);
@@ -29,7 +30,11 @@ function textOf(value: unknown): string {
   if (typeof value === "object") return Object.entries(value).filter(([key]) => !["mode", "resourceId", "logoAssetId"].includes(key)).map(([, value]) => textOf(value)).filter(Boolean).join("\n");
   return String(value);
 }
-export const familyCopyText = (copy: CardCopyV2) => copy.pages.map(page => `${page.page}. ${FAMILY_PAGE_LABELS[page.id]}\n${textOf(page.fields)}`).join("\n\n");
+export const familyCopyText = (copy: CardCopyV2) => copy.pages.map(page => {
+  const display = resolveFamilyDisplay(page);
+  const labels = familyDisplayDescriptors(page).map(field => display[field.key] ? `${field.label}: ${display[field.key]}` : "").filter(Boolean).join("\n");
+  return `${page.page}. ${FAMILY_PAGE_LABELS[page.id]}\n${textOf(page.fields)}\n${labels}`;
+}).join("\n\n");
 const copyText = familyCopyText;
 function pageValue(page: FamilyPage, path: string): unknown { return path.split(".").reduce<unknown>((value, key) => value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined, page); }
 const localRefPath = (page: FamilyPage, ref: ClaimRef) => ref.fieldPath.startsWith(`pages.${page.id}.`) ? ref.fieldPath.slice(`pages.${page.id}.`.length) : ref.fieldPath;
@@ -139,8 +144,9 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const generation = useGenerationRequest(channelId, itemId, "card-copy");
   const dirty = !same(editable(base), editable(draft)), parsed = familyCardCopySchema.safeParse(draft.copy), invalid = !parsed.success;
   const page = draft.copy.pages[selected], design = draft.pageDesigns[page.id];
+  const display = resolveFamilyDisplay(page, { ...familyDisplayContext(draft.copy, draft.captionPackage), imageCredit: design.background.kind === "image" ? draft.artworkCredits?.[String(design.background.assetId)] ?? "배경 이미지" : "" });
   const fixedOutroDesign = design.alignment === "center" && design.background.kind === "brand" && (design.background.color ?? "#1B2023").toUpperCase() === "#1B2023";
-  const signatureFor = (value: FamilyDialogueResponse, index: number) => stable({ page: value.copy.pages[index], design: value.pageDesigns[value.copy.pages[index].id], template: value.copy.templateKey, version: value.version, previewRevision });
+  const signatureFor = (value: FamilyDialogueResponse, index: number) => stable({ page: value.copy.pages[index], design: value.pageDesigns[value.copy.pages[index].id], template: value.copy.templateKey, version: value.version, displayContext: familyDisplayContext(value.copy, value.captionPackage), artworkCredits: value.artworkCredits, previewRevision });
   const signature = signatureFor(draft, selected), previewCurrent = preview?.signature === signature;
   const recovery = useDraftRecovery<FamilyDialogueResponse>({
     recoveryKey: `item:${channelId}:${itemId}:family-dialogue`, label: "8장 문구와 페이지 디자인", version: base.version, serverValue: base, value: draft, dirty, ready: true,
@@ -276,6 +282,17 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     }
     put(next); setSaveError(null);
   }
+  function updateDisplay(key: FamilyDisplayKey, value: string | undefined) {
+    const current = draftRef.current;
+    const copy = { ...current.copy, pages: current.copy.pages.map(candidate => {
+      if (candidate.id !== page.id) return candidate;
+      const overrides = { ...candidate.displayOverrides };
+      if (value === undefined) delete overrides[key]; else overrides[key] = value;
+      const { displayOverrides: _previous, ...rest } = candidate;
+      return Object.keys(overrides).length ? { ...rest, displayOverrides: overrides } as FamilyPage : rest as FamilyPage;
+    }) };
+    put(invalidateDerived({ ...current, copy })); setSelectedField(null); setSaveError(null);
+  }
   function lockField(fieldPath: string, lock: boolean) { const current = draftRef.current, fieldLocks = { ...current.fieldLocks }; if (lock) fieldLocks[fieldPath] = true; else delete fieldLocks[fieldPath]; put({ ...current, fieldLocks }); }
   function updateDesign(id: FamilyPageId, next: PageDesign, keepHistory = true) {
     const current = draftRef.current;
@@ -300,6 +317,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     // explicit proposal for another page instead of altering the fixed close.
     if (id === "outro") return false;
     if (!current || baseRef.current.version !== result.version || (current.background.kind === "image" ? current.background.assetId ?? null : null) !== prior) return false;
+    put({ ...draftRef.current, artworkCredits: { ...draftRef.current.artworkCredits, [String(result.assetId)]: result.credit } });
     selectAsset(id, result.assetId); return true;
   }
   function changeMode(mode: "value_definition" | "scientific_explanation") {
@@ -349,7 +367,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   function applyProposal() {
     if (!proposal || !canApply) return;
     const current = draftRef.current, result = proposal.result;
-    const next = { ...current, ...Object.fromEntries(metadataKeys.filter(key => result[key] !== undefined).map(key => [key, result[key]])), ...(result.evidence ? { evidence: result.evidence } : {}), copy: result.copy ?? current.copy } as FamilyDialogueResponse;
+    const next = { ...current, ...Object.fromEntries(metadataKeys.filter(key => result[key] !== undefined).map(key => [key, result[key]])), ...(result.evidence ? { evidence: result.evidence } : {}), copy: result.copy ? preserveFamilyDisplayOverrides(result.copy, current.copy) : current.copy } as FamilyDialogueResponse;
     appliedProposal.current = result.jobId ?? null; put(next); setProposal(null); setSaveError(null); onTemplateChange?.(next.copy.templateKey);
   }
   async function saveAndRender() {
@@ -363,9 +381,9 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     const systemOwned = !!descriptor.systemOwned, locked = !!draft.fieldLocks[d.fieldPath];
     return <div className="family-field" key={path}>
       <label className="field" htmlFor={id}><span className="row between"><strong>{label}{!d.required && " · 선택"}</strong><span className={count > d.initialBudget ? "family-budget-over" : "muted"}>{count} / 권장 {d.initialBudget}자</span></span>
-        <textarea id={id} rows={d.initialBudget > 36 ? 3 : 2} value={text} readOnly={systemOwned} disabled={disabled || !!recovery.pending} onFocus={() => setSelectedField(d.fieldPath)} onChange={event => updateField(d, event.target.value || (["fields.caveat", "fields.scenario"].includes(path) ? null : ""))} aria-invalid={d.required && !text.trim() || count > d.manualMax} />
+        <textarea id={id} rows={d.initialBudget > 36 ? 3 : 2} value={text} disabled={disabled || !!recovery.pending} onFocus={() => setSelectedField(systemOwned ? null : d.fieldPath)} onChange={event => updateField(d, event.target.value || (["fields.caveat", "fields.scenario"].includes(path) ? null : ""))} aria-invalid={d.required && !text.trim() || count > d.manualMax} />
       </label>
-      {systemOwned ? <p className="hint">채널에 저장한 브랜드 정보입니다. 채널 설정에서 변경할 수 있습니다.</p> : <div className="family-field-actions"><label><input type="checkbox" checked={locked} disabled={disabled || !!recovery.pending} onChange={event => lockField(d.fieldPath, event.target.checked)} />자동 재작성에서 이 칸 유지</label>{showAi && <button type="button" className="btn sm ghost" disabled={busy || aiBusy || locked} aria-pressed={selectedField === d.fieldPath} onClick={() => { setSelectedField(d.fieldPath); if (aiPanel.current) { aiPanel.current.open = true; aiPanel.current.scrollIntoView({ behavior: "smooth", block: "nearest" }); } }}>이 칸 재작성 선택</button>}</div>}
+      {systemOwned ? <p className="hint">채널 기본값에서 시작한 문구입니다. 여기서 수정하면 현재 콘텐츠에만 저장하고, AI 재작성에서도 유지합니다.</p> : <div className="family-field-actions"><label><input type="checkbox" checked={locked} disabled={disabled || !!recovery.pending} onChange={event => lockField(d.fieldPath, event.target.checked)} />자동 재작성에서 이 칸 유지</label>{showAi && <button type="button" className="btn sm ghost" disabled={busy || aiBusy || locked} aria-pressed={selectedField === d.fieldPath} onClick={() => { setSelectedField(d.fieldPath); if (aiPanel.current) { aiPanel.current.open = true; aiPanel.current.scrollIntoView({ behavior: "smooth", block: "nearest" }); } }}>이 칸 재작성 선택</button>}</div>}
       {count > d.initialBudget && <p className="hint">권장 길이를 넘었습니다. 저장은 가능하며 실제 배치에서 넘치는 칸을 확인할 수 있습니다.</p>}
       {count > d.manualMax && <p className="card-copy-error" role="alert">저장 한도 {d.manualMax}자를 넘었습니다. 붙여넣은 내용은 그대로 유지했습니다. 이 칸을 나눠 정리한 뒤 저장해 주세요.</p>}
       {(page.id === "news_summary" && /^fields\.facts\.\d+$/.test(path) || page.id === "concept" && page.fields.mode === "scientific_explanation" && path === "fields.acceptedDefinition") && <FieldEvidence key={`${page.id}:${path}`} page={page} path={path} value={text} evidence={draft.evidence} bindingId={draft.evidenceBinding.evidenceSetId} disabled={busy || aiBusy || !!conflict} onConfirm={(choice, text, bindingId) => connectFieldEvidence(page.id, path, choice, text, bindingId)} onReload={reloadEvidence} />}
@@ -391,6 +409,20 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
         {page.id === "concept" && <label className="field">개념을 다루는 방식<select value={page.fields.mode} disabled={disabled || !!recovery.pending} onChange={event => changeMode(event.target.value as "value_definition" | "scientific_explanation")}><option value="value_definition">가치 개념 · 나의 정의 만들기</option><option value="scientific_explanation">과학 개념 · 확인된 정의 설명하기</option></select><span className="hint">과학적 정의는 확인된 근거가 필요합니다. 두 방식의 칸은 서로 다르며 자동으로 바꾸지 않습니다.</span></label>}
         {page.id === "perspectives" && <label className="field">두 시선 배치<select value={page.layout === "columns" ? "columns" : "stacked"} disabled={disabled || !!recovery.pending} onChange={event => put(invalidateDerived({ ...draftRef.current, copy: { ...draftRef.current.copy, pages: draftRef.current.copy.pages.map(value => value.id === "perspectives" ? { ...value, layout: event.target.value } : value) } }))}><option value="stacked">위아래 · 기본</option><option value="columns">좌우 · 짧은 문구에 적합</option></select></label>}
         {familyFieldDescriptors(page).map(descriptor => descriptor.kind === "array" ? <fieldset className="family-facts" key={descriptor.path}><legend>{descriptor.label}</legend>{(pageValue(page, descriptor.path) as string[]).map((_value, index) => field(descriptor, `${descriptor.path}.${index}`, `${descriptor.label} ${index + 1}`))}<div className="row"><button className="btn sm" disabled={busy || (pageValue(page, descriptor.path) as string[]).length >= 3} onClick={() => updateField(descriptor, [...pageValue(page, descriptor.path) as string[], ""])}>사실 한 칸 추가</button><button className="btn sm ghost" disabled={busy || (pageValue(page, descriptor.path) as string[]).length <= 2} onClick={() => updateField(descriptor, (pageValue(page, descriptor.path) as string[]).slice(0, -1))}>마지막 사실 칸 빼기</button></div></fieldset> : field(descriptor))}
+        <fieldset className="family-display-fields stack" data-testid="family-display-fields">
+          <legend>표시 문구·출처·번호</legend>
+          <p className="hint">현재 콘텐츠의 표시 문구를 직접 수정합니다. 빈칸은 표시하지 않습니다. 기본값으로 돌리면 해당 수정만 지웁니다. 본문과 원문 근거는 별도로 유지합니다.</p>
+          {familyDisplayDescriptors(page).map(descriptor => {
+            const id = `${uid}-displayOverrides.${descriptor.key}`, text = display[descriptor.key], overridden = Object.hasOwn(page.displayOverrides ?? {}, descriptor.key);
+            return <div className="family-field" key={descriptor.key}>
+              <label className="field" htmlFor={id}>{descriptor.label}
+                <textarea id={id} rows={descriptor.max > 300 ? 3 : 2} value={text} disabled={disabled || !!recovery.pending} onFocus={() => setSelectedField(null)} onChange={event => updateDisplay(descriptor.key, event.target.value)} aria-invalid={[...text].length > descriptor.max} />
+              </label>
+              <div className="family-field-actions"><span className="hint">{[...text].length} / {descriptor.max}자 · {overridden ? "현재 콘텐츠 수정값" : "기본 표시값"}</span><button type="button" className="btn sm ghost" disabled={busy || !overridden} onClick={() => updateDisplay(descriptor.key, undefined)}>이 표시 문구 기본값으로</button></div>
+            </div>;
+          })}
+          <p className="hint">이 문구를 Canva에도 반영하려면 대응하는 자동 채우기 필드가 필요합니다. 지원하지 않는 마스터는 자동 제작 전에 알려 드립니다.</p>
+        </fieldset>
         {page.id === "activity" && <div className="notice small">{page.fields.optionalActivity ? <>확인된 추가 자료를 쓰는 선택 활동입니다.<button className="btn sm ghost" disabled={busy} onClick={removeOptionalActivity}>추가 활동 빼기</button></> : "확인된 추가 자료가 없어 집 활동만 표시합니다. 선택 활동 영역은 이미지에서도 완전히 빠집니다."}</div>}
       </div>
       <div className="card-copy-preview-column">
@@ -403,7 +435,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
         {previewError && <ErrorBox error={previewError} retry={() => setPreviewRetry(value => value + 1)} />}
         {page.id === "outro" ? <div className="notice small stack" data-testid="family-outro-fixed-design">
           <strong>승인된 닫는 표지 디자인</strong>
-          <p>8장은 승인된 브랜드 마무리로, Canva의 고정 배경·중앙 정렬·기존 로고를 사용합니다. 마지막 행동 안내는 문구 입력칸에서 계속 수정할 수 있습니다.</p>
+          <p>8장은 승인된 브랜드 마무리로, Canva의 고정 배경·중앙 정렬·기존 로고를 사용합니다. 브랜드명·브랜드 문구·계정·마지막 행동 안내는 현재 콘텐츠의 문구 입력칸에서 수정할 수 있습니다.</p>
           {!fixedOutroDesign && <><p>기존 배경·정렬 설정은 자체 렌더용으로 보관하고 있습니다. Canva로 만들려면 승인된 닫는 표지 배치를 선택하고 저장해 주세요.</p><button className="btn" disabled={busy || aiBusy || !!conflict} onClick={useApprovedOutroDesign}>승인된 닫는 표지 배치 사용</button></>}
           {!!designHistory.outro?.length && <button className="btn ghost" disabled={busy || aiBusy || !!conflict} onClick={() => { const history = designHistory.outro ?? []; if (history.length) { updateDesign("outro", history.at(-1)!, false); setDesignHistory(value => ({ ...value, outro: history.slice(0, -1) })); } }}>이전 닫는 표지 배치 되돌리기</button>}
         </div> : <>

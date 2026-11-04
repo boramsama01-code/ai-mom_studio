@@ -60,6 +60,17 @@ export async function assertCardPageArtworkOwnership(db: DB, itemId: number, cha
   if (rows.length !== ids.length || rows.some(row => row.mime !== "image/jpeg")) throw new HttpError(404, "이 콘텐츠의 페이지 배경 이미지를 찾을 수 없습니다. 다른 콘텐츠의 이미지는 사용할 수 없습니다.");
 }
 
+/** Small scoped metadata for the editor and Canva labels; never loads image bytes. */
+export async function loadCardPageArtworkCredits(db: DB, itemId: number, channelId: number, copy: CardCopy | CardCopyV2, pageDesigns?: PageDesigns, includeHistory = false): Promise<Record<string, string>> {
+  const ids = cardPageArtworkIds(copy, pageDesigns, includeHistory);
+  if (!ids.length) return {};
+  const rows = await db.select({ id: mediaAssets.id, mime: mediaAssets.mime, source: mediaAssets.source }).from(mediaAssets)
+    .innerJoin(contentRevisions, and(eq(contentRevisions.id, mediaAssets.revisionId), eq(contentRevisions.contentItemId, itemId)))
+    .where(and(inArray(mediaAssets.id, ids), eq(mediaAssets.contentItemId, itemId), eq(mediaAssets.channelId, channelId), eq(mediaAssets.kind, CARD_PAGE_ARTWORK_KIND)));
+  if (rows.length !== ids.length || rows.some(row => row.mime !== "image/jpeg")) throw new HttpError(404, "이 콘텐츠의 페이지 배경 이미지 출처를 찾을 수 없습니다.");
+  return Object.fromEntries(rows.map(row => [String(row.id), cardPageArtworkCredit(row.source)]));
+}
+
 /** The live preview only needs the selected page's bytes; final export loads all. */
 export async function loadCardPageArtworkForPage(db: DB, itemId: number, channelId: number, copy: CardCopy | CardCopyV2, pageIndex: number, pageDesigns?: PageDesigns) {
   if (copy.version === 2) {

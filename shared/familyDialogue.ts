@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { aiStageProvenanceSchema } from "./aiProvenance";
 import { FAMILY_PAGE_COLORS } from "./familyDialogueTheme";
+import { familyDisplayOverridesSchema } from "./familyDisplay";
 
 export const FAMILY_FORMAT_ID = "family_dialogue_8" as const;
 export const FAMILY_SCHEMA_VERSION = "family-dialogue-v2.1";
@@ -30,7 +31,7 @@ function pageSchema(ai: boolean) {
   const o = (budget: number) => t(budget).nullable();
   const view = z.object({ label: t(10), body: t(45) }).strict();
   const activity = z.object({ label: t(18), action: t(60), resourceId: z.string().regex(/^R[1-9][0-9]*$/).nullable() }).strict();
-  const base = { page: z.number().int().min(1).max(8), layout: z.string().min(1).max(80), claimRefs: z.array(claimRefSchema).max(40) };
+  const base = { page: z.number().int().min(1).max(8), layout: z.string().min(1).max(80), claimRefs: z.array(claimRefSchema).max(40), ...(ai ? {} : { displayOverrides: familyDisplayOverridesSchema.optional() }) };
   const page = <Id extends FamilyPageId, T extends z.ZodType>(id: Id, fields: T) => z.object({ ...base, id: z.literal(id), type: z.literal(id), fields }).strict();
   return z.discriminatedUnion("id", [
     page("cover", z.object({ headline: t(24), subtitle: t(36, false) }).strict()),
@@ -130,7 +131,7 @@ export const FAMILY_FIELD_DESCRIPTORS: Record<FamilyPageId, FamilyFieldDescripto
   perspectives: [fd("perspectives", "fields.title", "두 시선 제목", 18), fd("perspectives", "fields.viewA.label", "첫 번째 기준", 10), fd("perspectives", "fields.viewA.body", "첫 번째 시선", 45), fd("perspectives", "fields.viewB.label", "두 번째 기준", 10), fd("perspectives", "fields.viewB.body", "두 번째 시선", 45)],
   concept: [fd("concept", "fields.title", "개념 제목", 18), fd("concept", "fields.concept", "핵심 개념", 30), fd("concept", "fields.definitionA", "첫 번째 정의 예시", 25, { conceptMode: "value_definition" }), fd("concept", "fields.definitionB", "두 번째 정의 예시", 25, { conceptMode: "value_definition" }), fd("concept", "fields.boundaryCase", "경계 사례", 35, { conceptMode: "value_definition" }), fd("concept", "fields.acceptedDefinition", "통용 정의", 45, { conceptMode: "scientific_explanation" }), fd("concept", "fields.exampleOrNonExample", "예시·비예·조건", 35, { conceptMode: "scientific_explanation" }), fd("concept", "fields.fillIn", "내 말로 정리", 30)],
   activity: [fd("activity", "fields.title", "활동 제목", 18), fd("activity", "fields.homeActivity.label", "집 활동 이름", 18), fd("activity", "fields.homeActivity.action", "집에서 할 일", 60), fd("activity", "fields.optionalActivity.label", "추가 활동 이름", 18, { required: false }), fd("activity", "fields.optionalActivity.action", "추가로 할 일", 60, { required: false })],
-  outro: [fd("outro", "fields.brandName", "채널 브랜드", 80, { systemOwned: true }), fd("outro", "fields.parentBrand", "상위 브랜드", 80, { systemOwned: true }), fd("outro", "fields.brandLine", "승인된 브랜드 문구", 120, { systemOwned: true }), fd("outro", "fields.cta", "마지막 행동 안내", 35), fd("outro", "fields.handle", "채널 계정", 80, { required: false, systemOwned: true })],
+  outro: [fd("outro", "fields.brandName", "채널 브랜드", 80, { systemOwned: true }), fd("outro", "fields.parentBrand", "상위 브랜드", 80, { systemOwned: true }), fd("outro", "fields.brandLine", "브랜드 문구", 120, { systemOwned: true }), fd("outro", "fields.cta", "마지막 행동 안내", 35), fd("outro", "fields.handle", "채널 계정", 80, { required: false, systemOwned: true })],
 };
 export function familyFieldDescriptors(page: FamilyPage): FamilyFieldDescriptor[] {
   return FAMILY_FIELD_DESCRIPTORS[page.id].filter(field => (!field.conceptMode || page.id === "concept" && page.fields.mode === field.conceptMode) && (page.id !== "activity" || page.fields.optionalActivity !== null || !field.path.startsWith("fields.optionalActivity.")));

@@ -1,5 +1,6 @@
 /** Flat Canva fields are a boundary adapter, never the authoring schema. */
-import type { CardCopyV2 } from './familyDialogue';
+import type { CardCopyV2, FamilyPageId } from './familyDialogue';
+import { familyDisplayDescriptors, familyReadingTextValues, resolveFamilyDisplay, type FamilyDisplayContext } from './familyDisplay';
 
 export const CANVA_MAPPING_VERSION = 'family-dialogue-8/v1.1';
 export const CANVA_PAGE_IDS = ['cover','news_summary','implication','discussion','perspectives','concept','activity','outro'] as const;
@@ -34,10 +35,36 @@ export function validateCanvaDataset(dataset:CanvaDataset,variant:CanvaVariant) 
   const forbidden=variant.conceptMode==='value_definition' ? ['P06_ACCEPTED_DEFINITION','P06_EXAMPLE_OR_NON_EXAMPLE'] : ['P06_DEFINITION_A','P06_DEFINITION_B','P06_BOUNDARY_CASE'];
   if(!variant.hasExternalActivity) forbidden.push('P07_OPTIONAL_LABEL','P07_OPTIONAL_ACTION');
   for(const name of forbidden) if(dataset[name]) errors.push(`${name}: 선택한 변형에 있으면 안 되는 필드`);
+  for(const [name,field] of Object.entries(dataset)) {
+    if(/^P0[1-8]_(HEADER_BRAND|PAGE_NUMBER|TOPIC_TAG|KICKER|SOURCE|IMAGE_CREDIT|FACT_INDEX_[1-3]|DEFINITION_INDEX_[AB]|DURATION|ACTIVITY_HELP)$/.test(name) && field.type!=='text') errors.push(name+': text 형식 필요');
+  }
   return errors;
 }
 
-export function canvaTextFields(copy:CardCopyV2):Record<string,{type:'text';text:string}> {
+export type CanvaTextOptions = { context?: FamilyDisplayContext; pageContexts?: Partial<Record<FamilyPageId, FamilyDisplayContext>>; dataset?: CanvaDataset };
+export function canvaDisplayTextFields(copy:CardCopyV2,options:CanvaTextOptions={}):Record<string,{type:'text';text:string}> {
+  const fields:Record<string,{type:'text';text:string}>={};
+  for(const page of copy.pages) {
+    const display=resolveFamilyDisplay(page,{...options.context,...options.pageContexts?.[page.id]});
+    for(const descriptor of familyDisplayDescriptors(page)) fields[descriptor.canvaField]={type:'text',text:display[descriptor.key]};
+  }
+  return fields;
+}
+/** Never silently export a template's old static label after the user edits it. */
+export function canvaDisplaySupportErrors(copy:CardCopyV2,dataset:CanvaDataset):string[] {
+  const errors:string[]=[];
+  for(const page of copy.pages) for(const descriptor of familyDisplayDescriptors(page)) {
+    if(Object.hasOwn(page.displayOverrides??{},descriptor.key) && dataset[descriptor.canvaField]?.type!=='text') errors.push(page.page+'페이지 '+descriptor.label+' ('+descriptor.canvaField+'): 편집 가능한 텍스트 필드가 필요합니다.');
+  }
+  return errors;
+}
+/** Only a prepared 46-text contract. Runtime registration must still validate the
+ * actual profile, every image slot and the live Canva dataset. */
+export function canvaReadingTextFields(copy:CardCopyV2,options:CanvaTextOptions={}):Record<string,{type:'text';text:string}> {
+  return Object.fromEntries(Object.entries(familyReadingTextValues(copy,options.context,options.pageContexts)).map(([key,text])=>[key,{type:'text' as const,text}]));
+}
+
+export function canvaTextFields(copy:CardCopyV2,options:CanvaTextOptions={}):Record<string,{type:'text';text:string}> {
   const byType=new Map(copy.pages.map(p=>[p.type,p]));
   const fields:Record<string,string>={};
   // All fields visible on the master are mapped, including labels and optional text.
@@ -62,6 +89,11 @@ export function canvaTextFields(copy:CardCopyV2):Record<string,{type:'text';text
   }
   if(byType.size!==8 || copy.pages.some((p,i)=>p.id!==CANVA_PAGE_IDS[i] || p.type!==CANVA_PAGE_IDS[i])) throw new Error('표지부터 닫는 표지까지 8장 순서가 맞지 않습니다.');
   if(Object.values(fields).some(v=>typeof v!=='string')) throw new Error('Canva로 보낼 문구가 빠졌습니다.');
+  if(options.dataset) {
+    const errors=canvaDisplaySupportErrors(copy,options.dataset);
+    if(errors.length) throw new Error('현재 표시 문구를 Canva에 반영할 수 없습니다. '+errors.join(' '));
+    for(const [name,value] of Object.entries(canvaDisplayTextFields(copy,options))) if(options.dataset[name]?.type==='text') fields[name]=value.text;
+  }
   return Object.fromEntries(Object.entries(fields).map(([k,text])=>[k,{type:'text' as const,text}]));
 }
 

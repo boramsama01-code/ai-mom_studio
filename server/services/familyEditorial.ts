@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { preserveFamilyDisplayOverrides } from "../../shared/familyDisplay";
 import { z } from "zod";
 import type { DB } from "../db";
 import type { Channel, ContentItem } from "../../shared/schema";
@@ -179,7 +180,7 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
         return errors;
       } });
     if (generated.status !== "ready" || !generated.data) return failure(input, revision.id, generated.status === "needs_source" ? "needs_source" : "needs_review", generated.reviewFlags, { editorialPlan: planned.data, evidenceBinding, generationRuns: runs, sourceAnalysis: analysis });
-    copy = generated.data.cardCopy;
+    copy = preserveFamilyDisplayOverrides(generated.data.cardCopy, existing);
     copy.templateKey = input.templateKey;
     const outro = copy.pages.find(page => page.id === "outro")!;
     if (outro.id === "outro") outro.fields = { ...outro.fields, ...brand };

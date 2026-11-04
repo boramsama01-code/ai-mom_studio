@@ -94,6 +94,30 @@ async function connectEvidence(path: string, evidenceId: string) {
 }
 
 describe("family dialogue v2 editor", () => {
+  it("edits every closing brand field and display label, saves them, and reopens without changing channel defaults", async () => {
+    await render();
+    await selectPage("8페이지 · 닫는 표지");
+    for (const key of ["brandName", "parentBrand", "brandLine", "handle"]) expect(field("fields." + key).readOnly).toBe(false);
+    await input("fields.brandName", "이번 콘텐츠 브랜드");
+    await input("fields.parentBrand", "우주펭귄상회");
+    await input("fields.brandLine", "오늘 나눈 생각을 기억해요.");
+    await input("fields.handle", "@my_current_content");
+    await selectPage("2페이지 · 뉴스 요약");
+    expect(field("displayOverrides.kicker").value).toBe("뉴스 읽기");
+    await input("displayOverrides.kicker", "우리의 뉴스 읽기");
+    await input("displayOverrides.sourceCredit", "출처: 직접 확인한 기사");
+    await input("displayOverrides.pageNumber", "2");
+    await click("문구·디자인 저장");
+    expect(saved.copy.pages[7]).toMatchObject({ fields: { brandName: "이번 콘텐츠 브랜드", brandLine: "오늘 나눈 생각을 기억해요.", handle: "@my_current_content" } });
+    expect(saved.copy.pages[1]).toMatchObject({ displayOverrides: { kicker: "우리의 뉴스 읽기", sourceCredit: "출처: 직접 확인한 기사", pageNumber: "2" } });
+    await render(null); client.clear(); await render(); await selectPage("2페이지 · 뉴스 요약");
+    expect(field("displayOverrides.sourceCredit").value).toBe("출처: 직접 확인한 기사");
+    await input("displayOverrides.kicker", "");
+    await click("문구·디자인 저장");
+    expect(saved.copy.pages[1]).toMatchObject({ displayOverrides: { kicker: "" } });
+    expect(mocks.api.mock.calls.some(([request, options]) => request === "/channels/3" && options?.method === "PATCH")).toBe(false);
+  });
+
   it("saves semantic fields, layouts and locks without flattening two views, then reopens the same values", async () => {
     await render(); expect(host.querySelectorAll(".family-page-strip>button")).toHaveLength(8);
     await selectPage("5페이지 · 두 가지 시선");
