@@ -18,7 +18,7 @@ import { defaultPageDesigns, familyCardCopySchema, pageDesignsSchema, type CardC
 import { checkFamilyDialogueCard, familyBrandName, familyPageText, familyPageTitle, renderFamilyDialogueCard, type FamilyCardContext } from "./familyDialogueCard";
 import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
 import { resolvedReadingPageDesigns } from "../../shared/readingPageImages";
-import { layoutReadingCard, readingPageText, renderReadingCard } from "./readingCard";
+import { checkReadingCard, readingPageText, renderReadingCard } from "./readingCard";
 
 type Block = CardModel["blocks"][number];
 type Section = { title: string; blocks: Block[] };
@@ -62,7 +62,7 @@ export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan 
     const context: FamilyCardContext = { ...familyDisplayContext(copy, caption.success ? caption.data : null), brandName: familyBrandName(copy, input.channelName), accent: input.accent };
     const readingProfile = readingProfileForTemplateKey(copy.templateKey);
     const models = copy.pages.map(page => {
-      if (readingProfile) layoutReadingCard(copy, page, context); else checkFamilyDialogueCard(page, designs[page.id], context, style);
+      if (readingProfile) checkReadingCard(copy, page, context); else checkFamilyDialogueCard(page, designs[page.id], context, style);
       return { ...base, title: familyPageTitle(page), subtitle: undefined,
         blocks: (readingProfile ? readingPageText(copy, page, context) : familyPageText(page, context)).map((text, i) => ({ field: `cardCopy.pages.${page.page - 1}.fields.${i}`, text, maxLines: 30 })),
         badge: `${String(page.page).padStart(2, "0")} / 08`,

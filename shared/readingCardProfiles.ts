@@ -32,14 +32,21 @@ const newProfiles:ReadingCardProfile[] = CARDNEWS14_STYLE_IDS.map(styleId=>{
   if(!style)throw new Error(`Missing cardnews14 layout: ${styleId}`);
   const id=`cardnews14-${styleId}-v1` as const;
   const pages:ReadingPageLayout[]=style.pages.map(page=>{
-    const elements=page.elements.map(element=>element.kind==='image'?{...element,pageId:pageIds[page.page-1]}:element) as ReadingElement[];
+    let elements=page.elements.map(element=>element.kind==='image'?{...element,pageId:pageIds[page.page-1]}:element) as ReadingElement[];
+    // Studio r2 corrects three rules crossing the image credit. Keep the handoff
+    // layout/hash and native Canva original intact; this is a versioned adapter.
+    if(styleId==='amber-cream'&&[1,4,7].includes(page.page)) {
+      const rules=elements.flatMap((element,index)=>element.kind==='rect'&&element.x===72&&element.y===1258&&element.width===720&&element.height===2&&element.fill==='#FFD579'&&element.radius===0&&element.strokeWidth===1?[index]:[]);
+      if(rules.length!==1)throw new Error(`Amber Cream source rule changed on page ${page.page}; verify the derived layout before rendering.`);
+      elements=elements.map((element,index)=>index===rules[0]?{...element,y:1290}:element);
+    }
     return {page:page.page,background:page.background,elements,
       shapes:elements.filter((e):e is Extract<ReadingElement,{kind:'rect'}>=>e.kind==='rect').map(({kind,...shape})=>({type:'rect' as const,...shape})),
       textBoxes:elements.filter((e):e is Extract<ReadingElement,{kind:'text'}>=>e.kind==='text'),
       imageBoxes:elements.filter((e):e is Extract<ReadingElement,{kind:'image'}>=>e.kind==='image').map(({kind,...box})=>({...box,kind:page.page===8?'profile' as const:'artwork' as const})),
     };
   });
-  return {id,templateKey:id,templateVersion:id+'-20261104',mappingVersion:READING_MAPPING_VERSION,label:style.name,pages,images:pages.flatMap(page=>page.imageBoxes),profileImagePath:READING_PROFILE_LOGO_PATH,profileImageSha256:READING_PROFILE_LOGO_SHA256,profileImageAssetId:'MAHZ7ZCRRbs',sourceStyleId:styleId,sourceLayoutSha256:style.sourceLayoutSha256,sourceAssetsSha256:style.sourceAssetsSha256,previewUrl:`/cardnews14/${styleId}.webp`};
+  return {id,templateKey:id,templateVersion:id+'-20261104'+(styleId==='amber-cream'?'-r2':''),mappingVersion:READING_MAPPING_VERSION,label:style.name,pages,images:pages.flatMap(page=>page.imageBoxes),profileImagePath:READING_PROFILE_LOGO_PATH,profileImageSha256:READING_PROFILE_LOGO_SHA256,profileImageAssetId:'MAHZ7ZCRRbs',sourceStyleId:styleId,sourceLayoutSha256:style.sourceLayoutSha256,sourceAssetsSha256:style.sourceAssetsSha256,previewUrl:`/cardnews14/${styleId}.webp`};
 });
 /** Existing IDs/versioned snapshots remain stable; new styles have their own identity. */
 export const READING_CARD_PROFILES:ReadingCardProfile[]=[...legacyProfiles,...newProfiles];
@@ -70,10 +77,14 @@ export function readingProfileDesigns(profile:ReadingCardProfile,current:PageDes
     const previous=current[id], background=previous.background;
     const slot=readingImageSlot(profile,id), useImage=slot?.kind==='artwork'&&background.kind==='image'&&!!background.assetId;
     const previousAssetIds=[...new Set([...(previous.previousAssetIds??[]),...(background.assetId?[background.assetId]:[])])].slice(-20);
-    const inheritCover=!!profile.sourceStyleId&&id!=='cover'&&slot?.kind==='artwork'&&!useImage&&background.inheritCover!==false;
+    // A style without this photo window only hides inheritance; it is not a
+    // user opt-out. Keep the preference through sparse and legacy styles.
+    const inheritCover=profile.sourceStyleId&&(id==='cover'||id==='outro')?false
+      :profile.sourceStyleId&&slot?.kind==='artwork'?!useImage&&background.inheritCover!==false
+      :background.inheritCover;
     const overlay=background.color?.toUpperCase()===profile.pages[index].background.toUpperCase()?background.overlay:0;
     const defaults=profile.sourceStyleId&&slot?.kind==='artwork'&&!background.assetId&&background.inheritCover===undefined&&background.focalX===50&&background.focalY===50?{...sourceFocalPoint(slot.position),fit:slot.fit??background.fit}:{};
-    return [id,{ ...previous,alignment:'left',background:{...background,...defaults,kind:useImage?'image':'brand',color:profile.pages[index].background,...(!useImage?{assetId:undefined}:{}),overlay,...(profile.sourceStyleId||background.inheritCover!==undefined?{inheritCover}: {})},previousAssetIds }];
+    return [id,{ ...previous,alignment:'left',background:{...background,...defaults,kind:useImage?'image':'brand',color:profile.pages[index].background,...(!useImage?{assetId:undefined}:{}),overlay,...(inheritCover!==undefined?{inheritCover}: {})},previousAssetIds }];
   })) as PageDesigns;
 }
 export function readingProfileDesignErrors(profile:ReadingCardProfile,designs:PageDesigns):string[] {

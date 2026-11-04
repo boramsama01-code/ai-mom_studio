@@ -1,0 +1,443 @@
+{
+  "date": "2026-11-04",
+  "status": "local-evidence-production-observation-pending",
+  "measurement": "Linux process.resourceUsage().maxRSS; whole process including Worker threads",
+  "sameWorkload": true,
+  "workload": "Full application modules, no createApp/listen/database; existing Pretendard faces and both legacy layouts; eight-page preflight + selected preview; three consecutive eight-page Sharp Serif decks; two concurrent eight-page requests",
+  "samplePhotos": 3,
+  "forcedGC": false,
+  "heapCap": false,
+  "externalCalls": 0,
+  "remainingUnverified": [
+    "Render runtime RSS with database/collection/provider work",
+    "Concurrent uploads at the 8 MB image-input limit",
+    "Long-running production workload; three repeats are not a soak test"
+  ],
+  "nativeAsyncRaw": {
+    "complete": true,
+    "kind": "offline-production-bundle",
+    "node": "v22.23.4",
+    "platform": "linux",
+    "architecture": "x64",
+    "backend": "native-async-raw-identical-page-gate",
+    "profile": "cardnews14-sharp-serif-v1",
+    "requests": 6,
+    "repeats": 3,
+    "concurrent": 2,
+    "preflightPagesPerRequest": 8,
+    "selectedPagePreviews": 1,
+    "deckPagesRendered": 40,
+    "peakRssKiB": 590724,
+    "peakRssMiB": 576.88,
+    "elapsedSeconds": 10.086,
+    "forcedGC": false,
+    "heapCap": false,
+    "externalCalls": 0,
+    "databaseCalls": 0,
+    "paidAiCalls": 0,
+    "canvaCalls": 0,
+    "fonts": {
+      "limit": 5,
+      "faces": [
+        "Noto Serif KR:800",
+        "Noto Serif KR:600",
+        "Noto Serif KR:900",
+        "Noto Sans KR:700",
+        "Noto Sans KR:400"
+      ]
+    },
+    "raster": {
+      "pendingPages": 0,
+      "activeWorkers": 0,
+      "maxObservedWorkers": 0,
+      "admissionLimit": 4
+    },
+    "outputSha256": [
+      "1385e5403949319905f5a70223a607324fc66b638eaf1e298bb83f3c138c25e4",
+      "187d74e9d82789e63ebb5c65beae6f877da39cfb932d9be4831ef2d31ca6c9d5",
+      "a732ad5fd3781953f3b432c11e3475d1fe164c040000abb6f12fa969e3b6234e",
+      "e6a97da9f9d517959acb28201b1f2d10cbfa4671c1acbfcb124f9dea3f134235",
+      "f369486f58bd1f8720cf927234a74e88c46b6351cd1329079360182d8193d605",
+      "cf9e4e22a201bbbcda7ce6d49c200bb05cb333a656b6d748b8292d107ccad5f4",
+      "cfbd4134906216da4677e334570e919aca88ea872c45e94642ba70fe9b33f7c3",
+      "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c"
+    ],
+    "samples": [
+      {
+        "stage": "runtime",
+        "elapsedSeconds": 0,
+        "rssMiB": 200.66,
+        "heapUsedMiB": 92.03,
+        "externalMiB": 3.98,
+        "peakRssMiB": 200.66
+      },
+      {
+        "stage": "app modules loaded; no app/server created",
+        "elapsedSeconds": 0.093,
+        "rssMiB": 170.85,
+        "heapUsedMiB": 42.92,
+        "externalMiB": 3.98,
+        "peakRssMiB": 216.55
+      },
+      {
+        "stage": "three Pretendard faces and both legacy layouts loaded",
+        "elapsedSeconds": 0.246,
+        "rssMiB": 192.27,
+        "heapUsedMiB": 69.08,
+        "externalMiB": 16.73,
+        "peakRssMiB": 216.55
+      },
+      {
+        "stage": "selected-page preview: eight-page preflight",
+        "elapsedSeconds": 0.752,
+        "rssMiB": 294.56,
+        "heapUsedMiB": 110.67,
+        "externalMiB": 64.86,
+        "peakRssMiB": 305.42
+      },
+      {
+        "stage": "selected-page preview: completed",
+        "elapsedSeconds": 1.02,
+        "rssMiB": 357.51,
+        "heapUsedMiB": 105.01,
+        "externalMiB": 70.65,
+        "peakRssMiB": 357.51
+      },
+      {
+        "stage": "sequential 1: eight-page preflight",
+        "elapsedSeconds": 1.023,
+        "rssMiB": 357.64,
+        "heapUsedMiB": 105.82,
+        "externalMiB": 70.65,
+        "peakRssMiB": 357.64
+      },
+      {
+        "stage": "sequential 1: completed eight-page deck",
+        "elapsedSeconds": 2.743,
+        "rssMiB": 478.23,
+        "heapUsedMiB": 133.13,
+        "externalMiB": 88.1,
+        "peakRssMiB": 478.23
+      },
+      {
+        "stage": "sequential 1: natural idle",
+        "elapsedSeconds": 3.044,
+        "rssMiB": 478.23,
+        "heapUsedMiB": 133.15,
+        "externalMiB": 88.1,
+        "peakRssMiB": 478.23
+      },
+      {
+        "stage": "sequential 2: eight-page preflight",
+        "elapsedSeconds": 3.047,
+        "rssMiB": 478.23,
+        "heapUsedMiB": 133.88,
+        "externalMiB": 88.1,
+        "peakRssMiB": 478.23
+      },
+      {
+        "stage": "sequential 2: completed eight-page deck",
+        "elapsedSeconds": 4.522,
+        "rssMiB": 507,
+        "heapUsedMiB": 120.17,
+        "externalMiB": 89.3,
+        "peakRssMiB": 541.13
+      },
+      {
+        "stage": "sequential 2: natural idle",
+        "elapsedSeconds": 4.829,
+        "rssMiB": 507,
+        "heapUsedMiB": 120.18,
+        "externalMiB": 89.3,
+        "peakRssMiB": 541.13
+      },
+      {
+        "stage": "sequential 3: eight-page preflight",
+        "elapsedSeconds": 4.84,
+        "rssMiB": 507,
+        "heapUsedMiB": 120.89,
+        "externalMiB": 89.3,
+        "peakRssMiB": 541.13
+      },
+      {
+        "stage": "sequential 3: completed eight-page deck",
+        "elapsedSeconds": 6.349,
+        "rssMiB": 532.12,
+        "heapUsedMiB": 126.36,
+        "externalMiB": 103.63,
+        "peakRssMiB": 552.91
+      },
+      {
+        "stage": "sequential 3: natural idle",
+        "elapsedSeconds": 6.65,
+        "rssMiB": 532.12,
+        "heapUsedMiB": 126.37,
+        "externalMiB": 103.63,
+        "peakRssMiB": 552.91
+      },
+      {
+        "stage": "concurrent A: eight-page preflight",
+        "elapsedSeconds": 6.653,
+        "rssMiB": 532.25,
+        "heapUsedMiB": 127.22,
+        "externalMiB": 103.63,
+        "peakRssMiB": 552.91
+      },
+      {
+        "stage": "concurrent B: eight-page preflight",
+        "elapsedSeconds": 6.655,
+        "rssMiB": 532.37,
+        "heapUsedMiB": 127.94,
+        "externalMiB": 103.63,
+        "peakRssMiB": 552.91
+      },
+      {
+        "stage": "concurrent A: completed eight-page deck",
+        "elapsedSeconds": 9.684,
+        "rssMiB": 498.3,
+        "heapUsedMiB": 110.84,
+        "externalMiB": 71.21,
+        "peakRssMiB": 576.88
+      },
+      {
+        "stage": "concurrent B: completed eight-page deck",
+        "elapsedSeconds": 9.785,
+        "rssMiB": 485.3,
+        "heapUsedMiB": 107.63,
+        "externalMiB": 73.04,
+        "peakRssMiB": 576.88
+      },
+      {
+        "stage": "concurrent A: natural idle",
+        "elapsedSeconds": 9.986,
+        "rssMiB": 485.3,
+        "heapUsedMiB": 107.63,
+        "externalMiB": 73.04,
+        "peakRssMiB": 576.88
+      },
+      {
+        "stage": "concurrent B: natural idle",
+        "elapsedSeconds": 10.086,
+        "rssMiB": 485.3,
+        "heapUsedMiB": 107.64,
+        "externalMiB": 73.04,
+        "peakRssMiB": 576.88
+      }
+    ]
+  },
+  "isolatedRaster": {
+    "complete": true,
+    "kind": "offline-production-bundle",
+    "node": "v22.23.4",
+    "platform": "linux",
+    "architecture": "x64",
+    "backend": "isolated-native-raster",
+    "profile": "cardnews14-sharp-serif-v1",
+    "requests": 6,
+    "repeats": 3,
+    "concurrent": 2,
+    "preflightPagesPerRequest": 8,
+    "selectedPagePreviews": 1,
+    "deckPagesRendered": 40,
+    "peakRssKiB": 478196,
+    "peakRssMiB": 466.99,
+    "elapsedSeconds": 12.838,
+    "forcedGC": false,
+    "heapCap": false,
+    "externalCalls": 0,
+    "databaseCalls": 0,
+    "paidAiCalls": 0,
+    "canvaCalls": 0,
+    "fonts": {
+      "limit": 5,
+      "faces": [
+        "Noto Serif KR:800",
+        "Noto Serif KR:600",
+        "Noto Serif KR:900",
+        "Noto Sans KR:700",
+        "Noto Sans KR:400"
+      ]
+    },
+    "raster": {
+      "pendingPages": 0,
+      "activeWorkers": 0,
+      "maxObservedWorkers": 1,
+      "admissionLimit": 4
+    },
+    "outputSha256": [
+      "1385e5403949319905f5a70223a607324fc66b638eaf1e298bb83f3c138c25e4",
+      "187d74e9d82789e63ebb5c65beae6f877da39cfb932d9be4831ef2d31ca6c9d5",
+      "a732ad5fd3781953f3b432c11e3475d1fe164c040000abb6f12fa969e3b6234e",
+      "e6a97da9f9d517959acb28201b1f2d10cbfa4671c1acbfcb124f9dea3f134235",
+      "f369486f58bd1f8720cf927234a74e88c46b6351cd1329079360182d8193d605",
+      "cf9e4e22a201bbbcda7ce6d49c200bb05cb333a656b6d748b8292d107ccad5f4",
+      "cfbd4134906216da4677e334570e919aca88ea872c45e94642ba70fe9b33f7c3",
+      "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c"
+    ],
+    "samples": [
+      {
+        "stage": "runtime",
+        "elapsedSeconds": 0,
+        "rssMiB": 197.79,
+        "heapUsedMiB": 92.28,
+        "externalMiB": 3.98,
+        "peakRssMiB": 197.79
+      },
+      {
+        "stage": "app modules loaded; no app/server created",
+        "elapsedSeconds": 0.13,
+        "rssMiB": 167.42,
+        "heapUsedMiB": 43.4,
+        "externalMiB": 3.98,
+        "peakRssMiB": 211.55
+      },
+      {
+        "stage": "three Pretendard faces and both legacy layouts loaded",
+        "elapsedSeconds": 0.254,
+        "rssMiB": 188.91,
+        "heapUsedMiB": 69.33,
+        "externalMiB": 16.73,
+        "peakRssMiB": 211.55
+      },
+      {
+        "stage": "selected-page preview: eight-page preflight",
+        "elapsedSeconds": 0.724,
+        "rssMiB": 292.52,
+        "heapUsedMiB": 111.13,
+        "externalMiB": 64.86,
+        "peakRssMiB": 303.39
+      },
+      {
+        "stage": "selected-page preview: completed",
+        "elapsedSeconds": 1.063,
+        "rssMiB": 338.15,
+        "heapUsedMiB": 104.96,
+        "externalMiB": 65.33,
+        "peakRssMiB": 363.69
+      },
+      {
+        "stage": "sequential 1: eight-page preflight",
+        "elapsedSeconds": 1.065,
+        "rssMiB": 338.15,
+        "heapUsedMiB": 105.77,
+        "externalMiB": 65.33,
+        "peakRssMiB": 363.69
+      },
+      {
+        "stage": "sequential 1: completed eight-page deck",
+        "elapsedSeconds": 3.303,
+        "rssMiB": 391,
+        "heapUsedMiB": 133.67,
+        "externalMiB": 77.25,
+        "peakRssMiB": 423.1
+      },
+      {
+        "stage": "sequential 1: natural idle",
+        "elapsedSeconds": 3.604,
+        "rssMiB": 391,
+        "heapUsedMiB": 133.67,
+        "externalMiB": 77.25,
+        "peakRssMiB": 423.1
+      },
+      {
+        "stage": "sequential 2: eight-page preflight",
+        "elapsedSeconds": 3.606,
+        "rssMiB": 391.13,
+        "heapUsedMiB": 134.41,
+        "externalMiB": 77.25,
+        "peakRssMiB": 423.1
+      },
+      {
+        "stage": "sequential 2: completed eight-page deck",
+        "elapsedSeconds": 5.677,
+        "rssMiB": 401.94,
+        "heapUsedMiB": 120.77,
+        "externalMiB": 83.84,
+        "peakRssMiB": 464.06
+      },
+      {
+        "stage": "sequential 2: natural idle",
+        "elapsedSeconds": 5.977,
+        "rssMiB": 401.94,
+        "heapUsedMiB": 120.77,
+        "externalMiB": 83.84,
+        "peakRssMiB": 464.06
+      },
+      {
+        "stage": "sequential 3: eight-page preflight",
+        "elapsedSeconds": 5.979,
+        "rssMiB": 401.94,
+        "heapUsedMiB": 121.49,
+        "externalMiB": 83.84,
+        "peakRssMiB": 464.06
+      },
+      {
+        "stage": "sequential 3: completed eight-page deck",
+        "elapsedSeconds": 8.036,
+        "rssMiB": 397.72,
+        "heapUsedMiB": 127,
+        "externalMiB": 92.78,
+        "peakRssMiB": 465.09
+      },
+      {
+        "stage": "sequential 3: natural idle",
+        "elapsedSeconds": 8.337,
+        "rssMiB": 397.72,
+        "heapUsedMiB": 127,
+        "externalMiB": 92.78,
+        "peakRssMiB": 465.09
+      },
+      {
+        "stage": "concurrent A: eight-page preflight",
+        "elapsedSeconds": 8.339,
+        "rssMiB": 397.85,
+        "heapUsedMiB": 127.86,
+        "externalMiB": 92.78,
+        "peakRssMiB": 465.09
+      },
+      {
+        "stage": "concurrent B: eight-page preflight",
+        "elapsedSeconds": 8.34,
+        "rssMiB": 397.85,
+        "heapUsedMiB": 128.58,
+        "externalMiB": 92.78,
+        "peakRssMiB": 465.09
+      },
+      {
+        "stage": "concurrent A: completed eight-page deck",
+        "elapsedSeconds": 12.373,
+        "rssMiB": 395.25,
+        "heapUsedMiB": 110.02,
+        "externalMiB": 77.6,
+        "peakRssMiB": 466.99
+      },
+      {
+        "stage": "concurrent B: completed eight-page deck",
+        "elapsedSeconds": 12.537,
+        "rssMiB": 399.95,
+        "heapUsedMiB": 106.43,
+        "externalMiB": 67.58,
+        "peakRssMiB": 466.99
+      },
+      {
+        "stage": "concurrent A: natural idle",
+        "elapsedSeconds": 12.673,
+        "rssMiB": 399.95,
+        "heapUsedMiB": 106.43,
+        "externalMiB": 67.58,
+        "peakRssMiB": 466.99
+      },
+      {
+        "stage": "concurrent B: natural idle",
+        "elapsedSeconds": 12.838,
+        "rssMiB": 399.95,
+        "heapUsedMiB": 106.44,
+        "externalMiB": 67.58,
+        "peakRssMiB": 466.99
+      }
+    ]
+  },
+  "sequentialDeckEndRssMiBAverage": 396.89,
+  "nominal512MiBMargin": 45.01,
+  "safe512MiBDeploymentConfirmed": false
+}

@@ -55,4 +55,37 @@ describe("explicit cover-photo inheritance", () => {
     expect(resolvedReadingPageDesigns(copy, designs)).toBe(designs);
     expect(designs.discussion.background.assetId).toBeUndefined();
   });
+  it.each(["cardnews14-cobalt-paper-v1", "reading-ink-lime-v1", "reading-cobalt-paper-v1"])("preserves opt-in and opt-out when switching through %s and back", templateKey => {
+    const { copy, designs } = fixture();
+    designs.news_summary.background.inheritCover = true;
+    designs.implication.background.inheritCover = false;
+    const before = structuredClone(designs);
+    const intermediate = readingProfileDesigns(readingProfileForTemplateKey(templateKey)!, designs);
+    expect(intermediate.news_summary.background.inheritCover).toBe(true);
+    expect(intermediate.implication.background.inheritCover).toBe(false);
+    expect(resolvedReadingPageDesigns({ ...copy, templateKey }, intermediate).news_summary.background.assetId).toBeUndefined();
+    const restored = readingProfileDesigns(readingProfileForTemplateKey(copy.templateKey)!, intermediate);
+    const resolved = resolvedReadingPageDesigns(copy, restored);
+    expect(resolved.news_summary.background.assetId).toBe(101);
+    expect(resolved.implication.background.assetId).toBeUndefined();
+    expect(restored.implication.background.inheritCover).toBe(false);
+    expect(designs).toEqual(before);
+  });
+  it("does not turn an absent preference into an opt-out in styles without the photo window", () => {
+    const empty = defaultPageDesigns();
+    const sparse = readingProfileDesigns(readingProfileForTemplateKey("cardnews14-cobalt-paper-v1")!, empty);
+    const legacy = readingProfileDesigns(readingProfileForTemplateKey("reading-ink-lime-v1")!, sparse);
+    expect(sparse.news_summary.background.inheritCover).toBeUndefined();
+    expect(legacy.news_summary.background.inheritCover).toBeUndefined();
+    const full = readingProfileDesigns(readingProfileForTemplateKey("cardnews14-cinematic-v1")!, legacy);
+    expect(full.news_summary.background.inheritCover).toBe(true);
+  });
+  it("keeps a manually selected image ahead of the shared cover across supported styles", () => {
+    const { copy, designs } = fixture();
+    designs.discussion.background = { ...designs.discussion.background, kind: "image", assetId: 303, inheritCover: true, focalX: 0, brightness: 0 };
+    const sparse = readingProfileDesigns(readingProfileForTemplateKey("cardnews14-cobalt-paper-v1")!, designs);
+    const restored = readingProfileDesigns(readingProfileForTemplateKey(copy.templateKey)!, sparse);
+    expect(resolvedReadingPageDesigns(copy, restored).discussion.background).toMatchObject({ kind: "image", assetId: 303, focalX: 0, brightness: 0 });
+    expect(restored.discussion.previousAssetIds).toContain(303);
+  });
 });

@@ -67,12 +67,13 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,disable
   const originals=Array.isArray(current?.result?.originals)?current!.result!.originals as Array<{id:number;page:number}>:[];
   const drawing=pending||start.isPending||action.isPending;
   const canStart=!disabled&&!drawing&&connection.isSuccess&&masters.isSuccess&&jobs.isSuccess&&connection.data?.autofill&&!!selected&&!lostRequest&&!unresolved;
+  const preferLocal=!!readingProfile?.sourceStyleId&&!!onLocalRender&&!available.length;
   const reviewMatchesCurrent=current?.sourceVersion===version&&current?.sourceRevisionId===revisionId;
   const canReexport=current?.status==='failed'&&!!current.exportJobId&&(current.errorCode==='export_expired'||current.errorCode==='job_failed'&&current.phase==='export_polling');
   return <section className="canva-editorial stack" aria-label="Canva 8장 디자인">
-    <div className="row between"><div><h3>8장 디자인 완성</h3><p className="small muted">저장한 문구와 페이지 이미지를 Canva 템플릿에 넣습니다.</p></div><span className="pill">자동 · Canva</span></div>
+    <div className="row between"><div><h3>8장 디자인 완성</h3><p className="small muted">{preferLocal?'저장한 문구와 사진으로 선택한 스타일의 8장을 만듭니다.':'저장한 문구와 페이지 이미지를 Canva 템플릿에 넣습니다.'}</p></div><span className="pill">자동 · {preferLocal?'스튜디오':'Canva'}</span></div>
     {readingProfile && <p className={`notice ${available.length?'':'warn'}`} data-testid="reading-canva-readiness">{readingProfile.label} · {available.length?'검증된 같은 스타일 마스터를 선택할 수 있습니다.':`스튜디오 문구 편집·미리보기를 사용할 수 있습니다. Canva 자동 제작은 8장·46개 문구·${readingProfile.images.length}개 이미지의 연결과 실제 출력을 검증한 뒤 사용할 수 있습니다.`}</p>}
-    {!connection.isLoading&&!connection.error&&!connection.data?.connected&&<p className="notice warn">Canva 계정을 먼저 연결해 주세요. <GuardedLink href="/connections?service=canva">Canva 연결 설정</GuardedLink></p>}
+    {!connection.isLoading&&!connection.error&&!connection.data?.connected&&<p className={preferLocal?'small muted':'notice warn'}>{preferLocal?'Canva 출력도 사용하려면 계정을 연결해 주세요.':'Canva 계정을 먼저 연결해 주세요.'} <GuardedLink href="/connections?service=canva">Canva 연결 설정</GuardedLink></p>}
     {connection.data?.connected&&!connection.data.autofill&&<div className="notice warn stack" data-testid="canva-capability-status" role="status"><strong>{connection.data.capabilityStatus==='unknown'?'자동 채우기 권한을 아직 확인하지 못했습니다':'연결한 계정에서 자동 채우기를 사용할 수 없습니다'}</strong><p>{connection.data.message??'연결한 계정·팀의 기능 이용 권한을 확인해 주세요.'}</p><div className="row wrap"><button className="btn sm" disabled={connection.isFetching} onClick={()=>connection.refetch()}>{connection.isFetching?'확인 중…':'권한 다시 확인'}</button>{['missing_scope','auth_required'].includes(connection.data.reason??'')&&<GuardedLink href="/connections?service=canva">Canva 다시 연결</GuardedLink>}</div></div>}
     {connection.error&&<ErrorBox error={connection.error} retry={()=>connection.refetch()}/>}
     <label className="field">템플릿 선택<select aria-label="Canva 템플릿 선택" value={selected?.id??''} disabled={!!drawing||!available.length} onChange={e=>setChoice(Number(e.target.value))}>
@@ -83,10 +84,12 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,disable
     {masters.error&&<ErrorBox error={masters.error} retry={()=>masters.refetch()}/>}
     {disabled&&<p className="notice small">문구·이미지 설정에 미저장 변경이 있습니다. 저장한 뒤 디자인을 만들어 주세요.</p>}
     <div className="row wrap">
-      <button className="btn primary" disabled={!canStart} onClick={()=>start.mutate(undefined)}>{start.isPending?'요청 중…':'Canva 8장 만들기'}</button>
+      {preferLocal&&<button className="btn primary" disabled={disabled||!!drawing||!jobs.isSuccess||!!lostRequest} onClick={onLocalRender}>스튜디오에서 8장 만들기</button>}
+      <button className={`btn ${preferLocal?'':'primary'}`} disabled={!canStart} onClick={()=>start.mutate(undefined)}>{start.isPending?'요청 중…':'Canva 8장 만들기'}</button>
       {current?.editUrl&&<a className="btn" href={current.editUrl} target="_blank" rel="noopener noreferrer">Canva에서 열기 ↗</a>}
       {current?.designId&&<button className="btn" disabled={disabled||!!drawing||!!lostRequest||!!unresolved||!jobs.isSuccess||!connection.data?.connected} onClick={()=>start.mutate(current.id)}>최신 디자인 가져오기</button>}
     </div>
+    {preferLocal&&<p className="small muted">선택한 스타일로 8장을 완성합니다. 스튜디오 자체 출력이며, Canva 자동 제작은 원본 연결·출력 검증이 끝나면 사용할 수 있습니다.</p>}
     {lostRequest&&<div className="notice warn stack"><span>요청 응답을 아직 확인하지 못했습니다. 같은 요청의 결과를 먼저 확인합니다.</span><button className="btn" disabled={!!drawing||disabled} onClick={()=>start.mutate(undefined)}>요청 결과 확인</button></div>}
     {pending&&<div className="notice" role="status"><strong>{phaseLabels[pending.phase]??'Canva 작업 중'}</strong><p className="small">창을 닫아도 저장된 작업 ID로 이어서 확인합니다. 기존 원고와 이미지는 유지합니다.</p><button className="btn sm" disabled={action.isPending} onClick={()=>action.mutate({name:'cancel',id:pending.id})}>대기 취소</button></div>}
     {current?.errorMessage&&<div className="notice warn stack" role="alert"><strong>{current.status==='result_unknown'?'Canva 결과 확인 필요':current.status==='superseded'?'이전 원고의 결과 보관':'Canva 작업 확인'}</strong><p>{current.errorMessage}</p>{['failed','result_unknown'].includes(current.status)&&<button className="btn" disabled={action.isPending} onClick={()=>action.mutate({name:'resume',id:current.id})}>저장된 작업 결과 확인</button>}</div>}
@@ -103,7 +106,7 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,disable
       <p className="small muted">Canva에서 내보낸 원본 PNG를 보관합니다. 게시 미리보기와 전송은 같은 게시용 JPEG 8장을 사용합니다.</p>
       {current?.status==='needs_review'&&<div className="notice stack"><strong>Canva에서 바꾼 문구를 대조해 주세요.</strong><p>Canva 편집 내용은 자동으로 원고에 동기화되지 않습니다. 글을 바꿨다면 스튜디오의 해당 칸도 수정·저장한 뒤 다시 가져와 주세요.</p>{!reviewMatchesCurrent&&<p className="notice warn">가져온 뒤 원고 버전이 바뀌었습니다. 최신 디자인 가져오기로 다시 대조해 주세요.</p>}<label className="check"><input type="checkbox" checked={confirmed} disabled={loaded.length!==8||disabled||action.isPending||!reviewMatchesCurrent} onChange={e=>setConfirmed(e.target.checked)}/><span>8장의 모든 문구가 현재 스튜디오 원고와 같은지 확인했습니다.</span></label><button className="btn primary" disabled={!confirmed||loaded.length!==8||disabled||action.isPending||!reviewMatchesCurrent} onClick={()=>action.mutate({name:'accept',id:current.id})}>확인한 8장을 새 버전으로 저장</button><p className="small muted">저장 후 검토·승인을 다시 진행합니다.</p></div>}
     </div></details>}
-    {onLocalRender&&<details className="content-options"><summary>Canva 연결이 어려울 때</summary><div className="stack"><p className="small muted">같은 원고를 스튜디오 자체 디자인으로 만듭니다. 결과에 자체 이미지라고 표시하며 Canva 출력과 구분합니다.</p><button className="btn" disabled={disabled||!!drawing} onClick={onLocalRender}>자체 이미지로 만들기</button></div></details>}
+    {onLocalRender&&!preferLocal&&<details className="content-options"><summary>Canva 연결이 어려울 때</summary><div className="stack"><p className="small muted">같은 원고를 스튜디오 자체 디자인으로 만듭니다. 결과에 자체 이미지라고 표시하며 Canva 출력과 구분합니다.</p><button className="btn" disabled={disabled||!!drawing} onClick={onLocalRender}>자체 이미지로 만들기</button></div></details>}
   </section>;
 }
 

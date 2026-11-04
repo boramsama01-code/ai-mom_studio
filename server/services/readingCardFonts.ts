@@ -2,13 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import opentype from 'opentype.js';
-import manifest from '../../assets/fonts/cardnews14/manifest.json';
+import manifest from '../../assets/fonts/cardnews14/static-manifest.json';
 import { CardFontError } from './card';
 
 type Family = 'Noto Sans KR' | 'Noto Serif KR';
-type VariableFont = opentype.Font & {
-  variation: { getTransform(glyph: opentype.Glyph, coordinates: { wght: number }): opentype.Glyph };
-};
 export type ReadingFont = {
   family: Family;
   weight: number;
@@ -17,12 +14,10 @@ export type ReadingFont = {
   path(text: string, x: number, baseline: number, size: number, letterSpacing?: number): string;
   baseline(size: number, lineHeight: number): number;
 };
-const files: Record<Family, string> = {
-  'Noto Sans KR': 'NotoSansKR-Variable.ttf',
-  'Noto Serif KR': 'NotoSerifKR-Variable.ttf',
-};
-const fonts = new Map<Family, { font: VariableFont; sha256: string }>();
 const faces = new Map<string, ReadingFont>();
+const MAX_CACHED_FACES=5;
+/** Operational diagnostics contain only public font identities, no copy text. */
+export function readingFontCacheState(){return {limit:MAX_CACHED_FACES,faces:[...faces.keys()]};}
 
 /** opentype.js 2's toPathData decimal formatter concatenates exponent strings;
  * tiny floating-point residues such as 5e-14 become `5e-14e+2` and emit NaN.
@@ -44,9 +39,10 @@ export function readingPathData(commands:opentype.PathCommand[]):string {
   }).join('');
 }
 
-/** The two original OFL variable fonts are bundled and checked by hash. Do not
- * substitute Pretendard or a system font: that would change the fixed slots.
- * Explicit variation coordinates avoid changing the font's global defaults. */
+/** Full-Unicode weight instances are built from the untouched bundled OFL
+ * sources. Parsing the original variable fonts eagerly allocates every glyph's
+ * variation metadata even with lowMemory enabled. Static weights avoid that
+ * allocation; an LRU bounds cached faces across repeated style changes. */
 export function loadReadingFont(family: string | undefined, weight: number): ReadingFont {
   if (family !== 'Noto Sans KR' && family !== 'Noto Serif KR') {
     throw new CardFontError('카드뉴스 스타일의 한글 서체가 등록되지 않았습니다.');
@@ -56,22 +52,25 @@ export function loadReadingFont(family: string | undefined, weight: number): Rea
   }
   const key = `${family}:${weight}`;
   const saved = faces.get(key);
-  if (saved) return saved;
-  let loaded = fonts.get(family);
-  if (!loaded) {
-    const filename = files[family], entry = manifest.files.find(file => file.file === filename);
-    const candidates = [path.resolve(process.cwd(), 'assets/fonts/cardnews14', filename), path.resolve(import.meta.dirname ?? '.', '../../assets/fonts/cardnews14', filename)];
-    const filenameOnDisk = candidates.find(candidate => fs.existsSync(candidate));
-    if (!entry || !filenameOnDisk) throw new CardFontError(`${family} 원본 폰트 파일을 찾을 수 없습니다. 배포 자산 복구 후 다시 시도해 주세요.`);
-    const bytes = fs.readFileSync(filenameOnDisk), sha256 = createHash('sha256').update(bytes).digest('hex');
-    if (bytes.length !== entry.bytes || sha256 !== entry.sha256) throw new CardFontError(`${family} 폰트의 무결성 검사에 실패했습니다. 등록된 원본을 복구해 주세요.`);
-    const font = opentype.parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)) as VariableFont;
-    if (!font.variation || font.charToGlyph('한').index === 0) throw new CardFontError(`${family}의 한글 가변 서체를 읽을 수 없습니다.`);
-    loaded = { font, sha256 }; fonts.set(family, loaded);
-  }
-  const { font, sha256 } = loaded;
-  const advanceWidths = new Map<number, number>();
+  if(saved){faces.delete(key);faces.set(key,saved);return saved;}
+  const entry=manifest.files.find(file=>file.family===family&&file.weight===weight);
+  if(!entry)throw new CardFontError(`${family} ${weight} 굵기의 등록된 폰트가 없습니다.`);
+  const candidates=[path.resolve(process.cwd(),'assets/fonts/cardnews14',entry.file),path.resolve(import.meta.dirname??'.','../../assets/fonts/cardnews14',entry.file)];
+  const filenameOnDisk=candidates.find(candidate=>fs.existsSync(candidate));
+  if(!filenameOnDisk)throw new CardFontError(`${family} ${weight} 폰트 파일을 찾을 수 없습니다. 배포 자산 복구 후 다시 시도해 주세요.`);
+  // Evict before allocating a new face. No rendered page retains a font object.
+  if(faces.size>=MAX_CACHED_FACES)faces.delete(faces.keys().next().value!);
+  const bytes=fs.readFileSync(filenameOnDisk),sha256=createHash('sha256').update(bytes).digest('hex');
+  if(bytes.length!==entry.bytes||sha256!==entry.sha256)throw new CardFontError(`${family} 폰트의 무결성 검사에 실패했습니다. 등록된 원본을 복구해 주세요.`);
+  const buffer=bytes.byteOffset===0&&bytes.byteLength===bytes.buffer.byteLength?bytes.buffer:bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength);
+  const font=opentype.parse(buffer,{lowMemory:true});
+  if(font.tables.fvar||font.tables.gvar||font.charToGlyph('한').index===0)throw new CardFontError(`${family}의 검증된 한글 정적 서체를 읽을 수 없습니다.`);
   const measurementCache = new Map<string, number>();
+  // Repeated previews/decks reuse identical outlines. Bound retained UTF-16
+  // strings to about 1 MiB per face instead of rebuilding thousands of short
+  // command objects for the same line on every render.
+  const outlines=new Map<string,string>();let outlineChars=0;
+  const MAX_OUTLINE_CHARS=512_000;
   const face: ReadingFont = {
     family, weight, sha256,
     measure(text, size, letterSpacing = 0) {
@@ -82,12 +81,7 @@ export function loadReadingFont(family: string | undefined, weight: number): Rea
       let units = 0;
       for (let index = 0; index < glyphs.length; index++) {
         const glyph = glyphs[index];
-        let advance = advanceWidths.get(glyph.index);
-        if (advance === undefined) {
-          advance = font.variation.getTransform(glyph, { wght: weight }).advanceWidth ?? 0;
-          advanceWidths.set(glyph.index, advance);
-        }
-        units += advance;
+        units += glyph.advanceWidth??0;
         if (index < glyphs.length - 1) units += font.getKerningValue(glyph, glyphs[index + 1]);
       }
       const width = units / font.unitsPerEm * size + Math.max(0, glyphs.length - 1) * letterSpacing;
@@ -96,10 +90,17 @@ export function loadReadingFont(family: string | undefined, weight: number): Rea
       return width;
     },
     path(text, x, baseline, size, letterSpacing = 0) {
-      // opentype.js 2 implements variation; its DefinitelyTyped declaration is
-      // still 1.x. A typed variable retains the checked standard options too.
-      const options = { kerning: true, variation: { wght: weight }, letterSpacing: letterSpacing / size };
-      return readingPathData(font.getPath(text, x, baseline, size, options).commands);
+      const key=JSON.stringify([text,x,baseline,size,letterSpacing]),cached=outlines.get(key);
+      if(cached!==undefined){outlines.delete(key);outlines.set(key,cached);return cached;}
+      const options = { kerning: true, letterSpacing: letterSpacing / size };
+      const data=readingPathData(font.getPath(text, x, baseline, size, options).commands),chars=key.length+data.length;
+      if(chars<=MAX_OUTLINE_CHARS){
+        while(outlines.size&&(outlineChars+chars>MAX_OUTLINE_CHARS||outlines.size>=128)){
+          const oldest=outlines.keys().next().value!;outlineChars-=oldest.length+outlines.get(oldest)!.length;outlines.delete(oldest);
+        }
+        outlines.set(key,data);outlineChars+=chars;
+      }
+      return data;
     },
     baseline(size, lineHeight) {
       // CSS puts the font's ascender/descender in the centre of the line box.

@@ -34,6 +34,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Measure production-bundle card rendering on Node 22
+        run: node scripts/cardnews14-memory-qa.mjs --concurrent=2 --output=test-results/cardnews14-memory/ci-production.json
       - name: Install mobile browser regression tools
         id: browser_tools
         run: npm install --no-save --package-lock=false playwright@1.62.1 && npx playwright install --with-deps webkit
@@ -62,5 +64,11 @@ jobs:
             test-results/news-editorial
             test-results/channel-navigation
             test-results/studio-automatic-browser
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cardnews14-memory
+          path: test-results/cardnews14-memory/ci-production.json
           if-no-files-found: ignore
 

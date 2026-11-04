@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import {patchOpenTypeMemory} from './patch-opentype-memory.mjs';
+
+await patchOpenTypeMemory();
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = resolve(root, "assets/studio-comic");

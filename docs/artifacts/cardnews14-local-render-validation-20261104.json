@@ -1,0 +1,924 @@
+{
+  "kind": "local-render-only",
+  "pages": 112,
+  "textFields": 644,
+  "canvaExternalCalls": 0,
+  "paidAiCalls": 0,
+  "checks": [
+    {
+      "profile": "cardnews14-cinematic-v1",
+      "page": 1,
+      "file": "cinematic/page-1.jpg",
+      "sha256": "39f55c0717ee377bacdbc1e7c0feb6edc3976bb26e4fca26ce11c910e90752dd",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cinematic-v1",
+      "page": 2,
+      "file": "cinematic/page-2.jpg",
+      "sha256": "629d4fdd6019df760aa69d08a2bcb576c94a6a738e39c5ee19195f776738e0b8",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cinematic-v1",
+      "page": 3,
+      "file": "cinematic/page-3.jpg",
+      "sha256": "f54183efc80b8700ac69407e70431e1102cdf61cfb13d34ffb73471ef13b69ed",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cinematic-v1",
+      "page": 4,
+      "file": "cinematic/page-4.jpg",
+      "sha256": "4f49f639a248cf34378d28f2fa4725be621ad344063b1c41c9e21e352658d82d",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cinematic-v1",
+      "page": 5,
+      "file": "cinematic/page-5.jpg",
+      "sha256": "565aa40f5e8f537daa033384291b510596adc84b76be18933fc7299b7df2e07d",
+      "textFields": 6,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cinematic-v1",
+      "page": 6,
+      "file": "cinematic/page-6.jpg",
+      "sha256": "b07c638dcb1e18a45dc4fcff28d73333f374e7e122cdf39ac62a54c670115306",
+      "textFields": 9,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cinematic-v1",
+      "page": 7,
+      "file": "cinematic/page-7.jpg",
+      "sha256": "ca409eda275c826f7bfeea6606b07c507789a9d07080d1e3ab1f70647d9ea714",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cinematic-v1",
+      "page": 8,
+      "file": "cinematic/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-monochrome-coral-v1",
+      "page": 1,
+      "file": "monochrome-coral/page-1.jpg",
+      "sha256": "bc0ee9a4757d248b3a5fc14cd11af0ebb44f0bc249111edaa375f92f59cea6cc",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-monochrome-coral-v1",
+      "page": 2,
+      "file": "monochrome-coral/page-2.jpg",
+      "sha256": "c0279d916d2f439d19bec62013c6793a27187bb76bd245f22bd36f1460f93514",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-monochrome-coral-v1",
+      "page": 3,
+      "file": "monochrome-coral/page-3.jpg",
+      "sha256": "3a6c49346a2362108da24fab43765328d8272cd0ed58964c90a14096af1cc507",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-monochrome-coral-v1",
+      "page": 4,
+      "file": "monochrome-coral/page-4.jpg",
+      "sha256": "9cf37e6e37b99c9d043d8c563a8d9860a31bb54ded99be0c90f32f0404cce031",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-monochrome-coral-v1",
+      "page": 5,
+      "file": "monochrome-coral/page-5.jpg",
+      "sha256": "206655e77850cdb0a1d40d06628301bdae90029e3fc4eba40bec394101a59874",
+      "textFields": 6,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-monochrome-coral-v1",
+      "page": 6,
+      "file": "monochrome-coral/page-6.jpg",
+      "sha256": "264359adfc3de2b7ac61179c83db0db44486c8d86237eae36e07a26014c1fc5e",
+      "textFields": 9,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-monochrome-coral-v1",
+      "page": 7,
+      "file": "monochrome-coral/page-7.jpg",
+      "sha256": "ca643fbba4d0e70ee22792b7d5b06e0fd442d9563bea2d0278060911351e83bd",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-monochrome-coral-v1",
+      "page": 8,
+      "file": "monochrome-coral/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-amber-cream-v1",
+      "page": 1,
+      "file": "amber-cream/page-1.jpg",
+      "sha256": "e4f1fcc85eab5ab93be77867bfc5fe2bf82980b15982cd157ef16acbb3f083d7",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-amber-cream-v1",
+      "page": 2,
+      "file": "amber-cream/page-2.jpg",
+      "sha256": "3e76809f0b8827a20b153b951d4a3adf344119fca2023acada4f88aefc1d3937",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-amber-cream-v1",
+      "page": 3,
+      "file": "amber-cream/page-3.jpg",
+      "sha256": "1bb9d1b97cbb9fc3ec99df7503693ef5834c07f6fcbf713716599a41368e3a24",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-amber-cream-v1",
+      "page": 4,
+      "file": "amber-cream/page-4.jpg",
+      "sha256": "f87fd7734ea3dcc6f36a9d373bdf648d5f2a5f65fc721ca6a0857597657fa95d",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-amber-cream-v1",
+      "page": 5,
+      "file": "amber-cream/page-5.jpg",
+      "sha256": "61bdb3e5de63585230f86793b7906a02c083d0d44091a157c0ba2198d37bb5d7",
+      "textFields": 6,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-amber-cream-v1",
+      "page": 6,
+      "file": "amber-cream/page-6.jpg",
+      "sha256": "ef7c7b5968c46f4fdf40370e60794750fa46dba776c27d35e074d52909baa7e0",
+      "textFields": 9,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-amber-cream-v1",
+      "page": 7,
+      "file": "amber-cream/page-7.jpg",
+      "sha256": "9beb2c372a8c59e095179f621b047877d03b6b7df06b4aeb2a12a7c1783790ca",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-amber-cream-v1",
+      "page": 8,
+      "file": "amber-cream/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cobalt-paper-v1",
+      "page": 1,
+      "file": "cobalt-paper/page-1.jpg",
+      "sha256": "3dc9899f4f84af71253a1ab89a4584dd1c5f3b5d179626073167113170ccaee0",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cobalt-paper-v1",
+      "page": 2,
+      "file": "cobalt-paper/page-2.jpg",
+      "sha256": "96be76e000f409642ee64f2b9cf881f696613a3651d1985623293fc03f4146f1",
+      "textFields": 5,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-cobalt-paper-v1",
+      "page": 3,
+      "file": "cobalt-paper/page-3.jpg",
+      "sha256": "481fdf1dfa66ebe0c9328a16d697e4572958eb52018eec3d7eb6d5cf6ae9f5f2",
+      "textFields": 4,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-cobalt-paper-v1",
+      "page": 4,
+      "file": "cobalt-paper/page-4.jpg",
+      "sha256": "33bd90287447aa63128b9f77aa0799005e3afccbc2c1ff46981b4cde5d3c471a",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cobalt-paper-v1",
+      "page": 5,
+      "file": "cobalt-paper/page-5.jpg",
+      "sha256": "25d70e9add288048bf337e7da166e0468e52e6dda0dae899b46b18f7071e54f6",
+      "textFields": 6,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-cobalt-paper-v1",
+      "page": 6,
+      "file": "cobalt-paper/page-6.jpg",
+      "sha256": "9167d852e97d2c7765c8f360c5fc30db6bb46fae7761d3afcd44a8881e440bd5",
+      "textFields": 9,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-cobalt-paper-v1",
+      "page": 7,
+      "file": "cobalt-paper/page-7.jpg",
+      "sha256": "e9a8d61054f7667c4821a1ba4227d1f9f9a56fdf04d12b786d2b464d39526d99",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-cobalt-paper-v1",
+      "page": 8,
+      "file": "cobalt-paper/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ink-lime-v1",
+      "page": 1,
+      "file": "ink-lime/page-1.jpg",
+      "sha256": "c3edbe6e553623f9a79c2bd790d09be449c2469d314b36b30c86f531d7ce48de",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ink-lime-v1",
+      "page": 2,
+      "file": "ink-lime/page-2.jpg",
+      "sha256": "98e7aaa2c20fbb278c7dffe72ba4f3a5b9657090cd855ba40b90cac9edef1524",
+      "textFields": 5,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-ink-lime-v1",
+      "page": 3,
+      "file": "ink-lime/page-3.jpg",
+      "sha256": "a46062a27fe1d6a30b0f560bb49379497d1e1dfa0725e371ef5071fc07fb20d2",
+      "textFields": 4,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-ink-lime-v1",
+      "page": 4,
+      "file": "ink-lime/page-4.jpg",
+      "sha256": "a8ecf9cdfe4b17aa7b1561f5656e3e6950707a4a167d7f6e2026d23879669620",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ink-lime-v1",
+      "page": 5,
+      "file": "ink-lime/page-5.jpg",
+      "sha256": "676d4972e9e560a3e692379eac720079a96ba01faee076d8e34ba5a796428a45",
+      "textFields": 6,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-ink-lime-v1",
+      "page": 6,
+      "file": "ink-lime/page-6.jpg",
+      "sha256": "d52ffdf129ceeb66c6c364d13d088d72dc8b4ffc6a1ad0bde1e2b2738cbac2d8",
+      "textFields": 9,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-ink-lime-v1",
+      "page": 7,
+      "file": "ink-lime/page-7.jpg",
+      "sha256": "082ef7ac8a338cbee8c0d917d701e06fb0357c4b156c87e5e6a76764ac8323d9",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ink-lime-v1",
+      "page": 8,
+      "file": "ink-lime/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-swiss-modernism-v1",
+      "page": 1,
+      "file": "swiss-modernism/page-1.jpg",
+      "sha256": "18c3491ac70afb193d58821af82b42b817119f4e05d4c64b29f1040b84327c32",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-swiss-modernism-v1",
+      "page": 2,
+      "file": "swiss-modernism/page-2.jpg",
+      "sha256": "367933a8f2cb41f266539d63d86389aa0a72310f1d5f681212de2104b2ae33a0",
+      "textFields": 5,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-swiss-modernism-v1",
+      "page": 3,
+      "file": "swiss-modernism/page-3.jpg",
+      "sha256": "fb18b147c90bc760a0c6e206062946110deed2b9618416c597fb8b9231077aba",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-swiss-modernism-v1",
+      "page": 4,
+      "file": "swiss-modernism/page-4.jpg",
+      "sha256": "16e694ad8d4f144cde9c26b043700e1a81a6d760e6b6b20d4b93783c01b98141",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-swiss-modernism-v1",
+      "page": 5,
+      "file": "swiss-modernism/page-5.jpg",
+      "sha256": "28d1b7f878b76e7b2f935211ece8c73399d36fe5b3e63493d0551ddf1dc04efa",
+      "textFields": 6,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-swiss-modernism-v1",
+      "page": 6,
+      "file": "swiss-modernism/page-6.jpg",
+      "sha256": "7fd0e634b0fa449cf8019f859ca14d81a47adb4b2382302433b7716a10311386",
+      "textFields": 9,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-swiss-modernism-v1",
+      "page": 7,
+      "file": "swiss-modernism/page-7.jpg",
+      "sha256": "41c3f9944427f8343ac1e5f3131e7526aa6f9e3fc668e5868d3f60db03d4dcb4",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-swiss-modernism-v1",
+      "page": 8,
+      "file": "swiss-modernism/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-studio-2am-v1",
+      "page": 1,
+      "file": "studio-2am/page-1.jpg",
+      "sha256": "10d5fb262101530ff27b77c78403479c22c092966bf8ab866242c7770cde24f9",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-studio-2am-v1",
+      "page": 2,
+      "file": "studio-2am/page-2.jpg",
+      "sha256": "efbf895c73250edeca64c64e5cd75e364e8cb76f95a92e606d67de3118498aa5",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-studio-2am-v1",
+      "page": 3,
+      "file": "studio-2am/page-3.jpg",
+      "sha256": "9816bfe41bd2e10c1c36279365b802955bbbf901cac1b74e0264199798ed07db",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-studio-2am-v1",
+      "page": 4,
+      "file": "studio-2am/page-4.jpg",
+      "sha256": "8d673a68118f6e20380d03446ff1c24729041b30ece4bb56313e71a3a2ff3bf8",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-studio-2am-v1",
+      "page": 5,
+      "file": "studio-2am/page-5.jpg",
+      "sha256": "f8768474c68111c3d1499b71248433d1a1d377afb9e045c93e309a3810ccbdee",
+      "textFields": 6,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-studio-2am-v1",
+      "page": 6,
+      "file": "studio-2am/page-6.jpg",
+      "sha256": "917d02d01360b031e3bf7725c47be911afd7d99bb8fd7420cd65607d478373a2",
+      "textFields": 9,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-studio-2am-v1",
+      "page": 7,
+      "file": "studio-2am/page-7.jpg",
+      "sha256": "ff6bf9d853606be40929f35625e9c5ed6b24a14c6512db7d5f688edec33ec813",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-studio-2am-v1",
+      "page": 8,
+      "file": "studio-2am/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ichestyime-v1",
+      "page": 1,
+      "file": "ichestyime/page-1.jpg",
+      "sha256": "9a4ea0a7907a3c825aab68eff5f7762c7321568cf253357648c04b104edfcfd4",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ichestyime-v1",
+      "page": 2,
+      "file": "ichestyime/page-2.jpg",
+      "sha256": "62ac902c2a2546c10fcb04dbdec052c829807eabdfc86507617b9e65be3ac94b",
+      "textFields": 5,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-ichestyime-v1",
+      "page": 3,
+      "file": "ichestyime/page-3.jpg",
+      "sha256": "7b5a4f0e0fb377fc91e126a0c97b1515128233b30dc07d7bdca3c474e2573265",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ichestyime-v1",
+      "page": 4,
+      "file": "ichestyime/page-4.jpg",
+      "sha256": "edd289ffe3a92a8bf2575f90320a6e454781abc5c83fda38071c04161ca3d799",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ichestyime-v1",
+      "page": 5,
+      "file": "ichestyime/page-5.jpg",
+      "sha256": "e8954eb59623f9351f20a227f2594c276289fbd7a9bdfc9a65f7b6d28056650c",
+      "textFields": 6,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-ichestyime-v1",
+      "page": 6,
+      "file": "ichestyime/page-6.jpg",
+      "sha256": "832cb05f1055aa6747f66734c8be08fde35d396bf3002a5c292c41dc295d5ca6",
+      "textFields": 9,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-ichestyime-v1",
+      "page": 7,
+      "file": "ichestyime/page-7.jpg",
+      "sha256": "0237854603f1c429b73e9ae2a2fca2852ce5c03f96ccb598f7eed1467c6b1cac",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ichestyime-v1",
+      "page": 8,
+      "file": "ichestyime/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-sharp-serif-v1",
+      "page": 1,
+      "file": "sharp-serif/page-1.jpg",
+      "sha256": "1385e5403949319905f5a70223a607324fc66b638eaf1e298bb83f3c138c25e4",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-sharp-serif-v1",
+      "page": 2,
+      "file": "sharp-serif/page-2.jpg",
+      "sha256": "187d74e9d82789e63ebb5c65beae6f877da39cfb932d9be4831ef2d31ca6c9d5",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-sharp-serif-v1",
+      "page": 3,
+      "file": "sharp-serif/page-3.jpg",
+      "sha256": "a732ad5fd3781953f3b432c11e3475d1fe164c040000abb6f12fa969e3b6234e",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-sharp-serif-v1",
+      "page": 4,
+      "file": "sharp-serif/page-4.jpg",
+      "sha256": "e6a97da9f9d517959acb28201b1f2d10cbfa4671c1acbfcb124f9dea3f134235",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-sharp-serif-v1",
+      "page": 5,
+      "file": "sharp-serif/page-5.jpg",
+      "sha256": "f369486f58bd1f8720cf927234a74e88c46b6351cd1329079360182d8193d605",
+      "textFields": 6,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-sharp-serif-v1",
+      "page": 6,
+      "file": "sharp-serif/page-6.jpg",
+      "sha256": "cf9e4e22a201bbbcda7ce6d49c200bb05cb333a656b6d748b8292d107ccad5f4",
+      "textFields": 9,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-sharp-serif-v1",
+      "page": 7,
+      "file": "sharp-serif/page-7.jpg",
+      "sha256": "cfbd4134906216da4677e334570e919aca88ea872c45e94642ba70fe9b33f7c3",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-sharp-serif-v1",
+      "page": 8,
+      "file": "sharp-serif/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-bang-bang-v1",
+      "page": 1,
+      "file": "bang-bang/page-1.jpg",
+      "sha256": "0a63ae0b86b85ca7a7609bdbb0ed5a7bd96e8ca2b0ad27391513ede6e7613c51",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-bang-bang-v1",
+      "page": 2,
+      "file": "bang-bang/page-2.jpg",
+      "sha256": "31ba57a546e647d9eb5b057993d0721da3ff78847ce4ccf46bcac08f506df610",
+      "textFields": 5,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-bang-bang-v1",
+      "page": 3,
+      "file": "bang-bang/page-3.jpg",
+      "sha256": "b3fcf9af2c7adc4627c7cf36b0026b1e18948075cf7d1e1c2281283824bbbf09",
+      "textFields": 4,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-bang-bang-v1",
+      "page": 4,
+      "file": "bang-bang/page-4.jpg",
+      "sha256": "c9e2d16162193cf50a44dbfe96869b3a01eb534465af7bb84cfca947af6bb635",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-bang-bang-v1",
+      "page": 5,
+      "file": "bang-bang/page-5.jpg",
+      "sha256": "7e314f2ca99e7af692ae919a5fe934c6fbd858a13ba04841ef6bddd16adb4a77",
+      "textFields": 6,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-bang-bang-v1",
+      "page": 6,
+      "file": "bang-bang/page-6.jpg",
+      "sha256": "104205bb177b46b3a0c21e49f75ac2d57e991b014e7cd0ddb1ec73ea283b4b9f",
+      "textFields": 9,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-bang-bang-v1",
+      "page": 7,
+      "file": "bang-bang/page-7.jpg",
+      "sha256": "b1f0a8596a534832264674f2944c3f810d57d67c8d5020f0bb44d837e697667d",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-bang-bang-v1",
+      "page": 8,
+      "file": "bang-bang/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-hello-v1",
+      "page": 1,
+      "file": "hello/page-1.jpg",
+      "sha256": "d0e422114798eb134c4dc5917664c6912b93a2eea6ec4b04ffe1fe58262ac863",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-hello-v1",
+      "page": 2,
+      "file": "hello/page-2.jpg",
+      "sha256": "4364b2fb9e6991c49bb882e688460b71997a2cd44f210673911bae13fab6e860",
+      "textFields": 5,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-hello-v1",
+      "page": 3,
+      "file": "hello/page-3.jpg",
+      "sha256": "98e03b292ef442a13aa7613cb132ba847b7b65e1b75c61dd38b73cc2b38db863",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-hello-v1",
+      "page": 4,
+      "file": "hello/page-4.jpg",
+      "sha256": "72e054746768101b73e8ffc8c45a5dfb6b5cdd4217ca32eff8694140b4f23e83",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-hello-v1",
+      "page": 5,
+      "file": "hello/page-5.jpg",
+      "sha256": "3c9c5b8ae720e6c8abc6733af84d595b3b1ef3eab7589e70d0d8e615f457c088",
+      "textFields": 6,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-hello-v1",
+      "page": 6,
+      "file": "hello/page-6.jpg",
+      "sha256": "9d203b2b7f8e92376a785b510afa55e43af238295d1a326c368a5e77449fb513",
+      "textFields": 9,
+      "imageFields": 0
+    },
+    {
+      "profile": "cardnews14-hello-v1",
+      "page": 7,
+      "file": "hello/page-7.jpg",
+      "sha256": "b9a9b22c8bca04118fdab3de9accfc73975b083705cf607cc5247c36fe5c98b4",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-hello-v1",
+      "page": 8,
+      "file": "hello/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ekiden-pack-v1",
+      "page": 1,
+      "file": "ekiden-pack/page-1.jpg",
+      "sha256": "ec5a085537c1f879648de178b7204ce8bcaa62bc6b2f6758ff4f10fc68e5cce1",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ekiden-pack-v1",
+      "page": 2,
+      "file": "ekiden-pack/page-2.jpg",
+      "sha256": "5762a65023c667193de5f759c957d79ea268a000bf2b51e9f46c393c9b4a43de",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ekiden-pack-v1",
+      "page": 3,
+      "file": "ekiden-pack/page-3.jpg",
+      "sha256": "d0754f56d358c1a65d73d51ec92f8714f5264c5047c0131ba538cc929839f969",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ekiden-pack-v1",
+      "page": 4,
+      "file": "ekiden-pack/page-4.jpg",
+      "sha256": "7f73c59787ef7b141436361994e45fac3191d0181af220ba8438724c49b3a889",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ekiden-pack-v1",
+      "page": 5,
+      "file": "ekiden-pack/page-5.jpg",
+      "sha256": "58dfde8b00037c8847f2521319248df5bbe7996933fdb94beb3bf3265f0daf36",
+      "textFields": 6,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ekiden-pack-v1",
+      "page": 6,
+      "file": "ekiden-pack/page-6.jpg",
+      "sha256": "9d097b57f78b091e81f487119eb33c485cb8119c92930fcd553a461f3e37953c",
+      "textFields": 9,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ekiden-pack-v1",
+      "page": 7,
+      "file": "ekiden-pack/page-7.jpg",
+      "sha256": "43819d43ee2dffd29ad191d66657a791390db5ce38195350ad4e7a74f4c859ca",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ekiden-pack-v1",
+      "page": 8,
+      "file": "ekiden-pack/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-you-and-me-v1",
+      "page": 1,
+      "file": "you-and-me/page-1.jpg",
+      "sha256": "1f03c08979db8f6981abefc54e3019ad6d81922619d188637c08b5fddcd1bacb",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-you-and-me-v1",
+      "page": 2,
+      "file": "you-and-me/page-2.jpg",
+      "sha256": "6c2911a0fc24ec68676d15f3e3f39fe58baaf315484a84d40cb615a322b56aed",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-you-and-me-v1",
+      "page": 3,
+      "file": "you-and-me/page-3.jpg",
+      "sha256": "130eccd9048c12386c637e087d2e0242402859a2816475e71847e147e7dec17d",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-you-and-me-v1",
+      "page": 4,
+      "file": "you-and-me/page-4.jpg",
+      "sha256": "505f32f053ad5ae6e8b39853debf7aecc816605aba1ced5a8bc253cfcab679d6",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-you-and-me-v1",
+      "page": 5,
+      "file": "you-and-me/page-5.jpg",
+      "sha256": "1a2072333af1204334e55eb34eaa516b3797e1a3e9648747d459fff4e8c7062b",
+      "textFields": 6,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-you-and-me-v1",
+      "page": 6,
+      "file": "you-and-me/page-6.jpg",
+      "sha256": "73f93c7ae09b2adc72ba6fddc64593d31383e997ca4c8612a6c044d171e8ed09",
+      "textFields": 9,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-you-and-me-v1",
+      "page": 7,
+      "file": "you-and-me/page-7.jpg",
+      "sha256": "ae8264a942f6ffeec522fe4ee93e20abf5e3f23ca8d57d41c10a2691726f2367",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-you-and-me-v1",
+      "page": 8,
+      "file": "you-and-me/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ott-recommendation-v1",
+      "page": 1,
+      "file": "ott-recommendation/page-1.jpg",
+      "sha256": "98bd7fb803eb4fcf4076b6fbcc0d8ee922cde9c781b9d58a51f6aababe9bf961",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ott-recommendation-v1",
+      "page": 2,
+      "file": "ott-recommendation/page-2.jpg",
+      "sha256": "9d643cbaf79b6f21133ba6f7a951998cd3c95b3c57a1b5c99ed879a1617585e7",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ott-recommendation-v1",
+      "page": 3,
+      "file": "ott-recommendation/page-3.jpg",
+      "sha256": "d12329607520c6606665bd4b44a8b52ba8daf934b750649951a94aff0e35535e",
+      "textFields": 4,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ott-recommendation-v1",
+      "page": 4,
+      "file": "ott-recommendation/page-4.jpg",
+      "sha256": "07d5b60bbfd55dff1c70b0710d28053091765bd3ebe474c700f7356cf1b69faa",
+      "textFields": 5,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ott-recommendation-v1",
+      "page": 5,
+      "file": "ott-recommendation/page-5.jpg",
+      "sha256": "698ce8b18f00f582cab279d9af53447e54cdf455ffad524bea30138d8b2c74a6",
+      "textFields": 6,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ott-recommendation-v1",
+      "page": 6,
+      "file": "ott-recommendation/page-6.jpg",
+      "sha256": "1f3a379c7dad6d53b5564580d4e7d3dc73565b777b6e65c89d41d76570090240",
+      "textFields": 9,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ott-recommendation-v1",
+      "page": 7,
+      "file": "ott-recommendation/page-7.jpg",
+      "sha256": "f2ca42d3169e71689b1318f60694003bc857b22ec769ee472798234eb4c7c19b",
+      "textFields": 7,
+      "imageFields": 1
+    },
+    {
+      "profile": "cardnews14-ott-recommendation-v1",
+      "page": 8,
+      "file": "ott-recommendation/page-8.jpg",
+      "sha256": "c535591b772a9077389158d9950d7f2c82edc5e2e361e7ad03c5f90e10584b7c",
+      "textFields": 5,
+      "imageFields": 1
+    }
+  ],
+  "comparison": {
+    "kind": "same-static-fonts-and-geometry-upstream-vs-patched-opentype",
+    "comparedPages": 112,
+    "differentPages": 0
+  },
+  "previewArtifacts": [
+    {
+      "file": "docs/artifacts/cardnews14-studio-covers.webp",
+      "width": 1890,
+      "height": 676,
+      "sha256": "6cc1b1b40baec188ddd6440d493ea610a727b33001c94178ae7baade3dda910e"
+    },
+    {
+      "file": "docs/artifacts/cardnews14-studio-cinematic.webp",
+      "width": 1080,
+      "height": 676,
+      "sha256": "8ee51ebd9cc2f85484443f1ec922b1ecf80689ee43cb1f540d00839bd8b43d71"
+    }
+  ]
+}

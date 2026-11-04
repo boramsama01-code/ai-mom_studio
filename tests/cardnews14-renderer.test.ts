@@ -33,7 +33,7 @@ describe('cardnews14 fixed source geometry and text',()=>{
       expect(profile.pages).toHaveLength(8);
       expect(profile.sourceLayoutSha256).toBe(createHash('sha256').update(source.bytes).digest('hex'));
       expect(profile.mappingVersion).toBe(READING_MAPPING_VERSION);
-      expect(profile.templateVersion).toBe(`${profile.id}-20261104`);
+      expect(profile.templateVersion).toBe(`${profile.id}-20261104${profile.sourceStyleId==='amber-cream'?'-r2':''}`);
       for(const [index,page] of profile.pages.entries())expect(page.elements?.map(element=>element.kind)).toEqual(source.layout.pages[index].elements.map(element=>element.kind));
     }
   });
@@ -41,6 +41,9 @@ describe('cardnews14 fixed source geometry and text',()=>{
     const source=sources.find(item=>item.layout.id===profile.sourceStyleId)!.layout;
     for(const page of profile.pages){
       const values=sourceValues(source,page.page),before=JSON.stringify(values),result=layoutReadingProfilePage(profile,page.page,values);
+      const preflight=layoutReadingProfilePage(profile,page.page,values,{measureOnly:true});
+      expect(preflight.textRuns).toEqual(result.textRuns);
+      expect(preflight.svg).not.toContain('<path');
       expect(result.svg).not.toMatch(/NaN|Infinity|undefined/);
       expect(result.textRuns.map(run=>run.field)).toEqual(page.textBoxes.filter(box=>values[box.field]).map(box=>box.field));
       for(const run of result.textRuns){

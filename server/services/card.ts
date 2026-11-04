@@ -43,7 +43,7 @@ export function loadFonts(): Fonts {
   const dir = fontDir();
   const load = (f: string) => {
     const buf = fs.readFileSync(path.join(dir, f));
-    return opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+    return opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), { lowMemory: true });
   };
   const fonts = { regular: load("Pretendard-Regular.ttf"), semibold: load("Pretendard-SemiBold.ttf"), bold: load("Pretendard-Bold.ttf") };
   // 한글 글리프가 실제로 있는지 확인

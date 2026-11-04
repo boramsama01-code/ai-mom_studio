@@ -90,6 +90,8 @@ describe("Canva editorial request and import UI", () => {
     props.copy.templateKey='cardnews14-cinematic-v1';await render();
     expect(host.querySelector('[data-testid="reading-canva-readiness"]')?.textContent).toContain('8개 이미지');
     expect(button('Canva 8장 만들기').disabled).toBe(true);expect(writes()).toHaveLength(0);
+    await click('스튜디오에서 8장 만들기');expect(mocks.local).toHaveBeenCalledOnce();expect(writes()).toHaveLength(0);
+    await render({disabled:true});expect(button('스튜디오에서 8장 만들기').disabled).toBe(true);
   });
 
   it("keeps a new reading profile previewable but blocks Canva creation until a matching master is registered", async () => {

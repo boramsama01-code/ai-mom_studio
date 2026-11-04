@@ -8,6 +8,7 @@ import path from "node:path";
 import { preview } from "vite";
 import sharp from "sharp";
 import { cardCopySchema } from "../shared/cardCopy.ts";
+import { isCardPageArtworkId } from "../shared/cardPageArtworkId.ts";
 import { planCarousel, renderCarouselPage } from "../server/services/cardCarousel.ts";
 import { discussionCardCopyFixture } from "../tests/fixtures/discussionCardCopy.ts";
 import { familyCardCopySchema } from "../shared/familyDialogue.ts";
@@ -117,7 +118,7 @@ function fixture() {
       data = { ...clone(state.saved), copy: discussionCardCopyFixture(), model: roles.copy.model, scope: "all", selectedPage: 0, jobId: 502 };
     } else if (pathname === `${copyPath}/background` && method === "POST") {
       assert.equal(body.version, state.saved.version); assert.equal(body.mode, "upload", "this regression must not request paid background generation");
-      assert.match(body.pageId, /^(?:body-[1-7]|news_summary)$/); assert.match(body.requestId, /^[0-9a-f-]{36}$/i); assert.match(body.imageData, /^data:image\/png;base64,/);
+      assert(isCardPageArtworkId(body.pageId), "background uploads must use an accepted v1 or v2 page ID"); assert.match(body.requestId, /^[0-9a-f-]{36}$/i); assert.match(body.imageData, /^data:image\/png;base64,/);
       const assetId = state.nextBackgroundId++;
       const normalized = await sharp(Buffer.from(body.imageData.split(",")[1], "base64")).jpeg().toBuffer();
       backgrounds.set(assetId, normalized); backgrounds.credits.set(assetId, "직접 등록 이미지");
@@ -351,7 +352,7 @@ try {
       await family.getByRole('button',{name:'1페이지 · 표지',exact:true}).click();
       await family.locator('textarea[id$="-displayOverrides.kicker"]').fill('');
       await openBackground(page);
-      await family.getByLabel('페이지 배경 이미지 파일',{exact:true}).setInputFiles({name:'shared-cover.png',mimeType:'image/png',buffer:pasteImage});
+      await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === `${copyPath}/background` && response.request().method() === 'POST' && response.ok()), family.getByLabel('페이지 배경 이미지 파일',{exact:true}).setInputFiles({name:'shared-cover.png',mimeType:'image/png',buffer:pasteImage})]);
       await family.locator('.page-background-thumb[src$="/9003"]').waitFor();
       await familySave.click();await family.locator('.card-copy-heading .badge',{hasText:'저장됨'}).waitFor();
       assert.equal(state.saved.copy.templateKey,'cardnews14-cinematic-v1');

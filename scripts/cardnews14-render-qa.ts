@@ -6,10 +6,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import sharp from 'sharp';
-import {Resvg} from '@resvg/resvg-js';
 import {READING_CARD_PROFILES,readingProfileDesigns,type ReadingImageBox} from '../shared/readingCardProfiles';
 import {defaultPageDesigns} from '../shared/familyDialogue';
-import {layoutReadingProfilePage} from '../server/services/readingCard';
+import {layoutReadingProfilePage,rasterizeReadingCardSvg} from '../server/services/readingCard';
 import {prepareReadingArtwork} from '../server/services/readingCardImages';
 
 const root=process.cwd(),output=path.resolve(root,process.argv[2]??'test-results/cardnews14-render');
@@ -57,7 +56,7 @@ for(const profile of READING_CARD_PROFILES.filter(candidate=>candidate.sourceSty
       if(run.lines.join('').replace(/\s/gu,'')!==run.text.replace(/\s/gu,''))throw new Error(`Lost text ${profile.id}:${run.field}`);
       if(run.fontSize!==run.size)throw new Error(`Shrunk text ${profile.id}:${run.field}`);
     }
-    const bytes=await sharp(new Resvg(result.svg,{font:{loadSystemFonts:false}}).render().asPng()).flatten({background:'#ffffff'}).toColorspace('srgb').removeAlpha().jpeg({quality:92,chromaSubsampling:'4:4:4'}).toBuffer();
+    const bytes=await rasterizeReadingCardSvg(result.svg);
     const metadata=await sharp(bytes).metadata();
     if(metadata.width!==1080||metadata.height!==1350||metadata.channels!==3)throw new Error(`Wrong output size ${profile.id}:${page.page}`);
     const file=`${profile.sourceStyleId}/page-${page.page}.jpg`;await fs.writeFile(path.join(output,file),bytes);

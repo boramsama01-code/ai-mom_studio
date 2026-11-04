@@ -19,13 +19,39 @@ describe('14-style handoff identity and actual read-only Canva contracts',()=>{
   for(const styleId of CARDNEWS14_STYLE_IDS){
    const p=profiles.find(p=>p.sourceStyleId===styleId)!,source=cardnews14Source(styleId);
    const verified=live.designs.find(d=>d.sourceId===source.sourceId)!;
-   expect(p.id).toBe(`cardnews14-${styleId}-v1`);expect(p.templateVersion).toBe(`${p.id}-20261104`);
+   expect(p.id).toBe(`cardnews14-${styleId}-v1`);expect(p.templateVersion).toBe(`${p.id}-20261104${styleId==='amber-cream'?'-r2':''}`);
    expect(verified.pageCount).toBe(8);expect(verified.fields).toEqual(expectedCanvaDataset({conceptMode:'value_definition',hasExternalActivity:false},p));
    expect(source.productionEnabled).toBe(false);expect(readingMasterSourceApproved(p,source.sourceId)).toBe(false);
    expect(p.pages.map(p=>p.page)).toEqual([1,2,3,4,5,6,7,8]);
    expect(p.pages[7].imageBoxes.map(slot=>[slot.field,slot.kind])).toEqual([['P08_PROFILE_IMAGE','profile']]);
    expect(p.images.filter(slot=>slot.kind==='profile')).toHaveLength(1);
   }
+ });
+ it('changes only the three versioned Amber Cream rules while retaining source geometry, text, images and hashes',()=>{
+  const changed:Array<{styleId:string;page:number;from:number;to:number}>=[];
+  const pageIds=['cover','news_summary','implication','discussion','perspectives','concept','activity','outro'];
+  for(const profile of READING_CARD_PROFILES){
+   if(!profile.sourceStyleId){expect(profile.templateVersion).toBe(`${profile.id}-20261104`);continue;}
+   const source=runtime.styles.find(style=>style.id===profile.sourceStyleId)!;
+   expect(profile.sourceLayoutSha256).toBe(source.sourceLayoutSha256);
+   expect(profile.sourceAssetsSha256).toBe(source.sourceAssetsSha256);
+   for(const [index,page] of profile.pages.entries()){
+    const originals=source.pages[index].elements.map(element=>element.kind==='image'?{...element,pageId:pageIds[index]}:element);
+    expect(page.elements).toHaveLength(originals.length);
+    for(const [elementIndex,element] of page.elements!.entries()){
+     const original=originals[elementIndex];
+     if(profile.sourceStyleId==='amber-cream'&&[1,4,7].includes(page.page)&&original.kind==='rect'&&original.x===72&&original.y===1258&&original.width===720&&original.height===2){
+      expect(original).toMatchObject({fill:'#FFD579',radius:0,strokeWidth:1});
+      expect(element).toEqual({...original,y:1290});
+      const credit=page.textBoxes.find(box=>box.field===`P0${page.page}_IMAGE_CREDIT`)!;
+      expect(credit).toMatchObject({x:72,y:1248,width:620,height:30});
+      expect(credit.y+credit.height+12).toBe(element.y);
+      changed.push({styleId:profile.sourceStyleId,page:page.page,from:original.y,to:element.y});
+     }else expect(element).toEqual(original);
+    }
+   }
+  }
+  expect(changed).toEqual([1,4,7].map(page=>({styleId:'amber-cream',page,from:1258,to:1290})));
  });
  it('pins the exact source layout and selected source assets and does not ship example article text as runtime defaults',()=>{
   for(const style of runtime.styles){

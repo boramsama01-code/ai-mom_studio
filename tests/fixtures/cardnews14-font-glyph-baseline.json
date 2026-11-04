@@ -1,0 +1,86 @@
+{
+  "upstream": "opentype.js 2.0.0",
+  "upstreamCjsSha256": "737212d8aae53d1996ef10b315e4369a1542ebb9b94c13c5f99793914745d484",
+  "checks": [
+    {
+      "file": "assets/fonts/cardnews14/generated/NotoSansKR-400.ttf",
+      "family": "Noto Sans KR",
+      "weight": 400,
+      "fontSha256": "4609a7b62a6da24cae3a8b73ecde7003581b8f60662d60cc8f55a3793de07763",
+      "cases": 62,
+      "upstreamResultSha256": "311aa0affa5bad0d029cccb63d116187ecfc6af856c206e69e56388ee3419519"
+    },
+    {
+      "file": "assets/fonts/cardnews14/generated/NotoSansKR-700.ttf",
+      "family": "Noto Sans KR",
+      "weight": 700,
+      "fontSha256": "cf93c6acfa4c4adcb580d156aa46fc3614ed0310f1e2ef23b5954476e85c872e",
+      "cases": 50,
+      "upstreamResultSha256": "5a3a468cbbd0e22b01cf75e86295f2dac3b8afc097a577ebd917334529f3bb8d"
+    },
+    {
+      "file": "assets/fonts/cardnews14/generated/NotoSerifKR-500.ttf",
+      "family": "Noto Serif KR",
+      "weight": 500,
+      "fontSha256": "bdcca2708fd71294ad7f610e1e4730f725b86bf08e991ef82f2c566f75b5b086",
+      "cases": 18,
+      "upstreamResultSha256": "57dc79414eadf598f207db9e49e086c3b9b9126c24306404db41bf6d0a21850a"
+    },
+    {
+      "file": "assets/fonts/cardnews14/generated/NotoSerifKR-600.ttf",
+      "family": "Noto Serif KR",
+      "weight": 600,
+      "fontSha256": "e753e23fdcbaf6e81822a16a8b0e2a485a065fcad930f22bd1d55024345e402b",
+      "cases": 18,
+      "upstreamResultSha256": "003293db87c35e6c06cd4959b68c00732721cc835393aeaf931a11c3fff9efc7"
+    },
+    {
+      "file": "assets/fonts/cardnews14/generated/NotoSerifKR-700.ttf",
+      "family": "Noto Serif KR",
+      "weight": 700,
+      "fontSha256": "e6e87bf0cbd32a2c89799dd9835ed4c472fe8f058bfe50e1e57c97e9d5ef071c",
+      "cases": 22,
+      "upstreamResultSha256": "9b83cc275d8f6f9e17b5bf60b718f3adc874d6fcc0b35b6498f6c34e0e3f3035"
+    },
+    {
+      "file": "assets/fonts/cardnews14/generated/NotoSerifKR-800.ttf",
+      "family": "Noto Serif KR",
+      "weight": 800,
+      "fontSha256": "764d631ac5a4841931307c434c871870a9f3c6dac6a7b632e1776a37bc4c21c8",
+      "cases": 19,
+      "upstreamResultSha256": "ef216fa33b3872ba3f0392bc615bc5849edbd6030ba83e6f7b9c04b38a861138"
+    },
+    {
+      "file": "assets/fonts/cardnews14/generated/NotoSerifKR-900.ttf",
+      "family": "Noto Serif KR",
+      "weight": 900,
+      "fontSha256": "04fd1105c447210eb1c6825b7e628ab4e2c12dfb7190a334ef4af72e58f58135",
+      "cases": 20,
+      "upstreamResultSha256": "9b2e4b39ef481a9202c36931e027cbf69add1f5a6416a17298d724e0a066064d"
+    },
+    {
+      "file": "assets/fonts/Pretendard-Regular.ttf",
+      "family": "Pretendard",
+      "weight": 400,
+      "fontSha256": "6d0af5258997aec7354a6e340fc2325ba321c410ca48b3af858c8c3d6e92a324",
+      "cases": 16,
+      "upstreamResultSha256": "b1f26cc54320fc95c7b5ef2575cc76f233325a02ed0e6fa49bb02eafec9c88ff"
+    },
+    {
+      "file": "assets/fonts/Pretendard-SemiBold.ttf",
+      "family": "Pretendard",
+      "weight": 600,
+      "fontSha256": "5e1c548732af70873103066c16e1369b9a8a871f0b38c321a1d5bc73e43cea2d",
+      "cases": 16,
+      "upstreamResultSha256": "c796c99020efdf6de28ca243f0d100b023350effecb1a069d88d0d6436aaf6a0"
+    },
+    {
+      "file": "assets/fonts/Pretendard-Bold.ttf",
+      "family": "Pretendard",
+      "weight": 700,
+      "fontSha256": "c16b88c670d23e83fa1170c954cbc4822d3b8dad3c3cde15d798a94b43d97985",
+      "cases": 16,
+      "upstreamResultSha256": "3c6372bbfe240d80ea33da19bd1416ddfce61154567ace55a8b9a634eff81000"
+    }
+  ]
+}

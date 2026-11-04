@@ -9,9 +9,10 @@ import {readingProfileForTemplateKey,readingImageSlot,READING_PROFILE_LOGO_ID,ty
 import {CardOverflowError,loadFonts,wrapText} from './card';
 import {prepareReadingArtwork} from './readingCardImages';
 import {loadReadingFont,wrapReadingText} from './readingCardFonts';
+import {rasterizeReadingSvg} from './readingCardRaster';
 
 export type ReadingTextRun=ReadingTextBox & {text:string;lines:string[];size:number;renderedLineHeight:number};
-type Options={imageDataUrl?:string;profileDataUrl?:string;imageCredit?:string;images?:ReadonlyMap<string,string>};
+type Options={imageDataUrl?:string;profileDataUrl?:string;imageCredit?:string;images?:ReadonlyMap<string,string>;measureOnly?:boolean};
 const escaped=(value:string)=>value.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const decimal=(value:number)=>String(Math.round(value*10000)/10000);
 function verifiedPng(value:string):string {
@@ -70,6 +71,7 @@ function orderedLayout(profile:ReadingCardProfile,pageNumber:number,values:Reado
   const layout=profile.pages[pageNumber-1],textRuns:ReadingTextRun[]=[],definitions:string[]=[];
   const elements=[`<rect width="1080" height="1350" fill="${escaped(layout.background)}"/>`];
   for(const [index,element] of layout.elements!.entries()) {
+    if(options.measureOnly&&element.kind!=='text')continue;
     if(element.kind==='rect') {
       const id=`reading-gradient-${index}`,gradient=element.fill.startsWith('linear-gradient(');
       const color=gradient?{color:`url(#${id})`,opacity:1}:svgColor(element.fill);
@@ -96,6 +98,8 @@ function orderedLayout(profile:ReadingCardProfile,pageNumber:number,values:Reado
     const font=loadReadingFont(box.fontFamily,box.effectiveFontWeight??box.fontWeight),spacing=box.letterSpacing??0;
     const lines=wrapReadingText(font,value,box.fontSize,box.width,spacing),lineHeight=box.fontSize*box.lineHeight;
     if(lines.length>box.maxLines||lines.length*lineHeight>box.height+.01||lines.some(line=>font.measure(line,box.fontSize,spacing)>box.width+.01))overflow(pageNumber,box);
+    textRuns.push({...box,text:value,lines,size:box.fontSize,renderedLineHeight:lineHeight});
+    if(options.measureOnly)continue;
     const paths:string[]=[];
     lines.forEach((line,lineIndex)=>{
       if(!line)return;
@@ -114,7 +118,6 @@ function orderedLayout(profile:ReadingCardProfile,pageNumber:number,values:Reado
       shadow=`<g transform="translate(${match[1]} ${match[2]})" fill="${match[3]}">${paths.join('')}</g>`;
     }
     elements.push(`<g data-field="${escaped(box.field)}" opacity="${box.opacity??1}">${shadow}<g fill="${escaped(box.color)}">${paths.join('')}</g></g>`);
-    textRuns.push({...box,text:value,lines,size:box.fontSize,renderedLineHeight:lineHeight});
   }
   return {svg:`<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350"><title>${escaped(profile.label+' · '+pageNumber)}</title><defs>${definitions.join('')}</defs>${elements.join('')}</svg>`,textRuns};
 }
@@ -125,6 +128,12 @@ export function layoutReadingCard(copy:CardCopyV2,page:FamilyPage,context:Family
   if(!profile) throw new Error('읽는 카드뉴스 스타일을 확인해 주세요.');
   const values=familyReadingTextValues(copy,context,{[page.id]:{imageCredit:options.imageCredit??context.imageCredit??''}});
   return layoutReadingProfilePage(profile,page.page,values,options);
+}
+
+/** Preflight checks exactly the same widths, line breaks and height limits,
+ * without constructing eight complete SVG outlines that the caller discards. */
+export function checkReadingCard(copy:CardCopyV2,page:FamilyPage,context:FamilyDisplayContext={}) {
+  return layoutReadingCard(copy,page,context,{measureOnly:true}).textRuns;
 }
 
 /** Registered geometry plus canonical field values, also used by offline QA.
@@ -173,9 +182,18 @@ export function approvedReadingProfileLogo(copy:CardCopyV2):string {
 export async function renderReadingCard(copy:CardCopyV2,page:FamilyPage,design:PageDesign,context:FamilyDisplayContext={},image:Buffer|null=null,imageCredit='') {
   const profile=readingProfileForTemplateKey(copy.templateKey)!;
   const slot=readingImageSlot(profile,page.id);
-  const bytes=slot?.kind==='artwork'?await prepareReadingArtwork(image,design,slot,profile.pages[page.page-1].background):null;
-  const {svg}=layoutReadingCard(copy,page,context,{imageDataUrl:bytes?`data:image/png;base64,${bytes.toString('base64')}`:undefined,imageCredit,profileDataUrl:page.id==='outro'?approvedReadingProfileLogo(copy):undefined});
+  const makeSvg=async()=>{
+    const bytes=slot?.kind==='artwork'?await prepareReadingArtwork(image,design,slot,profile.pages[page.page-1].background):null;
+    return layoutReadingCard(copy,page,context,{imageDataUrl:bytes?`data:image/png;base64,${bytes.toString('base64')}`:undefined,imageCredit,profileDataUrl:page.id==='outro'?approvedReadingProfileLogo(copy):undefined}).svg;
+  };
+  // Admit the complete page before decoding an image or constructing paths.
+  if(profile.sourceStyleId)return rasterizeReadingSvg(makeSvg);
+  const svg=await makeSvg();
   return sharp(new Resvg(svg,{font:{loadSystemFonts:false}}).render().asPng()).flatten({background:'#ffffff'}).toColorspace('srgb').removeAlpha().jpeg({quality:92,chromaSubsampling:'4:4:4'}).toBuffer();
+}
+/** New layouts use the same rasterizer in Studio and offline visual QA. */
+export async function rasterizeReadingCardSvg(svg:string):Promise<Buffer>{
+  return rasterizeReadingSvg(()=>svg);
 }
 export function readingPageText(copy:CardCopyV2,page:FamilyPage,context:FamilyDisplayContext={}):string[] {
   const profile=readingProfileForTemplateKey(copy.templateKey)!;
