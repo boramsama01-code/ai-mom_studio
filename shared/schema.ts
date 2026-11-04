@@ -11,6 +11,7 @@ import { sql } from "drizzle-orm";
 import type { DiscoveryInfo, DiscoverySettings } from "./domain";
 import type { StudioContent } from "./studio";
 import type { PublicationDraft, StudioPublicationDraft } from "./publicationDraft";
+import type { ChannelAiSettings } from "./channelAi";
 import {
   bigserial,
   boolean,
@@ -45,6 +46,7 @@ export const channels = pgTable("channels", {
   contentType: text("content_type").notNull(), // notice | science_dialogue | current_dialogue | manual
   // null keeps the historical built-in defaults; [] intentionally disables categories.
   categories: jsonb("categories").$type<string[] | null>(),
+  aiSettings: jsonb("ai_settings").$type<ChannelAiSettings | null>(),
   accentColor: text("accent_color").notNull(),
   active: boolean("active").notNull().default(true),
   editorialGuide: text("editorial_guide").notNull().default(""),

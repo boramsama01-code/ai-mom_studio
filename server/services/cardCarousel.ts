@@ -11,10 +11,13 @@ import { sha256 } from "./text";
 import { HttpError } from "../routes/util";
 import { layoutCollectionBody, renderCollectionBody, renderCollectionCover } from "./cardCollection";
 import { cardCopyFromStored, cardCopySchema, type CardCopy } from "../../shared/cardCopy";
+import { checkEditorialCard, renderEditorialCard } from "./editorialCard";
 
 type Block = CardModel["blocks"][number];
 type Section = { title: string; blocks: Block[] };
 export type ModelInput = Parameters<typeof buildCardModel>[0];
+export type CarouselPlan = { base: CardModel; pages: CardModel[]; count: number; copy?: CardCopy };
+export type CarouselPageImages = ReadonlyMap<number, Buffer> & { credits?: ReadonlyMap<number, string> };
 const block = (field: string, label: string, text: unknown): Block => ({ field, label, text: Array.isArray(text) ? text.filter(Boolean).join("\n\n") : String(text ?? ""), maxLines: 30 });
 
 /** Four editorial sections, without an extra summarization call or loss of source facts. */
@@ -40,22 +43,27 @@ export function carouselSections(kind: string, p: Record<string, any>): Section[
 }
 
 /** Measure real typography. Overflow continues on another page; text is never sliced away. */
-export function planCarousel(input: ModelInput, style: CardStyle) {
+export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan {
   const base = buildCardModel(input);
   const copy = cardCopyFromStored(input.payload);
   if (copy) {
     const count = copy.pages.length + 1;
-    const cover = { ...base, title: copy.cover.title, subtitle: copy.cover.subtitle };
+    const cover: CardModel = { ...base, title: copy.cover.title, subtitle: copy.cover.subtitle,
+      ...(copy.storyFormat === "discussion8" ? { editorial: { role: "cover", page: 1, count, background: copy.cover.background } } : {}),
+    };
     const pages = copy.pages.map((page, i): CardModel => ({
       ...base, title: page.title, subtitle: page.subtitle,
       badge: `${String(i + 2).padStart(2, "0")} / ${String(count).padStart(2, "0")}`,
       blocks: [{ field: `cardCopy.pages.${i}.body`, label: page.subtitle, text: page.body, maxLines: 30 }],
+      ...(copy.storyFormat === "discussion8" ? { editorial: { role: page.role!, page: i + 2, count, columns: page.columns, sourceIds: page.sourceIds, background: page.background } } : {}),
     }));
     // A saved card has a stable identity. Overflow is actionable; it never silently splits or clips edited copy.
+    if (cover.editorial) checkEditorialCard(cover, style);
     for (const page of pages) {
-      if (style.collection) layoutCollectionBody(page, style.collection); else layoutCard(page, style);
+      if (page.editorial) checkEditorialCard(page, style);
+      else if (style.collection) layoutCollectionBody(page, style.collection); else layoutCard(page, style);
     }
-    return { base: cover, pages, count };
+    return { base: cover, pages, count, copy };
   }
   const pages: CardModel[] = [];
   const append = (title: string, blocks: Block[], depth = 0) => {
@@ -107,6 +115,7 @@ export function cardCopyFromPayload(input: ModelInput, style: CardStyle, templat
 }
 
 export async function renderCarouselCover(model: CardModel, count: number, art: Buffer | null, credit: string, style: CardStyle): Promise<Buffer> {
+  if (model.editorial) return renderEditorialCard(model, style, art ?? style.background ?? null, credit);
   if (style.collection) return renderCollectionCover(model, count, art ?? style.background ?? null, credit, style.collection);
   const f = loadFonts();
   const color = /^#[a-f0-9]{6}$/i.test(model.accent) ? model.accent : "#2563eb";
@@ -141,10 +150,23 @@ export async function renderCarouselCover(model: CardModel, count: number, art: 
   return sharp(new Resvg(`<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350">${svg.join("")}</svg>`, { font: { loadSystemFonts: false } }).render().asPng()).flatten({ background: "#ffffff" }).jpeg({ quality: 92, chromaSubsampling: "4:4:4" }).toBuffer();
 }
 
-export async function renderCarouselPages(plan: ReturnType<typeof planCarousel>, style: CardStyle, art: Buffer | null, credit: string) {
-  const output = [{ title: plan.base.title, altText:conciseAlt([`카드뉴스 표지. ${plan.base.title}`,plan.base.subtitle ?? "",plan.base.brandLine,plan.base.footer]), bytes: await renderCarouselCover(plan.base, plan.count, art, credit, style) }];
+/** One exact final page, shared by the editor preview, saved deck and publication export. */
+export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, style: CardStyle, art: Buffer | null, credit: string, pageImages: CarouselPageImages = new Map()): Promise<Buffer> {
+  if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= plan.count) throw new HttpError(400, "카드 페이지를 확인해 주세요.");
+  const model = pageIndex === 0 ? plan.base : plan.pages[pageIndex - 1];
+  const background = pageIndex === 0 ? plan.copy?.cover.background : plan.copy?.pages[pageIndex - 1].background;
+  const bytes = background ? pageImages.get(background.assetId) : undefined;
+  if (background && !bytes) throw new HttpError(422, "이 카드의 배경 이미지를 불러올 수 없습니다. 배경을 다시 선택해 주세요. 기존 저장본은 유지했습니다.");
+  const pageCredit = background ? pageImages.credits?.get(background.assetId) ?? "배경 이미지" : pageIndex === 0 ? credit : "";
+  if (model.editorial) return renderEditorialCard(model, style, bytes ?? (pageIndex === 0 ? art ?? style.background ?? null : null), pageCredit);
+  if (pageIndex === 0) return renderCarouselCover(model, plan.count, bytes ?? art, credit, style);
+  return style.collection ? renderCollectionBody(model, style.collection) : (await renderCardJpeg(model, style)).jpeg;
+}
+
+export async function renderCarouselPages(plan: CarouselPlan, style: CardStyle, art: Buffer | null, credit: string, pageImages: CarouselPageImages = new Map()) {
+  const output = [{ title: plan.base.title, altText:conciseAlt([`카드뉴스 표지. ${plan.base.title}`,plan.base.subtitle ?? "",plan.base.brandLine,plan.base.footer]), bytes: await renderCarouselPage(plan, 0, style, art, credit, pageImages) }];
   // Sequential rendering keeps the free instance's peak memory bounded.
-  for (const model of plan.pages) output.push({ title: model.title, altText:conciseAlt([model.title,...model.blocks.map(b=>[b.label,b.text].filter(Boolean).join(": ")),model.footer]), bytes: style.collection ? await renderCollectionBody(model, style.collection) : (await renderCardJpeg(model, style)).jpeg });
+  for (const [index, model] of plan.pages.entries()) output.push({ title: model.title, altText:conciseAlt([model.title,...model.blocks.map(b=>[b.label,b.text].filter(Boolean).join(": ")),...(model.editorial?.columns ?? []).map(column => `${column.title}: ${column.body}`),model.footer]), bytes: await renderCarouselPage(plan, index + 1, style, art, credit, pageImages) });
   // Bind the cover's identity to every body page, even when only a body template changes.
   // A standard JPEG comment preserves pixels while preventing a saved manifest being overwritten.
   const comment = Buffer.from(`cardnews-v1:${sha256(output.slice(1).map(p => sha256(p.bytes)).join(":"))}`);

@@ -4,7 +4,7 @@ import sharp from "sharp";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
-import { channels, jobs, studioCards, studioImages, studioRevisions, type Job } from "../../shared/schema";
+import { jobs, studioCards, studioImages, studioRevisions, type Job } from "../../shared/schema";
 import { studioContentSchema, studioGenerationSchema, type StudioContent } from "../../shared/studio";
 import { generateStudioCaption, generateStudioImage, generateStudioPanel, generateStudioText } from "../services/studioAi";
 import { applyStudioText, studioChangedTextFields, studioImageContext, studioInstruction } from "../../shared/studioWorkflow";
@@ -18,16 +18,17 @@ import { STUDIO_CHARACTER_GUIDE, studioCharacterById } from "../../shared/studio
 import { studioPanelReferences } from "../services/studioCharacters";
 import { assertGenerationActive, withGenerationContext } from "../services/generationContext";
 import { invalidateStudioPublication, lockStudioPublication } from "../services/studioPublicationState";
-import { channelSlug } from "../../shared/channelKeys";
 import { channelBrandName } from "../../shared/branding";
 import { studioGenerationFeedback, type StudioImageProgress } from "../../shared/studioGenerationFeedback";
+import { aiExecutionSchema, aiModelMatches, type AiExecution } from "../../shared/channelAi";
+import { channelAiSelection } from "../services/channelAi";
 
-const payloadSchema = studioGenerationSchema.safeExtend({ cardId: z.number().int().positive(), snapshot: studioContentSchema });
+const payloadSchema = studioGenerationSchema.safeExtend({ cardId: z.number().int().positive(), snapshot: studioContentSchema, ai: aiExecutionSchema.optional() });
 const activeJobs = new Map<number, { controller: AbortController; work: Promise<boolean> }>();
 let stopping = false;
 
 /** One panel is one paid request. Existing art is a reference and is never deleted. */
-async function drawStudioPanel(db: DB, cardId: number, content: StudioContent, panelIndex: number, instruction: string, signal: AbortSignal) {
+async function drawStudioPanel(db: DB, cardId: number, content: StudioContent, panelIndex: number, instruction: string, signal: AbortSignal, ai: AiExecution) {
   signal.throwIfAborted();
   const panel = content.panels[panelIndex];
   const refs = content.characters.length ? await studioPanelReferences(panel) : [];
@@ -42,7 +43,7 @@ async function drawStudioPanel(db: DB, cardId: number, content: StudioContent, p
       : "첨부된 참조 이미지는 없다. 요청한 장면만 그리고 지정하지 않은 펭귄 마스코트를 추가하지 않는다.";
   const image = await generateStudioImage({
     prompt: `${content.characters.length ? STUDIO_CHARACTER_GUIDE : ""}\n이번 콘텐츠의 선택된 등장인물: ${content.characters.map(id => studioCharacterById(id).name).join(", ") || "없음"}\n${studioImageContext(content, panelIndex)}\n수정 지시: ${instruction}\n${referenceGuide} 패널 하나만, 말풍선·글자·자막 없이 그린다. 대사는 별도로 편집한다.`,
-    referenceImages: refs, signal,
+    referenceImages: refs, signal, model: ai.model,
   });
   if (image.bytes.length > 20 * 1024 * 1024) throw new Error("생성 이미지가 저장 한도를 초과했습니다.");
   const meta = await sharp(image.bytes, { limitInputPixels: 40_000_000 }).metadata();
@@ -51,7 +52,7 @@ async function drawStudioPanel(db: DB, cardId: number, content: StudioContent, p
 }
 
 /** Commit each panel with its progress; a later failure/cancel cannot erase earlier successes. */
-async function drawStudioBatch(db: DB, job: Job, workerId: string, payload: z.infer<typeof payloadSchema>, instruction: string, signal: AbortSignal, progress: StudioImageProgress) {
+async function drawStudioBatch(db: DB, job: Job, workerId: string, payload: z.infer<typeof payloadSchema>, instruction: string, signal: AbortSignal, progress: StudioImageProgress, ai: AiExecution) {
   let content = payload.snapshot;
   let expectedVersion = payload.version;
   for (const [position, panelIndex] of progress.panelIndexes.entries()) {
@@ -65,7 +66,7 @@ async function drawStudioBatch(db: DB, job: Job, workerId: string, payload: z.in
     if (!started.length) throw new Error("생성 작업의 실행 권한이 만료되었습니다.");
     // Check cancellation immediately before starting another paid request, not only on the timer.
     await checkStudioJob(db, job.id, workerId, signal);
-    const image = await drawStudioPanel(db, payload.cardId, content, panelIndex, instruction, signal);
+    const image = await drawStudioPanel(db, payload.cardId, content, panelIndex, instruction, signal, ai);
     const applied = await db.transaction(async tx => {
       const guardDb = tx as unknown as DB;
       const current = await lockStudioPublication(guardDb, payload.cardId);
@@ -140,28 +141,30 @@ async function runStudioJob(db: DB, job: Job, workerId: string, signal: AbortSig
     assertStudioActive(card);
     const [active] = await db.select({ id: jobs.id }).from(jobs).where(and(eq(jobs.id, job.id), eq(jobs.status, "running"), eq(jobs.leaseOwner, workerId)));
     if (!active) throw new Error("생성 작업의 실행 권한이 만료되었습니다.");
-    await validateStudioChannel(db, card.content.channel);
+    const channel = await validateStudioChannel(db, card.content.channel);
+    // Older queued jobs have no AI snapshot; resolve once before their first paid call.
+    const ai = payload.ai ?? channelAiSelection(channel, payload.kind === "image" ? "image" : "copy", { provider: payload.textTarget === "experience" ? "openai" : payload.provider });
+    if (!aiModelMatches(ai.provider, ai.model, payload.kind === "image" ? "image" : "copy")) throw new AiServiceError("저장된 생성 요청의 AI와 모델이 일치하지 않습니다. 채널 설정을 확인하고 새 요청을 만들어 주세요.", "parse");
     if (card.version !== payload.version) throw new Error("생성 전 콘텐츠가 수정되었습니다. 최신 내용에서 다시 요청하세요.");
     timer = setInterval(() => { void heartbeat(db, job.id, workerId).catch(() => undefined); }, 30_000);
     timer.unref();
     if (payload.kind === "image") {
       const panelIndexes = payload.panelIndexes ?? [payload.panelIndex!];
       imageProgress = { cardId: card.id, kind: "image", panelIndex: payload.panelIndex ?? null, panelIndexes, completedPanels: [], remainingPanelIndexes: [...panelIndexes], activePanelIndex: null, applied: false, partial: false, message: "그림 생성을 준비합니다." };
-      return await drawStudioBatch(db, job, workerId, payload, instruction, signal, imageProgress);
+      return await drawStudioBatch(db, job, workerId, payload, instruction, signal, imageProgress, ai);
     }
     let content: StudioContent = payload.snapshot;
-    let provider = payload.provider;
+    let provider = ai.provider;
     let model: string;
     {
-      const [channel] = await db.select({ slug: channels.slug, name: channels.name }).from(channels).where(eq(channels.slug, channelSlug(content.channel)));
       const options = {
-        provider: payload.provider, directive: instruction,
+        provider: ai.provider, model: ai.model, directive: instruction,
         content: { title: content.title, channel: content.channel, channelName: channel ? channelBrandName(channel) : content.channel, format: content.format, brief: content.memo, script: content.script, caption: content.caption, panels: content.panels.map(p => ({ scene: p.scene, dialogue: p.dialogue })) },
         referenceText: content.characters.length ? STUDIO_CHARACTER_GUIDE : "",
         signal,
       };
       if (payload.textTarget === "experience") {
-        const generated=await generateExperience(db,card.id,content,payload.instruction);
+        const generated=await generateExperience(db,card.id,content,payload.instruction, ai.model);
         content=generated.content; model=generated.model; provider="openai";
       } else if (payload.textTarget === "caption") {
         const generated = await generateStudioCaption(options);

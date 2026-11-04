@@ -46,7 +46,10 @@ import { sendPhotoToChannel, sendAlbumToChannel, telegramPostUrl } from "../serv
 import * as ig from "../services/instagram";
 import { audit } from "../audit";
 import { resolveStyle } from "../services/templates";
-import { cardApprovalHash, loadCardPages, planCarousel, renderCarouselCover, renderCarouselPages } from "../services/cardCarousel";
+import { cardApprovalHash, loadCardPages, planCarousel, renderCarouselPage, renderCarouselPages } from "../services/cardCarousel";
+import { loadCardPageArtwork } from "../services/cardPageArtwork";
+import { channelAiSelection } from "../services/channelAi";
+import type { AiSelection } from "../../shared/channelAi";
 import { generateStudioImage } from "../services/studioAi";
 import { assertStudioActive, createStudioCard } from "../services/studio";
 import { studioContentSchema } from "../../shared/studio";
@@ -77,7 +80,7 @@ export async function sourceOrgFor(db: DB, item: { id?: number; primarySourceId:
 }
 
 /* ───────────── 카드 생성 ───────────── */
-type CardRenderOptions = { version?: number; coverMode?: "ai" | "typography" | "reuse"; regenerateCover?: boolean; coverInstruction?: string; actor?: string };
+type CardRenderOptions = { version?: number; coverMode?: "ai" | "typography" | "reuse"; regenerateCover?: boolean; coverInstruction?: string; actor?: string; imageAi?: AiSelection };
 
 /** Editing typography must not buy another illustration for unchanged source facts. */
 export async function findReusableCardCover(db: DB, itemId: number, payload: Record<string, unknown>) {
@@ -120,13 +123,14 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   let style;
   try { style = await resolveStyle(db, key, ch.id); }
   catch (e) { return { ok: false as const, code: "template", error: (e as Error).message }; }
-  const typographyOnly = !!style.collection && !collectionUsesArt(style.collection);
+  const typographyOnly = copy?.storyFormat !== "discussion8" && !!style.collection && !collectionUsesArt(style.collection);
+  if (options.regenerateCover && copy?.cover.background) return { ok: false as const, code: "invalid_image_request", error: "표지에 선택한 페이지 배경이 있습니다. 표지의 ‘이 페이지 배경 다시 만들기’에서 수정해 주세요." };
   if (options.regenerateCover && (options.coverMode !== "ai" || typographyOnly)) return { ok: false as const, code: "invalid_image_request", error: "그림이 있는 디자인과 AI 표지를 선택한 뒤 새 표지를 요청하세요." };
   if (options.coverInstruction?.trim() && !options.regenerateCover) return { ok: false as const, code: "invalid_image_request", error: "표지 수정 지시는 새 표지 생성과 함께 요청해 주세요." };
   const previousArt = typographyOnly || options.coverMode === "typography" ? null : await findReusableCardCover(db, item.id, payload);
   // Ordinary copy/layout edits remain free. Only an explicit redraw buys new art.
   const cachedArt = options.regenerateCover ? null : previousArt;
-  const coverMode = typographyOnly ? "typography" : options.coverMode === "reuse" ? (cachedArt ? "ai" : "typography") : options.coverMode ?? (copy ? (cachedArt ? "ai" : "typography") : env.openaiKey ? "ai" : "typography");
+  const coverMode = typographyOnly || copy?.cover.background ? "typography" : options.coverMode === "reuse" ? (cachedArt ? "ai" : "typography") : options.coverMode ?? (copy ? (cachedArt ? "ai" : "typography") : env.openaiKey ? "ai" : "typography");
   if (coverMode === "ai" && !cachedArt && !env.openaiKey) return { ok: false as const, code: "ai_not_configured", error: "AI 표지는 OpenAI 이미지 연결이 필요합니다. 연결 설정에서 키를 입력하거나 글자 중심 표지를 선택하세요." };
   if (coverMode === "ai" && !cachedArt && await getSetting(db, "global_stop", false)) return { ok: false as const, code: "global_stop", error: "전역 정지 상태입니다. 정지를 해제한 뒤 AI 표지를 만들어 주세요." };
   let output;
@@ -134,8 +138,9 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   let cover: CardCarousel["cover"] = { kind: "typography", credit: style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오" };
   try {
     const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
+    const pageImages = copy ? await loadCardPageArtwork(db, item.id, ch.id, copy) : new Map<number, Buffer>();
     // Check the title and source line before spending an image-generation call.
-    await renderCarouselCover(plan.base, plan.count, null, cover.credit, style);
+    await renderCarouselPage(plan, 0, style, null, cover.credit, pageImages);
     let art: Buffer | null = null;
     if (coverMode === "ai") {
       const cached = cachedArt;
@@ -145,6 +150,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
       } else {
         const generated = await generateStudioImage({
           purpose: "cover",
+          model: (options.imageAi ?? channelAiSelection(ch, "image")).model,
           prompt: JSON.stringify({ title, subtitle: copy?.cover.subtitle, topic: payload.topic, summary: payload.summary ?? payload.one_line_summary ?? payload.background, channel: ch.name }),
           ...(options.regenerateCover ? {
             instruction: options.coverInstruction?.trim() || "같은 주제를 새로운 구도로 다시 그려 주세요.",
@@ -156,7 +162,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
         cover = { kind: "ai", credit: "표지: AI 생성 · OpenAI", model: generated.model };
       }
     }
-    output = await renderCarouselPages(plan, style, art, cover.credit);
+    output = await renderCarouselPages(plan, style, art, cover.credit, pageImages);
   } catch (e) {
     if (e instanceof CardOverflowError) return { ok: false as const, code: "overflow", field: e.field, error: `편집 필요: ${e.message}` };
     if (e instanceof CardFontError) return { ok: false as const, code: "font", error: e.message };

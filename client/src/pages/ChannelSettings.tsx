@@ -11,6 +11,8 @@ import { StudioImport } from "./Studio";
 import { channelCategories } from "@shared/channelCategories";
 import { channelCategoriesSchema, channelContentTypes, channelContentTypeLabels, channelCreateSchema, type ChannelContentType } from "@shared/channelSettings";
 import { useLocation } from "wouter";
+import { channelAiSettingsSchema, defaultChannelAiSettings, type ChannelAiRuntime } from "@shared/channelAi";
+import { ChannelAiFields } from "../ChannelAiFields";
 
 type Status = { integrations: Record<string, boolean | Record<string, boolean>>; globalStop: boolean; workerConnected: boolean };
 type DestView = Destination & { connection: { missing: string[]; invalid: string[]; ready: boolean } };
@@ -90,6 +92,7 @@ function NewChannel({ onCreated }: { onCreated: (ch: Channel) => void }) {
     <label className="field">한 줄 소개<textarea rows={2} maxLength={500} value={description} onChange={e => setDescription(e.target.value)} placeholder="어떤 이야기를 전하는 채널인가요?" /></label>
     <label className="field">소분류<textarea rows={3} value={categoryText} onChange={event => setCategoryText(event.target.value)} placeholder={"예: 동네 소식\n방문 후기\n행사 안내"} /><span className="hint">한 줄에 하나씩, 최대 30개를 입력하세요. 비워 두면 소분류 없이 시작합니다.</span></label>
     <label className="field">채널 색상<input type="color" value={accentColor} onChange={e => setColor(e.target.value)} /></label>
+    <p className="small muted">AI 기본값은 Gemini 기사 요약 · GPT 카드 문구 · OpenAI 이미지입니다. 채널 추가 후 역할별 AI와 모델을 따로 변경할 수 있습니다.</p>
     <details className="settings-details"><summary>추가 설정 · 대상과 채널 주소</summary><div className="stack"><label className="field">대상 독자<input maxLength={60} value={audience} onChange={event => setAudience(event.target.value)} /></label><label className="field">채널 주소 <span className="small muted">선택</span><input value={slug} maxLength={48} autoComplete="off" spellCheck={false} onChange={event => setSlug(event.target.value)} placeholder="my-channel" /><span className="hint">비우면 자동으로 정합니다. 직접 정하려면 영문 소문자·숫자·하이픈을 쓰세요. 생성 후 주소는 바뀌지 않습니다.</span></label></div></details>
     <p className="small muted">추가 후 바로 콘텐츠를 만들 수 있습니다. 자료 수집은 검색어를 정한 뒤 시작하고, 실제 발행은 게시 계정을 연결한 뒤 승인합니다.</p></fieldset>
     {create.error && <ErrorBox error={create.error} />}<div className="savebar"><button className="btn primary" disabled={!name.trim() || create.isPending}>{create.isPending ? "추가 중…" : "채널 추가"}</button></div>
@@ -123,7 +126,7 @@ function GlobalStop({ on }: { on: boolean }) {
   );
 }
 
-const channelFields = (ch: Channel) => ({ name: ch.name, description: ch.description, audience: ch.audience, accentColor: ch.accentColor, editorialGuide: ch.editorialGuide, budget: ch.budget, contentType: ch.contentType as ChannelContentType, categoryText: channelCategories(ch.slug, ch.categories).join("\n"), categoriesDefault: ch.categories == null });
+const channelFields = (ch: Channel) => ({ name: ch.name, description: ch.description, audience: ch.audience, accentColor: ch.accentColor, editorialGuide: ch.editorialGuide, budget: ch.budget, contentType: ch.contentType as ChannelContentType, categoryText: channelCategories(ch.slug, ch.categories).join("\n"), categoriesDefault: ch.categories == null, aiSettings: ch.aiSettings ?? defaultChannelAiSettings() });
 function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
@@ -142,9 +145,11 @@ function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }
       const categories = channelCategoriesSchema.safeParse(snapshot.categoriesDefault ? null : snapshot.categoryText.split("\n").map(value => value.trim()).filter(Boolean));
       if (!categories.success) throw new Error(categories.error.issues.map(issue => issue.message).join(" "));
       if (!snapshot.name.trim() || !snapshot.audience.trim()) throw new Error("채널명과 대상 독자를 입력해 주세요.");
+      const ai = channelAiSettingsSchema.safeParse(snapshot.aiSettings);
+      if (!ai.success) throw new Error(ai.error.issues.map(issue => issue.message).join(" "));
       submitted.current = snapshot;
       const { categoryText: _text, categoriesDefault: _defaults, ...fields } = snapshot;
-      return api<Channel>(`/channels/${ch.id}`, { method: "PATCH", body: { version: baseRef.current.version, ...fields, categories: categories.data } });
+      return api<Channel>(`/channels/${ch.id}`, { method: "PATCH", body: { version: baseRef.current.version, ...fields, categories: categories.data, aiSettings: ai.data } });
     },
     onSuccess: saved => { if (JSON.stringify(formRef.current) === JSON.stringify(submitted.current)) accept(saved); else { baseRef.current = saved; setBase(saved); setConflict(null); } updateCache(saved); void qc.invalidateQueries({ queryKey: ["channels"] }); },
     onError: async error => { if (error instanceof ApiError && error.status === 409) { try { const rows = await api<Channel[]>("/channels"); qc.setQueryData(["channels"], rows); const latest = rows.find(row => row.id === ch.id); if (latest && latest.version > baseRef.current.version) setConflict(latest); } catch { /* Keep the original save error and input. */ } } },
@@ -176,7 +181,7 @@ function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }
   return (
     <form className="panel stack channel-editor" onSubmit={(e) => { e.preventDefault(); if (!conflict) m.mutate(); }}>
       <h2>{base.name}</h2>
-      {conflict && <div className="notice warn stack channel-settings-conflict" role="alert"><strong>다른 곳에서 바꾼 채널 설정이 있습니다. 입력은 유지했습니다.</strong><details open><summary>최신 설정과 비교</summary><div className="draft-recovery-compare"><div><h3>최신 저장본</h3><pre>{`${conflict.name}\n${conflict.description}\n대상: ${conflict.audience}\n자료 유형: ${channelContentTypeLabels[conflict.contentType as ChannelContentType] ?? conflict.contentType}\n소분류: ${channelCategories(conflict.slug, conflict.categories).join(", ")}\n강조색: ${conflict.accentColor}\n편집 기준: ${conflict.editorialGuide}\n실행 한도·비용: ${JSON.stringify(conflict.budget, null, 2)}`}</pre></div><div><h3>현재 입력</h3><pre>{`${f.name}\n${f.description}\n대상: ${f.audience}\n자료 유형: ${channelContentTypeLabels[f.contentType]}\n소분류: ${f.categoryText}\n강조색: ${f.accentColor}\n편집 기준: ${f.editorialGuide}\n실행 한도·비용: ${JSON.stringify(f.budget, null, 2)}`}</pre></div></div><div className="row"><button type="button" className="btn" disabled={m.isPending} onClick={() => { accept(conflict); m.reset(); }}>최신 설정 사용</button><button type="button" className="btn" disabled={m.isPending} onClick={() => { baseRef.current = conflict; setBase(conflict); setConflict(null); m.mutate(); }}>현재 입력으로 다시 저장</button></div></details></div>}
+      {conflict && <div className="notice warn stack channel-settings-conflict" role="alert"><strong>다른 곳에서 바꾼 채널 설정이 있습니다. 입력은 유지했습니다.</strong><details open><summary>최신 설정과 비교</summary><div className="draft-recovery-compare"><div><h3>최신 저장본</h3><pre>{`${conflict.name}\n${conflict.description}\n대상: ${conflict.audience}\n자료 유형: ${channelContentTypeLabels[conflict.contentType as ChannelContentType] ?? conflict.contentType}\n소분류: ${channelCategories(conflict.slug, conflict.categories).join(", ")}\n강조색: ${conflict.accentColor}\n편집 기준: ${conflict.editorialGuide}\n역할별 AI: ${JSON.stringify(conflict.aiSettings ?? defaultChannelAiSettings(), null, 2)}\n실행 한도·비용: ${JSON.stringify(conflict.budget, null, 2)}`}</pre></div><div><h3>현재 입력</h3><pre>{`${f.name}\n${f.description}\n대상: ${f.audience}\n자료 유형: ${channelContentTypeLabels[f.contentType]}\n소분류: ${f.categoryText}\n강조색: ${f.accentColor}\n편집 기준: ${f.editorialGuide}\n역할별 AI: ${JSON.stringify(f.aiSettings, null, 2)}\n실행 한도·비용: ${JSON.stringify(f.budget, null, 2)}`}</pre></div></div><div className="row"><button type="button" className="btn" disabled={m.isPending} onClick={() => { accept(conflict); m.reset(); }}>최신 설정 사용</button><button type="button" className="btn" disabled={m.isPending} onClick={() => { baseRef.current = conflict; setBase(conflict); setConflict(null); m.mutate(); }}>현재 입력으로 다시 저장</button></div></details></div>}
       <fieldset className="channel-form-fields stack" disabled={m.isPending || archive.isPending}>
       <div className="grid grid-2">
         <label className="field">
@@ -206,6 +211,7 @@ function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }
         편집 기준
         <textarea rows={4} value={f.editorialGuide} onChange={(e) => setF({ ...f, editorialGuide: e.target.value })} />
       </label>
+      <ChannelAiFields value={f.aiSettings} onChange={aiSettings => setF({ ...f, aiSettings })} runtime={base as Channel & Partial<ChannelAiRuntime>} />
       <details className="settings-details">
         <summary>고급 설정 · 실행 한도와 비용</summary><div className="stack">
         <div className="grid grid-3">

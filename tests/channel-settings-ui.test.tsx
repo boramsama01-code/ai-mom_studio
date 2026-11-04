@@ -20,7 +20,7 @@ vi.mock("../client/src/pages/InstagramAccounts", () => ({ InstagramAccounts: () 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root, host: HTMLDivElement, client: QueryClient, channels: Channel[], createError: boolean;
 const makeChannel = (id: number, name: string, slug = `brand-${id}`): Channel => ({
-  id, name, slug, description: "채널 소개", audience: "일반 독자", contentType: "current_dialogue", categories: ["행사", "인터뷰"], accentColor: "#51635A", active: true,
+  id, name, slug, description: "채널 소개", audience: "일반 독자", contentType: "current_dialogue", categories: ["행사", "인터뷰"], aiSettings: null, accentColor: "#51635A", active: true,
   editorialGuide: "확인한 자료를 사용합니다.", cardTemplate: "builtin:classic", canvaBrandTemplateId: null,
   budget: { naverCallsPerRun: 3, resultsPerRun: 20, fetchTargetsPerRun: 3, fetchCallsPerRun: 3, llmCallsPerRun: 2, dailyPublishLimit: 0 },
   version: 1, createdAt: new Date("2026-11-04"), updatedAt: new Date("2026-11-04"),
@@ -97,6 +97,37 @@ describe("manual channel administration", () => {
     await click("현재 입력으로 다시 저장");
     expect(writes()[1][1].body.version).toBe(2); expect(channels[0].name).toBe("내가 수정한 채널명");
     expect(channels[0].categories).toEqual(["행사", "인터뷰", "새 분류"]); expect(host.textContent).toContain("채널 설정 저장됨");
+  });
+  it("offers independent role defaults, clears incompatible model overrides and saves only the edited channel", async () => {
+    await render(); await editFirst();
+    expect(field("기사 요약 AI").value).toBe("gemini");
+    expect(field("카드뉴스 문구 AI").value).toBe("openai");
+    expect(field("이미지 제작 AI").value).toBe("openai");
+    expect(writes()).toHaveLength(0);
+    await fill("카드뉴스 문구 모델 ID", "gpt-my-editor");
+    await fill("카드뉴스 문구 AI", "anthropic");
+    expect(field("카드뉴스 문구 모델 ID").value).toBe("");
+    await fill("카드뉴스 문구 모델 ID", "claude-editor");
+    await fill("이미지 제작 모델 ID", "gpt-image-illustration");
+    await click("채널 설정 저장");
+    expect(writes()[0][1].body.aiSettings).toEqual({ summary: { provider: "gemini", model: "" }, copy: { provider: "anthropic", model: "claude-editor" }, image: { provider: "openai", model: "gpt-image-illustration" } });
+    expect(channels[1].aiSettings).toBeNull();
+    expect(host.textContent).toContain("채널 설정 저장됨");
+  });
+  it("keeps an invalid model input without sending it and compares conflicting AI settings", async () => {
+    await render(); await editFirst();
+    await fill("기사 요약 모델 ID", "gpt-wrong-provider");
+    await click("채널 설정 저장");
+    expect(writes()).toHaveLength(0); expect(field("기사 요약 모델 ID").value).toBe("gpt-wrong-provider");
+    expect(host.textContent).toContain("선택한 AI의 텍스트 모델");
+    await fill("기사 요약 모델 ID", "gemini-my-summary");
+    channels[0] = { ...channels[0], version: 2, aiSettings: { summary: { provider: "gemini", model: "gemini-other-window" }, copy: { provider: "openai", model: "" }, image: { provider: "openai", model: "" } } };
+    await click("채널 설정 저장");
+    expect(field("기사 요약 모델 ID").value).toBe("gemini-my-summary");
+    expect(host.textContent).toContain("gemini-other-window");
+    expect(button("채널 설정 저장").disabled).toBe(true);
+    await click("현재 입력으로 다시 저장");
+    expect(channels[0].aiSettings?.summary.model).toBe("gemini-my-summary");
   });
   it("archives only after edits are resolved and allows restoring the same channel", async () => {
     await render(); await editFirst(); await fill("설명", "아직 저장하지 않은 소개");

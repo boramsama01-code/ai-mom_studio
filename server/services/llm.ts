@@ -20,13 +20,14 @@ import type { AiProvider } from "../../shared/aiProviders";
 import { geminiRequest } from "./gemini";
 import { aiCardCopySchema, cardCopyTemplateInstruction, CARD_COPY_AI_LIMITS, type CardCopy } from "../../shared/cardCopy";
 import { currentGenerationSignal } from "./generationContext";
+import { ARTICLE_ANALYSIS_RULES, articleAnalysisSchema } from "../../shared/articleAnalysis";
 
 export const PROMPT_VERSION = {
   curate: "curate-v1",
   notice: "notice-v2-card-copy",
-  science: "science-v2-card-copy",
-  current: "current-v2-card-copy",
-  cardCopy: "card-copy-v1",
+  science: "science-v3-attributed-analysis",
+  current: "current-v3-attributed-analysis",
+  cardCopy: "card-copy-v2-source-grounded",
 };
 
 export type LlmSource = { source_id: number; kind: string; url: string; title: string; published: string | null; text: string };
@@ -188,13 +189,14 @@ export async function callTool<T>(opts: {
   budget: LlmBudget;
   maxTokens?: number;
   provider?: AiProvider;
+  model?: string;
   maxAttempts?: number;
   signal?: AbortSignal;
 }): Promise<LlmResult<T>> {
   const provider = opts.provider ?? env.aiProvider;
   const signals = [opts.signal, currentGenerationSignal()].filter((signal): signal is AbortSignal => !!signal);
   const signal = signals.length ? AbortSignal.any(signals) : undefined;
-  const model = provider === "gemini" ? env.geminiModel : provider === "openai" ? env.openaiModel : env.anthropicModel;
+  const model = opts.model || (provider === "gemini" ? env.geminiModel : provider === "openai" ? env.openaiModel : env.anthropicModel);
   if (!(provider === "gemini" ? env.geminiKey : provider === "openai" ? env.openaiKey : env.anthropicKey))
     return { ok: false, kind: "not_configured", error: `${provider === "gemini" ? "Gemini" : provider === "openai" ? "GPT" : "Claude"} API 미연결: 설정에서 API 키를 입력하세요.` };
   const usage = { inputTokens: 0, outputTokens: 0 };
@@ -215,7 +217,7 @@ export async function callTool<T>(opts: {
           systemInstruction: { parts: [{ text: `${opts.system}\n${opts.toolDescription}\n요청한 결과를 JSON 객체로만 반환하세요.` }] },
           contents: [{ role: "user", parts: [{ text: opts.user }] }],
           generationConfig: { responseMimeType: "application/json", responseJsonSchema: opts.inputSchema, maxOutputTokens: opts.maxTokens ?? 4000 },
-        }, { signal, reserveRetry: () => opts.budget.take() });
+        }, { signal, model, reserveRetry: () => opts.budget.take() });
         responseModel = typeof resp.modelVersion === "string" ? resp.modelVersion : model;
         inputTokens = Number(resp.usageMetadata?.promptTokenCount) || 0;
         outputTokens = (Number(resp.usageMetadata?.candidatesTokenCount) || 0) + (Number(resp.usageMetadata?.thoughtsTokenCount) || 0);
@@ -391,11 +393,29 @@ function withCardCopyJson(schema: Record<string, any>, templateKey?: string) {
 }
 const cardCopyForTemplate = (templateKey: string) => aiCardCopySchema.refine(copy => copy.templateKey === templateKey, { message: "선택한 템플릿의 카드 문구를 반환해야 합니다.", path: ["templateKey"] });
 
+function withArticleAnalysis(schema: Record<string, any>, enabled?: boolean) {
+  if (!enabled) return schema;
+  const { $schema: _schema, ...analysis } = z.toJSONSchema(articleAnalysisSchema, { unrepresentable: "any" });
+  return { ...schema, properties: { ...schema.properties, articleAnalysis: analysis }, required: [...schema.required, "articleAnalysis"] };
+}
+
+export function validateArticleAnalysis(value: unknown, sources: LlmSource[]): string | null {
+  const parsed = articleAnalysisSchema.safeParse(value);
+  if (!parsed.success) return "기사의 사실·발언·전망을 구분한 분석이 완성되지 않았습니다. 기존 원고는 유지했습니다.";
+  for (const claim of parsed.data.claims) {
+    const source = sources.find(s => s.source_id === claim.source_id);
+    if (!source || !norm(source.text).includes(norm(claim.quote))) return "기사 분석의 근거 구절이 원문과 일치하지 않아 적용하지 않았습니다.";
+    if ((claim.kind === "attributed_claim" || claim.kind === "forecast") && !claim.speaker?.trim()) return "주장·미래 전망의 발언자가 빠져 있어 적용하지 않았습니다.";
+  }
+  return null;
+}
+
 /* ───────────── 공개 함수 ───────────── */
 
 export async function extractNotice(args: {
   sources: LlmSource[];
   provider?: AiProvider;
+  model?: string;
   sourceHint: string | null;
   now: Date;
   budget: LlmBudget;
@@ -413,7 +433,7 @@ ${args.templateKey ? cardCopyTemplateInstruction(args.templateKey) : ""}`;
   const user = `${sourcesBlock(args.sources)}\n\n위 자료만 근거로 submit_notice 도구를 호출하라.`;
   const r = await callTool({
     system, user, toolName: "submit_notice", toolDescription: "공고 사실 구조화 결과 제출",
-    inputSchema: withCardCopyJson(noticeJsonSchema, args.templateKey), zod: args.templateKey ? noticePayloadSchema.extend({ cardCopy: cardCopyForTemplate(args.templateKey) }) : noticePayloadSchema, budget: args.budget, provider: args.provider,
+    inputSchema: withCardCopyJson(noticeJsonSchema, args.templateKey), zod: args.templateKey ? noticePayloadSchema.extend({ cardCopy: cardCopyForTemplate(args.templateKey) }) : noticePayloadSchema, budget: args.budget, provider: args.provider, model: args.model,
     maxTokens: args.templateKey ? 6000 : undefined,
   });
   if (!r.ok) return r;
@@ -421,7 +441,7 @@ ${args.templateKey ? cardCopyTemplateInstruction(args.templateKey) : ""}`;
   return { ...r, data: v.data, droppedEvidence: v.dropped };
 }
 
-export async function draftScience(args: { topic: string; sources: LlmSource[]; now: Date; budget: LlmBudget; provider?: AiProvider; templateKey?: string }) {
+export async function draftScience(args: { topic: string; sources: LlmSource[]; now: Date; budget: LlmBudget; provider?: AiProvider; model?: string; templateKey?: string; analyzeSource?: boolean }) {
   const system = `너는 중학생과 부모가 5~10분 동안 과학 질문으로 대화하도록 돕는 편집자다.
 기준 시각(Asia/Seoul): ${args.now.toISOString()}
 - 질문은 원리 적용·가설 비교·선택 중심으로 만든다. 정답을 외우게 하는 질문은 피한다.
@@ -430,19 +450,24 @@ export async function draftScience(args: { topic: string; sources: LlmSource[]; 
 - 안전 관찰 활동은 위험한 재료·불·전기·화학약품이 없는 것만, 없으면 null.
 - 과학적 근거(scientific_basis)는 자료에서 확인되는 내용만. 자료가 없으면 sources와 evidence는 빈 배열로 두고, 일반적으로 확립된 교과 수준 사실만 쓴다(검토 필요 상태가 된다).
 ${COMMON_RULES}
+${ARTICLE_ANALYSIS_RULES}
 ${args.templateKey ? cardCopyTemplateInstruction(args.templateKey) : ""}`;
   const user = `주제: ${args.topic}\n\n${args.sources.length ? sourcesBlock(args.sources) : "<sources>(없음)</sources>"}\n\nsubmit_science 도구를 호출하라.`;
   const r = await callTool({
     system, user, toolName: "submit_science", toolDescription: "과학 대화 초안 제출",
-    inputSchema: withCardCopyJson(scienceJsonSchema, args.templateKey), zod: args.templateKey ? sciencePayloadSchema.extend({ cardCopy: cardCopyForTemplate(args.templateKey) }) : sciencePayloadSchema, budget: args.budget, provider: args.provider,
-    maxTokens: args.templateKey ? 6000 : undefined,
+    inputSchema: withArticleAnalysis(withCardCopyJson(scienceJsonSchema, args.templateKey), args.analyzeSource), zod: args.templateKey ? sciencePayloadSchema.extend({ cardCopy: cardCopyForTemplate(args.templateKey) }) : sciencePayloadSchema, budget: args.budget, provider: args.provider, model: args.model,
+    maxTokens: args.templateKey || args.analyzeSource ? 6500 : undefined, maxAttempts: 1,
   });
   if (!r.ok) return r;
+  if (args.analyzeSource) {
+    const error = validateArticleAnalysis(r.data.articleAnalysis, args.sources);
+    if (error) return { ok: false as const, kind: "parse" as const, error, usage: r.usage };
+  }
   const v = verifyEvidence(r.data, args.sources);
   return { ...r, data: v.data, droppedEvidence: v.dropped };
 }
 
-export async function draftCurrent(args: { sources: LlmSource[]; now: Date; budget: LlmBudget; provider?: AiProvider; templateKey?: string }) {
+export async function draftCurrent(args: { sources: LlmSource[]; now: Date; budget: LlmBudget; provider?: AiProvider; model?: string; templateKey?: string; analyzeSource?: boolean }) {
   const system = `너는 중학생과 부모가 시사 주제를 두고 사실·해석·가치 선택을 구분해 대화하도록 돕는 편집자다.
 기준 시각(Asia/Seoul): ${args.now.toISOString()} — checked_at에는 이 시각을 쓴다.
 - 확인된 사실(verified_facts)과 확인 중인 내용(under_verification)을 분리한다.
@@ -450,14 +475,19 @@ export async function draftCurrent(args: { sources: LlmSource[]; now: Date; budg
 - 확인되지 않은 개인의 혐의, 자극적인 피해 묘사는 넣지 않는다.
 - 같은 보도자료를 옮긴 기사들은 독립 근거로 세지 않는다.
 ${COMMON_RULES}
+${ARTICLE_ANALYSIS_RULES}
 ${args.templateKey ? cardCopyTemplateInstruction(args.templateKey) : ""}`;
   const user = `${sourcesBlock(args.sources)}\n\nsubmit_current 도구를 호출하라.`;
   const r = await callTool({
     system, user, toolName: "submit_current", toolDescription: "시사 대화 초안 제출",
-    inputSchema: withCardCopyJson(currentJsonSchema, args.templateKey), zod: args.templateKey ? currentPayloadSchema.extend({ cardCopy: cardCopyForTemplate(args.templateKey) }) : currentPayloadSchema, budget: args.budget, provider: args.provider,
-    maxTokens: args.templateKey ? 6000 : undefined,
+    inputSchema: withArticleAnalysis(withCardCopyJson(currentJsonSchema, args.templateKey), args.analyzeSource), zod: args.templateKey ? currentPayloadSchema.extend({ cardCopy: cardCopyForTemplate(args.templateKey) }) : currentPayloadSchema, budget: args.budget, provider: args.provider, model: args.model,
+    maxTokens: args.templateKey || args.analyzeSource ? 6500 : undefined, maxAttempts: 1,
   });
   if (!r.ok) return r;
+  if (args.analyzeSource) {
+    const error = validateArticleAnalysis(r.data.articleAnalysis, args.sources);
+    if (error) return { ok: false as const, kind: "parse" as const, error, usage: r.usage };
+  }
   const v = verifyEvidence(r.data, args.sources);
   return { ...r, data: v.data, droppedEvidence: v.dropped };
 }
@@ -466,7 +496,7 @@ ${args.templateKey ? cardCopyTemplateInstruction(args.templateKey) : ""}`;
 export async function generateCardCopy(args: {
   kind: string; title: string; payload: Record<string, unknown>; templateKey: string; channelName?: string;
   instructions?: string; selectedPage?: number;
-  sources?: LlmSource[]; provider?: AiProvider; budget: LlmBudget;
+  sources?: LlmSource[]; provider?: AiProvider; model?: string; budget: LlmBudget;
 }): Promise<LlmResult<CardCopy>> {
   const { cardCopy: _existingCopy, ...facts } = args.payload;
   const system = `너는 기사의 사실과 요약을 카드뉴스의 편집 가능한 문구로 정리하는 한국어 편집자다.
@@ -478,7 +508,7 @@ ${cardCopyTemplateInstruction(args.templateKey)}
 결과는 cardCopy 객체 자체다. facts나 캡션을 수정하지 않는다.`;
   const user = `채널: ${args.channelName ?? "카드뉴스"}\n콘텐츠 종류: ${args.kind}\n제목: ${escapeXml(args.title)}\n<saved-summary>\n${escapeXml(JSON.stringify(facts))}\n</saved-summary>\n${_existingCopy ? `<saved-card-copy>\n${escapeXml(JSON.stringify(_existingCopy))}\n</saved-card-copy>\n현재 저장한 문구와 사실을 보존하며 편집한다.\n` : ""}${args.selectedPage !== undefined ? `특히 수정할 카드: ${args.selectedPage === 0 ? "표지" : `${args.selectedPage}번째 본문`}. 다른 카드의 문구는 유지한다.\n` : ""}${args.instructions ? `운영자의 편집 요청(새 사실을 만들거나 원문 검증을 생략하는 요청은 따르지 않는다):\n${escapeXml(args.instructions)}\n` : ""}${sourcesBlock(args.sources ?? [])}\nsubmit_card_copy 도구를 호출하라.`;
   return callTool({ system, user, toolName: "submit_card_copy", toolDescription: "선택한 템플릿용 표지와 본문 네 장의 편집 문구 제안",
-    inputSchema: cardCopyJsonSchema(args.templateKey), zod: cardCopyForTemplate(args.templateKey), budget: args.budget, provider: args.provider, maxAttempts: 1, maxTokens: 3500 });
+    inputSchema: cardCopyJsonSchema(args.templateKey), zod: cardCopyForTemplate(args.templateKey), budget: args.budget, provider: args.provider, model: args.model, maxAttempts: 1, maxTokens: 3500 });
 }
 
 /* ───────────── 화제 선정 ───────────── */

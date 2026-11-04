@@ -26,9 +26,9 @@ export function geminiFailureMessage(status: number, options: FailureMessageOpti
   return `Gemini HTTP ${status}: ${reason}${attempted}${retryAfter}`;
 }
 
-export function geminiModelUrl(): string {
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,119}$/.test(env.geminiModel)) throw new AiServiceError("Gemini 모델 ID 형식이 올바르지 않습니다.", "not_configured");
-  return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.geminiModel)}`;
+export function geminiModelUrl(model = env.geminiModel): string {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,119}$/.test(model)) throw new AiServiceError("Gemini 모델 ID 형식이 올바르지 않습니다.", "not_configured");
+  return `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`;
 }
 
 function retryAfterMs(value: string | null): number | undefined {
@@ -113,6 +113,7 @@ function waitToRetry(delay: number, signal: AbortSignal): Promise<void> {
 
 /** Fixed key/model/origin; bounded transient retries only, with one deadline and no provider fallback. */
 export async function geminiRequest(body: Record<string, unknown>, options: {
+  model?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   /** Reserve each extra HTTP request against the caller's existing request budget. */
@@ -120,7 +121,7 @@ export async function geminiRequest(body: Record<string, unknown>, options: {
 } = {}): Promise<Record<string, any>> {
   const key = env.geminiKey;
   if (!key) throw new AiServiceError("설정에서 Gemini API 키를 먼저 입력하세요.", "not_configured");
-  const url = `${geminiModelUrl()}:generateContent`;
+  const url = `${geminiModelUrl(options.model)}:generateContent`;
   const requestBody = JSON.stringify(body);
   const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, Math.max(1, options.timeoutMs ?? REQUEST_TIMEOUT_MS));
   const deadline = Date.now() + timeoutMs;

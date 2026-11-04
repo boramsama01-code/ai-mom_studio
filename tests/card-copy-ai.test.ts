@@ -52,11 +52,10 @@ describe("template-aware card copy generation", () => {
     expect(sent.instructions).toContain("선택한 템플릿");
   });
 
-  it("uses the existing format retry when a new source draft omits required editable copy", async () => {
+  it("refuses a malformed source draft without automatically repeating a paid request", async () => {
     const data = emptyPayload("science_dialogue", "빛");
-    const fetchMock = vi.fn().mockResolvedValueOnce(response(data, "submit_science")).mockResolvedValueOnce(response({ ...data, cardCopy: copy() }, "submit_science")); vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = vi.fn().mockResolvedValue(response(data, "submit_science")); vi.stubGlobal("fetch", fetchMock);
     const result = await draftScience({ topic: "빛", sources: [], now: new Date(), budget: new LlmBudget(2), templateKey: copy().templateKey, provider: "openai" });
-    expect(result).toMatchObject({ ok: true, data: { cardCopy: copy() } }); expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body).input).toContain("cardCopy");
+    expect(result).toMatchObject({ ok: false, kind: "parse" }); expect(result).not.toHaveProperty("data"); expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

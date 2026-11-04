@@ -14,6 +14,7 @@ import { Resvg } from "@resvg/resvg-js";
 import sharp from "sharp";
 import { TOKENS } from "../../shared/tokens";
 import { fitCardBody } from "./cardBodyFit";
+import type { CardCopyColumn, CardPageBackground, NewsEditorialRole } from "../../shared/cardCopy";
 
 export const CARD_W = 1080;
 export const CARD_H = 1350;
@@ -97,6 +98,15 @@ export type CardModel = {
   subtitle?: string;
   blocks: Array<{ field: string; label?: string; text: string; maxLines: number; emphasis?: boolean }>;
   footer: string; // "출처: 기관 · 확인 2026-09-28"
+  /** Only explicit discussion8 copy uses the new renderer; legacy cards retain their layout. */
+  editorial?: {
+    role: "cover" | NewsEditorialRole;
+    page: number;
+    count: number;
+    columns?: CardCopyColumn[];
+    sourceIds?: number[];
+    background?: CardPageBackground;
+  };
 };
 
 function pathFor(font: opentype.Font, text: string, x: number, y: number, size: number, color: string): string {

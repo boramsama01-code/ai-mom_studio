@@ -1,6 +1,10 @@
 import { validSubcategory } from "../../shared/channelCategories";
 import { studioCards } from "../../shared/schema";
-import { cardCopyFromPayload, loadCardPages, planCarousel, renderCarouselCover } from "../services/cardCarousel";
+import { cardCopyFromPayload, loadCardPages, planCarousel, renderCarouselPage } from "../services/cardCarousel";
+import { channelAiSelection } from "../services/channelAi";
+import { proposeNewsDiscussion } from "../services/newsEditorial";
+import { articleAnalysisSchema, aiWorkflowSchema } from "../../shared/articleAnalysis";
+import { loadCardPageArtwork } from "../services/cardPageArtwork";
 import { zipFiles } from "../services/zip";
 import { studioAiStatus } from "../services/studioAi";
 import { aiProviders } from "../../shared/aiProviders";
@@ -21,6 +25,7 @@ import {
   deliveries,
   destinations,
   mediaAssets,
+  jobs,
   officialSources,
   runs,
   sourceDocuments,
@@ -468,12 +473,13 @@ itemRoutes.post(
     const db = getDb();
     const { provider, templateKey, version, requestId } = parse(z.object({ version: zVersion.optional(), requestId: z.string().uuid().optional(), provider: z.enum(aiProviders).optional(), templateKey: z.string().min(1).max(40).optional() }).strict(), req.body ?? {});
     if (templateKey) await resolveCardCopyStyle(templateKey, ch.id);
-    const result = await runSourceGeneration(db, { type: "source_generate", itemId: item.id, channelId: ch.id, version: version ?? item.version, requestId, intent: { provider: provider ?? null, templateKey: templateKey ?? null }, actor: actorOf(req) }, async () => {
+    const ai = { summary: channelAiSelection(ch, "summary", { provider }), copy: channelAiSelection(ch, "copy") };
+    const result = await runSourceGeneration(db, { type: "source_generate", itemId: item.id, channelId: ch.id, version: version ?? item.version, requestId, intent: { provider: provider ?? null, templateKey: templateKey ?? null }, configuration: ai, actor: actorOf(req) }, async () => {
       if (item.kind === "notice") {
-        const r = await extractForItem(db, item.id, new LlmBudget(2), new Date(), undefined, provider, templateKey);
+        const r = await extractForItem(db, item.id, new LlmBudget(4), new Date(), undefined, provider, templateKey, ai);
         if (!r.ok) throw new HttpError(r.kind === "not_configured" ? 503 : 400, r.error);
       } else {
-        const r = await generateDialogueDraft(db, item.id, new Date(), provider, templateKey);
+        const r = await generateDialogueDraft(db, item.id, new Date(), provider, templateKey, ai);
         if (!r.ok) throw new HttpError(400, r.error);
       }
       await audit(db, { actor: actorOf(req), action: "generate", entity: "content_item", entityId: item.id, channelId: ch.id });
@@ -537,14 +543,14 @@ itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     const { cardCopy: _oldCopy, ...sourcePayload } = revision.payload;
     const copy = cardCopyFromPayload({ kind: item.kind, payload: invalidSavedCopy ? sourcePayload : revision.payload, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style, key);
     const recoveryNotice = templateRecovery ?? (invalidSavedCopy ? "이전 카드 문구의 형식을 읽을 수 없어 원문 요약에서 편집 문구를 가져왔습니다. 기존 저장본은 유지했으며, 내용을 확인한 뒤 저장하면 새 버전으로 기록됩니다." : undefined);
-    res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, hasSavedCopy: saved.success && !templateRecovery, ...(recoveryNotice ? { recoveryNotice } : {}) });
+    res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, hasSavedCopy: saved.success && !templateRecovery, recommendedStoryFormat: item.kind === "notice" ? null : "discussion8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") }, ...(recoveryNotice ? { recoveryNotice } : {}) });
   } catch (error) { cardCopyRenderError(error); }
 }));
 
 /** A text edit becomes an immutable content revision; existing image files stay intact. */
 itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
-  const body = parse(z.object({ version: zVersion, copy: cardCopySchema }).strict(), req.body);
+  const body = parse(z.object({ version: zVersion, copy: cardCopySchema, proposalJobId: z.number().int().positive().optional() }).strict(), req.body);
   await resolveCardCopyStyle(body.copy.templateKey, ch.id);
   const result = await getDb().transaction(async tx => {
     const [fresh] = await tx.select().from(contentItems).where(and(eq(contentItems.id, item.id), eq(contentItems.channelId, ch.id))).for("update");
@@ -553,23 +559,35 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     if (board) assertStudioActive(board);
     const [current] = fresh.currentRevisionId ? await tx.select().from(contentRevisions).where(and(eq(contentRevisions.id, fresh.currentRevisionId), eq(contentRevisions.contentItemId, item.id))) : [];
     if (!current) throw new HttpError(409, "현재 초안이 없습니다. 먼저 원문 초안을 저장해 주세요.");
-    const savedCopy = cardCopySchema.safeParse(current.payload.cardCopy);
-    if (savedCopy.success && JSON.stringify(savedCopy.data) === JSON.stringify(body.copy)) return { version: fresh.version, revisionId: current.id, copy: body.copy, hasSavedCopy: true };
-    const payload = { ...current.payload, cardCopy: body.copy };
+    await loadCardPageArtwork(tx as unknown as import("../db").DB, item.id, ch.id, body.copy);
+    const payload: Record<string, unknown> = { ...current.payload, cardCopy: body.copy };
+    if (body.proposalJobId) {
+      const [proposal] = await tx.select().from(jobs).where(and(eq(jobs.id, body.proposalJobId), eq(jobs.channelId, ch.id), eq(jobs.type, "card_copy_generate"), eq(jobs.status, "succeeded")));
+      const response = proposal?.result?.response as Record<string, unknown> | undefined;
+      if (!proposal || proposal.payload.itemId !== item.id || proposal.payload.version !== body.version || response?.revisionId !== current.id) throw new HttpError(409, "제안 이후 원고 버전이 바뀌었습니다. 현재 문구를 유지했으니 최신 원고를 확인해 주세요.");
+      const analysis = articleAnalysisSchema.safeParse(response.articleAnalysis), workflow = aiWorkflowSchema.safeParse(response.aiWorkflow);
+      if (analysis.success) payload.articleAnalysis = analysis.data;
+      if (workflow.success) payload.aiWorkflow = workflow.data;
+    }
+    // Saving reviewed wording resolves only the incomplete-copy warning, never unrelated source warnings.
+    const workflow = aiWorkflowSchema.safeParse(payload.aiWorkflow);
+    if (workflow.success) payload.aiWorkflow = { ...workflow.data, warnings: workflow.data.warnings.filter(warning => !warning.startsWith("기사 요약은 저장했습니다. 카드 문구는 완성하지 못했습니다:")) };
+    if (JSON.stringify(current.payload) === JSON.stringify(payload)) return { version: fresh.version, revisionId: current.id, copy: body.copy, hasSavedCopy: true };
     const revision = await createRevision(tx, { contentItemId: item.id, author: "operator", payload, note: "카드 문구 편집 · 원문 요약과 캡션 유지" });
     await tx.update(contentItems).set({ edited: payload, version: fresh.version + 1, reviewStatus: fresh.reviewStatus === "reviewed" ? "pending" : fresh.reviewStatus, updatedAt: new Date() }).where(eq(contentItems.id, item.id));
     await audit(tx, { actor: actorOf(req), action: "edit_card_copy", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { revisionId: revision.id, templateKey: body.copy.templateKey, pages: body.copy.pages.length + 1 } });
     return { version: fresh.version + 1, revisionId: revision.id, copy: body.copy, hasSavedCopy: true };
   });
-  res.json(result);
+  res.json({ ...result, recommendedStoryFormat: item.kind === "notice" ? null : "discussion8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") } });
 }));
 
 /** Explicit AI action returns a proposal; it never overwrites saved/operator copy. */
 itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
-  const body = parse(z.object({ version: zVersion, requestId: z.string().uuid().optional(), templateKey: z.string().min(1).max(40), provider: z.enum(aiProviders).optional(), instructions: z.string().trim().max(1500).optional(), selectedPage: z.number().int().min(0).max(9).optional() }).strict(), req.body);
+  const body = parse(z.object({ version: zVersion, requestId: z.string().uuid().optional(), templateKey: z.string().min(1).max(40), provider: z.enum(aiProviders).optional(), instructions: z.string().trim().max(1500).optional(), selectedPage: z.number().int().min(0).max(9).optional(), storyFormat: z.literal("discussion8").optional(), refreshAnalysis: z.boolean().optional() }).strict(), req.body);
   const db = getDb();
-  const result = await runSourceGeneration(db, { type: "card_copy_generate", channelId: ch.id, itemId: item.id, version: body.version, requestId: body.requestId, intent: { templateKey: body.templateKey, provider: body.provider ?? null, ...(body.instructions ? { instructions: body.instructions } : {}), ...(body.selectedPage !== undefined ? { selectedPage: body.selectedPage } : {}) }, actor: actorOf(req) }, async () => {
+  const ai = { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy", { provider: body.provider }) };
+  const result = await runSourceGeneration(db, { type: "card_copy_generate", channelId: ch.id, itemId: item.id, version: body.version, requestId: body.requestId, intent: { templateKey: body.templateKey, provider: body.provider ?? null, ...(body.instructions ? { instructions: body.instructions } : {}), ...(body.selectedPage !== undefined ? { selectedPage: body.selectedPage } : {}), ...(body.storyFormat ? { storyFormat: body.storyFormat } : {}), ...(body.refreshAnalysis ? { refreshAnalysis: true } : {}) }, configuration: ai, actor: actorOf(req) }, async () => {
   await resolveCardCopyStyle(body.templateKey, ch.id);
   const revision = await cardCopyRevision(item);
   const [board] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
@@ -584,12 +602,16 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
   if (!sources.length && item.kind === "current_dialogue") throw new HttpError(400, "뉴스 원문을 먼저 확보하거나 본문을 붙여넣어 주세요. 제목만으로 카드 문구를 생성하지 않습니다.");
   const existingCopy = cardCopySchema.safeParse(revision.payload.cardCopy);
   if (body.selectedPage !== undefined && existingCopy.success && body.selectedPage > existingCopy.data.pages.length) throw new HttpError(400, "수정할 카드 페이지를 확인해 주세요.");
-  const generated = await generateCardCopy({ kind: item.kind, title: item.title, payload: revision.payload, templateKey: body.templateKey, channelName: ch.name, sources, provider: body.provider, instructions: body.instructions, selectedPage: body.selectedPage, budget: new LlmBudget(2) });
+  const storyFormat = body.storyFormat ?? (existingCopy.success ? existingCopy.data.storyFormat : undefined);
+  const args = { kind: item.kind, title: item.title, payload: revision.payload, templateKey: body.templateKey, channelName: ch.name, sources, instructions: body.instructions, selectedPage: body.selectedPage, budget: new LlmBudget(4) };
+  const generated = storyFormat === "discussion8"
+    ? await proposeNewsDiscussion({ ...args, ...ai, refreshAnalysis: body.refreshAnalysis })
+    : await generateCardCopy({ ...args, ...ai.copy });
   if (!generated.ok) throw new HttpError(generated.kind === "not_configured" ? 503 : 422, generated.error);
   const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id));
   if (fresh.version !== body.version || fresh.currentRevisionId !== revision.id) throw new HttpError(409, "AI 작성 중 원고가 변경됐습니다. 입력 내용은 유지했습니다. 최신 원고를 확인해 주세요.");
   await audit(db, { actor: actorOf(req), action: "propose_card_copy", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { templateKey: body.templateKey, model: generated.model, pages: generated.data.pages.length + 1 } });
-  return { version: item.version, revisionId: revision.id, copy: generated.data, model: generated.model, selectedPage: body.selectedPage ?? 0 };
+  return { version: item.version, revisionId: revision.id, copy: generated.data, model: generated.model, selectedPage: body.selectedPage ?? 0, scope: body.selectedPage === undefined ? "all" : "page", ...( "articleAnalysis" in generated ? { articleAnalysis: generated.articleAnalysis } : {}), ...( "aiWorkflow" in generated ? { aiWorkflow: generated.aiWorkflow } : {}) };
   });
   res.json(result);
 }));
@@ -604,15 +626,10 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/preview", ah(async (req, res
   const style = await resolveCardCopyStyle(body.copy.templateKey, ch.id);
   try {
     const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, cardCopy: body.copy }, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style);
-    let bytes: Buffer;
-    if (body.page === 0) {
-      const savedArt = body.coverMode === "typography" ? null : await findReusableCardCover(getDb(), item.id, revision.payload);
-      const credit = savedArt ? "표지: AI 생성 · OpenAI" : style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오";
-      bytes = await renderCarouselCover(plan.base, plan.count, savedArt?.bytes ?? null, credit, style);
-    } else {
-      const model = plan.pages[body.page - 1];
-      bytes = style.collection ? await renderCollectionBody(model, style.collection) : (await renderCardJpeg(model, style)).jpeg;
-    }
+    const pageImages = await loadCardPageArtwork(getDb(), item.id, ch.id, body.copy);
+    const savedArt = body.coverMode === "typography" ? null : await findReusableCardCover(getDb(), item.id, revision.payload);
+    const credit = savedArt ? "표지: AI 생성 · OpenAI" : style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오";
+    const bytes = await renderCarouselPage(plan, body.page, style, savedArt?.bytes ?? null, credit, pageImages);
     res.set("Cache-Control", "no-store").type("image/jpeg").send(bytes);
   } catch (error) { cardCopyRenderError(error); }
 }));
@@ -628,15 +645,16 @@ itemRoutes.post(
       .refine(value => !value.regenerateCover || value.coverMode === "ai", "새 표지 생성은 AI 표지에서만 사용할 수 있습니다.")
       .refine(value => !value.regenerateCover || (value.version !== undefined && value.requestId !== undefined), "새 표지를 만들려면 최신 원고 버전과 요청 ID가 필요합니다.")
       .refine(value => !value.coverInstruction || value.regenerateCover, "표지 수정 지시는 새 표지 생성과 함께 요청해 주세요."), req.body ?? {});
+    const imageAi = channelAiSelection(ch, "image");
     const render = async () => {
-      const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey, { version: body.version, coverMode: body.coverMode, regenerateCover: body.regenerateCover, coverInstruction: body.coverInstruction, actor: actorOf(req) });
+      const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey, { version: body.version, coverMode: body.coverMode, regenerateCover: body.regenerateCover, coverInstruction: body.coverInstruction, actor: actorOf(req), imageAi });
       if (!r.ok) throw new HttpError(r.code === "font" || r.code === "render" ? 500 : r.code === "template" || r.code === "invalid_image_request" ? 400 : r.code === "conflict" ? 409 : 422, r.error, { code: r.code, field: (r as { field?: string }).field });
       await audit(getDb(), { actor: actorOf(req), action: "render_card", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { assetId: r.asset.id, sha256: r.asset.sha256 } });
       return r.asset;
     };
     const asset = body.requestId || body.coverMode === "ai" || body.coverMode === undefined ? await runSourceGeneration(getDb(), {
       type: "card_render", channelId: ch.id, itemId: item.id, version: body.version ?? item.version,
-      requestId: body.requestId, intent: { templateKey: body.templateKey ?? null, coverMode: body.coverMode ?? null, ...(body.regenerateCover ? { regenerateCover: true, coverInstruction: body.coverInstruction ?? "" } : {}) }, actor: actorOf(req),
+      requestId: body.requestId, intent: { templateKey: body.templateKey ?? null, coverMode: body.coverMode ?? null, ...(body.regenerateCover ? { regenerateCover: true, coverInstruction: body.coverInstruction ?? "" } : {}) }, configuration: { image: imageAi }, actor: actorOf(req),
     }, render) : await render();
     res.json(asset);
   }),

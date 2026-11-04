@@ -60,7 +60,7 @@ export function TemplatePicker({ cid, value, onChange, items, version, studioCha
             </div>
             <p className="small muted">선택한 컬러가 표지와 본문 전체에 적용됩니다.</p>
           </div>}
-          {pages > 1 && <p className="small muted">표지 1장 + 본문 4장. {cid === "studio" ? "긴 원고는 내보내기 전에 분량을 확인합니다." : "내용이 길면 페이지가 이어집니다."} 이미지는 예시이며 실제 생성 시 콘텐츠에 맞게 달라집니다.</p>}
+          {pages > 1 && <p className="small muted">디자인 예시 {pages}장입니다. 실제 장수는 편집 중인 원고를 따릅니다. 뉴스 대화는 표지부터 닫는 표지까지 8장으로 구성할 수 있어요.</p>}
           <button type="button" className="btn primary" disabled={disabled || value === activeKey} onClick={() => onChange(activeKey)}>{value === activeKey ? "현재 사용 중인 디자인" : "이 디자인 사용"}</button>
         </aside>}
       </div>

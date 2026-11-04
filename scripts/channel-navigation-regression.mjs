@@ -143,8 +143,8 @@ try {
  for (const width of widths) {
   const context=await browser.newContext({viewport:{width,height:900},locale:"ko-KR",timezoneId:"Asia/Seoul",serviceWorkers:"block"});
   await context.addInitScript(()=>localStorage.setItem("spacepenguin.channel","3"));
-  const page=await context.newPage(), f=fixture(), errors=[], blocked=[], creates=[];
-  const completeChannel={...channels[0],description:"",audience:"일반 독자",editorialGuide:"",categories:null,cardTemplate:"set:n04",budget:{naverCallsPerRun:3,resultsPerRun:10,fetchTargetsPerRun:5,fetchCallsPerRun:10,llmCallsPerRun:3,dailyPublishLimit:0}};
+  const page=await context.newPage(), f=fixture(), errors=[], blocked=[], creates=[], aiSettingSaves=[];
+  const completeChannel={...channels[0],description:"",audience:"일반 독자",editorialGuide:"",categories:null,aiSettings:null,aiDefaultModels:{gemini:"gemini-default",openai:"gpt-default",anthropic:"claude-default",image:"gpt-image-default"},aiAvailability:{gemini:true,openai:false,anthropic:false},cardTemplate:"set:n04",budget:{naverCallsPerRun:3,resultsPerRun:10,fetchTargetsPerRun:5,fetchCallsPerRun:10,llmCallsPerRun:3,dailyPublishLimit:0}};
   const directory=[completeChannel,{...completeChannel,id:4,slug:"new-brand",name:"직접 추가한 브랜드",categories:[]}];
   page.on("pageerror",e=>errors.push(e.message));
   await context.route("**/*",async route=>{
@@ -154,6 +154,13 @@ try {
    if(url.pathname==="/api/channels") {
      if(method==="POST") { const body=route.request().postDataJSON(); creates.push(clone(body)); const next={...completeChannel,...body,id:9,active:true,version:1}; directory.push(next);return route.fulfill({json:next}); }
      return route.fulfill({json:directory});
+   }
+   if(url.pathname==="/api/channels/9" && method==="PATCH") {
+     const body=route.request().postDataJSON(),index=directory.findIndex(channel=>channel.id===9);
+     assert.equal(body.version,directory[index].version,"AI settings save must carry the current version");
+     aiSettingSaves.push(clone(body.aiSettings));
+     directory[index]={...directory[index],...body,version:directory[index].version+1};
+     return route.fulfill({json:directory[index]});
    }
    if(/^\/api\/channels\/(4|9)\/today$/.test(url.pathname))return route.fulfill({json:{counts:{pendingReview:0}}});
    if(/^\/api\/channels\/\d+\/destinations$/.test(url.pathname))return route.fulfill({json:{items:[],defaults:{}}});
@@ -199,12 +206,25 @@ try {
     assert.equal(await selection.locator('option[value="9"]').textContent(),"테스트로 만든 동네 채널");
     await noOverflow(page,"created-channel-form");
     await page.screenshot({path:`${outputDir}/created-channel-${width}.png`});
+    assert.equal(await page.getByLabel("기사 요약 AI",{exact:true}).inputValue(),"gemini");
+    assert.equal(await page.getByLabel("카드뉴스 문구 AI",{exact:true}).inputValue(),"openai");
+    assert.equal(await page.getByLabel("이미지 제작 AI",{exact:true}).inputValue(),"openai");
+    await page.getByLabel("기사 요약 모델 ID",{exact:true}).fill("gemini-browser-summary");
+    await page.getByLabel("카드뉴스 문구 모델 ID",{exact:true}).fill("gpt-browser-copy");
+    await page.getByLabel("이미지 제작 모델 ID",{exact:true}).fill("gpt-image-browser");
+    await noOverflow(page,"channel-ai-role-models");
+    await page.getByRole("heading",{name:"역할별 AI",exact:true}).scrollIntoViewIfNeeded();
+    await page.screenshot({path:`${outputDir}/channel-ai-roles-${width}.png`});
+    await page.getByRole("button",{name:"채널 설정 저장",exact:true}).click();
+    await page.getByRole("status").filter({hasText:"채널 설정 저장됨"}).waitFor();
+    assert.deepEqual(aiSettingSaves,[{summary:{provider:"gemini",model:"gemini-browser-summary"},copy:{provider:"openai",model:"gpt-browser-copy"},image:{provider:"openai",model:"gpt-image-browser"}}]);
+    assert.equal(directory.find(channel=>channel.id===4).aiSettings,null,"another channel's AI must remain unchanged");
     await page.getByRole("button",{name:"이 채널 콘텐츠 보기",exact:true}).click();
     await page.waitForURL(origin+"/");assert.equal(await selection.inputValue(),"9");
     assert.equal(await page.locator('a[href="/studio/25"]').count(),0);assert.equal(await page.locator('a[href="/studio/26"]').count(),0);
     await noOverflow(page,"created-channel-list");
     assert(listWorks);assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);assert.deepEqual(mutations(f.state),[],"channel switching must not save, generate or publish a discarded draft");
-    const result={width,browserEngine,listWorks,dirtyCancelledPreserved:true,explicitDiscardNavigated:true,newChannelCreated:true,newChannelSelected:true,creates,errors,blocked};
+    const result={width,browserEngine,listWorks,dirtyCancelledPreserved:true,explicitDiscardNavigated:true,newChannelCreated:true,newChannelSelected:true,roleAiDefaults:true,roleModelsSaved:true,creates,aiSettingSaves,errors,blocked};
     out.push(result);await writeFile(`${outputDir}/results.json`,JSON.stringify(out,null,2));console.log(JSON.stringify(result));
   } catch(error) { await page.screenshot({path:`${outputDir}/after-failure-${width}.png`});await writeFile(`${outputDir}/after-failure-${width}.json`,JSON.stringify({errors,blocked,url:page.url(),creates},null,2));throw error; }
   finally {await context.close();}

@@ -10,14 +10,22 @@ import { createRevision } from "../content";
 import { itemPrimarySource } from "../services/itemSources";
 import { preserveCardCopy } from "../../shared/cardCopy";
 import { assertGenerationActive, completeGenerationResult } from "../services/generationContext";
+import { channelAiSelection } from "../services/channelAi";
+import { generateNewsCardCopy } from "../services/newsEditorial";
+import { generateCardCopy } from "../services/llm";
+import type { AiSelection } from "../../shared/channelAi";
 
-export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider, templateKey?: string, options: { budget?: LlmBudget } = {}) {
+export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider, templateKey?: string, options: { budget?: LlmBudget; summary?: AiSelection; copy?: AiSelection } = {}) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
   if (!item) return { ok: false as const, error: "항목 없음" };
   if (item.kind !== "science_dialogue" && item.kind !== "current_dialogue")
     return { ok: false as const, error: "공고 항목은 '구조화 추출'을 사용하세요" };
-  const [channel] = await db.select({ cardTemplate: channels.cardTemplate }).from(channels).where(eq(channels.id, item.channelId));
+  const [channel] = await db.select().from(channels).where(eq(channels.id, item.channelId));
+  if (!channel) return { ok: false as const, error: "채널을 찾을 수 없습니다." };
   const selectedTemplate = templateKey ?? channel?.cardTemplate ?? "builtin:classic";
+  const summaryAi = options.summary ?? channelAiSelection(channel, "summary", { provider });
+  const copyAi = options.copy ?? channelAiSelection(channel, "copy");
+  const [previousRevision] = item.currentRevisionId ? await db.select().from(contentRevisions).where(eq(contentRevisions.id, item.currentRevisionId)) : [];
 
   const docIds = new Set<number>();
   const primary = await itemPrimarySource(db, item);
@@ -34,14 +42,27 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   if (item.kind === "current_dialogue" && !sources.length)
     return { ok: false as const, error: "시사 대화는 원문이 확보된 자료가 있어야 생성합니다(제목만으로 생성하지 않음)." };
 
-  const budget = options.budget ?? new LlmBudget(2); // 자동 수집은 실행 전체의 동일 예산을 전달한다.
+  const budget = options.budget ?? new LlmBudget(4); // 요약·카드 편집을 분리하고 실행 전체 예산을 공유한다.
   const r =
     item.kind === "science_dialogue"
-      ? await draftScience({ topic: item.topicKey || item.title, sources, now, budget, provider, templateKey: selectedTemplate })
-      : await draftCurrent({ sources, now, budget, provider, templateKey: selectedTemplate });
+      ? await draftScience({ topic: item.topicKey || item.title, sources, now, budget, ...summaryAi, analyzeSource: sources.length > 0 })
+      : await draftCurrent({ sources, now, budget, ...summaryAi, analyzeSource: true });
   if (!r.ok) return { ok: false as const, error: r.error };
 
-  const payload = r.data as Record<string, unknown>;
+  const { cardCopy: _summaryCopy, ...summaryPayload } = r.data as Record<string, unknown>;
+  const payload: Record<string, unknown> = { ...summaryPayload };
+  const warnings: string[] = [];
+  let copyModel: string | null = null;
+  const totalUsage = { ...r.usage };
+  // Never replace a saved operator's deck just because the article summary was refreshed.
+  if (!previousRevision?.payload.cardCopy) {
+    const args = { kind: item.kind, title: item.title, payload, templateKey: selectedTemplate, channelName: channel.name, sources, budget, ...copyAi };
+    const written = sources.length ? await generateNewsCardCopy(args) : await generateCardCopy(args);
+    if (written.usage) { totalUsage.inputTokens += written.usage.inputTokens; totalUsage.outputTokens += written.usage.outputTokens; }
+    if (written.ok) { payload.cardCopy = written.data; copyModel = written.model; }
+    else warnings.push(`기사 요약은 저장했습니다. 카드 문구는 완성하지 못했습니다: ${written.error} 카드 편집에서 문구만 다시 제안받을 수 있습니다.`);
+  }
+  payload.aiWorkflow = { version: 1, summary: { provider: summaryAi.provider, model: r.model }, copy: copyModel ? { provider: copyAi.provider, model: copyModel } : null, warnings };
   const evidenceCount = (payload.evidence as unknown[]).length;
   const indep = item.kind === "current_dialogue" ? Number(payload.independent_source_count ?? 0) : null;
   const evidenceStatus = !sources.length || !evidenceCount || sources.some(s => s.kind === "manual_text") ? "needs_review" : "secondary_only";
@@ -58,12 +79,13 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
       payload: savedPayload,
       model: r.model,
       promptVersion: item.kind === "science_dialogue" ? PROMPT_VERSION.science : PROMPT_VERSION.current,
-      usage: r.usage,
+      usage: totalUsage,
       note: [
         previous?.payload.cardCopy ? "원문 요약을 새로 작성했습니다. 저장된 카드 문구는 유지했으니 바뀐 원문과 맞는지 검토해 주세요." : "",
         r.droppedEvidence ? `원문에서 찾을 수 없는 근거 구절 ${r.droppedEvidence}개 제거` : "",
         indep !== null && indep < 2 ? "독립 출처가 2개 미만 — 추가 대조 권장" : "",
         !sources.length ? "확보된 출처 없이 생성 — 과학적 근거 검토 필요" : "",
+        ...warnings,
       ].filter(Boolean).join(" / "),
     });
     await tx
@@ -78,11 +100,11 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
       })
       .where(eq(contentItems.id, itemId));
     const [freshItem] = await tx.select().from(contentItems).where(eq(contentItems.id, itemId));
-    await completeGenerationResult(tx as unknown as DB, freshItem);
+    await completeGenerationResult(tx as unknown as DB, { ...freshItem, generationWarnings: warnings });
     return rev;
   });
   if (!rev) return { ok: false as const, error: "생성 중 원고가 변경되었습니다. 새 편집본을 유지했습니다. 새로고침 후 다시 생성해 주세요." };
-  return { ok: true as const, revisionId: rev.id, usage: r.usage, model: r.model };
+  return { ok: true as const, revisionId: rev.id, usage: totalUsage, model: r.model, warnings };
 }
 
 

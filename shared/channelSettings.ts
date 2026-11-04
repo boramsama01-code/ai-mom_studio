@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { RESERVED_CHANNEL_KEYS } from "./channelKeys";
 import { UNCLASSIFIED } from "./channelCategories";
+import { channelAiSettingsSchema } from "./channelAi";
 
 export const channelContentTypes = ["current_dialogue", "notice", "science_dialogue", "manual"] as const;
 export type ChannelContentType = typeof channelContentTypes[number];
@@ -27,5 +28,6 @@ export const channelCreateSchema = z.object({
   audience: z.string().trim().min(1).max(60).default("일반 독자"),
   accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default("#51635A"),
   categories: channelCategoriesSchema.default([]),
+  aiSettings: channelAiSettingsSchema.nullable().optional(),
 }).strict();
 export type ChannelCreateInput = z.input<typeof channelCreateSchema>;

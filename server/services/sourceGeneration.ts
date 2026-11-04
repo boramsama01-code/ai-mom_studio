@@ -25,7 +25,7 @@ function stopped(job: Job): never {
 /** One paid logical request, recorded before network I/O; completed IDs are never run twice. */
 export async function runSourceGeneration<T extends Record<string, unknown>>(
   db: DB,
-  input: { type: "source_generate" | "card_copy_generate" | "card_render"; channelId: number; itemId: number; version: number; requestId?: string; intent: Record<string, unknown>; actor: string },
+  input: { type: "source_generate" | "card_copy_generate" | "card_render"; channelId: number; itemId: number; version: number; requestId?: string; intent: Record<string, unknown>; configuration?: Record<string, unknown>; actor: string },
   work: () => Promise<T>,
 ): Promise<T & { jobId: number }> {
   const requestId = input.requestId ?? randomUUID();
@@ -49,7 +49,7 @@ export async function runSourceGeneration<T extends Record<string, unknown>>(
     if (busy) throw new HttpError(409, "다른 AI 요청이 이 콘텐츠를 처리 중이어서 새 요청을 시작하지 않았습니다. 실행 기록에서 기존 결과를 확인하세요.", { requestRejected: true, jobStatus: "failed", activeJobId: busy.id });
     const now = new Date();
     const [job] = await tx.insert(jobs).values({ type: input.type, channelId: input.channelId, dedupeKey, requestedBy: input.actor,
-      payload: { itemId: item.id, version: input.version, requestId, requestHash, ...input.intent }, status: "running", attempts: 1, maxAttempts: 1,
+      payload: { itemId: item.id, version: input.version, requestId, requestHash, ...input.intent, ...(input.configuration ? { configuration: input.configuration } : {}) }, status: "running", attempts: 1, maxAttempts: 1,
       startedAt: now, heartbeatAt: now, leaseOwner: `source-ai:${randomUUID()}`, leaseExpiresAt: new Date(now.getTime() + REQUEST_LIMIT_MS + 30_000),
     }).returning();
     await audit(tx, { actor: input.actor, action: "start_generation", entity: "job", entityId: job.id, channelId: input.channelId, detail: { itemId: item.id, requestId, type: input.type } });

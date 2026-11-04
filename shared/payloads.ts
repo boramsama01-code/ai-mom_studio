@@ -3,6 +3,7 @@
  */
 import { z } from "zod";
 import { cardCopySchema } from "./cardCopy";
+import { articleAnalysisSchema, aiWorkflowSchema } from "./articleAnalysis";
 
 const nullableStr = z.string().trim().max(2000).nullable();
 
@@ -29,6 +30,7 @@ export const evidenceSchema = z.object({
 });
 
 export const noticePayloadSchema = z.object({
+  aiWorkflow: aiWorkflowSchema.optional(),
   cardCopy: cardCopySchema.optional(),
   relevance: z.enum(["relevant", "irrelevant", "uncertain"]),
   irrelevance_reason: nullableStr.optional(),
@@ -55,6 +57,8 @@ export type NoticePayload = z.infer<typeof noticePayloadSchema>;
 export const sourceRefSchema = z.object({ source_id: z.number().int(), note: z.string().max(300).nullable().optional() });
 
 export const sciencePayloadSchema = z.object({
+  articleAnalysis: articleAnalysisSchema.optional(),
+  aiWorkflow: aiWorkflowSchema.optional(),
   cardCopy: cardCopySchema.optional(),
   topic: z.string().max(200),
   age_band: z.string().max(60),
@@ -71,6 +75,8 @@ export const sciencePayloadSchema = z.object({
 export type SciencePayload = z.infer<typeof sciencePayloadSchema>;
 
 export const currentPayloadSchema = z.object({
+  articleAnalysis: articleAnalysisSchema.optional(),
+  aiWorkflow: aiWorkflowSchema.optional(),
   cardCopy: cardCopySchema.optional(),
   title: z.string().max(200),
   event_at: nullableStr,
