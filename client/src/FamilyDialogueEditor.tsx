@@ -159,7 +159,16 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
       const candidate = value as FamilyDialogueResponse, copyCheck = familyCardCopySchema.safeParse(candidate.copy);
       const meta = Object.fromEntries(metadataKeys.map(key => [key, candidate[key]])), metadataCheck = familyDialogueMetadataSchema.safeParse(meta);
       const onlyIncompleteText = (check: { success: boolean; error?: { issues: Array<{ code: string; message: string }> } }) => check.success || check.error?.issues.every(issue => issue.code === "custom" && issue.message === "문구를 입력해 주세요.");
-      return onlyIncompleteText(copyCheck) && onlyIncompleteText(metadataCheck) ? { ...baseRef.current, ...meta, copy: candidate.copy } as FamilyDialogueResponse : null;
+      if (!onlyIncompleteText(copyCheck) || !onlyIncompleteText(metadataCheck)) return null;
+      // Credits are presentation metadata for immutable, item-scoped assets.
+      // Keep a newly selected asset's label in a local checkpoint; the server
+      // still verifies ownership and obtains canonical credits at save/render.
+      const referenced = new Set(Object.values(candidate.pageDesigns).flatMap(design => [design.background.assetId, ...(design.previousAssetIds ?? [])]).filter((id): id is number => typeof id === "number").map(String));
+      const inputCredits: unknown = candidate.artworkCredits;
+      const recoveredCredits = inputCredits && typeof inputCredits === "object" && !Array.isArray(inputCredits)
+        ? Object.fromEntries(Object.entries(inputCredits).filter(([id, value]) => referenced.has(id) && typeof value === "string" && [...value].length <= 300)) as Record<string, string> : {};
+      const artworkCredits = { ...baseRef.current.artworkCredits, ...recoveredCredits };
+      return { ...baseRef.current, ...meta, copy: candidate.copy, ...(Object.keys(artworkCredits).length ? { artworkCredits } : {}) } as FamilyDialogueResponse;
     },
     onRestore: value => { put(value); setProposal(null); setSaveError(null); },
   });

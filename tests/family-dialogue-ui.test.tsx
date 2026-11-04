@@ -94,7 +94,9 @@ async function connectEvidence(path: string, evidenceId: string) {
 }
 
 describe("family dialogue v2 editor", () => {
-  it("shows a newly proposed image's actual credit before saving and includes source/image labels in copied text", async () => {
+  it("keeps a new image credit in unsaved recovery, preview inputs and copied text", async () => {
+    const session = { user: "operator", recoveryScope: "a".repeat(64) };
+    client.setQueryData(["me"], session);
     generate = async () => {
       const result = structuredClone(saved) as FamilyDialogueResponse;
       result.pageDesigns.cover.background = { ...result.pageDesigns.cover.background, kind: "image", assetId: 991 };
@@ -107,6 +109,14 @@ describe("family dialogue v2 editor", () => {
     current.artworkCredits = { "991": "AI 일러스트 · OpenAI" };
     const text = familyCopyText(current.copy, current);
     expect(text).toContain("출처: 테스트용 원문 메타데이터"); expect(text).toContain("AI 일러스트 · OpenAI");
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(0);
+    await render(null); client.clear(); client.setQueryData(["me"], session); await render();
+    const recovery = host.querySelector(".draft-recovery")!;
+    expect(recovery.textContent).toContain("기기 복구본");
+    expect(recovery.textContent).toContain("AI 일러스트 · OpenAI");
+    await click("복구본을 편집기에 불러오기");
+    expect(field("displayOverrides.imageCredit").value).toBe("AI 일러스트 · OpenAI");
+    expect(field("displayOverrides.sourceCredit").value).toBe("출처: 테스트용 원문 메타데이터");
     expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(0);
   });
 
