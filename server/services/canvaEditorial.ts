@@ -37,15 +37,15 @@ function assertCanvaTextFits(copy:CardCopyV2,master:Master,purpose:'create'|'imp
 }
 function canvaDisplayOptions(input:Input,dataset:CanvaDataset):CanvaTextOptions {
   const caption=captionPackageSchema.safeParse(input.payload.captionPackage);
-  return { dataset,context:familyDisplayContext(input.copy,caption.success?caption.data:null),
+  return { dataset,requireDisplayFields:true,context:familyDisplayContext(input.copy,caption.success?caption.data:null),
     pageContexts:Object.fromEntries(input.copy.pages.map(page=>{
       const bg=input.pageDesigns[page.id].background;
       return [page.id,{imageCredit:bg.kind==='image'?input.artworkCredits?.[String(bg.assetId)]??'배경 이미지':''}];
     })) };
 }
 function assertCanvaDisplaySupported(copy:CardCopyV2,dataset:CanvaDataset) {
-  const errors=canvaDisplaySupportErrors(copy,dataset);
-  if(errors.length)throw new HttpError(422,'수정한 표시 문구를 반영할 수 있는 Canva 마스터가 필요합니다. 원고는 저장되어 있습니다.',{code:'canva_display_fields_unsupported',details:errors});
+  const errors=canvaDisplaySupportErrors(copy,dataset,true);
+  if(errors.length)throw new HttpError(422,'뉴스 읽기·STEP·상단 표기·출처·번호를 현재 원고와 같게 채울 수 없는 마스터입니다. 표시 문구 필드를 갖춘 버전이 필요하며 원고는 그대로 저장되어 있습니다.',{code:'canva_display_profile_unsupported',details:errors});
 }
 export const canvaMasterDto=(m:Master):CanvaMasterDto=>({id:m.id,conceptMode:m.conceptMode,hasExternalActivity:m.hasExternalActivity,templateVersion:m.templateVersion,sourceType:m.sourceType,sourceId:m.sourceId,status:m.status,editUrl:m.editUrl,validatedAt:m.validatedAt.toISOString()});
 export function canvaJobDto(job:Job):CanvaJobDto {
@@ -195,6 +195,7 @@ async function processCanvaStep(db:DB,job:Job){
     const dataset=await rest.getCanvaDataset(db,{type:master.sourceType as 'design'|'brand_template',id:master.sourceId});
     const errors=validateCanvaDataset(dataset,canvaVariant(input.copy));
     if(errors.length || canvaInputHash(dataset)!==input.datasetHash){await db.update(canvaMasters).set({status:'field_changed'}).where(eq(canvaMasters.id,master.id));throw new HttpError(409,'Canva 마스터의 필드가 변경됐습니다. 설정에서 새 버전을 검사·등록해 주세요.',{code:'dataset_changed'});}
+    assertCanvaDisplaySupported(input.copy,dataset);
     const [pages,design]=await Promise.all([rest.getCanvaPages(db,master.sourceId),rest.getCanvaDesign(db,master.sourceId)]);
     if(!pages.validEightPageMaster)throw new HttpError(422,'Canva 디자인은 1080×1350 크기의 8장이어야 합니다.',{code:'page_mismatch'});
     if(canvaInputHash(pages.items.map(p=>p.id))!==canvaInputHash(master.pageIds))throw new HttpError(409,'Canva 마스터의 페이지가 바뀌었습니다. 새 버전으로 등록해 주세요.',{code:'page_changed'});
@@ -202,6 +203,7 @@ async function processCanvaStep(db:DB,job:Job){
     return saveStep(db,job,{phase:'images'});
   }
   if(job.phase==='images'){
+    assertCanvaDisplaySupported(input.copy,master.dataset as CanvaDataset);
     const images=await prepareCanvaImages(db,{itemId:job.contentItemId,channelId:job.channelId,copy:input.copy,pageDesigns:input.pageDesigns});
     const uploaded={...(job.result?.uploadedImages as Record<string,{assetId:string;hash:string}>??{})};
     const next=images.find(image=>uploaded[image.field]?.hash!==image.hash);

@@ -649,11 +649,12 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
       const [board] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
       if (board) assertStudioActive(board);
       const proposed = await proposeFamilyDialogue(db, item, ch, revision, body, configuration);
+      const artworkCredits = proposed.copy && proposed.pageDesigns ? await loadCardPageArtworkCredits(db, item.id, ch.id, proposed.copy, proposed.pageDesigns, true) : undefined;
       // Preserve a late response as a comparison-only proposal. Content is never
       // written here; explicit apply uses the item CAS and original revision.
       return db.transaction(async tx => {
         const [fresh] = await tx.select().from(contentItems).where(and(eq(contentItems.id, item.id), eq(contentItems.channelId, ch.id))).for("update");
-        const response = { ...proposed, lateResult: !fresh || fresh.version !== body.version || fresh.currentRevisionId !== revision.id };
+        const response = { ...proposed, ...(artworkCredits ? { artworkCredits } : {}), lateResult: !fresh || fresh.version !== body.version || fresh.currentRevisionId !== revision.id };
         await completeGenerationResult(tx as unknown as import("../db").DB, response);
         await audit(tx, { actor: actorOf(req), action: "propose_family_card_copy", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { scope: body.scope, baseRevision: revision.id, status: response.status, lateResult: response.lateResult, stages: proposed.generationRuns?.length ?? 0 } });
         return response;

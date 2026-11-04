@@ -67,6 +67,8 @@ describe("family editorial pipeline with mock provider HTTP", () => {
     const result = await proposeFamilyDialogue(db, f.item, f.channel, f.revision, f.input, f.plan);
     expect(result.reviewFlags, JSON.stringify(rows)).toEqual([]);
     expect(result.copy?.pages).toHaveLength(8); expect(result.pageDesigns?.cover.background).toMatchObject({ kind: "image", assetId: 991 });
+    expect(result.copy?.pages[7]).toMatchObject({ fields: { brandLine: "오늘, 서로의 어떤 생각을 발견했나요?" } });
+    expect(JSON.stringify(mock.calls[0].body)).toContain("중·고등학생 자녀와 학부모");
     expect(result.parentGuide?.coreQuestion).toBe(result.editorialPlan?.coreQuestion); expect(result.captionPackage?.coreQuestion).toBe(result.editorialPlan?.coreQuestion);
     expect(mock.calls.map(call => call.stage)).toEqual(["article_analysis", "editorial_plan", "card_copy", "caption", "image_brief", "editorial_review"]);
     expect(mock.calls[0].url).toContain("gemini-analysis-unit"); expect(mock.calls.find(call => call.stage === "card_copy")?.body.model).toBe("gpt-copy-unit");

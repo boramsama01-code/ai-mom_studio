@@ -4,7 +4,7 @@ import { and, desc, eq, getTableName } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import sharp from "sharp";
 import { approvals, canvaAssetUploads, canvaMasters, canvaRenderJobs, contentItems, contentRevisions, mediaAssets } from "../shared/schema";
-import { CANVA_MAPPING_VERSION, canvaVariant, expectedCanvaDataset } from "../shared/canvaEditorial";
+import { CANVA_MAPPING_VERSION, canvaDisplayTextFields, canvaVariant, expectedCanvaDataset } from "../shared/canvaEditorial";
 import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
 import { createFamilyPgFixture } from './fixtures/familyEvidencePg';
 import { resetDb, setTestEnv } from "./helpers";
@@ -139,7 +139,8 @@ afterAll(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); await closeD
 async function fixture(phase: string, patch: Partial<typeof canvaRenderJobs.$inferInsert> = {}, options: { scientific?: boolean } = {}) {
   const db = getDb();
   const { item, revision, copy, metadata } = await createFamilyPgFixture(db, { channelId: 2, rendererProvider: 'canva', scientific: options.scientific });
-  const dataset = expectedCanvaDataset(canvaVariant(copy)); api.dataset.mockResolvedValue(dataset);
+  // Synthetic supported display dataset for recovery tests; no live master is asserted ready.
+  const dataset = { ...expectedCanvaDataset(canvaVariant(copy)), ...Object.fromEntries(Object.keys(canvaDisplayTextFields(copy)).map(name => [name, { type: "text" }])) }; api.dataset.mockResolvedValue(dataset);
   const image = { field: "P01_IMAGE", bytes: Buffer.from(`isolated-image-${randomUUID()}`), hash: "" }; image.hash = sha256(image.bytes);
   api.prepare.mockResolvedValue([image]);
   const [master] = await db.insert(canvaMasters).values({ channelId: 2, sourceId: `master_${randomUUID()}`, sourceType: "design", sourceUpdatedAt: "123", ...canvaVariant(copy), templateVersion: randomUUID(), principal: "team_test:user_test", dataset, datasetHash: canvaInputHash(dataset), pageIds: Array.from({ length: 8 }, (_, index) => `page_${index + 1}`), validatedAt: new Date() }).returning();
@@ -153,6 +154,16 @@ async function runNow(id: number) { await getDb().update(canvaRenderJobs).set({ 
 async function uploadFor(hash: string) { return (await getDb().select().from(canvaAssetUploads).where(and(eq(canvaAssetUploads.principal, "team_test:user_test"), eq(canvaAssetUploads.sha256, hash))))[0]; }
 
 describe("Canva durable dispatch and recovery on PostgreSQL", () => {
+  it("blocks unchanged legacy static labels before preparing or uploading images", async () => {
+    const f = await fixture("images");
+    const legacy = expectedCanvaDataset(canvaVariant(f.copy));
+    await f.db.update(canvaMasters).set({ dataset: legacy, datasetHash: canvaInputHash(legacy) }).where(eq(canvaMasters.id, f.master.id));
+    expect(f.copy.pages.every(page => page.displayOverrides === undefined)).toBe(true);
+    const failed = await runNow(f.job.id);
+    expect(failed).toMatchObject({ status: "failed", errorCode: "canva_display_profile_unsupported" });
+    expect(api.prepare).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
+  });
+
   it("blocks a second autofill under fresh UUIDs and later source versions after an unknown response", async () => {
     const f = await fixture("autofill_prepare");
     api.submitAutofill.mockRejectedValue(new CanvaRestError("응답 미확정", undefined, "result_unknown", true));

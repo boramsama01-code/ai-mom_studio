@@ -41,7 +41,7 @@ export function validateCanvaDataset(dataset:CanvaDataset,variant:CanvaVariant) 
   return errors;
 }
 
-export type CanvaTextOptions = { context?: FamilyDisplayContext; pageContexts?: Partial<Record<FamilyPageId, FamilyDisplayContext>>; dataset?: CanvaDataset };
+export type CanvaTextOptions = { context?: FamilyDisplayContext; pageContexts?: Partial<Record<FamilyPageId, FamilyDisplayContext>>; dataset?: CanvaDataset; requireDisplayFields?: boolean };
 export function canvaDisplayTextFields(copy:CardCopyV2,options:CanvaTextOptions={}):Record<string,{type:'text';text:string}> {
   const fields:Record<string,{type:'text';text:string}>={};
   for(const page of copy.pages) {
@@ -51,10 +51,10 @@ export function canvaDisplayTextFields(copy:CardCopyV2,options:CanvaTextOptions=
   return fields;
 }
 /** Never silently export a template's old static label after the user edits it. */
-export function canvaDisplaySupportErrors(copy:CardCopyV2,dataset:CanvaDataset):string[] {
+export function canvaDisplaySupportErrors(copy:CardCopyV2,dataset:CanvaDataset,requireDefaults=false):string[] {
   const errors:string[]=[];
   for(const page of copy.pages) for(const descriptor of familyDisplayDescriptors(page)) {
-    if(Object.hasOwn(page.displayOverrides??{},descriptor.key) && dataset[descriptor.canvaField]?.type!=='text') errors.push(page.page+'페이지 '+descriptor.label+' ('+descriptor.canvaField+'): 편집 가능한 텍스트 필드가 필요합니다.');
+    if((requireDefaults || Object.hasOwn(page.displayOverrides??{},descriptor.key)) && dataset[descriptor.canvaField]?.type!=='text') errors.push(page.page+'페이지 '+descriptor.label+' ('+descriptor.canvaField+'): 편집 가능한 텍스트 필드가 필요합니다.');
   }
   return errors;
 }
@@ -90,7 +90,7 @@ export function canvaTextFields(copy:CardCopyV2,options:CanvaTextOptions={}):Rec
   if(byType.size!==8 || copy.pages.some((p,i)=>p.id!==CANVA_PAGE_IDS[i] || p.type!==CANVA_PAGE_IDS[i])) throw new Error('표지부터 닫는 표지까지 8장 순서가 맞지 않습니다.');
   if(Object.values(fields).some(v=>typeof v!=='string')) throw new Error('Canva로 보낼 문구가 빠졌습니다.');
   if(options.dataset) {
-    const errors=canvaDisplaySupportErrors(copy,options.dataset);
+    const errors=canvaDisplaySupportErrors(copy,options.dataset,options.requireDisplayFields);
     if(errors.length) throw new Error('현재 표시 문구를 Canva에 반영할 수 없습니다. '+errors.join(' '));
     for(const [name,value] of Object.entries(canvaDisplayTextFields(copy,options))) if(options.dataset[name]?.type==='text') fields[name]=value.text;
   }

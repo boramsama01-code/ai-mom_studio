@@ -35,7 +35,7 @@ export function resolveFamilyDisplay(page: FamilyPage, context: FamilyDisplayCon
     sourceCredit: page.id === "outro" ? "" : context.sourceCredit ?? "",
     imageCredit: page.id === "outro" ? "" : context.imageCredit ?? "",
     factIndex1: "01", factIndex2: "02", factIndex3: "03",
-    definitionIndexA: "1", definitionIndexB: "2", duration: "10분", activityHelp: "",
+    definitionIndexA: "1", definitionIndexB: "2", duration: "선택 활동", activityHelp: "",
   };
   for (const [key, value] of Object.entries(page.displayOverrides ?? {})) {
     if (typeof value === "string" && Object.hasOwn(defaults, key)) defaults[key as FamilyDisplayKey] = value;

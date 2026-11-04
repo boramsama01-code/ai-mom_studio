@@ -55,6 +55,7 @@ describe("editable family display copy", () => {
     const before = canvaTextFields(copy);
     expect(Object.keys(before).sort()).toEqual(Object.entries(legacy).filter(([, field]) => field.type === "text").map(([name]) => name).sort());
     copy.pages[1].displayOverrides = { kicker: "함께 읽기", sourceCredit: "", pageNumber: "둘째 장" };
+    expect(canvaDisplaySupportErrors(familyDialogueCardFixture(), legacy, true).length).toBeGreaterThan(0);
     expect(canvaDisplaySupportErrors(copy, legacy)).toHaveLength(3);
     expect(() => canvaTextFields(copy, { dataset: legacy })).toThrow("표시 문구");
     expect(copy.pages[1].displayOverrides?.sourceCredit).toBe("");
@@ -66,7 +67,7 @@ describe("editable family display copy", () => {
       const activity = copy.pages[6];
       if (activity.id !== "activity") throw new Error("activity");
       activity.fields.optionalActivity = { label: "추가 자료", action: "확인한 자료에서 조건을 찾아요.", resourceId: "R1" };
-      activity.displayOverrides = { duration: "5분", activityHelp: "아이의 이유를 들어 주세요." };
+      activity.displayOverrides = { duration: "5분", activityHelp: "서로의 이유를 들어 주세요." };
       const values = familyReadingTextValues(copy);
       expect(Object.keys(values)).toHaveLength(46);
       expect(Object.keys(canvaReadingTextFields(copy))).toHaveLength(46);
@@ -77,7 +78,7 @@ describe("editable family display copy", () => {
       if (concept.fields.mode === "scientific_explanation") expect(values.P06_DEFINITION_A).toBe(concept.fields.acceptedDefinition);
       if (copy.pages[0].id === "cover") copy.pages[0].fields.headline = "본문을 다시 고친 제목";
       expect(familyReadingTextValues(copy).P01_HEADLINE).toBe("본문을 다시 고친 제목");
-      expect(familyReadingTextValues(copy).P07_ACTIVITY_HELP).toBe("아이의 이유를 들어 주세요.");
+      expect(familyReadingTextValues(copy).P07_ACTIVITY_HELP).toBe("서로의 이유를 들어 주세요.");
     }
   });
 });

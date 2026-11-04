@@ -103,8 +103,8 @@ export function applyFamilyFieldPatches(copy: CardCopyV2, patches: FamilyFieldPa
 function brandFor(channel: Channel, existing: CardCopyV2 | null) {
   const prior = existing?.pages.find(page => page.id === "outro");
   if (prior?.id === "outro") { const { cta: _cta, ...brand } = prior.fields; return brand; }
-  const name = channelBrandName(channel), news = /alligodang/i.test(name);
-  return { brandName: news ? "ALLligodang" : name, parentBrand: "우주펭귄상회", brandLine: news ? "아이와 함께 나누는 뉴스·과학·세상 이야기" : channel.description || name, handle: "", logoAssetId: "brand:space-penguin-company:20261101" };
+  const name = channelBrandName(channel), news = /all+igodang|알리고당/i.test(name);
+  return { brandName: news ? "ALLligodang" : name, parentBrand: "우주펭귄상회", brandLine: news ? "오늘, 서로의 어떤 생각을 발견했나요?" : channel.description || name, handle: "", logoAssetId: "brand:space-penguin-company:20261101" };
 }
 function canonicalQuestion(copy: CardCopyV2, metadata: FamilyDialogueMetadata) {
   const discussion = copy.pages.find(page => page.id === "discussion")!, concept = copy.pages.find(page => page.id === "concept")!;

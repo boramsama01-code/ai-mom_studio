@@ -4,7 +4,7 @@ import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CardCopyEditor, type StoredCardCopyResponse } from "../client/src/CardCopyEditor";
-import type { FamilyDialogueResponse } from "../client/src/FamilyDialogueEditor";
+import { familyCopyText, type FamilyDialogueResponse } from "../client/src/FamilyDialogueEditor";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
 import { cardCopyFixture } from "./fixtures/cardCopy";
 import { ApiError } from "../client/src/api";
@@ -94,6 +94,22 @@ async function connectEvidence(path: string, evidenceId: string) {
 }
 
 describe("family dialogue v2 editor", () => {
+  it("shows a newly proposed image's actual credit before saving and includes source/image labels in copied text", async () => {
+    generate = async () => {
+      const result = structuredClone(saved) as FamilyDialogueResponse;
+      result.pageDesigns.cover.background = { ...result.pageDesigns.cover.background, kind: "image", assetId: 991 };
+      result.artworkCredits = { "991": "AI 일러스트 · OpenAI" };
+      return { ...result, status: "ready", reviewFlags: [], scope: "all", baseRevision: saved.revisionId, jobId: 88 };
+    };
+    await render(); await click("8장 전체 다시 제안"); await click("제안을 편집기에 적용");
+    expect(field("displayOverrides.imageCredit").value).toBe("AI 일러스트 · OpenAI");
+    const current = fresh(); current.pageDesigns.cover.background = { ...current.pageDesigns.cover.background, kind: "image", assetId: 991 };
+    current.artworkCredits = { "991": "AI 일러스트 · OpenAI" };
+    const text = familyCopyText(current.copy, current);
+    expect(text).toContain("출처: 테스트용 원문 메타데이터"); expect(text).toContain("AI 일러스트 · OpenAI");
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(0);
+  });
+
   it("edits every closing brand field and display label, saves them, and reopens without changing channel defaults", async () => {
     await render();
     await selectPage("8페이지 · 닫는 표지");
