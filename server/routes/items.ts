@@ -14,6 +14,7 @@ import { aiProviders } from "../../shared/aiProviders";
  */
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, notExists, or, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
@@ -573,7 +574,9 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     // Saving reviewed wording resolves only the incomplete-copy warning, never unrelated source warnings.
     const workflow = aiWorkflowSchema.safeParse(payload.aiWorkflow);
     if (workflow.success) payload.aiWorkflow = { ...workflow.data, warnings: workflow.data.warnings.filter(warning => !warning.startsWith("기사 요약은 저장했습니다. 카드 문구는 완성하지 못했습니다:")) };
-    if (JSON.stringify(current.payload) === JSON.stringify(payload)) return { version: fresh.version, revisionId: current.id, copy: body.copy, hasSavedCopy: true };
+    // PostgreSQL JSONB may reorder keys. A repeated save must not manufacture a
+    // new revision or invalidate an approval when the data is unchanged.
+    if (isDeepStrictEqual(current.payload, payload)) return { version: fresh.version, revisionId: current.id, copy: body.copy, hasSavedCopy: true };
     const revision = await createRevision(tx, { contentItemId: item.id, author: "operator", payload, note: "카드 문구 편집 · 원문 요약과 캡션 유지" });
     await tx.update(contentItems).set({ edited: payload, version: fresh.version + 1, reviewStatus: fresh.reviewStatus === "reviewed" ? "pending" : fresh.reviewStatus, updatedAt: new Date() }).where(eq(contentItems.id, item.id));
     await audit(tx, { actor: actorOf(req), action: "edit_card_copy", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { revisionId: revision.id, templateKey: body.copy.templateKey, pages: body.copy.pages.length + 1 } });

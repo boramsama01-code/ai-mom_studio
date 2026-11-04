@@ -115,7 +115,7 @@ describe("two-stage news generation and partial recovery on PostgreSQL", () => {
     const saved = await latest(f.item.id);
     expect(saved.item.version).toBe(f.item.version); expect(saved.revision).toEqual(f.originalRevision);
     const again = await f.agent.post(`${f.endpoint}/generate`).set(f.headers).send(body);
-    expect(again.status).toBe(409); expect(again.body.jobStatus).toBe("failed"); expect(outbound).toHaveBeenCalledOnce();
+    expect(again.status).toBe(422); expect(again.body.jobStatus).toBe("failed"); expect(outbound).toHaveBeenCalledOnce();
   });
 
   it("saves a canonical reference from this item's actually fetched primary source without calling AI", async () => {
