@@ -7,3 +7,6 @@
 @media(max-width:400px){.card-copy-editor{padding:12px}.card-copy-pages>.btn{font-size:11px;padding:8px}.card-copy-dots button{width:24px}.card-copy-savebar .btn{flex:1}.card-copy-savebar>.row{align-items:stretch;flex-wrap:wrap}}
 
 #card-panel a.btn[aria-disabled=true]{opacity:.48;cursor:not-allowed}
+
+.card-copy-dots button{width:auto;min-width:40px;padding:0 7px;white-space:nowrap}.card-copy-editor [hidden]{display:none!important}
+@media(max-width:400px){.card-copy-pages{flex-wrap:wrap}.card-copy-dots{order:3;flex-basis:100%;justify-content:flex-start;gap:4px}.card-copy-dots button{min-width:40px}}

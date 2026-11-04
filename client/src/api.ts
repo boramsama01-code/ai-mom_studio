@@ -10,19 +10,21 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
+export async function api<T = unknown>(path: string, opts: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
   const method = opts.method ?? "GET";
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["content-type"] = "application/json";
   if (method !== "GET" && csrf) headers["x-csrf-token"] = csrf;
   let res: Response;
   try {
-    res = await fetch(`/api${path}`, { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body), credentials: "same-origin" });
-  } catch {
+    res = await fetch(`/api${path}`, { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body), credentials: "same-origin", signal: opts.signal });
+  } catch (error) {
+    if (opts.signal?.aborted) throw error;
     throw new ApiError(0, "서버에 연결할 수 없습니다. 네트워크를 확인하세요.");
   }
   const ct = res.headers.get("content-type") || "";
   const body = ct.includes("json") ? await res.json().catch(() => ({})) : {};
+  opts.signal?.throwIfAborted();
   if (!res.ok) throw new ApiError(res.status, (body as { error?: string }).error || `요청 실패 (HTTP ${res.status})`, body as Record<string, unknown>);
   return body as T;
 }

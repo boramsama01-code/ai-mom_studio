@@ -35,7 +35,7 @@ beforeEach(() => {
     item: { id: 9, channelId: 2, title: "하나의 제작 공간", kind: "science_dialogue", origin: "manual", version: 1, currentRevisionId: 4, reviewStatus: "reviewed", evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: {} },
     primary: null, linked: [], current: { id: 4, revisionNo: 1, author: "operator", payload: { title: "하나의 제작 공간" } }, revisions: [],
     cards: [{ id: 40, revisionId: 4, sha256: "fixture", createdAt: "2026-11-01T00:00:00Z", cloudinaryUrl: null }],
-    publicationDraft: { version: 1, captions: { instagram: "확인할 게시 캡션", telegram: "" } },
+    publicationDraft: { version: 1, captions: { instagram: "확인할 게시 캡션", telegram: "" }, options: { destinationIds: [20], timing: "now", scheduledAtKst: "" } },
     approvals: [], deliveries: [], similar: [], defaultCaptions: { instagram: "확인할 게시 캡션", telegram: "" },
     publicationReadiness: { ready: true, blockers: [], dryRun: false, autoPublish: true, dailyLimit: 3, expectedUsername: "highscoop.official", destinations: [{ id: 20, label: "@highscoop.official", platform: "instagram", configured: true }] },
   };
@@ -48,7 +48,7 @@ beforeEach(() => {
     if (path === "/studio/ai-status") return { defaultProvider: "gemini", text: { gemini: true, openai: false, anthropic: false } };
     if (path === "/canva/status") return { connected: false };
     if (path === `${itemPath}/publication-draft` && options?.method === "PATCH") {
-      detail.publicationDraft = { version: options.body.version + 1, captions: structuredClone(options.body.captions) };
+      detail.publicationDraft = { version: options.body.version + 1, captions: structuredClone(options.body.captions), options: structuredClone(options.body.options) };
       return structuredClone(detail.publicationDraft);
     }
     if (path === itemPath) { if (readError) throw readError; return structuredClone(detail); }
@@ -159,7 +159,7 @@ describe("단일 콘텐츠 작업 공간", () => {
     readError = null; await refresh();
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(host.querySelector(".card-copy-editor")).toBe(editor); expect(title.value).toBe("조회 오류 사이에도 유지할 문구");
-    expect(mocks.guard.setDirty).toHaveBeenCalledWith("card-copy-2-9", true, expect.any(Function)); expect(writes()).toEqual([]);
+    expect(mocks.guard.setDirty).toHaveBeenCalledWith("card-copy-2-9", true, expect.any(Function), expect.any(Function)); expect(writes()).toEqual([]);
   });
 
   it("내용 검토와 최종 게시 확인을 구분하며 즉시 게시를 기본값으로 둔다", async () => {
@@ -185,19 +185,22 @@ describe("단일 콘텐츠 작업 공간", () => {
     expect(host.querySelector<HTMLInputElement>(".publish-confirm input")?.checked).toBe(false);
     expect(button("승인하고 예약 게시").disabled).toBe(true);
     const time = host.querySelector<HTMLInputElement>('input[type="datetime-local"]')!;
-    await input(time, "2020-01-01T12:30"); await confirm();
+    await input(time, "2020-01-01T12:30");
+    expect(host.querySelector<HTMLInputElement>(".publish-confirm input")?.disabled).toBe(true);
+    await click("게시 준비 저장"); await confirm();
     expect(button("승인하고 예약 게시").disabled).toBe(true);
     expect(host.textContent).toContain("현재보다 뒤의 시간을 선택해 주세요");
     await input(time, "2099-07-21T16:45");
     expect(host.querySelector<HTMLInputElement>(".publish-confirm input")?.checked).toBe(false);
-    await confirm(); expect(button("승인하고 예약 게시").disabled).toBe(false);
+    await click("게시 준비 저장"); await confirm(); expect(button("승인하고 예약 게시").disabled).toBe(false);
     const caption = [...host.querySelectorAll<HTMLLabelElement>("#publish-options label")].find(node => node.textContent?.includes("인스타그램 캡션"))!.querySelector<HTMLTextAreaElement>("textarea")!;
     await input(caption, "최종 확인한 예약 캡션");
     expect(host.querySelector<HTMLInputElement>(".publish-confirm input")?.checked).toBe(false);
-    expect(button("승인하고 예약 게시").disabled).toBe(true); expect(writes()).toEqual([]);
-    await click("캡션 저장");
+    expect(button("승인하고 예약 게시").disabled).toBe(true);
+    expect(writes().every(([path]) => path.endsWith("/publication-draft"))).toBe(true);
+    await click("게시 준비 저장");
     await confirm(); await click("승인하고 예약 게시");
     expect(mocks.api).toHaveBeenCalledWith(`${itemPath}/approve`, { method: "POST", body: expect.objectContaining({ timing: "later", scheduledAt: "2099-07-21T16:45:00+09:00", captions: { instagram: "최종 확인한 예약 캡션", telegram: "" } }) });
-    expect(writes()).toHaveLength(2);
+    expect(writes()).toHaveLength(4);
   });
 });

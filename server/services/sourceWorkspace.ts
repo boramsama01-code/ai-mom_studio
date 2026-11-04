@@ -18,7 +18,7 @@ export async function ensureSourceWorkspace(tx: Tx, itemId: number) {
   const key = studioKey(channel.slug);
   const content = studioContentSchema.parse({
     title: item.title.slice(0, 160), channel: key, format: "카드뉴스", stage: "writing",
-    ...(validSubcategory(key, item.subcategory) ? { subcategory: item.subcategory ?? "" } : {}),
+    ...(validSubcategory(key, item.subcategory, channel.categories) ? { subcategory: item.subcategory ?? "" } : {}),
   });
   const [created] = await tx.insert(studioCards).values({
     sourceItemId: item.id, content, importedMeta: { sourceWorkspace: true },

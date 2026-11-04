@@ -1,0 +1,27 @@
+.source-revision-history { min-width: 0; }
+.source-revision-history h3, .source-revision-history h4, .source-revision-history h5 { margin: 0; }
+.source-revision-history select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+.source-revision-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1rem; }
+.source-revision-summary label { display: flex; align-items: center; gap: .45rem; min-height: 44px; font-size: .85rem; }
+.source-revision-summary input { width: auto; }
+.source-revision-columns, .source-revision-values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; }
+.source-revision-columns { font-size: .85rem; padding: .5rem .75rem; }
+.source-revision-section { display: flex; flex-direction: column; gap: .65rem; min-width: 0; }
+.source-revision-section h4 { font-size: .95rem; }
+.source-revision-field { border: 1px solid var(--line, #dfe3e8); border-radius: 8px; overflow: hidden; }
+.source-revision-field h5 { padding: .45rem .75rem; font-size: .8rem; background: var(--surface-muted, #f4f6f8); }
+.source-revision-field.changed h5 { background: #fff7e8; color: #614413; }
+.source-revision-values { padding: .75rem; }
+.source-revision-values > div { min-width: 0; }
+.source-revision-values p { margin: .3rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; line-height: 1.65; }
+.source-revision-side { font-size: .72rem; color: var(--muted, #637082); }
+.source-revision-confirm p { margin: 0 0 .7rem; overflow-wrap: anywhere; }
+.source-revision-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+.source-revision-actions .btn, .source-revision-restore { min-height: 44px; white-space: normal; }
+@media (max-width: 600px) {
+  .source-revision-columns { display: none; }
+  .source-revision-values { grid-template-columns: minmax(0, 1fr); gap: .85rem; }
+  .source-revision-values > div + div { border-top: 1px solid var(--line, #dfe3e8); padding-top: .7rem; }
+  .source-revision-actions { flex-direction: column; }
+  .source-revision-actions .btn, .source-revision-restore { width: 100%; }
+}

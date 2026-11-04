@@ -1,7 +1,7 @@
 /**
  * 콘텐츠 payload → 카드 모델 / 캡션
  */
-import { cardBrandName } from "../../shared/branding";
+import { cardBrandName, channelBrandName } from "../../shared/branding";
 import type { CardModel } from "./card";
 import { formatScheduleLines } from "../../shared/format";
 
@@ -11,12 +11,13 @@ export function buildCardModel(args: {
   kind: string;
   payload: Any;
   channelName: string;
+  channelSlug?: string;
   accent: string;
   sourceOrg: string | null;
   checkedDate: string; // YYYY-MM-DD (KST)
 }): CardModel {
   const { kind, payload: p } = args;
-  const brandLine = cardBrandName(args.channelName);
+  const brandLine = args.channelSlug ? channelBrandName({ slug: args.channelSlug, name: args.channelName }) : cardBrandName(args.channelName);
   const footer = `출처: ${args.sourceOrg || "원문 확인 필요"} · 확인 ${args.checkedDate} · 자세한 내용은 캡션 참고`;
   if (kind === "science_dialogue") {
     return {

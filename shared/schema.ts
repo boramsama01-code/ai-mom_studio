@@ -10,6 +10,7 @@
 import { sql } from "drizzle-orm";
 import type { DiscoveryInfo, DiscoverySettings } from "./domain";
 import type { StudioContent } from "./studio";
+import type { PublicationDraft, StudioPublicationDraft } from "./publicationDraft";
 import {
   bigserial,
   boolean,
@@ -41,7 +42,9 @@ export const channels = pgTable("channels", {
   name: text("name").notNull(),
   description: text("description").notNull().default(""),
   audience: text("audience").notNull().default("중학생과 부모"),
-  contentType: text("content_type").notNull(), // notice | science_dialogue | current_dialogue
+  contentType: text("content_type").notNull(), // notice | science_dialogue | current_dialogue | manual
+  // null keeps the historical built-in defaults; [] intentionally disables categories.
+  categories: jsonb("categories").$type<string[] | null>(),
   accentColor: text("accent_color").notNull(),
   active: boolean("active").notNull().default(true),
   editorialGuide: text("editorial_guide").notNull().default(""),
@@ -205,7 +208,7 @@ export const contentItems = pgTable(
     extracted: jsonb("extracted").$type<Record<string, unknown> | null>(),
     edited: jsonb("edited").$type<Record<string, unknown> | null>(),
     // Saved publication copy is independent from an immutable approval snapshot.
-    publicationDraft: jsonb("publication_draft").$type<{ version: number; captions: { instagram: string; telegram: string } } | null>(),
+    publicationDraft: jsonb("publication_draft").$type<PublicationDraft | null>(),
     currentRevisionId: integer("current_revision_id"),
     nextActionAt: ts("next_action_at"),
     lastUsedAt: ts("last_used_at"),
@@ -551,6 +554,7 @@ export const studioCards = pgTable("studio_cards", {
   sourceItemId: integer("source_item_id").references(() => contentItems.id).unique(),
   externalId: text("external_id").unique(),
   importedMeta: jsonb("imported_meta").$type<Record<string, unknown>>(),
+  publicationDraft: jsonb("publication_draft").$type<StudioPublicationDraft | null>(),
   trashedAt: timestamp("trashed_at", { withTimezone: true }),
   createdAt: createdAt(), updatedAt: updatedAt(),
 });

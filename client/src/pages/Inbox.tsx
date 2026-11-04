@@ -16,6 +16,8 @@ import { CollectionPanel, useKstToday } from "../collection";
 import { isIdeaChannel, readIdea } from "@shared/ideaBank";
 import { InboxKeywords } from "./InboxKeywords";
 import { NOTICE_INTENTS, NOTICE_INTENT_LABEL, type NoticeIntent } from "@shared/noticeIntent";
+import { WorkModeControl, type WorkMode } from "../WorkModeControl";
+import { channelCategories } from "@shared/channelCategories";
 
 export type ListRow = {
   item: ContentItem;
@@ -43,7 +45,8 @@ const BODY_STATES: Record<string, { label: string; kind: "" | "ok" | "warn" | "e
 };
 
 export function InboxPage() {
-  const { selected, current } = useChannel();
+  const { selected, current, allChannels } = useChannel();
+  const [workMode, setWorkMode] = useState<WorkMode>("auto");
   const params = new URLSearchParams(useSearch());
   const today = useKstToday();
   const [followToday, setFollowToday] = useState(!params.has("collectedOn"));
@@ -65,7 +68,7 @@ export function InboxPage() {
   const [mode, setMode] = useState<"ideas" | "scraps">(() => params.has("collectedOn") || params.has("subcategory") || params.has("fetchStatus") ? "scraps" : "ideas");
   const ideas = isIdeaChannel(current) && mode === "ideas";
   const previousChannel = useRef(selected);
-  useEffect(() => { setPage(1); if (previousChannel.current !== selected) { setMode("ideas"); setF(old => ({ ...old, subcategory: "" })); previousChannel.current = selected; } }, [selected]);
+  useEffect(() => { setPage(1); if (previousChannel.current !== selected) { setMode("ideas"); setWorkMode("auto"); setF(old => ({ ...old, subcategory: "" })); previousChannel.current = selected; } }, [selected]);
   const noticeChannel = current?.contentType === "notice";
   const query = useQuery({
     queryKey: ["ch", selected, "items", f, page, ideas],
@@ -88,8 +91,12 @@ export function InboxPage() {
           <h1>수집함</h1>
           <p className="muted small">{current?.contentType === "manual" ? "아이디어를 골라 원고·카드뉴스·웹툰으로 이어가세요." : "자료를 고르고, 원문을 확인한 뒤 콘텐츠로 만드세요."}</p>
         </div>
-        {current && <GuardedLink className="btn sm" href={`/?start=experience&channel=${studioKey(current.slug)}`}>직접 다녀온 후기 쓰기</GuardedLink>}
+        {current && <GuardedLink className="btn sm" href={`/?start=free&channel=${studioKey(current.slug)}`}>새 콘텐츠 자동 제작</GuardedLink>}
       </div>
+      <WorkModeControl context="collect" mode={workMode} onChange={setWorkMode} />
+      {workMode === "auto" && current?.contentType === "manual" && <div className="notice small">이 채널은 직접 제작용입니다. 소재를 선택하거나 <GuardedLink href={`/?start=free&channel=${studioKey(current.slug)}`}>주제로 자동 제작</GuardedLink>을 시작하세요. 자료 자동 수집이 필요하면 <GuardedLink href="/settings">채널 설정</GuardedLink>에서 자료 유형을 지정하세요.</div>}
+      {workMode === "auto" && !ideas && current?.contentType !== "manual" && <CollectionPanel date={f.collectedOn || undefined} subcategory={f.subcategory} />}
+      {workMode === "manual" && <section className="panel stack" aria-label="수동 자료 작업"><h2>수동으로 이어서 만들기</h2><p className="small muted">자동 수집·생성의 한도나 연결 문제일 때 사용하세요. 아래 자료를 열어 본문을 직접 붙여넣거나, 완성한 이미지를 가져올 수 있습니다.</p><div className="row"><GuardedLink className="btn" href={`/?start=free${current ? `&channel=${studioKey(current.slug)}` : ""}&mode=manual`}>직접 원고 작성</GuardedLink><GuardedLink className="btn" href={`/?start=finished${current ? `&channel=${studioKey(current.slug)}` : ""}&mode=manual`}>완성 이미지 가져오기</GuardedLink></div></section>}
       {isIdeaChannel(current) && <div className="tabs inbox-modes" role="group" aria-label="수집함 자료 유형"><button aria-pressed={ideas} onClick={() => { setMode("ideas"); resetFilters(); }}>아이디어 100</button><button aria-pressed={!ideas} onClick={() => { setMode("scraps"); resetFilters(); }}>스크랩 자료</button></div>}
       {ideas && <p className="small muted idea-intro">소재를 선택하면 구성안과 참고 자료를 볼 수 있습니다. 제작 보드에서 원고와 이미지를 완성하세요.</p>}
       <form
@@ -110,7 +117,7 @@ export function InboxPage() {
           <button type="button" className="btn ghost" onClick={resetFilters}>필터 초기화</button>
         </div>
         <div className="row" style={{ alignItems: "flex-end", gap: 12, minWidth: 0 }}>
-          <div style={{ flex: "1 1 180px", minWidth: 0 }}><CategorySelect channel={current?.slug ?? "all"} value={f.subcategory} onChange={v => set("subcategory", v)} filter /></div>
+          <div style={{ flex: "1 1 180px", minWidth: 0 }}><CategorySelect channel={current?.slug ?? "all"} categories={current?.categories ?? (selected === "all" ? [...new Set((allChannels ?? []).flatMap(channel => channelCategories(channel.slug, channel.categories)))] : undefined)} value={f.subcategory} onChange={v => set("subcategory", v)} filter /></div>
           {!ideas && <label className="field" style={{ flex: "1 1 180px", minWidth: 0 }}>
             본문 상태
             <select aria-label="본문 상태" value={f.fetchStatus} onChange={e => set("fetchStatus", e.target.value)}>
@@ -190,7 +197,6 @@ export function InboxPage() {
       {(!ideas || current) && <details className="settings-details inbox-collection-options" style={{ margin: "0 0 16px", minWidth: 0 }}>
         <summary style={{ display: "list-item", listStylePosition: "inside" }}>수집 현황·설정 <span className="small muted" style={{ fontWeight: 400, marginLeft: 8 }}>지금 수집 · 키워드 관리</span></summary>
         <div className="stack" style={{ minWidth: 0, overflowWrap: "anywhere" }}>
-          {!ideas && <CollectionPanel date={f.collectedOn || undefined} subcategory={f.subcategory} />}
           {current && <InboxKeywords key={current.id} cid={current.id} kind={current.contentType} subcategory={f.subcategory} />}
         </div>
       </details>}

@@ -38,7 +38,7 @@ beforeEach(() => {
     item: { id: 9, channelId: 2, title: "하나의 제작 공간", kind: "science_dialogue", origin: "manual", version: 1, currentRevisionId: 4, reviewStatus: "reviewed", evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: {} },
     primary: null, linked: [], current: { id: 4, revisionNo: 1, author: "operator", payload: { title: "하나의 제작 공간" } }, revisions: [],
     cards: [{ id: 40, revisionId: 4, sha256: "fixture", createdAt: "2026-11-01T00:00:00Z", cloudinaryUrl: null }],
-    publicationDraft: { version: 1, captions: { instagram: "확인할 게시 캡션", telegram: "" } },
+    publicationDraft: { version: 1, captions: { instagram: "확인할 게시 캡션", telegram: "" }, options: { destinationIds: [20], timing: "now", scheduledAtKst: "" } },
     approvals: [], deliveries: [], similar: [], defaultCaptions: { instagram: "확인할 게시 캡션", telegram: "" },
     publicationReadiness: { ready: true, blockers: [], dryRun: false, autoPublish: true, dailyLimit: 3, expectedUsername: "highscoop.official", destinations: [{ id: 20, label: "@highscoop.official", platform: "instagram", configured: true }] },
   };
@@ -53,7 +53,7 @@ beforeEach(() => {
     if (path === "/canva/status") return { connected: false };
     if (path === `${itemPath}/publication-draft` && options?.method === "PATCH") {
       if (options.body.version !== detail.publicationDraft.version) throw new ApiError(409, "다른 곳에서 먼저 저장됨");
-      detail.publicationDraft = { version: options.body.version + 1, captions: structuredClone(options.body.captions) };
+      detail.publicationDraft = { version: options.body.version + 1, captions: structuredClone(options.body.captions), options: structuredClone(options.body.options) };
       return structuredClone(detail.publicationDraft);
     }
     if (path === itemPath) { if (readError) throw readError; return structuredClone(detail); }
@@ -97,7 +97,7 @@ async function confirm() { const checkbox = host.querySelector<HTMLInputElement>
 
 
 describe("actual editor channel scope preservation", () => {
- it("keeps the real detail query and card draft mounted when the list channel changes", async () => {
+ it("preserves the real card editor while a channel change is cancelled, then leaves only after explicit discard", async () => {
   localStorage.clear();
   await render();
   const title = host.querySelector<HTMLTextAreaElement>('.card-copy-editor textarea[id$="-title"]')!;
@@ -106,7 +106,16 @@ describe("actual editor channel scope preservation", () => {
   await act(async () => { selector.value = "3"; selector.dispatchEvent(new Event("change", { bubbles: true })); });
   await settle();
   const after = host.querySelector<HTMLTextAreaElement>('.card-copy-editor textarea[id$="-title"]')!;
-  console.log(JSON.stringify({sameNode: title === after, before: title.value, after: after?.value, dialog: !!host.querySelector('[role="dialog"]'), selected: selector.value, reads: mocks.api.mock.calls.filter(([path, opts]) => path === itemPath && !opts?.method).length}));
+  expect(host.querySelector('[role="dialog"]')).not.toBeNull(); expect(selector.value).toBe("all");
+  expect(mocks.navigate).not.toHaveBeenCalled();
+  await click("머무르기");
+  expect(after).toBe(title);
   expect(after.value).toBe("채널 범위를 바꿔도 지켜야 할 카드 문구");
+  expect(client.getQueryData(itemKey)).toMatchObject({ item: { id: 9 } });
+  await act(async () => { selector.value = "3"; selector.dispatchEvent(new Event("change", { bubbles: true })); }); await settle();
+  await click("버리고 이동");
+  expect(mocks.navigate).toHaveBeenCalledWith("/"); expect(selector.value).toBe("3");
+  expect(client.getQueryData(itemKey)).toMatchObject({ item: { id: 9 } });
+  expect(writes()).toEqual([]);
  });
 });

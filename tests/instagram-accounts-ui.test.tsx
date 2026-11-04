@@ -68,6 +68,38 @@ async function openTokenForm() {
 }
 
 describe("Instagram account connection states", () => {
+  it("shows a custom channel by slug, hides empty profile links and accepts its actual account name", async () => {
+    const custom: InstagramAccountRow = { channelId: 9, channelSlug: "custom-brand", channelName: "새로 추가한 채널", expectedUsername: "", destinations: [] };
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, options?: any) => {
+      if (path === "/studio/instagram/accounts") return Promise.resolve({ accounts: [...accounts, custom, { ...custom, channelId: 10, channelSlug: "other-brand", channelName: "다른 사용자 채널" }] });
+      if (path === "/studio/instagram/9/connect") { expect(options.body.username).toBe("custom.official"); return Promise.resolve({ username: "custom.official" }); }
+      return fallback(path, options);
+    });
+    await render(<InstagramAccounts channel="custom-brand" />);
+    expect(host.querySelectorAll("article.instagram-account")).toHaveLength(1); expect(host.textContent).toContain("새로 추가한 채널");
+    expect(host.querySelector('a[href="https://www.instagram.com//"]')).toBeNull();
+    await click("이 계정 연결하기");
+    const username = host.querySelector<HTMLInputElement>('input[placeholder="my.brand"]')!;
+    expect(username.readOnly).toBe(false);
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(username, "custom.official"); username.dispatchEvent(new Event("input", { bubbles: true })); });
+    await click("이미 발급한 토큰으로 연결"); await fillToken(); await click("계정 확인하고 연결");
+    expect(host.querySelector('a[href="https://www.instagram.com/custom.official/"]')).not.toBeNull();
+    expect(host.textContent).toContain("@custom.official · 계정·게시 권한 확인 완료");
+  });
+  it("sends an optional custom account name for an unambiguous OAuth connection", async () => {
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation((path: string, options?: any) => {
+      if (path === "/studio/instagram/accounts") return Promise.resolve({ accounts: [{ channelId: 9, channelSlug: "custom-brand", channelName: "새 채널", expectedUsername: "", destinations: [] }] });
+      if (path === "/studio/instagram/9/oauth/start") return new Promise(() => {}); // no external navigation
+      return fallback(path, options);
+    });
+    await render(<InstagramAccounts channelId={9} />); await click("이 계정 연결하기");
+    const username = host.querySelector<HTMLInputElement>('input[placeholder="my.brand"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(username, "@custom.official"); username.dispatchEvent(new Event("input", { bubbles: true })); });
+    await click("Instagram으로 연결");
+    expect(mocks.api).toHaveBeenCalledWith("/studio/instagram/9/oauth/start", { method: "POST", body: { username: "custom.official" } });
+  });
   it("keeps sanitized OAuth diagnostics visible after removing the query string", async () => {
     window.history.replaceState(null, "", "/instagram?instagram=error&reason=direct_account_access_failed&stage=business_asset&http_status=400&graph_code=100&graph_subcode=33&lost=false&code=PRIVATE_CODE&state=PRIVATE_STATE");
     await render(<InstagramConnectionsPage />);

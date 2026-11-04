@@ -38,7 +38,7 @@ function itemFixture() {
     cards: [{ id: 40, revisionId: 4, sha256: "test", createdAt: past, cloudinaryUrl: null }],
     approvals: [{ id: 10, revisionId: 4, scheduledAt: past, status: "active" }],
     deliveries: [{ d: { id: 100, approvalId: 10, status: "scheduled", lastError: null, externalUrl: null, completedAt: null }, dest: { label: "@highscoop.official", platform: "instagram" } }],
-    publicationDraft: { version: 1, captions: { instagram: "확인한 캡션", telegram: "" } },
+    publicationDraft: { version: 1, captions: { instagram: "확인한 캡션", telegram: "" }, options: { destinationIds: [20], timing: "now", scheduledAtKst: "" } },
     similar: [], defaultCaptions: { instagram: "확인한 캡션", telegram: "" },
     publicationReadiness: { ready: true, blockers: [], dryRun: false, autoPublish: true, dailyLimit: 3, expectedUsername: "highscoop.official", destinations: [{ id: 20, label: "@highscoop.official", platform: "instagram", configured: true }] },
   };
@@ -104,7 +104,7 @@ describe("승인 저장과 실제 전송의 구분", () => {
     mocks.guard.confirmLeave.mockClear();
     await goTo("전송 상태");
     expect(mocks.guard.confirmLeave).not.toHaveBeenCalled();
-    expect(mocks.guard.setDirty).toHaveBeenCalledWith("card-copy-2-9", true, expect.any(Function));
+    expect(mocks.guard.setDirty).toHaveBeenCalledWith("card-copy-2-9", true, expect.any(Function), expect.any(Function));
     expect(host.querySelector("#delivery-panel")).not.toBeNull();
     expect(host.querySelector("#card-panel")).toBe(editor);
     expect(host.querySelector<HTMLTextAreaElement>('.card-copy-editor textarea[id$="-title"]')?.value).toBe("저장하기 전 입력");

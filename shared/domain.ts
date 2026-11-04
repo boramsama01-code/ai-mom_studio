@@ -27,7 +27,9 @@ export const CHANNEL_SEEDS = [
   },
 ] as const;
 
-export type ChannelSlug = (typeof CHANNEL_SEEDS)[number]["slug"];
+export type BuiltinChannelSlug = (typeof CHANNEL_SEEDS)[number]["slug"];
+/** Channel identity comes from the persisted directory; seeds are examples. */
+export type ChannelSlug = string;
 export type ContentKind = "notice" | "science_dialogue" | "current_dialogue";
 
 export const DEFAULT_BUDGET = {

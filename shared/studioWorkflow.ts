@@ -13,6 +13,7 @@ export function studioInstruction(input: Pick<StudioGeneration, "kind" | "textTa
   if (input.instruction.trim()) return input.instruction.trim();
   if (input.kind === "image") return "작성된 장면과 대사의 상황·감정을 바탕으로 이 컷을 그려 주세요. 대사는 그림에 넣지 않습니다.";
   if (input.textTarget === "caption") return "이미 작성된 원고와 컷 구성에 맞는 짧고 자연스러운 게시용 캡션을 작성해 주세요. 새로운 사실은 추가하지 마세요.";
+  if (input.textTarget === "panel") return "선택한 한 컷의 장면과 문구만 전체 흐름에 맞게 다듬어 주세요. 다른 컷의 내용과 새로운 사실을 추가하지 마세요.";
   return "제목·기획·기존 원고와 대사를 바탕으로 원고, 네 컷의 장면·대사, 캡션의 빈칸만 완성해 주세요. 이미 쓴 내용은 그대로 유지하세요.";
 }
 

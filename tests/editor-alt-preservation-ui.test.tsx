@@ -8,6 +8,7 @@ import { emptyPayload, payloadSchemaFor } from "../shared/payloads";
 import { ApiError } from "../client/src/api";
 import { DirtyGuardProvider } from "../client/src/state";
 import { DirtyModal } from "../client/src/ui";
+import { activateDraftRecoveryScope, readDraftRecovery } from "../client/src/draftRecovery";
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn(), blob: vi.fn(), navigate: vi.fn(), toast: vi.fn(),
@@ -34,7 +35,7 @@ function source(fetchStatus = "not_fetched", fetchedText: string | null = null, 
   return { id: 70, kind: "rss_direct", title: "선택한 원문", originalUrl: "https://example.com/article", meta: {}, fetchStatus, fetchedText, snippet: "목록에서 받은 짧은 요약", attachments: [], isSample, publishedAt: "2026-11-01T00:00:00Z", publishedPrecision: "day", publishedRaw: null, lastFetchedAt: null };
 }
 beforeEach(() => {
-  vi.clearAllMocks(); altValues.clear(); readError = null; sourceLoad = async () => ({ changed: false });
+  vi.clearAllMocks(); localStorage.clear(); altValues.clear(); readError = null; sourceLoad = async () => ({ changed: false });
   detail = {
     item: { id: 9, channelId: 2, title: "하나의 제작 공간", kind: "science_dialogue", origin: "manual", version: 1, currentRevisionId: 4, reviewStatus: "reviewed", evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: {} },
     primary: null, linked: [], current: { id: 4, revisionNo: 1, author: "operator", payload: { title: "하나의 제작 공간" } }, revisions: [],
@@ -102,6 +103,20 @@ async function confirm() { const checkbox = host.querySelector<HTMLInputElement>
 
 
 describe("asset selection protects alternative text", () => {
+ it("recovers unsaved alt text after remount and keeps approval blocked until it is saved", async () => {
+  const scope="alt-text-recovery-test-session";activateDraftRecoveryScope(scope);client.setQueryData(["me"],{user:"operator",recoveryScope:scope});
+  await render();await open("게시 준비");
+  await input(host.querySelector<HTMLTextAreaElement>(".alt-text-editor textarea")!,"닫기 전에 작성한 카드의 새로운 설명입니다.");
+  await render(null);await render();await open("게시 준비");
+  expect(host.querySelector<HTMLTextAreaElement>(".alt-text-editor textarea")!.value).toBe("원래 저장된 이미지 설명입니다.");
+  expect(host.querySelector<HTMLTextAreaElement>(".alt-text-editor textarea")!.disabled).toBe(true);
+  await click("복구본을 편집기에 불러오기");
+  expect(host.querySelector<HTMLTextAreaElement>(".alt-text-editor textarea")!.value).toBe("닫기 전에 작성한 카드의 새로운 설명입니다.");
+  expect(writes()).toHaveLength(0);
+  await click("대체텍스트 저장");
+  expect(writes()).toHaveLength(1);expect(writes()[0][0]).toBe("/channels/2/media/40/alt-text");
+  expect(readDraftRecovery(scope,"media:2:40:alt-text",value=>value as any)).toEqual({ok:true,value:null});
+ });
  it("asks before changing candidates, stays after cancellation and saves before switching", async () => {
   detail.cards.push({...structuredClone(detail.cards[0]), id: 50});
   await render();

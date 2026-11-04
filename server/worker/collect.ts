@@ -71,7 +71,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   if (!channel.active) throw new Error("보관된 채널 — 수집하지 않음");
   if (await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태 — 수집하지 않음");
 
-  if (!validSubcategory(channel.slug, opts.subcategory)) throw new Error("이 채널의 소분류를 선택해 주세요.");
+  if (!validSubcategory(channel.slug, opts.subcategory, channel.categories)) throw new Error("이 채널의 소분류를 선택해 주세요.");
   const rules = await db
     .select()
     .from(searchRules)

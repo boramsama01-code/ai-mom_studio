@@ -64,39 +64,43 @@ const ruleCreate = z.object({
 });
 
 async function insertRules(channelId: number, items: Array<{ query: string; endpoint: string } & Record<string, unknown>>, actor: string) {
-  const db = getDb();
-  const created: unknown[] = [];
-  const duplicates: Array<{ query: string; endpoint: string }> = [];
-  for (const it of items) {
-    const q = cleanQuery(it.query);
-    if (!q) continue;
-    if (/\b(OR|AND)\b|\|/.test(q)) {
-      // 불리언 문법은 네이버 검색에서 그대로 글자로 처리되므로 경고만(자동 삽입하지 않음)
+  return getDb().transaction(async db => {
+    const [ch] = await db.select().from(channels).where(eq(channels.id, channelId)).for("share");
+    if (!ch) throw new HttpError(404, "채널을 찾을 수 없습니다.");
+    const created: unknown[] = [];
+    const duplicates: Array<{ query: string; endpoint: string }> = [];
+    for (const it of items) {
+      if (!validSubcategory(ch.slug, it.subcategory as string | null | undefined, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
+      const q = cleanQuery(it.query);
+      if (!q) continue;
+      if (/\b(OR|AND)\b|\|/.test(q)) {
+        // 불리언 문법은 네이버 검색에서 그대로 글자로 처리되므로 경고만(자동 삽입하지 않음)
+      }
+      const inserted = await db
+        .insert(searchRules)
+        .values({
+          channelId,
+          query: q,
+          normalizedQuery: normalizeQuery(q),
+          endpoint: it.endpoint,
+          subcategory: (it.subcategory as string | null | undefined) ?? null,
+          categoryHint: (it.categoryHint as string | null | undefined) ?? null,
+          enabled: (it.enabled as boolean | undefined) ?? true,
+          priority: (it.priority as number | undefined) ?? 100,
+          display: (it.display as number | undefined) ?? 10,
+          excludeTerms: (it.excludeTerms as string[] | undefined) ?? [],
+          excludeScope: (it.excludeScope as string | undefined) ?? "title",
+          memo: (it.memo as string | undefined) ?? "",
+        })
+        .onConflictDoNothing()
+        .returning();
+      if (inserted.length) {
+        created.push(inserted[0]);
+        await audit(db, { actor, action: "create", entity: "search_rule", entityId: inserted[0].id, channelId, detail: { query: q, endpoint: it.endpoint } });
+      } else duplicates.push({ query: q, endpoint: it.endpoint });
     }
-    const inserted = await db
-      .insert(searchRules)
-      .values({
-        channelId,
-        query: q,
-        normalizedQuery: normalizeQuery(q),
-        endpoint: it.endpoint,
-        subcategory: (it.subcategory as string | null | undefined) ?? null,
-        categoryHint: (it.categoryHint as string | null | undefined) ?? null,
-        enabled: (it.enabled as boolean | undefined) ?? true,
-        priority: (it.priority as number | undefined) ?? 100,
-        display: (it.display as number | undefined) ?? 10,
-        excludeTerms: (it.excludeTerms as string[] | undefined) ?? [],
-        excludeScope: (it.excludeScope as string | undefined) ?? "title",
-        memo: (it.memo as string | undefined) ?? "",
-      })
-      .onConflictDoNothing()
-      .returning();
-    if (inserted.length) {
-      created.push(inserted[0]);
-      await audit(db, { actor, action: "create", entity: "search_rule", entityId: inserted[0].id, channelId, detail: { query: q, endpoint: it.endpoint } });
-    } else duplicates.push({ query: q, endpoint: it.endpoint });
-  }
-  return { created, duplicates };
+    return { created, duplicates };
+  });
 }
 
 ruleRoutes.post(
@@ -104,7 +108,7 @@ ruleRoutes.post(
   ah(async (req, res) => {
     const ch = await loadChannel(req.params.cid);
     const body = parse(ruleCreate, req.body);
-    if (!validSubcategory(ch.slug, body.subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
+    if (!validSubcategory(ch.slug, body.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     const { endpoints, ...rest } = body;
     const r = await insertRules(ch.id, endpoints.map((e) => ({ ...rest, endpoint: e })), actorOf(req));
     if (!r.created.length) throw new HttpError(409, "같은 검색어가 이미 등록되어 있습니다.", { duplicates: r.duplicates });
@@ -178,7 +182,7 @@ ruleRoutes.patch(
     const ch = await loadChannel(req.params.cid);
     const id = intParam(req.params.id);
     const body = parse(rulePatch, req.body);
-    if (!validSubcategory(ch.slug, body.subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
+    if (!validSubcategory(ch.slug, body.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     const db = getDb();
     const [cur] = await db.select().from(searchRules).where(and(eq(searchRules.id, id), eq(searchRules.channelId, ch.id)));
     if (!cur) throw new HttpError(404, "검색어를 찾을 수 없습니다.");
@@ -189,20 +193,25 @@ ruleRoutes.patch(
       patch.query = cleanQuery(query);
       patch.normalizedQuery = normalizeQuery(query);
     }
-    let updated;
-    try {
-      updated = await db
-        .update(searchRules)
-        .set({ ...patch, version: sql`${searchRules.version} + 1`, updatedAt: new Date() })
-        .where(and(eq(searchRules.id, id), eq(searchRules.version, version)))
-        .returning();
-    } catch (e) {
-      if ((e as { cause?: { code?: string } }).cause?.code === "23505" || (e as { code?: string }).code === "23505") throw new HttpError(409, "같은 검색어가 이미 등록되어 있습니다.");
-      throw e;
-    }
-    if (!updated.length) conflict(cur);
-    await audit(db, { actor: actorOf(req), action: "update", entity: "search_rule", entityId: id, channelId: ch.id, detail: { before: { query: cur.query, endpoint: cur.endpoint, enabled: cur.enabled }, fields: Object.keys(patch) } });
-    res.json(updated[0]);
+    const saved = await db.transaction(async tx => {
+      const [freshChannel] = await tx.select().from(channels).where(eq(channels.id, ch.id)).for("share");
+      if (!validSubcategory(freshChannel.slug, body.subcategory, freshChannel.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
+      let updated;
+      try {
+        updated = await tx
+          .update(searchRules)
+          .set({ ...patch, version: sql`${searchRules.version} + 1`, updatedAt: new Date() })
+          .where(and(eq(searchRules.id, id), eq(searchRules.version, version)))
+          .returning();
+      } catch (e) {
+        if ((e as { cause?: { code?: string } }).cause?.code === "23505" || (e as { code?: string }).code === "23505") throw new HttpError(409, "같은 검색어가 이미 등록되어 있습니다.");
+        throw e;
+      }
+      if (!updated.length) conflict(cur);
+      await audit(tx, { actor: actorOf(req), action: "update", entity: "search_rule", entityId: id, channelId: ch.id, detail: { before: { query: cur.query, endpoint: cur.endpoint, enabled: cur.enabled }, fields: Object.keys(patch) } });
+      return updated[0];
+    });
+    res.json(saved);
   }),
 );
 

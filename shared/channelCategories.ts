@@ -8,10 +8,12 @@ export const CHANNEL_CATEGORIES: Record<string, readonly string[]> = {
   penguin: ["웹툰"],
 };
 export const UNCLASSIFIED = "미분류";
-export function channelCategories(channel: string): readonly string[] {
-  return channel === "all" ? [...new Set(Object.values(CHANNEL_CATEGORIES).flat())] : CHANNEL_CATEGORIES[studioKey(channel)] ?? [];
+export function channelCategories(channel: string, configured?: readonly string[] | null): readonly string[] {
+  if (configured !== undefined && configured !== null) return configured;
+  const key = studioKey(channel);
+  return channel === "all" ? [...new Set(Object.values(CHANNEL_CATEGORIES).flat())] : Object.hasOwn(CHANNEL_CATEGORIES, key) ? CHANNEL_CATEGORIES[key] : [];
 }
-export function validSubcategory(channel: string, value?: string | null): boolean {
-  return !value || channelCategories(channel).includes(value);
+export function validSubcategory(channel: string, value?: string | null, configured?: readonly string[] | null): boolean {
+  return !value || channelCategories(channel, configured).includes(value);
 }
 export function categoryLabel(value?: string | null): string { return value || UNCLASSIFIED; }

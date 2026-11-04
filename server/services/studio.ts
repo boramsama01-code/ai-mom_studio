@@ -97,33 +97,44 @@ export async function saveStudioNotes(db: DB, version: number, notes: string) {
   });
 }
 function validateStudioMode(content: StudioContent) {
-  if (!validSubcategory(content.channel, content.subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
   if (content.finishedDeck && (content.experience || content.format !== "카드뉴스")) throw new HttpError(400, "완성 이미지는 카드뉴스 형식으로 사용해 주세요.");
 }
 export async function validateStudioImages(db: DB, cardId: number, content: StudioContent) {
   validateStudioMode(content);
+  // Reading/continuing an existing card remains possible for an archived brand.
+  // A shared channel lock serializes label assignment with category settings.
+  const ch = await validateStudioChannel(db, content.channel, false);
+  if (!validSubcategory(content.channel, content.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
   const ids = [...new Set([...content.panels.flatMap(p => p.imageId ? [p.imageId] : []), ...(content.finishedDeck?.pages.map(p => p.imageId) ?? [])])];
   if (!ids.length) return;
   const own = await db.select({ id: studioImages.id }).from(studioImages).where(and(eq(studioImages.cardId, cardId), inArray(studioImages.id, ids)));
   if (own.length !== ids.length) throw new HttpError(400, "이 콘텐츠에 속한 이미지만 사용할 수 있습니다.");
 }
-export async function validateStudioChannel(db: DB, key: string) {
-  const [ch] = await db.select({ id: channels.id, active: channels.active }).from(channels).where(eq(channels.slug, channelSlug(key)));
+export async function validateStudioChannel(db: DB, key: string, requireActive = true) {
+  const [ch] = await db.select().from(channels).where(eq(channels.slug, channelSlug(key))).for("share");
   if (!ch) throw new HttpError(400, normalizeStudioChannel(key) === "highscoop" ? "Highscoop 기본 채널을 먼저 추가해 주세요." : "채널을 먼저 추가해 주세요.");
-  if (!ch.active) throw new HttpError(409, "보관된 채널입니다. 채널을 복원한 뒤 새 작업을 시작하세요.");
+  if (requireActive && !ch.active) throw new HttpError(409, "보관된 채널입니다. 채널을 복원한 뒤 새 작업을 시작하세요.");
+  return ch;
 }
 export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number) {
   validateStudioMode(content);
-  await validateStudioChannel(db, content.channel);
   if (content.experience && (content.experience.media.length || content.experience.coverId || content.experience.pages.some(p=>p.mediaId))) throw new HttpError(400, "새 작업을 만든 뒤 사진·영상을 올려 주세요.");
   if (content.finishedDeck?.pages.length || content.panels.some(p => p.imageId)) throw new HttpError(400, "새 콘텐츠에는 기존 이미지 ID를 넣을 수 없습니다.");
   return db.transaction(async tx => {
+    const ch = await validateStudioChannel(tx as unknown as DB, content.channel);
+    if (!validSubcategory(content.channel, content.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     if (sourceItemId) {
       const [source] = await tx.select().from(contentItems).where(eq(contentItems.id, sourceItemId));
       if (!source) throw new HttpError(404, "연결할 수집 콘텐츠가 없습니다.");
+      if (source.channelId !== ch.id) {
+        const [sourceChannel] = await tx.select({ slug: channels.slug }).from(channels).where(eq(channels.id, source.channelId));
+        // Historical science-dialogue rows remain importable into their merged
+        // news channel, but an unrelated custom brand can never adopt them.
+        if (!sourceChannel || channelSlug(sourceChannel.slug) !== ch.slug) throw new HttpError(400, "선택한 채널에 속한 수집 콘텐츠만 가져올 수 있습니다.");
+      }
       const [existing] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, sourceItemId));
       if (existing) { assertStudioActive(existing); return studioCardDto(existing); }
-      if (!content.subcategory && validSubcategory(content.channel, source.subcategory)) content = { ...content, subcategory: source.subcategory ?? "" };
+      if (!content.subcategory && validSubcategory(content.channel, source.subcategory, ch.categories)) content = { ...content, subcategory: source.subcategory ?? "" };
       const idea = readIdea(source.edited);
       if (idea && source.origin === "idea") {
         content = { ...content, format: idea.format, exportDesign: idea.format === "카드뉴스" ? "set:f01" : content.exportDesign,
@@ -196,8 +207,10 @@ export async function queueStudioGeneration(db: DB, cardId: number, input: Studi
       if (!e.notes.trim()) throw new HttpError(400,"직접 경험한 내용을 한 줄 이상 적어 주세요.");
       await validateExperienceMedia(tx as unknown as DB,cardId,e);
     }
-    if (input.kind === "image" && !input.instruction && !card.content.panels[input.panelIndex!].scene.trim() && !card.content.panels[input.panelIndex!].dialogue.trim()) {
-      throw new HttpError(400, "이 컷의 장면이나 대사를 먼저 작성해 주세요. 빈칸 초안 채우기도 사용할 수 있습니다.");
+    if (input.kind === "image") {
+      const indexes = input.panelIndexes ?? [input.panelIndex!];
+      const empty = indexes.find(index => !input.instruction && !card.content.panels[index].scene.trim() && !card.content.panels[index].dialogue.trim());
+      if (empty !== undefined) throw new HttpError(400, `${empty + 1}컷의 장면이나 대사를 먼저 작성해 주세요. 빈칸 초안 채우기도 사용할 수 있습니다.`);
     }
     const queued = await enqueueJob(tx as unknown as DB, {
       type: "studio_generate", maxAttempts: 1, dedupeKey: `studio:${cardId}`, requestedBy: actor,

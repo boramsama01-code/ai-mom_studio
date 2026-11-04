@@ -4,17 +4,21 @@ import { useLocation } from "wouter";
 import { api, setCsrf } from "./api";
 import { enterFromPrivateLink } from "./privateLink";
 import type { Channel } from "@shared/schema";
+import { activateDraftRecoveryScope } from "./draftRecovery";
 
 /* ───────────── 인증 ───────────── */
-export type Me = { user: string | null; demo: boolean; csrf: string | null; authConfigured: boolean; demoAllowed: boolean };
+export type Me = { user: string | null; demo: boolean; csrf: string | null; authConfigured: boolean; demoAllowed: boolean; recoveryScope?: string | null };
 
 export function useMe() {
   return useQuery({
     queryKey: ["me"],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       await enterFromPrivateLink();
-      const me = await api<Me>("/auth/me");
+      signal.throwIfAborted();
+      const me = await api<Me>("/auth/me", { signal });
+      signal.throwIfAborted();
       setCsrf(me.csrf);
+      activateDraftRecoveryScope(me.user ? me.recoveryScope ?? null : null);
       return me;
     },
     staleTime: 60_000,
@@ -28,6 +32,8 @@ type ChannelCtx = {
   selected: "all" | number;
   current: Channel | null; // '전체'면 null
   isLoading: boolean;
+  error: Error | null;
+  refresh: () => void;
   select: (v: "all" | number) => void;
 };
 const Ctx = createContext<ChannelCtx | null>(null);
@@ -48,40 +54,37 @@ function readStored(): "all" | number | null {
 }
 
 export function ChannelProvider({ children }: { children: ReactNode }) {
-  const { data: allChannels = [], isLoading } = useQuery({ queryKey: ["channels"], queryFn: () => api<Channel[]>("/channels") });
+  const { data: allChannels = [], isLoading, error, refetch } = useQuery({ queryKey: ["channels"], queryFn: () => api<Channel[]>("/channels") });
   const channels = useMemo(() => allChannels.filter(c => c.active), [allChannels]);
   const [stored, setSelected] = useState<"all" | number | null>(readStored);
   const guard = useDirtyGuard();
-  const [path] = useLocation();
-  // 목록의 조회 범위는 모든 화면에서 공유한다. 새 콘텐츠의 채널은 작성 폼에서 정한다.
+  const [path, navigate] = useLocation();
+  // Channel-aware lists keep their section; editors/settings return to the selected content list.
   const selected: "all" | number =
     stored !== null && stored !== "all" && channels.some((c) => c.id === stored) ? stored : "all";
   const select = useCallback(
     (v: "all" | number) => {
       if (v === selected || (v !== "all" && !channels.some(c => c.id === v))) return;
       const applySelection = () => {
-        // The selected channel scopes list query keys. Evicting active detail
-        // queries here unmounts editors and destroys their unsaved input.
+        // Keep detail caches intact. The guard finishes saving/discarding before navigation unmounts them.
         setSelected(v);
         try {
           localStorage.setItem("spacepenguin.channel", String(v));
         } catch {
           /* 저장 불가 환경 무시 */
         }
+        if (!["/", "/inbox", "/publish", "/today", "/runs", "/rules", "/design"].includes(path)) navigate("/");
       };
-      // Detail routes own their channel. Changing the list scope does not leave or
-      // retarget that editor, so its unsaved-edit guard must stay registered.
-      if (/^\/(?:studio\/\d+|items\/\d+\/\d+)\/?$/.test(path)) applySelection();
-      else guard.confirmLeave(applySelection);
+      guard.confirmLeave(applySelection);
     },
-    [guard, selected, channels, path],
+    [guard, selected, channels, path, navigate],
   );
   const current = selected === "all" ? null : channels.find((c) => c.id === selected) ?? null;
   useEffect(() => {
     document.documentElement.style.setProperty("--channel-accent", current?.accentColor ?? "#287b76");
     document.documentElement.style.setProperty("--channel-tint", hexA(current?.accentColor ?? "#287b76", 0.1));
   }, [current]);
-  const value = useMemo(() => ({ channels, allChannels, selected, current, isLoading, select }), [channels, allChannels, selected, current, isLoading, select]);
+  const value = useMemo(() => ({ channels, allChannels, selected, current, isLoading, error, refresh: () => { void refetch(); }, select }), [channels, allChannels, selected, current, isLoading, error, refetch, select]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

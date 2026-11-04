@@ -1,6 +1,6 @@
 import { altTextError, altTextFile, studioAltTexts } from "../../shared/altText";
 import { checkExperienceExport, createExperienceRenderer } from "./experienceExport";
-import { cardBrandName } from "../../shared/branding";
+import { channelBrandName } from "../../shared/branding";
 import sharp, { type OverlayOptions } from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import type { Font } from "opentype.js";
@@ -87,7 +87,7 @@ export async function renderStudioOutput(db: DB, cardId: number, requestedVersio
   if (check.errors.length) throw new HttpError(400, check.errors[0].message, { errors: check.errors });
   const [channel] = await db.select().from(channels).where(eq(channels.slug, channelSlug(content.channel)));
   const accent = /^#[a-f\d]{6}$/i.test(channel?.accentColor ?? "") ? channel!.accentColor : "#285f6a";
-  const brand = cardBrandName(channel?.name ?? "우주펭귄상회");
+  const brand = channel ? channelBrandName(channel) : "우주펭귄상회";
   const images = new Map<number, Buffer>();
   if (content.finishedDeck) {
     for (const p of content.finishedDeck.pages) {

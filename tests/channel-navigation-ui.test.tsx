@@ -86,20 +86,36 @@ describe("one persistent channel scope", () => {
     expect(selector().value).toBe("all");
     save.mockResolvedValueOnce(false); await choose("2"); await click("저장하고 이동");
     expect(save).toHaveBeenCalledOnce(); expect(selector().value).toBe("all");
+    expect(mocks.navigate).not.toHaveBeenCalled();
     await choose("2"); await click("저장하고 이동");
     expect(selector().value).toBe("2");
   });
 
-  it("does not retarget or discard a detail editor when its list scope changes", async () => {
+  it("asks before leaving a detail editor and then opens the chosen channel's canonical list", async () => {
     mocks.path = "/studio/11";
+    const preserved = { item: { id: 11 }, payload: "이미 캐시에 있는 저장 원고" };
+    client.setQueryData(["studio", "card", 11], preserved);
     await render(); await click("미저장 입력"); await choose("2");
-    expect(selector().value).toBe("2");
-    expect(host.querySelector('[role="dialog"]')).toBeNull();
-    expect(save).not.toHaveBeenCalled();
-    await click("작업 나가기");
+    expect(selector().value).toBe("all");
     expect(host.querySelector('[role="dialog"]')?.textContent).toContain("저장하지 않은 변경");
-    expect(leave).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
     await click("머무르기");
-    expect(leave).not.toHaveBeenCalled();
+    expect(selector().value).toBe("all"); expect(mocks.navigate).not.toHaveBeenCalled();
+    await choose("2"); await click("저장하고 이동");
+    expect(selector().value).toBe("2"); expect(save).toHaveBeenCalledOnce();
+    expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith("/");
+    expect(client.getQueryData(["studio", "card", 11])).toEqual(preserved);
+  });
+
+  it.each(["/inbox", "/publish", "/today", "/runs", "/rules", "/design"])("keeps the channel-aware section %s while changing its query scope", async path => {
+    mocks.path = path; await render(); await choose("2");
+    expect(selector().value).toBe("2"); expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it.each(["/items/1/8", "/settings", "/instagram"])("moves from %s to the selected content list without evicting queries", async path => {
+    mocks.path = path; client.setQueryData(["ch", 1, "item", 8], { saved: "보존" });
+    await render(); await choose("2");
+    expect(selector().value).toBe("2"); expect(mocks.navigate).toHaveBeenCalledWith("/");
+    expect(client.getQueryData(["ch", 1, "item", 8])).toEqual({ saved: "보존" });
   });
 });

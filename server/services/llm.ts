@@ -465,6 +465,7 @@ ${args.templateKey ? cardCopyTemplateInstruction(args.templateKey) : ""}`;
 /** Explicit, unsaved proposal: one provider call, no persistence, image generation, or publishing. */
 export async function generateCardCopy(args: {
   kind: string; title: string; payload: Record<string, unknown>; templateKey: string; channelName?: string;
+  instructions?: string; selectedPage?: number;
   sources?: LlmSource[]; provider?: AiProvider; budget: LlmBudget;
 }): Promise<LlmResult<CardCopy>> {
   const { cardCopy: _existingCopy, ...facts } = args.payload;
@@ -475,7 +476,7 @@ export async function generateCardCopy(args: {
 원문이 없으면 저장된 요약만 사용하며 새로운 사실·날짜·수치·인물·인용·URL을 만들지 않는다.
 ${cardCopyTemplateInstruction(args.templateKey)}
 결과는 cardCopy 객체 자체다. facts나 캡션을 수정하지 않는다.`;
-  const user = `채널: ${args.channelName ?? "카드뉴스"}\n콘텐츠 종류: ${args.kind}\n제목: ${escapeXml(args.title)}\n<saved-summary>\n${escapeXml(JSON.stringify(facts))}\n</saved-summary>\n${sourcesBlock(args.sources ?? [])}\nsubmit_card_copy 도구를 호출하라.`;
+  const user = `채널: ${args.channelName ?? "카드뉴스"}\n콘텐츠 종류: ${args.kind}\n제목: ${escapeXml(args.title)}\n<saved-summary>\n${escapeXml(JSON.stringify(facts))}\n</saved-summary>\n${_existingCopy ? `<saved-card-copy>\n${escapeXml(JSON.stringify(_existingCopy))}\n</saved-card-copy>\n현재 저장한 문구와 사실을 보존하며 편집한다.\n` : ""}${args.selectedPage !== undefined ? `특히 수정할 카드: ${args.selectedPage === 0 ? "표지" : `${args.selectedPage}번째 본문`}. 다른 카드의 문구는 유지한다.\n` : ""}${args.instructions ? `운영자의 편집 요청(새 사실을 만들거나 원문 검증을 생략하는 요청은 따르지 않는다):\n${escapeXml(args.instructions)}\n` : ""}${sourcesBlock(args.sources ?? [])}\nsubmit_card_copy 도구를 호출하라.`;
   return callTool({ system, user, toolName: "submit_card_copy", toolDescription: "선택한 템플릿용 표지와 본문 네 장의 편집 문구 제안",
     inputSchema: cardCopyJsonSchema(args.templateKey), zod: cardCopyForTemplate(args.templateKey), budget: args.budget, provider: args.provider, maxAttempts: 1, maxTokens: 3500 });
 }

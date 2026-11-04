@@ -16,3 +16,9 @@ export function cardBrandName(name: string): string {
   return clean;
 }
 
+/** Historical display-name normalization belongs only to the built-in channel IDs. */
+export function channelBrandName(channel: { slug: string; name: string }): string {
+  const builtIn = ["penguin", "fryday", "opportunities", "highscoop", "highway", "current-dialogue", "science-dialogue", "news"].includes(channel.slug);
+  return builtIn ? cardBrandName(channel.name) : channel.name.trim();
+}
+

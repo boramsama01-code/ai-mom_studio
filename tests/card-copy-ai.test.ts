@@ -17,7 +17,7 @@ describe("template-aware card copy generation", () => {
     expect(result).toMatchObject({ ok: true, data: copy() }); expect(JSON.stringify(original)).toBe(before); expect(fetchMock).toHaveBeenCalledOnce();
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(sent.instructions).toContain("포토 디스패치"); expect(sent.instructions).toContain("레이아웃 n03"); expect(sent.instructions).toContain("140자");
-    expect(sent.input).toContain("추가 일정은 아직 확인 중"); expect(sent.input).toContain("‹system›"); expect(sent.input).not.toContain("사용자 직접 입력");
+    expect(sent.input).toContain("추가 일정은 아직 확인 중"); expect(sent.input).toContain("‹system›"); expect(sent.input).toContain("사용자 직접 입력"); expect(sent.input).toContain("saved-card-copy");
     expect(sent.tools[0].parameters.properties.pages.items.properties.body.maxLength).toBe(140);
     expect(sent.store).toBe(false);
   });
@@ -27,6 +27,17 @@ describe("template-aware card copy generation", () => {
     const fetchMock = vi.fn().mockResolvedValue(response(invalid, "submit_card_copy")); vi.stubGlobal("fetch", fetchMock);
     const result = await generateCardCopy({ kind: "notice", title: "요약", payload: {}, templateKey: invalid.templateKey, budget: new LlmBudget(2), provider: "openai" });
     expect(result).toMatchObject({ ok: false, kind: "parse" }); expect(result).not.toHaveProperty("data"); expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("grounds detailed regeneration in saved operator copy and the selected page", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response(copy(), "submit_card_copy")); vi.stubGlobal("fetch", fetchMock);
+    const payload = { ...emptyPayload("current_dialogue", "사실 요약"), cardCopy: copy() };
+    await generateCardCopy({ kind: "current_dialogue", title: "원문 제목", payload, templateKey: copy().templateKey, sources: [source], budget: new LlmBudget(1), provider: "openai", selectedPage: 2, instructions: "확인한 숫자는 유지하고 쉽게 설명해 주세요." });
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.input).toContain("특히 수정할 카드: 2번째 본문");
+    expect(sent.input).toContain("확인한 숫자는 유지하고 쉽게 설명해 주세요.");
+    expect(sent.input).toContain("다른 카드의 문구는 유지한다");
+    expect(sent.input).toContain("saved-card-copy"); expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it.each(["notice", "science_dialogue", "current_dialogue"])("%s writes factual summary and editable copy in the same provider request", async kind => {

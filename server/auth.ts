@@ -132,10 +132,13 @@ export function installAuthRoutes(app: Express) {
     res.json({ user: req.session.user, csrf: req.session.csrf });
   });
   app.get("/api/auth/me", (req, res) => {
+    res.set("Cache-Control", "no-store");
     res.json({
       user: req.session?.user ?? null,
       demo: !!req.session?.demo,
       csrf: req.session?.user ? req.session.csrf : null,
+      // A one-way, purpose-bound namespace. It is never accepted as an authentication token.
+      recoveryScope: req.session?.user && env.sessionSecret ? crypto.createHmac("sha256", env.sessionSecret).update(`draft-recovery:${req.sessionID}`).digest("hex") : null,
       authConfigured: authConfigured(),
       demoAllowed: demoAllowed(),
     });

@@ -5,8 +5,8 @@ import { Badge, Empty, ErrorBox, fmtDate, Loading, StatusBadge } from "../ui";
 import type { Job, Run } from "@shared/schema";
 
 type WorkerRun = { id: number; workerId: string; command: string; status: string; processed: number; failed: number; note: string; startedAt: string; finishedAt: string | null };
-const jobLabels: Record<string, string> = { collect: "자료 수집", publish: "게시", studio_generate: "콘텐츠 AI 작성", source_generate: "원문 초안 AI 작성", card_copy_generate: "카드 문구 AI 제안" };
-const cancellableRunningJobs = new Set(["studio_generate", "source_generate", "card_copy_generate"]);
+const jobLabels: Record<string, string> = { collect: "자료 수집", publish: "게시", studio_generate: "콘텐츠 AI 작성", source_generate: "원문 초안 AI 작성", card_copy_generate: "카드 문구 AI 제안", card_render: "카드 이미지 생성" };
+const cancellableRunningJobs = new Set(["studio_generate", "source_generate", "card_copy_generate", "card_render"]);
 
 export function RunsPage() {
   const { selected, channels } = useChannel();

@@ -1,8 +1,9 @@
 import { CategorySelect } from "../CategorySelect";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { z } from "zod";
 import { studioContentSchema, type StudioCard, type StudioContent, type StudioCardDetail, type StudioBoard } from "@shared/studio";
-import { emptyExperience, experienceImageUrl, experienceMediaUrl, type Experience, type ExperienceMedia } from "@shared/experience";
+import { emptyExperience, experienceSchema, experiencePageSchema, experienceImageUrl, experienceMediaUrl, type Experience, type ExperienceMedia } from "@shared/experience";
 import { studioKey } from "@shared/channelKeys";
 import { api, apiUpload, ApiError } from "../api";
 import { useChannel, useDirtyGuard } from "../state";
@@ -11,18 +12,34 @@ import { useToast } from "../toast";
 import { compatiblePhoto, validateExperienceFile, videoFrame } from "../experienceMedia";
 import { StudioTrashButton } from "./StudioTrash";
 import { StudioExport } from "./StudioExport";
+import { useDraftRecovery } from "../useDraftRecovery";
+import { RecoveryNotice } from "../RecoveryNotice";
 import "../experience.css";
 
-export function experienceContentOf({id,version,sourceItemId,createdAt,updatedAt,trashedAt,sourceOutput,...content}:StudioCard):StudioContent{return studioContentSchema.parse(content);}
+export function experienceContentOf({id,version,sourceItemId,createdAt,updatedAt,trashedAt,sourceOutput,sourceReference,...content}:StudioCard):StudioContent{return studioContentSchema.parse(content);}
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
+// Recovery accepts unfinished text but only known fields and saved media IDs.
+// Validation must not trim historical/local text or persist image/video bytes.
+const recoveryExperienceSchema=studioContentSchema.safeExtend({title:z.string(),caption:z.string(),experience:experienceSchema.extend({
+ event:z.string(),place:z.string(),date:z.string(),notes:z.string(),takeaway:z.string(),tips:z.string(),coverAltText:z.string(),
+ media:z.array(z.object({id:z.number().int().positive(),note:z.string()}).strict()).max(12),
+ pages:z.array(experiencePageSchema.extend({title:z.string(),body:z.string(),altText:z.string()})).max(9),
+}).nullable()});
+const parseRecoveryExperience=(value:unknown):StudioContent|null=>{const parsed=recoveryExperienceSchema.safeParse(value);return parsed.success?parsed.data:null;};
+const experienceText=(value:StudioContent)=>{const e=value.experience;return [`제목\n${value.title}`,`채널: ${value.channel} · 분류: ${value.subcategory||"없음"}`,
+ e?`방문: ${e.event}\n장소: ${e.place}\n날짜: ${e.date}\n경험 메모\n${e.notes}\n기억에 남는 반응\n${e.takeaway}\n방문 팁\n${e.tips}`:"",
+ e?`선택 자료\n${e.media.map((m,i)=>`${i+1}. 저장 자료 #${m.id} · ${m.note}`).join("\n")}\n표지: ${e.coverId?`저장 자료 #${e.coverId}`:"없음"}\n표지 설명: ${e.coverAltText}`:"",
+ ...(e?.pages.map((p,i)=>`${i+2}페이지 · ${p.mediaId?`저장 자료 #${p.mediaId}`:"사진 없음"}\n${p.title}\n${p.body}\n대체텍스트: ${p.altText}`)??[]),`게시물 캡션\n${value.caption}`].filter(Boolean).join("\n\n");};
 export function ExperienceEditor({data,refresh}:{data:StudioCardDetail;refresh:()=>unknown}){
  const [base,setBase]=useState(data.card),baseRef=useRef(data.card);
+ const [recoveryBase,setRecoveryBase]=useState(data.card);
  const [form,setForm]=useState(()=>experienceContentOf(data.card)),formRef=useRef(form);
  const [step,setStep]=useState<"media"|"story"|"finish">(()=>data.card.experience?.pages.length?"finish":"media");
  const [saving,setSaving]=useState(false),[saveError,setSaveError]=useState<Error|null>(null),[uploading,setUploading]=useState("");
  const [uploadErrors,setUploadErrors]=useState<string[]>([]),[selected,setSelected]=useState(0),[history,setHistory]=useState(false);
  const [instruction,setInstruction]=useState(""); const serial=useRef<Promise<StudioCard>|null>(null);
- const [conflicting,setConflicting]=useState<StudioCard|null>(null);
+ const [conflicting,setConflicting]=useState<StudioCard|null>(null),conflictRef=useRef<StudioCard|null>(null);
+ const [publicationBusy,setPublicationBusy]=useState(false),[recoveredDraft,setRecoveredDraft]=useState(false);
  const fileInput=useRef<HTMLInputElement>(null),qc=useQueryClient(),guard=useDirtyGuard(),toast=useToast();
  const {allChannels}=useChannel();const channels=allChannels.filter(c=>c.active).map(c=>({id:studioKey(c.slug),name:c.name}));
  const board=useQuery({queryKey:["studio","cards"],queryFn:()=>api<StudioBoard>("/studio/cards")});
@@ -34,36 +51,55 @@ export function ExperienceEditor({data,refresh}:{data:StudioCardDetail;refresh:(
  function put(next:StudioContent){formRef.current=next;setForm(next);}
  function change<K extends keyof StudioContent>(key:K,value:StudioContent[K]){put({...formRef.current,[key]:value});}
  function edit(patch:Partial<Experience>){change("experience",{...(formRef.current.experience??emptyExperience()),...patch});}
- function adopt(card:StudioCard){baseRef.current=card;setBase(card);put(experienceContentOf(card));setSaveError(null);setConflicting(null);}
+ function clearConflict(){conflictRef.current=null;setConflicting(null);setSaveError(null);}
+ function noteConflict(card:StudioCard,message="다른 곳에서 저장한 최신 버전이 있습니다. 현재 입력과 비교한 뒤 선택해 주세요."){
+  const latest=card.version>=baseRef.current.version?card:baseRef.current;
+  baseRef.current=latest;setBase(latest);conflictRef.current=latest;setConflicting(latest);
+  const error=new ApiError(409,message,{current:latest});setSaveError(error);return error;
+ }
+ function adopt(card:StudioCard){if(card.version<baseRef.current.version)return;baseRef.current=card;setBase(card);setRecoveryBase(card);put(experienceContentOf(card));clearConflict();}
+ const recovery=useDraftRecovery<StudioContent>({recoveryKey:`studio:${base.id}:experience`,label:"사진·영상 후기 원고",version:recoveryBase.version,serverValue:experienceContentOf(recoveryBase),value:form,dirty:!same(form,experienceContentOf(recoveryBase)),parse:parseRecoveryExperience,onRestore:value=>{put(value);setRecoveredDraft(true);}});
+ function acceptSaved(card:StudioCard,snapshot:StudioContent){
+  if(card.version<baseRef.current.version)throw noteConflict(baseRef.current,"저장 요청 뒤 더 최신 버전이 도착했습니다. 현재 입력과 최신 저장본을 비교해 주세요.");
+  baseRef.current=card;setBase(card);setRecoveryBase(card);if(same(formRef.current,snapshot)){recovery.clear();put(experienceContentOf(card));}
+  clearConflict();setRecoveredDraft(false);void qc.invalidateQueries({queryKey:["studio","cards"]});void qc.invalidateQueries({queryKey:["studio","card",card.id]});return card;
+ }
  async function saveNow():Promise<StudioCard>{
+  if(recovery.pending)throw new Error("기기 복구본을 먼저 불러오거나 버려 주세요.");
   if(serial.current){await serial.current;return saveNow();}
+  if(conflictRef.current)throw noteConflict(conflictRef.current);
   const snapshot=formRef.current,current=baseRef.current;
   if(same(snapshot,experienceContentOf(current)))return current;
-  if(!snapshot.title.trim())throw new Error("제목을 입력해 주세요.");
+  if(!snapshot.title.trim()){const error=new Error("제목을 입력해 주세요.");setSaveError(error);throw error;}
   setSaving(true);setSaveError(null);
   const request=api<StudioCard>(`/studio/cards/${current.id}`,{method:"PATCH",body:{...snapshot,version:current.version}});serial.current=request;
-  try{const saved=await request;baseRef.current=saved;setBase(saved);if(same(formRef.current,snapshot))put(experienceContentOf(saved));setConflicting(null);qc.invalidateQueries({queryKey:["studio","cards"]});qc.invalidateQueries({queryKey:["studio","card",saved.id]});return saved;}
-  catch(error){setSaveError(error as Error);if(error instanceof ApiError&&error.status===409&&error.body.current)setConflicting(error.body.current as StudioCard);throw error;}
+  try{return acceptSaved(await request,snapshot);}
+  catch(error){setSaveError(error as Error);if(error instanceof ApiError&&error.status===409&&error.body.current)noteConflict(error.body.current as StudioCard);throw error;}
   finally{serial.current=null;setSaving(false);}
  }
- useEffect(()=>{const incoming=data.card;if(incoming.version>baseRef.current.version&&!serial.current&&same(formRef.current,experienceContentOf(baseRef.current))){adopt(incoming);qc.invalidateQueries({queryKey:["studio","experience-media",incoming.id]});}},[data.card.version]);
- useEffect(()=>{if(!dirty||saving||working||uploading||saveError||!form.title.trim())return;const t=window.setTimeout(()=>{void saveNow().catch(()=>{});},1300);return()=>clearTimeout(t);},[form,base.version,saving,working,uploading,saveError]);
- useEffect(()=>{guard.setDirty("experience",dirty||!!uploading,async()=>{if(uploading)return false;try{await saveNow();return true;}catch{return false;}});return()=>guard.setDirty("experience",false);},[dirty,form,uploading]);
+ useEffect(()=>{const incoming=data.card;if(incoming.version<=baseRef.current.version)return;
+  if(serial.current||!same(formRef.current,experienceContentOf(baseRef.current)))noteConflict(incoming);
+  else {adopt(incoming);void qc.invalidateQueries({queryKey:["studio","experience-media",incoming.id]});}
+ },[data.card.version]);
+ useEffect(()=>{if(!dirty||saving||working||uploading||saveError||publicationBusy||recovery.pending||recoveredDraft||!form.title.trim())return;const t=window.setTimeout(()=>{void saveNow().catch(()=>{});},1300);return()=>clearTimeout(t);},[form,base.version,saving,working,uploading,saveError,publicationBusy,recovery.pending,recoveredDraft]);
+ useEffect(()=>{const key=`experience-${base.id}`;guard.setDirty(key,dirty||saving||!!uploading||publicationBusy||!!recovery.pending,async()=>{if(uploading||publicationBusy||recovery.pending||conflictRef.current)return false;try{await saveNow();return same(formRef.current,experienceContentOf(baseRef.current));}catch{return false;}},()=>{recovery.clear();setRecoveryBase(baseRef.current);put(experienceContentOf(baseRef.current));setRecoveredDraft(false);clearConflict();});return()=>guard.setDirty(key,false);},[base.id,dirty,form,saving,uploading,publicationBusy,recovery.pending,guard]);
  useEffect(()=>{setSelected(i=>Math.min(i,e.pages.length));},[e.pages.length]);
  const generate=useMutation({mutationFn:async()=>{const saved=await saveNow();return api(`/studio/cards/${saved.id}/generate`,{method:"POST",body:{version:saved.version,kind:"text",textTarget:"experience",provider:"openai",instruction,requestId:crypto.randomUUID()}});},onSuccess:()=>{void refresh();setStep("finish");},onError:error=>toast("err",error.message)});
- const busy=working||generate.isPending||!!uploading;
- const restore=useMutation({mutationFn:async(revisionId:number)=>{const saved=await saveNow();return api<StudioCard>(`/studio/cards/${saved.id}/restore`,{method:"POST",body:{version:saved.version,revisionId}});},onSuccess:card=>{adopt(card);setHistory(false);void refresh();},onError:error=>toast("err",error.message)});
+ const restore=useMutation({mutationFn:async(revisionId:number)=>{const saved=await saveNow(),snapshot=formRef.current;const card=await api<StudioCard>(`/studio/cards/${saved.id}/restore`,{method:"POST",body:{version:saved.version,revisionId}});return {card,snapshot};},onSuccess:({card,snapshot})=>{acceptSaved(card,snapshot);setHistory(false);void refresh();},onError:error=>toast("err",error.message)});
+ const ownBusy=working||generate.isPending||restore.isPending||!!uploading||!!recovery.pending;
+ const busy=ownBusy||publicationBusy;
  async function upload(files:File[]){
   if(busy||saving)return;setUploadErrors([]);setUploading("자료 준비 중…");const errors:string[]=[];
   try{await saveNow();for(let i=0;i<files.length;i++){
    const original=files[i];setUploading(`${i+1} / ${files.length} · ${original.name}`);
    try{const video=validateExperienceFile(original),file=video?original:await compatiblePhoto(original);
-    const result=await apiUpload<{card:StudioCard;mediaId:number}>(`/studio/cards/${base.id}/media?version=${baseRef.current.version}&name=${encodeURIComponent(file.name)}`,file);adopt(result.card);
-    if(video){try{const frame=await videoFrame(original);const saved=await apiUpload<StudioCard>(`/studio/cards/${base.id}/media/${result.mediaId}/preview?version=${baseRef.current.version}&seconds=${frame.seconds}`,frame.file);adopt(saved);}catch(error){errors.push(`${original.name}: 원본은 저장했습니다. 대표 장면 사진을 따로 추가해 주세요. ${(error as Error).message}`);}}
+    const snapshot=formRef.current;
+    const result=await apiUpload<{card:StudioCard;mediaId:number}>(`/studio/cards/${base.id}/media?version=${baseRef.current.version}&name=${encodeURIComponent(file.name)}`,file);acceptSaved(result.card,snapshot);
+    if(video){try{const frame=await videoFrame(original),frameSnapshot=formRef.current;const saved=await apiUpload<StudioCard>(`/studio/cards/${base.id}/media/${result.mediaId}/preview?version=${baseRef.current.version}&seconds=${frame.seconds}`,frame.file);acceptSaved(saved,frameSnapshot);}catch(error){errors.push(`${original.name}: 원본은 저장했습니다. 대표 장면 사진을 따로 추가해 주세요. ${(error as Error).message}`);}}
    }catch(error){errors.push((error as Error).message);if((error as {status?:number}).status===409)break;}
   }}catch(error){errors.push((error as Error).message);}finally{setUploading("");setUploadErrors(errors);void media.refetch();void refresh();if(fileInput.current)fileInput.current.value="";}
  }
- async function manualFrame(asset:ExperienceMedia,file?:File){if(!file||busy)return;setUploading("영상 대표 장면 저장 중…");try{await saveNow();const converted=await compatiblePhoto(file);const saved=await apiUpload<StudioCard>(`/studio/cards/${base.id}/media/${asset.id}/preview?version=${baseRef.current.version}`,converted);adopt(saved);void media.refetch();}catch(error){toast("err",(error as Error).message);}finally{setUploading("");}}
+ async function manualFrame(asset:ExperienceMedia,file?:File){if(!file||busy)return;setUploading("영상 대표 장면 저장 중…");try{await saveNow();const converted=await compatiblePhoto(file),snapshot=formRef.current;const saved=await apiUpload<StudioCard>(`/studio/cards/${base.id}/media/${asset.id}/preview?version=${baseRef.current.version}`,converted);acceptSaved(saved,snapshot);void media.refetch();}catch(error){toast("err",(error as Error).message);}finally{setUploading("");}}
  function toggleAsset(id:number){const next=selectedIds.has(id)?e.media.filter(m=>m.id!==id):[...e.media,{id,note:""}];const keepCover=next.some(m=>m.id===e.coverId);edit({media:next,coverId:keepCover?e.coverId:next[0]?.id??null,coverAltText:keepCover?e.coverAltText:"",pages:e.pages.map(p=>p.mediaId===id&&!next.some(m=>m.id===id)?{...p,mediaId:null,altText:""}:p)});}
  function moveAsset(id:number,delta:number){const next=[...e.media],index=next.findIndex(m=>m.id===id),to=index+delta;if(index<0||to<0||to>=next.length)return;[next[index],next[to]]=[next[to],next[index]];edit({media:next});}
  function manualDraft(){edit({pages:Array.from({length:e.pageCount-1},(_,i)=>({mediaId:e.media[i]?.id??null,title:["현장에서","기억에 남은 장면","나누고 싶은 이야기","방문 메모"][i]??`기록 ${i+1}`,body:i===0?e.notes.slice(0,300):i===1?e.takeaway.slice(0,300):i===e.pageCount-2?e.tips.slice(0,300):"",altText:"",fit:"contain" as const})),questions:[]});setStep("finish");}
@@ -73,9 +109,11 @@ export function ExperienceEditor({data,refresh}:{data:StudioCardDetail;refresh:(
  const selectedAsset=currentAssets.find(a=>a.id===selectedMediaId);
  return <div className="experience-workspace">
   <header className="experience-header"><div><GuardedLink href="/">← 내 콘텐츠</GuardedLink><div className="experience-kicker">사진·영상 후기 · {channels.find(c=>c.id===form.channel)?.name??form.channel}</div><h1>{form.title}</h1></div>
-   <div className="experience-save"><span role="status">{uploading?"업로드 중":saving?"저장 중…":saveError?"저장 실패":dirty?"저장 대기":"모든 변경사항 저장됨"}</span><button className="btn sm" disabled={saving||busy||!dirty} onClick={()=>void saveNow().catch(()=>{})}>저장</button><StudioTrashButton card={base} disabled={dirty||saving||busy}/></div>
+   <div className="experience-save"><span role="status">{uploading?"업로드 중":saving?"저장 중…":saveError?"저장 실패":recovery.pending?"기기 복구본 확인 필요":recoveredDraft?"복구한 원고 · 저장 전":dirty?"저장 대기":"모든 변경사항 저장됨"}</span><button className="btn sm" disabled={saving||busy||!!conflicting||!dirty} onClick={()=>void saveNow().catch(()=>{})}>저장</button><StudioTrashButton card={base} disabled={dirty||saving||busy||!!conflicting}/></div>
   </header>
-  {saveError&&<div className="notice err" role="alert"><p>{saveError.message} 입력한 내용은 이 화면에 남아 있습니다.</p>{conflicting?<details><summary>저장된 내용과 비교하고 선택하기</summary><div className="grid grid-2"><div><strong>저장된 버전 · {conflicting.title}</strong><p style={{whiteSpace:"pre-wrap"}}>{[conflicting.experience?.notes,...conflicting.experience?.pages.map(p=>`${p.title}\n${p.body}`)??[],conflicting.caption].filter(Boolean).join("\n\n")}</p></div><div><strong>현재 입력 · {form.title}</strong><p style={{whiteSpace:"pre-wrap"}}>{[e.notes,...e.pages.map(p=>`${p.title}\n${p.body}`),form.caption].filter(Boolean).join("\n\n")}</p></div></div><p>선택 전까지 자동 저장은 멈춥니다. 기존 저장본은 버전 기록에 남습니다.</p><div className="row"><button className="btn sm" onClick={()=>adopt(conflicting)}>저장된 버전으로 바꾸기</button><button className="btn sm" disabled={saving||busy} onClick={()=>{baseRef.current=conflicting;setBase(conflicting);void saveNow().catch(()=>{});}}>현재 입력으로 저장</button></div></details>:<button className="btn sm" onClick={()=>void saveNow().catch(()=>{})}>다시 저장</button>}</div>}
+  <RecoveryNotice recovery={recovery} formatValue={experienceText}/>
+  {recoveredDraft&&<p className="notice small" role="status">복구한 원고를 확인한 뒤 ‘저장’을 눌러 주세요. 확인 전에는 자동 저장하지 않습니다.</p>}
+  {saveError&&<div className="notice err" role="alert"><p>{saveError.message} 입력한 내용은 이 화면에 남아 있습니다.</p>{conflicting?<details><summary>저장된 내용과 비교하고 선택하기</summary><div className="draft-recovery-compare"><div><strong>저장된 버전 · v{conflicting.version}</strong><pre>{experienceText(experienceContentOf(conflicting))}</pre></div><div><strong>현재 입력</strong><pre>{experienceText(form)}</pre></div></div><p>선택 전까지 자동 저장은 멈춥니다. 기존 저장본은 버전 기록에 남습니다.</p><div className="row"><button className="btn sm" disabled={saving||busy} onClick={()=>{recovery.clear();adopt(conflicting);setRecoveredDraft(false);}}>저장된 버전으로 바꾸기</button><button className="btn sm" disabled={saving||busy} onClick={()=>{setRecoveryBase(baseRef.current);clearConflict();void saveNow().catch(()=>{});}}>현재 입력으로 저장</button></div></details>:<button className="btn sm" disabled={saving||busy} onClick={()=>void saveNow().catch(()=>{})}>다시 저장</button>}</div>}
   <nav className="experience-steps" aria-label="후기 제작 단계">{([['media','01','사진·영상'],['story','02','내 경험'],['finish','03','카드·캡션']] as const).map(([id,n,label])=><button key={id} aria-current={step===id?"step":undefined} onClick={()=>setStep(id)}><span>{n}</span>{label}{id==="media"&&e.media.length>0&&<small>{e.media.length}</small>}</button>)}</nav>
   <section hidden={step!=="media"} className="experience-section">
    <div className="experience-section-head"><div><h2>촬영한 순간부터 모아 주세요</h2><p>사진과 영상을 한 번에 올리고, 후기에 쓸 자료와 표지를 고르세요.</p></div><span className="small muted">{currentAssets.length} / 12개</span></div>
@@ -132,7 +170,7 @@ export function ExperienceEditor({data,refresh}:{data:StudioCardDetail;refresh:(
     </div></div>
     <div className="experience-caption"><div className="row between"><h3>게시용 캡션</h3><button className="btn sm" disabled={!form.caption} onClick={async()=>{try{await navigator.clipboard.writeText(form.caption);toast("ok","캡션을 복사했습니다.");}catch{toast("err","캡션을 직접 선택해 복사해 주세요.");}}}>캡션 복사</button></div><textarea aria-label="후기 게시용 캡션" rows={7} value={form.caption} maxLength={8000} onChange={v=>change("caption",v.target.value)}/><span className="small muted">{form.caption.length} / 2,200자 권장</span></div>
     </fieldset>
-    <StudioExport form={form} base={base} dirty={dirty} busy={busy} change={change} save={saveNow}/>
+    <StudioExport form={form} base={base} dirty={dirty||!!conflicting||!!recovery.pending} busy={ownBusy||!!conflicting} change={change} save={saveNow} onPublicationBusyChange={setPublicationBusy}/>
     <div className="experience-bottom"><button className="btn ghost" onClick={()=>setStep("story")}>← 내 경험</button><button className="btn" disabled={busy||saving} onClick={async()=>{change("stage","done");try{await saveNow();toast("ok","제작 완료로 저장했습니다.");}catch{}}}>{form.stage==="done"?"제작 완료됨":"검토를 마치고 제작 완료"}</button></div>
    </>}
    {currentJob?.status==="failed"&&<p className="notice err" role="alert">{currentJob.lastError}</p>}

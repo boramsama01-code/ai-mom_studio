@@ -60,6 +60,9 @@ import { renderCollectionBody } from "../services/cardCollection";
 import { assertStudioActive } from "../services/studio";
 import { getSetting } from "../seed";
 import type { PublicationOrphan } from "../../shared/publicationReadiness";
+import { publicationDraftSaveSchema } from "../../shared/publicationDraft";
+import { saveItemPublicationDraft } from "../services/publicationDraft";
+import { restoreSourceRevision } from "../services/sourceRevisionRestore";
 
 export const itemRoutes = Router();
 
@@ -144,8 +147,11 @@ async function loadItem(cid: unknown, id: unknown) {
 itemRoutes.patch("/channels/:cid/items/:id/subcategory", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
   const body = parse(z.object({ version: zVersion, subcategory: z.string().max(40).nullable() }).strict(), req.body);
-  if (!validSubcategory(ch.slug, body.subcategory)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
+  if (!validSubcategory(ch.slug, body.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
   const saved = await getDb().transaction(async tx => {
+    const [currentChannel] = await tx.select().from(channels).where(eq(channels.id, ch.id)).for("share");
+    if (!currentChannel?.active) throw new HttpError(409, "보관된 채널입니다. 채널을 복원한 뒤 분류를 변경해 주세요.");
+    if (!validSubcategory(currentChannel.slug, body.subcategory, currentChannel.categories)) throw new HttpError(409, "채널의 분류 설정이 바뀌었습니다. 최신 분류를 확인해 주세요.");
     const [row] = await tx.update(contentItems).set({ subcategory: body.subcategory || null, version: sql`${contentItems.version} + 1`, updatedAt: new Date() }).where(and(eq(contentItems.id, item.id), eq(contentItems.channelId, ch.id), eq(contentItems.version, body.version))).returning();
     if (!row) conflict(item);
     await audit(tx, { actor: actorOf(req), action: "set_subcategory", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { subcategory: row.subcategory } });
@@ -267,22 +273,11 @@ itemRoutes.post("/channels/:cid/items/:id/draft", ah(async (req, res) => {
   res.status(result.created ? 201 : 200).json(result);
 }));
 
-/** Publication copy has its own CAS version and can be saved without approving a post. */
+/** Publication copy and intent share a CAS version, separate from image/content revisions. */
 itemRoutes.patch("/channels/:cid/items/:id/publication-draft", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
-  const body = parse(z.object({ version: z.number().int().min(0), captions: z.object({ instagram: z.string().max(5000), telegram: z.string().max(5000) }).strict() }).strict(), req.body);
-  const result = await getDb().transaction(async tx => {
-    const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
-    const version = fresh.publicationDraft?.version ?? 0;
-    if (version !== body.version) conflict({ publicationDraft: fresh.publicationDraft });
-    if (fresh.publicationDraft && JSON.stringify(fresh.publicationDraft.captions) === JSON.stringify(body.captions)) return fresh.publicationDraft;
-    await revokePublicationEligibility(tx as unknown as ReturnType<typeof getDb>, item.id, "게시물 캡션 변경 — 다시 확인 후 승인해 주세요.", actorOf(req));
-    const publicationDraft = { version: version + 1, captions: body.captions };
-    await tx.update(contentItems).set({ publicationDraft, updatedAt: new Date() }).where(eq(contentItems.id, item.id));
-    await audit(tx, { actor: actorOf(req), action: "save_publication_draft", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { version: publicationDraft.version } });
-    return publicationDraft;
-  });
-  res.json(result);
+  const body = parse(publicationDraftSaveSchema, req.body);
+  res.json(await saveItemPublicationDraft(getDb(), item.id, ch.id, body, actorOf(req)));
 }));
 
 /** 운영자 편집 — 새 버전 생성, 기존 승인 무효화 */
@@ -540,7 +535,7 @@ itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   try {
     const invalidSavedCopy = revision.payload.cardCopy !== undefined && !saved.success;
     const { cardCopy: _oldCopy, ...sourcePayload } = revision.payload;
-    const copy = cardCopyFromPayload({ kind: item.kind, payload: invalidSavedCopy ? sourcePayload : revision.payload, channelName: ch.name, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style, key);
+    const copy = cardCopyFromPayload({ kind: item.kind, payload: invalidSavedCopy ? sourcePayload : revision.payload, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style, key);
     const recoveryNotice = templateRecovery ?? (invalidSavedCopy ? "이전 카드 문구의 형식을 읽을 수 없어 원문 요약에서 편집 문구를 가져왔습니다. 기존 저장본은 유지했으며, 내용을 확인한 뒤 저장하면 새 버전으로 기록됩니다." : undefined);
     res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, hasSavedCopy: saved.success && !templateRecovery, ...(recoveryNotice ? { recoveryNotice } : {}) });
   } catch (error) { cardCopyRenderError(error); }
@@ -572,9 +567,9 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
 /** Explicit AI action returns a proposal; it never overwrites saved/operator copy. */
 itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
-  const body = parse(z.object({ version: zVersion, requestId: z.string().uuid().optional(), templateKey: z.string().min(1).max(40), provider: z.enum(aiProviders).optional() }).strict(), req.body);
+  const body = parse(z.object({ version: zVersion, requestId: z.string().uuid().optional(), templateKey: z.string().min(1).max(40), provider: z.enum(aiProviders).optional(), instructions: z.string().trim().max(1500).optional(), selectedPage: z.number().int().min(0).max(9).optional() }).strict(), req.body);
   const db = getDb();
-  const result = await runSourceGeneration(db, { type: "card_copy_generate", channelId: ch.id, itemId: item.id, version: body.version, requestId: body.requestId, intent: { templateKey: body.templateKey, provider: body.provider ?? null }, actor: actorOf(req) }, async () => {
+  const result = await runSourceGeneration(db, { type: "card_copy_generate", channelId: ch.id, itemId: item.id, version: body.version, requestId: body.requestId, intent: { templateKey: body.templateKey, provider: body.provider ?? null, ...(body.instructions ? { instructions: body.instructions } : {}), ...(body.selectedPage !== undefined ? { selectedPage: body.selectedPage } : {}) }, actor: actorOf(req) }, async () => {
   await resolveCardCopyStyle(body.templateKey, ch.id);
   const revision = await cardCopyRevision(item);
   const [board] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
@@ -587,12 +582,14 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
   const docs = ids.size ? await db.select().from(sourceDocuments).where(inArray(sourceDocuments.id, [...ids])) : [];
   const sources: LlmSource[] = docs.filter(doc => doc.fetchStatus === "ok" && doc.fetchedText).map(doc => ({ source_id: doc.id, kind: doc.kind, url: doc.originalUrl, title: doc.title, published: doc.publishedRaw, text: doc.fetchedText! }));
   if (!sources.length && item.kind === "current_dialogue") throw new HttpError(400, "뉴스 원문을 먼저 확보하거나 본문을 붙여넣어 주세요. 제목만으로 카드 문구를 생성하지 않습니다.");
-  const generated = await generateCardCopy({ kind: item.kind, title: item.title, payload: revision.payload, templateKey: body.templateKey, channelName: ch.name, sources, provider: body.provider, budget: new LlmBudget(2) });
+  const existingCopy = cardCopySchema.safeParse(revision.payload.cardCopy);
+  if (body.selectedPage !== undefined && existingCopy.success && body.selectedPage > existingCopy.data.pages.length) throw new HttpError(400, "수정할 카드 페이지를 확인해 주세요.");
+  const generated = await generateCardCopy({ kind: item.kind, title: item.title, payload: revision.payload, templateKey: body.templateKey, channelName: ch.name, sources, provider: body.provider, instructions: body.instructions, selectedPage: body.selectedPage, budget: new LlmBudget(2) });
   if (!generated.ok) throw new HttpError(generated.kind === "not_configured" ? 503 : 422, generated.error);
   const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id));
   if (fresh.version !== body.version || fresh.currentRevisionId !== revision.id) throw new HttpError(409, "AI 작성 중 원고가 변경됐습니다. 입력 내용은 유지했습니다. 최신 원고를 확인해 주세요.");
   await audit(db, { actor: actorOf(req), action: "propose_card_copy", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { templateKey: body.templateKey, model: generated.model, pages: generated.data.pages.length + 1 } });
-  return { version: item.version, revisionId: revision.id, copy: generated.data, model: generated.model };
+  return { version: item.version, revisionId: revision.id, copy: generated.data, model: generated.model, selectedPage: body.selectedPage ?? 0 };
   });
   res.json(result);
 }));
@@ -606,7 +603,7 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/preview", ah(async (req, res
   const revision = await cardCopyRevision(item);
   const style = await resolveCardCopyStyle(body.copy.templateKey, ch.id);
   try {
-    const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, cardCopy: body.copy }, channelName: ch.name, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style);
+    const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, cardCopy: body.copy }, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style);
     let bytes: Buffer;
     if (body.page === 0) {
       const savedArt = body.coverMode === "typography" ? null : await findReusableCardCover(getDb(), item.id, revision.payload);
@@ -624,11 +621,18 @@ itemRoutes.post(
   "/channels/:cid/items/:id/card",
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
-    const body = parse(z.object({ version: zVersion.optional(), templateKey: z.string().max(40).nullable().optional(), coverMode: z.enum(["ai", "typography", "reuse"]).optional() }), req.body ?? {});
-    const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey, { version: body.version, coverMode: body.coverMode, actor: actorOf(req) });
-    if (!r.ok) return res.status(r.code === "font" || r.code === "render" ? 500 : r.code === "template" ? 400 : r.code === "conflict" ? 409 : 422).json({ error: r.error, code: r.code, field: (r as { field?: string }).field });
-    await audit(getDb(), { actor: actorOf(req), action: "render_card", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { assetId: r.asset.id, sha256: r.asset.sha256 } });
-    res.json(r.asset);
+    const body = parse(z.object({ version: zVersion.optional(), requestId: z.string().uuid().optional(), templateKey: z.string().max(40).nullable().optional(), coverMode: z.enum(["ai", "typography", "reuse"]).optional() }).strict(), req.body ?? {});
+    const render = async () => {
+      const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey, { version: body.version, coverMode: body.coverMode, actor: actorOf(req) });
+      if (!r.ok) throw new HttpError(r.code === "font" || r.code === "render" ? 500 : r.code === "template" ? 400 : r.code === "conflict" ? 409 : 422, r.error, { code: r.code, field: (r as { field?: string }).field });
+      await audit(getDb(), { actor: actorOf(req), action: "render_card", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { assetId: r.asset.id, sha256: r.asset.sha256 } });
+      return r.asset;
+    };
+    const asset = body.requestId || body.coverMode === "ai" || body.coverMode === undefined ? await runSourceGeneration(getDb(), {
+      type: "card_render", channelId: ch.id, itemId: item.id, version: body.version ?? item.version,
+      requestId: body.requestId, intent: { templateKey: body.templateKey ?? null, coverMode: body.coverMode ?? null }, actor: actorOf(req),
+    }, render) : await render();
+    res.json(asset);
   }),
 );
 
@@ -874,3 +878,10 @@ itemRoutes.post(
 import { altTextError, altTextFile } from "../../shared/altText";
 import { cardAltTextState } from "../services/cardAccessibility";
 import { resolvePublicationTiming } from "../../shared/publicationTiming";
+
+// Restore as a new revision; the service owns the row lock, version check and approval revocation.
+itemRoutes.post("/channels/:cid/items/:id/revisions/:rid/restore", ah(async (req, res) => {
+  const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  const body = parse(z.object({ version: zVersion }).strict(), req.body);
+  res.json(await restoreSourceRevision(getDb(), { channelId: ch.id, itemId: item.id, revisionId: intParam(req.params.rid), version: body.version, actor: actorOf(req) }));
+}));

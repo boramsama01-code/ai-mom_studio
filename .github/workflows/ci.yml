@@ -40,6 +40,10 @@ jobs:
         run: node scripts/mobile-regression.mjs
       - name: Verify one-page editing, save/reopen and publication controls
         run: node scripts/content-workspace-regression.mjs
+      - name: Verify guarded channel switching and new channel creation
+        run: node scripts/channel-navigation-regression.mjs
+      - name: Verify automatic images, manual fallback and final page previews
+        run: node scripts/studio-automatic-regression.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -47,5 +51,7 @@ jobs:
           path: |
             test-results/mobile
             test-results/workspace
+            test-results/channel-navigation
+            test-results/studio-automatic-browser
           if-no-files-found: ignore
 

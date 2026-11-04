@@ -33,16 +33,34 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); for (const key of ["META_APP_ID", "META_INSTAGRAM_CONFIG_ID", "META_APP_SECRET"]) delete process.env[key]; });
 
-async function start() {
+async function start(body: Record<string, unknown> = {}) {
   const application = app(), agent = request.agent(application);
   await agent.post("/test-login");
-  const begun = await agent.post("/api/studio/instagram/1/oauth/start").set("x-csrf-token", "test-csrf").send({});
+  const begun = await agent.post("/api/studio/instagram/1/oauth/start").set("x-csrf-token", "test-csrf").send(body);
   expect(begun.status).toBe(200);
   const url = new URL(begun.body.url);
   return { application, agent, url, state: url.searchParams.get("state")! };
 }
 
 describe("operator-bound Meta Unified Login", () => {
+  it.each([undefined, "@Atelier.Account"])("supports a custom channel with a session-bound optional username %s", async hint => {
+    mocks.where.mockResolvedValue([{ id: 1, slug: "local-atelier", active: true, budget: { dailyPublishLimit: 0 } }]);
+    mocks.connect.mockResolvedValue({ username: "atelier.account" });
+    const { agent, state } = await start(hint ? { username: hint } : {});
+    const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "test-custom-code", username: "other.account", channelId: 999 });
+    expect(done.headers.location).toBe("/instagram?instagram=connected");
+    expect(mocks.connect).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ username: hint ? "atelier.account" : "", dailyLimit: 0, authMode: "facebook" }), "admin");
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it("does not replace a built-in account or accept a client-supplied account ID", async () => {
+    const agent = request.agent(app()); await agent.post("/test-login");
+    for (const body of [{ username: "other.account" }, { username: "spacepenguin.co", userId: "123" }]) {
+      expect((await agent.post("/api/studio/instagram/1/oauth/start").set("x-csrf-token", "test-csrf").send(body)).status).toBe(400);
+    }
+    expect(fetcher).not.toHaveBeenCalled(); expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
   it("reports missing setup without leaking the app secret", () => {
     expect(instagramOAuthConfig()).toMatchObject({ configured: true, appId: "111", redirectUri: "https://studio.example/api/studio/instagram/oauth/callback" });
     expect(JSON.stringify(instagramOAuthConfig())).not.toContain("test-only-app-secret");
