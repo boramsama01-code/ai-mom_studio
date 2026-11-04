@@ -13,7 +13,7 @@ import { saveSecret, deleteSecret } from "../secretStore";
 
 export const CANVA_AUTH_URL = "https://www.canva.com/api/oauth/authorize";
 export const CANVA_API = "https://api.canva.com/rest/v1";
-export const CANVA_SCOPES = ["design:content:read", "design:content:write", "design:meta:read", "brandtemplate:meta:read", "brandtemplate:content:read"];
+export const CANVA_SCOPES = ["design:content:read", "design:content:write", "design:meta:read", "brandtemplate:meta:read", "brandtemplate:content:read", "profile:read", "asset:read", "asset:write"];
 
 export class CanvaError extends Error {
   constructor(message: string, public status?: number, public code?: string) {
@@ -57,14 +57,16 @@ async function saveTokens(db: DB, j: { access_token: string; refresh_token: stri
 }
 
 async function tokenRequest(body: Record<string, string>, fetchImpl: typeof fetch) {
-  const res = await fetchImpl(`${CANVA_API}/oauth/token`, {
+  let res: Response;
+  try { res = await fetchImpl(`${CANVA_API}/oauth/token`, {
     method: "POST",
     headers: { authorization: basicAuth(), "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(body),
     signal: AbortSignal.timeout(15_000),
-  });
+    redirect: "error",
+  }); } catch { throw new CanvaError("Canva 인증 응답을 받지 못했습니다. 계정 연결 상태를 확인해 주세요.", undefined, "auth_response_unknown"); }
   const j = (await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string; message?: string };
-  if (!res.ok || !j.access_token || !j.refresh_token) throw new CanvaError(`Canva 토큰 발급 실패: ${j.error_description ?? j.message ?? j.error ?? res.status}`, res.status);
+  if (!res.ok || !j.access_token || !j.refresh_token || !Number.isFinite(j.expires_in) || Number(j.expires_in) <= 0) throw new CanvaError("Canva 인증 정보를 갱신하지 못했습니다. 앱의 연결 권한을 확인한 뒤 계정을 다시 연결해 주세요.", res.status, "auth_required");
   return j as { access_token: string; refresh_token: string; expires_in: number };
 }
 
@@ -108,11 +110,11 @@ async function api<T>(db: DB, path: string, init: { method?: string; body?: unkn
   if (!res.ok) {
     const msg =
       res.status === 401 ? "Canva 인증이 만료되었습니다. 다시 연결하세요." :
-      res.status === 403 ? `권한 부족(Canva 요금제 또는 연결 시 허용한 권한 확인): ${j.message ?? ""}` :
+      res.status === 403 ? "Canva 권한이 부족합니다. 현재 계정·팀, 기능 이용 가능 여부와 연결 권한을 확인하세요." :
       res.status === 404 ? "Canva에서 템플릿/디자인을 찾을 수 없습니다(ID 확인)." :
       res.status === 429 ? "Canva 호출 한도 초과 — 잠시 후 다시 시도하세요." :
-      `Canva 오류(HTTP ${res.status}): ${j.message ?? ""}`;
-    throw new CanvaError(msg, res.status, j.code);
+      `Canva 요청을 완료하지 못했습니다(HTTP ${res.status}). 기존 콘텐츠를 확인한 뒤 작업 결과를 다시 조회하세요.`;
+    throw new CanvaError(msg, res.status, "request_failed");
   }
   return j;
 }
@@ -158,7 +160,7 @@ export async function autofillFromBrandTemplate(
     await sleep(a.pollMs ?? 1500);
     job = await api<AutofillJob>(db, `/autofills/${job.job.id}`, {}, fetchImpl);
   }
-  if (job.job.status === "failed") throw new CanvaError(`Canva 자동 채우기 실패: ${job.job.error?.message ?? ""}`);
+  if (job.job.status === "failed") throw new CanvaError("Canva 자동 채우기가 실패했습니다. 템플릿 필드와 연결 계정을 확인하세요.", undefined, "job_failed");
   if (job.job.status !== "success" || !job.job.result?.design) throw new CanvaError("Canva 자동 채우기가 아직 끝나지 않았습니다. 잠시 후 다시 시도하세요.");
   const d = job.job.result.design;
   return { designId: d.id, editUrl: d.urls?.edit_url ?? d.url ?? null, viewUrl: d.urls?.view_url ?? null, usedFields: used, unusedTemplateFields: Object.keys(dataset).filter((k) => !used.includes(k)) };
@@ -181,7 +183,7 @@ export async function exportDesignPng(db: DB, designId: string, a: { pollMs?: nu
     await sleep(a.pollMs ?? 2000);
     job = await api<ExportJob>(db, `/exports/${job.job.id}`, {}, fetchImpl);
   }
-  if (job.job.status !== "success" || !job.job.urls?.length) throw new CanvaError(`Canva 내보내기 실패: ${job.job.error?.message ?? job.job.status}`);
+  if (job.job.status !== "success" || !job.job.urls?.length) throw new CanvaError("Canva 내보내기 결과를 확인할 수 없습니다. 저장된 작업의 상태를 확인하세요.", undefined, "job_failed");
   return job.job.urls[0];
 }
 

@@ -6,13 +6,14 @@ import { getDb } from "../db";
 import { actorOf } from "../auth";
 import { ah, HttpError, intParam, loadChannel, parse, zVersion } from "./util";
 import { CARD_PAGE_UPLOAD_MAX_DATA_URL, cardPageArtworkCredit, createCardPageArtwork, loadCardPageArtworkAsset, type CardPageId } from "../services/cardPageArtwork";
+import { cardPageArtworkIdSchema } from "../../shared/cardPageArtworkId";
 
 export const cardPageArtworkRoutes = Router();
 
 const backgroundRequest = z.object({
   version: zVersion,
   requestId: z.string().uuid(),
-  pageId: z.string().regex(/^(?:cover|body-[1-9])$/, "표지 또는 본문 페이지를 선택해 주세요."),
+  pageId: cardPageArtworkIdSchema,
   mode: z.enum(["ai", "upload"]),
   instruction: z.string().trim().max(2000).optional(),
   imageData: z.string().min(1).max(CARD_PAGE_UPLOAD_MAX_DATA_URL).optional(),
@@ -39,7 +40,7 @@ cardPageArtworkRoutes.post("/channels/:cid/items/:id/card-copy/background", ah(a
 const storedBackgroundResponse = z.object({
   assetId: z.number().int().positive(),
   version: zVersion,
-  pageId: z.string().regex(/^(?:cover|body-[1-9])$/),
+  pageId: cardPageArtworkIdSchema,
   source: z.enum(["ai", "upload"]),
 });
 

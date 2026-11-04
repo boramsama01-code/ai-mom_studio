@@ -1,3 +1,4 @@
+import { startCanvaJobs, stopCanvaJobs } from "./worker/canva";
 import { startInlinePublish, stopInlinePublish } from "./worker/inlinePublish";
 import { createApp } from "./app";
 import { env } from "./env";
@@ -32,6 +33,7 @@ async function main() {
       if (s.loaded) console.log(`화면에서 입력한 연결 키 ${s.loaded}개를 불러왔습니다.`);
       kickInlineStudio(getDb());
       startInlinePublish(getDb());
+      startCanvaJobs(getDb());
     } catch (e) {
       console.error("DB 준비 실패:", describeDbError(e));
       if (env.isProduction) process.exit(1);
@@ -58,7 +60,7 @@ async function main() {
     try {
       const connectionsClosed = new Promise<void>(resolve => server.close(() => resolve()));
       server.closeIdleConnections();
-      await Promise.allSettled([stopInlinePublish(), stopInlineStudio(), stopInlineCollect()]);
+      await Promise.allSettled([stopInlinePublish(), stopInlineStudio(), stopInlineCollect(), stopCanvaJobs()]);
       await connectionsClosed;
       await closeDb();
       clearTimeout(deadline);

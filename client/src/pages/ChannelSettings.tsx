@@ -11,7 +11,7 @@ import { StudioImport } from "./Studio";
 import { channelCategories } from "@shared/channelCategories";
 import { channelCategoriesSchema, channelContentTypes, channelContentTypeLabels, channelCreateSchema, type ChannelContentType } from "@shared/channelSettings";
 import { useLocation } from "wouter";
-import { channelAiSettingsSchema, defaultChannelAiSettings, type ChannelAiRuntime } from "@shared/channelAi";
+import { channelAiSettingsSchema, defaultChannelRoleSettings, normalizeChannelRoleSettings, type ChannelAiRuntime } from "@shared/channelAi";
 import { ChannelAiFields } from "../ChannelAiFields";
 
 type Status = { integrations: Record<string, boolean | Record<string, boolean>>; globalStop: boolean; workerConnected: boolean };
@@ -126,7 +126,7 @@ function GlobalStop({ on }: { on: boolean }) {
   );
 }
 
-const channelFields = (ch: Channel) => ({ name: ch.name, description: ch.description, audience: ch.audience, accentColor: ch.accentColor, editorialGuide: ch.editorialGuide, budget: ch.budget, contentType: ch.contentType as ChannelContentType, categoryText: channelCategories(ch.slug, ch.categories).join("\n"), categoriesDefault: ch.categories == null, aiSettings: ch.aiSettings ?? defaultChannelAiSettings() });
+const channelFields = (ch: Channel) => ({ name: ch.name, description: ch.description, audience: ch.audience, accentColor: ch.accentColor, editorialGuide: ch.editorialGuide, budget: ch.budget, contentType: ch.contentType as ChannelContentType, categoryText: channelCategories(ch.slug, ch.categories).join("\n"), categoriesDefault: ch.categories == null, aiSettings: normalizeChannelRoleSettings(ch.aiSettings) });
 function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
@@ -181,7 +181,7 @@ function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }
   return (
     <form className="panel stack channel-editor" onSubmit={(e) => { e.preventDefault(); if (!conflict) m.mutate(); }}>
       <h2>{base.name}</h2>
-      {conflict && <div className="notice warn stack channel-settings-conflict" role="alert"><strong>다른 곳에서 바꾼 채널 설정이 있습니다. 입력은 유지했습니다.</strong><details open><summary>최신 설정과 비교</summary><div className="draft-recovery-compare"><div><h3>최신 저장본</h3><pre>{`${conflict.name}\n${conflict.description}\n대상: ${conflict.audience}\n자료 유형: ${channelContentTypeLabels[conflict.contentType as ChannelContentType] ?? conflict.contentType}\n소분류: ${channelCategories(conflict.slug, conflict.categories).join(", ")}\n강조색: ${conflict.accentColor}\n편집 기준: ${conflict.editorialGuide}\n역할별 AI: ${JSON.stringify(conflict.aiSettings ?? defaultChannelAiSettings(), null, 2)}\n실행 한도·비용: ${JSON.stringify(conflict.budget, null, 2)}`}</pre></div><div><h3>현재 입력</h3><pre>{`${f.name}\n${f.description}\n대상: ${f.audience}\n자료 유형: ${channelContentTypeLabels[f.contentType]}\n소분류: ${f.categoryText}\n강조색: ${f.accentColor}\n편집 기준: ${f.editorialGuide}\n역할별 AI: ${JSON.stringify(f.aiSettings, null, 2)}\n실행 한도·비용: ${JSON.stringify(f.budget, null, 2)}`}</pre></div></div><div className="row"><button type="button" className="btn" disabled={m.isPending} onClick={() => { accept(conflict); m.reset(); }}>최신 설정 사용</button><button type="button" className="btn" disabled={m.isPending} onClick={() => { baseRef.current = conflict; setBase(conflict); setConflict(null); m.mutate(); }}>현재 입력으로 다시 저장</button></div></details></div>}
+      {conflict && <div className="notice warn stack channel-settings-conflict" role="alert"><strong>다른 곳에서 바꾼 채널 설정이 있습니다. 입력은 유지했습니다.</strong><details open><summary>최신 설정과 비교</summary><div className="draft-recovery-compare"><div><h3>최신 저장본</h3><pre>{`${conflict.name}\n${conflict.description}\n대상: ${conflict.audience}\n자료 유형: ${channelContentTypeLabels[conflict.contentType as ChannelContentType] ?? conflict.contentType}\n소분류: ${channelCategories(conflict.slug, conflict.categories).join(", ")}\n강조색: ${conflict.accentColor}\n편집 기준: ${conflict.editorialGuide}\n역할별 AI: ${JSON.stringify(conflict.aiSettings ?? defaultChannelRoleSettings(), null, 2)}\n실행 한도·비용: ${JSON.stringify(conflict.budget, null, 2)}`}</pre></div><div><h3>현재 입력</h3><pre>{`${f.name}\n${f.description}\n대상: ${f.audience}\n자료 유형: ${channelContentTypeLabels[f.contentType]}\n소분류: ${f.categoryText}\n강조색: ${f.accentColor}\n편집 기준: ${f.editorialGuide}\n역할별 AI: ${JSON.stringify(f.aiSettings, null, 2)}\n실행 한도·비용: ${JSON.stringify(f.budget, null, 2)}`}</pre></div></div><div className="row"><button type="button" className="btn" disabled={m.isPending} onClick={() => { accept(conflict); m.reset(); }}>최신 설정 사용</button><button type="button" className="btn" disabled={m.isPending} onClick={() => { baseRef.current = conflict; setBase(conflict); setConflict(null); m.mutate(); }}>현재 입력으로 다시 저장</button></div></details></div>}
       <fieldset className="channel-form-fields stack" disabled={m.isPending || archive.isPending}>
       <div className="grid grid-2">
         <label className="field">

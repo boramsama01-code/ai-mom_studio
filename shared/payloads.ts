@@ -2,10 +2,17 @@
  * 콘텐츠 유형별 payload 스키마 (LLM 출력 검증 + 운영자 편집 검증 공용)
  */
 import { z } from "zod";
-import { cardCopySchema } from "./cardCopy";
+import { storedCardCopySchema } from "./storedCardCopy";
+import { familyDialogueMetadataSchema } from "./familyDialogue";
 import { articleAnalysisSchema, aiWorkflowSchema } from "./articleAnalysis";
 
 const nullableStr = z.string().trim().max(2000).nullable();
+// Content revisions keep v1 and v2 intact. The source-edit route separately
+// enforces ownership; these fields are not accepted as new server evidence.
+const editorialFields = { ...familyDialogueMetadataSchema.partial().shape,
+  cardCopy: storedCardCopySchema.optional(), rendererProvider: z.enum(["builtin", "canva"]).optional(),
+  canvaExport: z.record(z.string(), z.unknown()).optional(),
+};
 
 export const datePointSchema = z
   .object({
@@ -30,8 +37,8 @@ export const evidenceSchema = z.object({
 });
 
 export const noticePayloadSchema = z.object({
+  ...editorialFields,
   aiWorkflow: aiWorkflowSchema.optional(),
-  cardCopy: cardCopySchema.optional(),
   relevance: z.enum(["relevant", "irrelevant", "uncertain"]),
   irrelevance_reason: nullableStr.optional(),
   title: nullableStr,
@@ -57,9 +64,9 @@ export type NoticePayload = z.infer<typeof noticePayloadSchema>;
 export const sourceRefSchema = z.object({ source_id: z.number().int(), note: z.string().max(300).nullable().optional() });
 
 export const sciencePayloadSchema = z.object({
+  ...editorialFields,
   articleAnalysis: articleAnalysisSchema.optional(),
   aiWorkflow: aiWorkflowSchema.optional(),
-  cardCopy: cardCopySchema.optional(),
   topic: z.string().max(200),
   age_band: z.string().max(60),
   key_question: z.string().max(300),
@@ -75,9 +82,9 @@ export const sciencePayloadSchema = z.object({
 export type SciencePayload = z.infer<typeof sciencePayloadSchema>;
 
 export const currentPayloadSchema = z.object({
+  ...editorialFields,
   articleAnalysis: articleAnalysisSchema.optional(),
   aiWorkflow: aiWorkflowSchema.optional(),
-  cardCopy: cardCopySchema.optional(),
   title: z.string().max(200),
   event_at: nullableStr,
   published_at: nullableStr,

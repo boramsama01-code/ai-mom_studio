@@ -7,6 +7,7 @@ import { channels, contentItems, contentRevisions, jobs, mediaAssets } from "../
 import { emptyPayload } from "../shared/payloads";
 import type { CardCopy } from "../shared/cardCopy";
 import { discussionCardCopyFixture } from "./fixtures/discussionCardCopy";
+import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
 import { login, resetDb, setTestEnv } from "./helpers";
 
 setTestEnv();
@@ -15,7 +16,7 @@ vi.mock("../server/services/studioAi", async original => ({ ...await original<ob
 const { getDb, closeDb } = await import("../server/db");
 const { createApp } = await import("../server/app");
 const { createRevision } = await import("../server/content");
-const { loadCardPageArtwork } = await import("../server/services/cardPageArtwork");
+const { loadCardPageArtwork, loadCardPageArtworkForPage, assertCardPageArtworkOwnership } = await import("../server/services/cardPageArtwork");
 const { cancelSourceGenerationRequest } = await import("../server/services/sourceGeneration");
 const { AiServiceError } = await import("../server/services/llm");
 let app: ReturnType<typeof createApp>;
@@ -58,6 +59,30 @@ async function enteredWithin(promise: Promise<void>) {
 }
 
 describe("page-specific backgrounds on PostgreSQL", () => {
+  it("uses v2 semantic IDs and scopes both current and recoverable images to the owning item", async () => {
+    const f = await fixture(), copy = familyDialogueCardFixture(), metadata = familyDialogueMetadataFixture();
+    const revision = await getDb().transaction(tx => createRevision(tx, { contentItemId: f.item.id, author: "operator", payload: { ...f.payload, ...metadata, cardCopy: copy } }));
+    const [item] = await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id));
+    const body = input(f, { version: item.version, pageId: "news_summary" });
+    const created = await f.agent.post(f.backgroundEndpoint).set(f.H).send(body);
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    expect(created.body).toMatchObject({ version: item.version, pageId: "news_summary", source: "upload" });
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send({ ...body, pageId: "body-1", requestId: randomUUID() })).status).toBe(400);
+    const designs = structuredClone(metadata.pageDesigns);
+    designs.news_summary.background = { ...designs.news_summary.background, kind: "image", assetId: created.body.assetId };
+    designs.news_summary.previousAssetIds = [created.body.assetId];
+    await expect(assertCardPageArtworkOwnership(getDb(), item.id, 2, copy, designs)).resolves.toBeUndefined();
+    expect([...await loadCardPageArtworkForPage(getDb(), item.id, 2, copy, 1, designs)].map(([id]) => id)).toEqual([created.body.assetId]);
+    expect((await loadCardPageArtworkForPage(getDb(), item.id, 2, copy, 0, designs)).size).toBe(0);
+    const other = await fixture(), otherUpload = await other.agent.post(other.backgroundEndpoint).set(other.H).send(input(other));
+    expect(otherUpload.status).toBe(200);
+    designs.concept.previousAssetIds = [otherUpload.body.assetId];
+    await expect(assertCardPageArtworkOwnership(getDb(), item.id, 2, copy, designs)).rejects.toMatchObject({ status: 404 });
+    const [stillSaved] = await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, revision.id));
+    expect(stillSaved.payload.cardCopy).toEqual(copy);
+    expect((await assets(item.id)).map(asset => asset.id)).toEqual([created.body.assetId]);
+  });
+
   it("requires authentication, CSRF, an owning channel, a version and a request UUID", async () => {
     const f = await fixture(), body = input(f);
     expect((await request(app).post(f.backgroundEndpoint).send(body)).status).toBe(401);

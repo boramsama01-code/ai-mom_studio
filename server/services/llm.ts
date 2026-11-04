@@ -21,6 +21,8 @@ import { geminiRequest } from "./gemini";
 import { aiCardCopySchema, cardCopyTemplateInstruction, CARD_COPY_AI_LIMITS, type CardCopy } from "../../shared/cardCopy";
 import { currentGenerationSignal } from "./generationContext";
 import { ARTICLE_ANALYSIS_RULES, articleAnalysisSchema } from "../../shared/articleAnalysis";
+import type { ProviderExecution } from "../../shared/aiProvenance";
+import { omitOptionalWireNulls, providerResponseId, providerUsage, strictClaudeSchema, strictOpenAiSchema } from "./structuredAi";
 
 export const PROMPT_VERSION = {
   curate: "curate-v1",
@@ -32,11 +34,13 @@ export const PROMPT_VERSION = {
 
 export type LlmSource = { source_id: number; kind: string; url: string; title: string; published: string | null; text: string };
 
-export type LlmResult<T> =
+export type LlmResult<T> = (
   | { ok: true; data: T; model: string; usage: { inputTokens: number; outputTokens: number }; droppedEvidence: number }
-  | { ok: false; error: string; kind: "not_configured" | "api" | "parse" | "budget"; usage?: { inputTokens: number; outputTokens: number } };
+  | { ok: false; error: string; kind: "not_configured" | "api" | "parse" | "budget"; usage?: { inputTokens: number; outputTokens: number } }
+) & { provenance?: ProviderExecution; usageStatus?: "known" | "usage_unknown" };
 
 export class LlmBudget {
+  usageUnknown = false;
   constructor(public limit: number, public used = 0, public inputTokens = 0, public outputTokens = 0) {}
   take(): boolean {
     if (this.used >= this.limit) return false;
@@ -192,85 +196,129 @@ export async function callTool<T>(opts: {
   model?: string;
   maxAttempts?: number;
   signal?: AbortSignal;
+  /** New editorial stages use provider-native JSON outputs, never a pretend forced tool. */
+  structured?: boolean;
 }): Promise<LlmResult<T>> {
   const provider = opts.provider ?? env.aiProvider;
   const signals = [opts.signal, currentGenerationSignal()].filter((signal): signal is AbortSignal => !!signal);
   const signal = signals.length ? AbortSignal.any(signals) : undefined;
   const model = opts.model || (provider === "gemini" ? env.geminiModel : provider === "openai" ? env.openaiModel : env.anthropicModel);
-  if (!(provider === "gemini" ? env.geminiKey : provider === "openai" ? env.openaiKey : env.anthropicKey))
-    return { ok: false, kind: "not_configured", error: `${provider === "gemini" ? "Gemini" : provider === "openai" ? "GPT" : "Claude"} API 미연결: 설정에서 API 키를 입력하세요.` };
+  const structured = !!opts.structured || provider === "anthropic" && /^claude-(?:opus-5-5|fable-5-1)(?:-|$)/.test(model);
   const usage = { inputTokens: 0, outputTokens: 0 };
+  let usageUnknown = false;
+  let execution: ProviderExecution = { provider, requestedModel: model, actualModel: null, requestId: null, usageStatus: "known", inputTokens: 0, outputTokens: 0, status: "not_started" };
+  const metadata = () => ({ provenance: { ...execution, usageStatus: usageUnknown ? "usage_unknown" as const : "known" as const,
+    inputTokens: usageUnknown ? null : usage.inputTokens, outputTokens: usageUnknown ? null : usage.outputTokens }, usageStatus: usageUnknown ? "usage_unknown" as const : "known" as const });
+  if (!(provider === "gemini" ? env.geminiKey : provider === "openai" ? env.openaiKey : env.anthropicKey))
+    return { ok: false, kind: "not_configured", error: `${provider === "gemini" ? "Gemini" : provider === "openai" ? "GPT" : "Claude"} API 미연결: 설정에서 API 키를 입력하세요.`, ...metadata() };
+  let wireSchema = opts.inputSchema;
+  try {
+    if (structured && provider === "openai") wireSchema = strictOpenAiSchema(opts.inputSchema);
+    if (structured && provider === "anthropic") wireSchema = strictClaudeSchema(opts.inputSchema);
+  } catch {
+    return { ok: false, kind: "parse", error: "AI 출력 스키마가 선택한 공급자의 구조화 응답 형식과 맞지 않습니다. 호출하지 않았습니다.", ...metadata() };
+  }
   const messages: Anthropic.MessageParam[] = [{ role: "user", content: opts.user }];
   let validationFeedback = "";
-  const attempts = provider === "gemini" ? 1 : Math.min(2, Math.max(1, opts.maxAttempts ?? 2));
+  // Truncated/refused/malformed structured generations are proposals to retry explicitly, not billable format-repair loops.
+  const attempts = provider === "gemini" || structured ? 1 : Math.min(2, Math.max(1, opts.maxAttempts ?? 2));
   for (let attempt = 0; attempt < attempts; attempt++) {
-    if (signal?.aborted) return { ok: false, kind: "api", error: "AI 요청을 취소했습니다. 기존 내용은 유지됩니다.", usage };
-    if (!opts.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달", usage };
+    if (signal?.aborted) { execution.status = "cancelled"; return { ok: false, kind: "api", error: "AI 요청을 취소했습니다. 기존 내용은 유지됩니다.", usage, ...metadata() }; }
+    if (!opts.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달", usage, ...metadata() };
     let payload: unknown;
     let responseModel = model;
-    let inputTokens = 0;
-    let outputTokens = 0;
+    let observedUsage: ReturnType<typeof providerUsage> = { usageStatus: "usage_unknown", inputTokens: null, outputTokens: null };
     let claudeResponse: Anthropic.Message | undefined;
+    execution = { ...execution, status: "failed", actualModel: null, requestId: null };
     try {
       if (provider === "gemini") {
         const resp = await geminiRequest({
           systemInstruction: { parts: [{ text: `${opts.system}\n${opts.toolDescription}\n요청한 결과를 JSON 객체로만 반환하세요.` }] },
           contents: [{ role: "user", parts: [{ text: opts.user }] }],
-          generationConfig: { responseMimeType: "application/json", responseJsonSchema: opts.inputSchema, maxOutputTokens: opts.maxTokens ?? 4000 },
+          generationConfig: { responseMimeType: "application/json", responseJsonSchema: wireSchema, maxOutputTokens: opts.maxTokens ?? 4000 },
         }, { signal, model, reserveRetry: () => opts.budget.take() });
-        responseModel = typeof resp.modelVersion === "string" ? resp.modelVersion : model;
-        inputTokens = Number(resp.usageMetadata?.promptTokenCount) || 0;
-        outputTokens = (Number(resp.usageMetadata?.candidatesTokenCount) || 0) + (Number(resp.usageMetadata?.thoughtsTokenCount) || 0);
+        execution.actualModel = typeof resp.modelVersion === "string" ? resp.modelVersion : null;
+        execution.requestId = providerResponseId(resp.responseId);
+        responseModel = execution.actualModel ?? model;
+        const thoughts = resp.usageMetadata?.thoughtsTokenCount;
+        const candidates = resp.usageMetadata?.candidatesTokenCount;
+        observedUsage = providerUsage(resp.usageMetadata?.promptTokenCount,
+          typeof candidates === "number" && (thoughts === undefined || typeof thoughts === "number") ? candidates + (thoughts ?? 0) : undefined);
         const candidate = resp.candidates?.[0];
+        execution.status = candidate?.finishReason === "MAX_TOKENS" ? "truncated" : resp.promptFeedback?.blockReason || ["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"].includes(candidate?.finishReason) ? "refused" : "invalid_output";
         if (!resp.promptFeedback?.blockReason && candidate?.finishReason === "STOP" && Array.isArray(candidate.content?.parts)) {
           const json = candidate.content.parts.filter((p: any) => !p.thought && typeof p.text === "string").map((p: any) => p.text).join("");
-          try { payload = JSON.parse(json); } catch { /* schema error below */ }
+          try { payload = JSON.parse(json); } catch { /* Original schema validation below remains authoritative. */ }
         }
       } else if (provider === "openai") {
         const resp = await openaiRequest("/responses", {
-          model,
-          store: false,
-          instructions: opts.system,
-          input: opts.user + validationFeedback,
+          model, store: false, instructions: opts.system, input: opts.user + validationFeedback,
           max_output_tokens: opts.maxTokens ?? 4000,
-          tools: [{ type: "function", name: opts.toolName, description: opts.toolDescription, parameters: opts.inputSchema, strict: false }],
-          tool_choice: { type: "function", name: opts.toolName },
-          parallel_tool_calls: false,
+          ...(structured ? { text: { format: { type: "json_schema", name: opts.toolName, schema: wireSchema, strict: true } } } : {
+            tools: [{ type: "function", name: opts.toolName, description: opts.toolDescription, parameters: wireSchema, strict: false }],
+            tool_choice: { type: "function", name: opts.toolName }, parallel_tool_calls: false,
+          }),
         }, { signal });
-        responseModel = typeof resp.model === "string" ? resp.model : model;
-        inputTokens = Number(resp.usage?.input_tokens) || 0;
-        outputTokens = Number(resp.usage?.output_tokens) || 0;
-        const block = Array.isArray(resp.output) ? resp.output.find((b: any) => b.type === "function_call" && b.name === opts.toolName) : null;
-        if (resp.status !== "incomplete" && block && typeof block.arguments === "string") {
-          try { payload = JSON.parse(block.arguments); } catch { /* schema error below */ }
+        execution.actualModel = typeof resp.model === "string" ? resp.model : null;
+        execution.requestId = providerResponseId(resp.id);
+        responseModel = execution.actualModel ?? model;
+        observedUsage = providerUsage(resp.usage?.input_tokens, resp.usage?.output_tokens);
+        const output = Array.isArray(resp.output) ? resp.output : [];
+        const content = output.flatMap((block: any) => Array.isArray(block.content) ? block.content : []);
+        const refused = output.some((b: any) => b.type === "refusal") || content.some((b: any) => b.type === "refusal");
+        execution.status = resp.status === "incomplete" ? "truncated" : refused ? "refused" : "invalid_output";
+        if (structured) {
+          if (resp.status === "completed" && !refused) {
+            const json = content.filter((block: any) => block.type === "output_text" && typeof block.text === "string").map((block: any) => block.text).join("");
+            try { payload = omitOptionalWireNulls(JSON.parse(json), opts.inputSchema); } catch { /* Schema error below. */ }
+          }
+        } else {
+          const block = output.find((b: any) => b.type === "function_call" && b.name === opts.toolName);
+          if (resp.status !== "incomplete" && !refused && block && typeof block.arguments === "string") {
+            try { payload = JSON.parse(block.arguments); } catch { /* Schema error below. */ }
+          }
         }
       } else {
         claudeResponse = await getClient().messages.create({
-          model,
-          max_tokens: opts.maxTokens ?? 4000,
-          system: opts.system,
-          tools: [{ name: opts.toolName, description: opts.toolDescription, input_schema: opts.inputSchema as Anthropic.Tool.InputSchema }],
-          tool_choice: { type: "tool", name: opts.toolName },
-          messages,
+          model, max_tokens: opts.maxTokens ?? (structured ? 8000 : 4000), system: opts.system, messages,
+          ...(structured ? { output_config: { format: { type: "json_schema" as const, schema: wireSchema } } } : {
+            tools: [{ name: opts.toolName, description: opts.toolDescription, input_schema: wireSchema as Anthropic.Tool.InputSchema }],
+            tool_choice: { type: "tool" as const, name: opts.toolName },
+          }),
         }, { signal });
-        responseModel = claudeResponse.model;
-        inputTokens = claudeResponse.usage.input_tokens;
-        outputTokens = claudeResponse.usage.output_tokens;
-        const block = claudeResponse.content.find((b) => b.type === "tool_use" && b.name === opts.toolName);
-        if (claudeResponse.stop_reason !== "max_tokens" && block?.type === "tool_use") payload = block.input;
+        execution.actualModel = typeof claudeResponse.model === "string" ? claudeResponse.model : null;
+        execution.requestId = providerResponseId(claudeResponse.id);
+        responseModel = execution.actualModel ?? model;
+        observedUsage = providerUsage(claudeResponse.usage?.input_tokens, claudeResponse.usage?.output_tokens);
+        execution.status = ["max_tokens", "model_context_window_exceeded"].includes(claudeResponse.stop_reason ?? "") ? "truncated" : claudeResponse.stop_reason === "refusal" ? "refused" : "invalid_output";
+        if (structured) {
+          if (claudeResponse.stop_reason === "end_turn") {
+            const json = claudeResponse.content.filter((block): block is Anthropic.TextBlock => block.type === "text").map(block => block.text).join("");
+            try { payload = JSON.parse(json); } catch { /* Thinking blocks are never parsed or shown as the public answer. */ }
+          }
+        } else {
+          const block = claudeResponse.content.find((b) => b.type === "tool_use" && b.name === opts.toolName);
+          if (!["max_tokens", "model_context_window_exceeded", "refusal"].includes(claudeResponse.stop_reason ?? "") && block?.type === "tool_use") payload = block.input;
+        }
       }
     } catch (e) {
-      if (signal?.aborted) return { ok: false, kind: "api", error: "AI 요청을 취소했습니다. 기존 내용은 유지됩니다. 공급자의 처리·과금 여부는 확인할 수 없어 자동 재호출하지 않았습니다.", usage };
-      return { ok: false, kind: e instanceof AiServiceError ? e.kind : "api", error: e instanceof AiServiceError ? e.message : aiErrorMessage(provider, (e as { status?: number }).status), usage };
+      usageUnknown = true; opts.budget.usageUnknown = true;
+      if (signal?.aborted) { execution.status = "cancelled"; return { ok: false, kind: "api", error: "AI 요청을 취소했습니다. 기존 내용은 유지됩니다. 공급자의 처리·과금 여부는 확인할 수 없어 자동 재호출하지 않았습니다.", usage, ...metadata() }; }
+      return { ok: false, kind: e instanceof AiServiceError ? e.kind : "api", error: e instanceof AiServiceError ? e.message : aiErrorMessage(provider, (e as { status?: number }).status), usage, ...metadata() };
     }
-    usage.inputTokens += inputTokens;
-    usage.outputTokens += outputTokens;
-    opts.budget.inputTokens += inputTokens;
-    opts.budget.outputTokens += outputTokens;
+    if (observedUsage.usageStatus === "usage_unknown") { usageUnknown = true; opts.budget.usageUnknown = true; }
+    usage.inputTokens += observedUsage.inputTokens ?? 0;
+    usage.outputTokens += observedUsage.outputTokens ?? 0;
+    opts.budget.inputTokens += observedUsage.inputTokens ?? 0;
+    opts.budget.outputTokens += observedUsage.outputTokens ?? 0;
     const parsed = opts.zod.safeParse(payload);
-    if (parsed.success) return { ok: true, data: parsed.data, model: responseModel, usage, droppedEvidence: 0 };
+    if (payload !== undefined && parsed.success) { execution.status = "completed"; return { ok: true, data: parsed.data, model: responseModel, usage, droppedEvidence: 0, ...metadata() }; }
+    if (execution.status === "truncated" || execution.status === "refused") {
+      const error = execution.status === "truncated" ? "AI 응답이 출력 한도에서 잘렸습니다. 기존 콘텐츠는 유지되며 자동 재호출하지 않았습니다." : "AI 공급자가 이번 요청의 생성을 거절했습니다. 입력·모델을 확인하세요. 기존 콘텐츠는 유지됩니다.";
+      return { ok: false, kind: "parse", error, usage, ...metadata() };
+    }
     if (attempt + 1 < attempts) {
-      validationFeedback = `\n이전 응답은 형식 검증에 실패했습니다: ${parsed.error.issues.slice(0, 8).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. 요청한 도구 형식으로 다시 작성하세요.`;
+      validationFeedback = `\n이전 응답은 형식 검증에 실패했습니다: ${parsed.success ? "완료한 응답이 없습니다" : parsed.error.issues.slice(0, 8).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}. 요청한 도구 형식으로 다시 작성하세요.`;
       if (claudeResponse) {
         const block = claudeResponse.content.find((b) => b.type === "tool_use");
         if (block?.type === "tool_use") {
@@ -280,7 +328,7 @@ export async function callTool<T>(opts: {
       }
     }
   }
-  return { ok: false, kind: "parse", error: "AI 출력 형식 오류. 기존 콘텐츠는 유지됩니다.", usage };
+  return { ok: false, kind: "parse", error: "AI 출력 형식 오류. 기존 콘텐츠는 유지됩니다.", usage, ...metadata() };
 }
 
 /* ───────────── JSON Schema (도구 입력) ───────────── */

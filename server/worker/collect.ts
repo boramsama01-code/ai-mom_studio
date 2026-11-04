@@ -339,7 +339,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       counts,
       errors,
       actualCalls: { naver: counter.naver, rss: publicSearch.counts.rssRequests, search: searchCalls(counter), fetch: fetchCalls, llm: llmBudget.used },
-      llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used },
+      llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used, usageStatus: llmBudget.usageUnknown ? "usage_unknown" : "known" },
       finishedAt: new Date(),
     })
     .where(eq(runs.id, run.id));
@@ -364,7 +364,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     Object.assign(counts, publicSearch.counts);
     await db.update(runs).set({ status: counts.newItems > 0 ? "partial" : "failed", counts, errors,
       actualCalls: { naver: counter.naver, rss: publicSearch.counts.rssRequests, search: searchCalls(counter), fetch: fetchCalls, llm: llmBudget.used },
-      llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used }, finishedAt: new Date(),
+      llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used, usageStatus: llmBudget.usageUnknown ? "usage_unknown" : "known" }, finishedAt: new Date(),
     }).where(eq(runs.id, run.id));
     throw error;
   }

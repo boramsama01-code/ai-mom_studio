@@ -48,7 +48,7 @@ describe("Gemini provider", () => {
   });
   it.each(["MAX_TOKENS", "SAFETY"])("does not accept partial or blocked output (%s)", async reason => {
     const mock = vi.fn().mockResolvedValue(response(draft, reason)); vi.stubGlobal("fetch", mock);
-    await expect(generateStudioText(input)).rejects.toThrow("출력 형식 오류");
+    await expect(generateStudioText(input)).rejects.toThrow(reason === "MAX_TOKENS" ? "출력 한도에서 잘렸습니다" : "생성을 거절했습니다");
     expect(mock).toHaveBeenCalledOnce();
   });
   it("rejects malformed JSON, oversized responses and network errors without leaking credentials", async () => {
@@ -239,7 +239,7 @@ describe("bounded Gemini recovery", () => {
   it("does not retry a successful response blocked by safety, even after recovering a 503", async () => {
     const mock = vi.fn().mockResolvedValueOnce(new Response(null, { status: 503 })).mockResolvedValueOnce(response(draft, "SAFETY"));
     vi.stubGlobal("fetch", mock);
-    const rejected = expect(generateStudioText(input)).rejects.toThrow("출력 형식 오류");
+    const rejected = expect(generateStudioText(input)).rejects.toThrow("생성을 거절했습니다");
     await vi.runAllTimersAsync();
     await rejected;
     expect(mock).toHaveBeenCalledTimes(2);

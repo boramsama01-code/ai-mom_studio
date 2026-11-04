@@ -49,6 +49,7 @@ import { resolveStyle } from "../services/templates";
 import { cardApprovalHash, loadCardPages, planCarousel, renderCarouselPage, renderCarouselPages } from "../services/cardCarousel";
 import { loadCardPageArtwork } from "../services/cardPageArtwork";
 import { assertNewsEditorialResources } from "../services/newsEditorialSources";
+import { assertCanvaPublication } from "../services/canvaPublication";
 import { channelAiSelection } from "../services/channelAi";
 import type { AiSelection } from "../../shared/channelAi";
 import { generateStudioImage } from "../services/studioAi";
@@ -58,6 +59,9 @@ import { studioKey } from "../../shared/channelKeys";
 import type { CardCarousel } from "../../shared/carousel";
 import { HttpError } from "../routes/util";
 import { cardCopySchema } from "../../shared/cardCopy";
+import { familyCardCopySchema } from "../../shared/familyDialogue";
+import { familyMetadataFromPayload } from "../services/familyEditorial";
+import { assertFamilyEvidenceForCopy } from "../services/familyEditorialPersistence";
 import { assertGenerationActive, completeGenerationResult } from "../services/generationContext";
 export { reconcileDelivery, confirmDeliveryPosted, confirmDeliveryNotPosted } from "../services/publicationReconciliation";
 
@@ -111,24 +115,37 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   const [existingBoard] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, itemId));
   if (existingBoard) assertStudioActive(existingBoard);
   if (!rev) return { ok: false as const, code: "no_revision", error: "초안이 없습니다. 먼저 추출·작성하세요." };
+  if ((rev.payload.cardCopy as { version?: unknown } | undefined)?.version === 2 && rev.payload.rendererProvider === "canva") return { ok: false as const, code: "conflict", error: "Canva에서 최신 8장을 가져오거나 스튜디오 자체 이미지로 전환한 뒤 생성해 주세요." };
   const parsed = payloadSchemaFor(item.kind).safeParse(rev.payload);
   if (!parsed.success) return { ok: false as const, code: "invalid_payload", error: "초안 형식이 올바르지 않습니다. 편집 화면에서 필수 항목을 채우세요." };
   const [ch] = await db.select().from(channels).where(eq(channels.id, item.channelId));
   if (!ch?.active) return { ok: false as const, code: "channel", error: "채널을 복원한 뒤 카드를 만들어 주세요." };
   const savedCopy = cardCopySchema.safeParse(rev.payload.cardCopy);
-  const key = templateKey || (savedCopy.success ? savedCopy.data.templateKey : null) || ch.cardTemplate || "builtin:classic";
+  const savedFamily = familyCardCopySchema.safeParse(rev.payload.cardCopy);
+  const familyMetadata = savedFamily.success ? familyMetadataFromPayload(rev.payload) : null;
+  if (savedFamily.success) {
+    if (!familyMetadata) return { ok: false as const, code: "invalid_payload", error: "8장 원고의 고정 근거와 편집 기록을 확인해 주세요." };
+    try { await assertFamilyEvidenceForCopy(db, item, savedFamily.data, familyMetadata); }
+    catch (error) { return { ok: false as const, code: "invalid_payload", error: (error as Error).message }; }
+    if (options.regenerateCover) return { ok: false as const, code: "invalid_image_request", error: "표지의 '이 페이지 배경 다시 만들기'에서 저장된 이미지 브리프를 확인하고 요청해 주세요." };
+  }
+  const key = templateKey || (savedFamily.success ? savedFamily.data.templateKey : savedCopy.success ? savedCopy.data.templateKey : null) || ch.cardTemplate || "builtin:classic";
   const copy = savedCopy.success ? { ...savedCopy.data, templateKey: key } : undefined;
+  const familyCopy = savedFamily.success ? { ...savedFamily.data, templateKey: key } : undefined;
   if (copy) {
     try { await assertNewsEditorialResources(db, item, copy); }
     catch (error) { return { ok: false as const, code: "invalid_payload", error: (error as Error).message }; }
   }
-  const payload = { ...rev.payload, ...(copy ? { cardCopy: copy } : {}) } as Record<string, any>;
-  const title = copy?.cover.title || payload.title || payload.key_question;
+  const payload = { ...rev.payload, ...(copy || familyCopy ? { cardCopy: familyCopy ?? copy } : {}) } as Record<string, any>;
+  const familyCover = familyCopy?.pages.find(page => page.id === "cover");
+  const title = (familyCover?.id === "cover" ? familyCover.fields.headline : null) || copy?.cover.title || payload.title || payload.key_question;
   if (!title || !String(title).trim()) return { ok: false as const, code: "invalid_payload", error: "카드 제목(제목/핵심 질문)이 비어 있습니다." };
   let style;
   try { style = await resolveStyle(db, key, ch.id); }
   catch (e) { return { ok: false as const, code: "template", error: (e as Error).message }; }
-  const typographyOnly = copy?.storyFormat !== "discussion8" && !!style.collection && !collectionUsesArt(style.collection);
+  // v2 backgrounds are explicit, durable page assets. Rendering never buys an
+  // unrelated replacement illustration or silently switches image workflows.
+  const typographyOnly = !!familyCopy || copy?.storyFormat !== "discussion8" && !!style.collection && !collectionUsesArt(style.collection);
   if (options.regenerateCover && copy?.cover.background) return { ok: false as const, code: "invalid_image_request", error: "표지에 선택한 페이지 배경이 있습니다. 표지의 ‘이 페이지 배경 다시 만들기’에서 수정해 주세요." };
   if (options.regenerateCover && (options.coverMode !== "ai" || typographyOnly)) return { ok: false as const, code: "invalid_image_request", error: "그림이 있는 디자인과 AI 표지를 선택한 뒤 새 표지를 요청하세요." };
   if (options.coverInstruction?.trim() && !options.regenerateCover) return { ok: false as const, code: "invalid_image_request", error: "표지 수정 지시는 새 표지 생성과 함께 요청해 주세요." };
@@ -143,9 +160,10 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   let cover: CardCarousel["cover"] = { kind: "typography", credit: style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오" };
   try {
     const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
-    const pageImages = copy ? await loadCardPageArtwork(db, item.id, ch.id, copy) : new Map<number, Buffer>();
-    if (copy?.cover.background) {
-      const [selectedArt] = await db.select({ source: mediaAssets.source, model: mediaAssets.templateKey }).from(mediaAssets).where(eq(mediaAssets.id, copy.cover.background.assetId));
+    const pageImages = copy || familyCopy ? await loadCardPageArtwork(db, item.id, ch.id, familyCopy ?? copy!, familyMetadata?.pageDesigns) : new Map<number, Buffer>();
+    const coverBackgroundId = familyCopy ? familyMetadata?.pageDesigns.cover.background.assetId : copy?.cover.background?.assetId;
+    if (coverBackgroundId) {
+      const [selectedArt] = await db.select({ source: mediaAssets.source, model: mediaAssets.templateKey }).from(mediaAssets).where(eq(mediaAssets.id, coverBackgroundId));
       cover = selectedArt.source === "ai" ? { kind: "ai", credit: "AI 일러스트 · OpenAI", ...(selectedArt.model ? { model: selectedArt.model } : {}) } : { kind: "upload", credit: "직접 등록 이미지" };
     }
     // Check the title and source line before spending an image-generation call.
@@ -195,7 +213,8 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
     pages.push({ id: stored.id, sha256: hash, title: page.title, altText:page.altText });
   }
   const [previous]=await db.select({carousel:mediaAssets.carousel}).from(mediaAssets).where(eq(mediaAssets.id,pages[0].id));
-  const carousel: CardCarousel = previous?.carousel?.pages.length===pages.length && previous.carousel.pages.every((p,i)=>p.id===pages[i].id) ? {...previous.carousel,pages:pages.map((p,i)=>({...p,altText:previous.carousel!.pages[i].altText||p.altText})), ...(copy ? { copy } : {})} : { version: 1, pages, cover, ...(copy ? { copy } : {}) };
+  const renderedCopy = familyCopy ?? copy;
+  const carousel: CardCarousel = previous?.carousel?.pages.length===pages.length && previous.carousel.pages.every((p,i)=>p.id===pages[i].id) ? {...previous.carousel,pages:pages.map((p,i)=>({...p,altText:previous.carousel!.pages[i].altText||p.altText})), ...(renderedCopy ? { copy: renderedCopy } : {}), ...(familyCopy ? { rendererProvider: "builtin" as const } : {})} : { version: 1, pages, cover, ...(renderedCopy ? { copy: renderedCopy } : {}), ...(familyCopy ? { rendererProvider: "builtin" as const } : {}) };
   await db.update(mediaAssets).set({ carousel }).where(eq(mediaAssets.id, pages[0].id));
   const board = await createStudioCard(db, studioContentSchema.parse({ title: String(title).slice(0, 160), channel: studioKey(ch.slug), format: "카드뉴스", stage: "review" }), options.actor ?? "system", item.id);
   // Keep all manually edited board fields and version history; only its generated output changes.
@@ -234,12 +253,13 @@ export async function approveItem(
   if (item.origin !== "studio") assertPublicationDraftIntent(item.publicationDraft, a, now);
   const [asset] = await db.select().from(mediaAssets).where(eq(mediaAssets.id, a.mediaAssetId));
   if (!asset || asset.kind !== "card" || asset.revisionId !== rev.id) return { ok: false as const, error: "현재 버전으로 만든 카드가 아닙니다. 카드를 다시 생성하세요." };
+  const canvaPublication = await assertCanvaPublication(db, { item, revision: rev, asset });
   if(a.altTextVersion!==undefined && a.altTextVersion!==cardAltTextState(asset,item.title).version)throw new HttpError(409,"대체텍스트가 변경됐습니다. 최신 설명을 확인하고 다시 승인해 주세요.");
   const altValues = cardAltTextState(asset, item.title).values;
   const invalidPage = altValues.findIndex(value => !!altTextError(value));
   if (invalidPage >= 0) return { ok: false as const, error: `${invalidPage + 1}페이지: ${altTextError(altValues[invalidPage])} 수정한 뒤 다시 승인해 주세요.` };
   let approvedHash: string;
-  try { approvedHash = cardApprovalHash(await loadCardPages(db, asset)); }
+  try { approvedHash = cardApprovalHash(canvaPublication?.pages ?? await loadCardPages(db, asset)); }
   catch (e) { return { ok: false as const, error: (e as Error).message }; }
   if (item.kind === "notice") {
     const st = computeScheduleStatus((rev.payload as any).schedules, now);
@@ -294,6 +314,10 @@ export async function approveItem(
     if (!freshReadiness.ready) throw new HttpError(409, freshReadiness.blockers.join(" "));
     if (board) { assertStudioActive(board); if (board.importedMeta?.studioPublication && rev.payload.studioVersion !== board.version) throw new HttpError(409, "제작보드가 수정됐습니다. 미리보기를 다시 준비하세요."); }
     const [freshAsset]=await tx.select().from(mediaAssets).where(eq(mediaAssets.id,asset.id));
+    if(canvaPublication){
+      const [freshRevision]=await tx.select().from(contentRevisions).where(eq(contentRevisions.id,rev.id));
+      await assertCanvaPublication(tx as unknown as DB,{item:freshItem,revision:freshRevision,asset:freshAsset});
+    }
     if(JSON.stringify(cardAltTextState(freshAsset,item.title))!==JSON.stringify(cardAltTextState(asset,item.title)))throw new HttpError(409,"대체텍스트가 변경됐습니다. 최신 설명을 확인하고 다시 승인해 주세요.");
     // 기존 활성 승인은 새 승인으로 대체
     const prev = await tx.select({ id: approvals.id }).from(approvals).where(and(eq(approvals.contentItemId, item.id), eq(approvals.status, "active")));

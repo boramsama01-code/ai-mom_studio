@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { familyCardCopySchema, familyDialogueMetadataSchema } from "./familyDialogue";
 import { cardDesign } from "./cardDesigns";
 import { discussionCardCopyInstruction, NEWS_EDITORIAL_AI_LIMITS, NEWS_EDITORIAL_BODY_LIMITS, NEWS_EDITORIAL_ROLES } from "./newsEditorial";
 import { newsEditorialResourceSchema } from "./newsEditorialResource";
@@ -123,5 +124,12 @@ export function cardCopyFromStored(payload: Record<string, unknown>): CardCopy |
 
 /** AI/source refreshes may update facts, but only an explicit copy edit can replace saved editorial text. */
 export function preserveCardCopy<T extends Record<string, unknown>>(next: T, previous: Record<string, unknown> | null | undefined): T {
+  if ((previous?.cardCopy as { version?: unknown } | undefined)?.version === 2) {
+    const copy = familyCardCopySchema.parse(previous!.cardCopy);
+    const metadata = familyDialogueMetadataSchema.parse(Object.fromEntries(Object.keys(familyDialogueMetadataSchema.shape).map(key => [key, previous![key]])));
+    return { ...next, ...metadata, cardCopy: copy, dependencies: { ...metadata.dependencies, caption: metadata.captionPackage ? "needs_review" : "not_generated", review: metadata.editorialReview ? "needs_review" : "not_generated", render: "needs_review" },
+      ...(previous!.rendererProvider !== undefined ? { rendererProvider: previous!.rendererProvider } : {}), ...(previous!.canvaExport !== undefined ? { canvaExport: previous!.canvaExport } : {}),
+    };
+  }
   return previous?.cardCopy === undefined ? next : { ...next, cardCopy: cardCopySchema.parse(previous.cardCopy) };
 }

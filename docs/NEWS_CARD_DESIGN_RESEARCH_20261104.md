@@ -4,6 +4,14 @@
 
 ## 참고 사례와 적용
 
+### 사용자가 지정한 최종 방향
+
+2026-11-04에 [이우연, 「카드뉴스 죽고, 읽는 뉴스 뜬다」](https://brunch.co.kr/@leewooyeon/7) 본문 전체와 실제 이미지 예시를 확인했다. 글은 2025-08-29에 게시됐다. 사용자가 함께 준 전면 사진·어두운 오버레이·노란 대형 활자 썸네일도 직접 확인했다.
+
+이를 현재 디자인의 우선 기준으로 삼는다. 표지는 사진을 넓게 사용하고 핵심 제목에 시선을 모은다. 내지는 짙은 회색·녹색, 부드러운 흰색 글자, 제한적인 노란 포인트, 문장 크기와 여백으로 읽는 순서를 만든다. 흰 바탕에 패널·장식을 늘리는 방향은 채택하지 않는다. 구성은 기존 8장의 역할을 유지한다.
+
+해당 글의 신뢰감·몰입에 관한 설명은 저자의 디자인 관찰과 해석이다. 특정 색이 모든 독자의 신뢰나 참여율을 높인다는 실험 결과, 또는 2026년 전체 매체의 보편적 운영 방식으로 인용하지 않는다. 사진·로고·유료 폰트·기사 문구를 가져오지 않고 편집 원칙만 참고한다.
+
 | 사례 | 확인한 근거 | 적용할 원칙 |
 | --- | --- | --- |
 | BBC News Instagram | [Joy Roxas의 2022 제작 포트폴리오](https://www.joyroxas.design/portfolio/bbc-news-instagram). 실제 템플릿에 제목 3~4줄 제한, 단색형·사진형, 브랜드·텍스트 영역이 구분돼 있다. | 사진을 넣어도 제목이 묻히지 않는 가독성 영역, 짧은 제목, 안정적인 브랜드 위치. |
@@ -12,6 +20,7 @@
 | Financial Times | [공식 Story Playbook](https://github.com/ft-interactive/story-playbook), [제작 책임자의 설명, 2019-06-12](https://source.opennews.org/articles/story-templates-financial-times-reusable/). 독자가 궁금해하는 질문에 맞춰 CMS의 콘텐츠 형식을 구분한다. | 하나의 긴 요약을 여러 장으로 나누는 대신 각 장에 다른 역할과 입력 필드를 부여한다. |
 | AJ Labs / Al Jazeera | [Al Jazeera Media Institute, 2021 연구·실무자 인터뷰](https://institute.aljazeera.net/sites/default/files/2021/Mathias-Felipe%20de-Lima-Santos_0.pdf). 당시 Instagram 게시물 분석과, 플랫폼 안에서 이야기가 완결돼야 한다는 편집자의 설명. | 원문을 열지 않아도 사건·조건·한계를 이해하도록 작성한다. 제목·한 줄 요약·추가 정보 경로를 구분한다. |
 | Reuters | [공식 편집 기준](https://reutersagency.com/about/standards-values/), [Graphics 소개](https://reutersagency.com/content/content-types/graphics/). | 출처, 확인된 사실, 해석을 구분한다. 과장된 표현이나 실제 사건 사진처럼 보이는 합성 그림을 피한다. |
+| The Economist | [자사 제작자의 Instagram 설명](https://medium.com/the-economist/charting-new-territory-7f5afb293270), [공식 Audiogram 가이드](https://design-system.economist.com/documents/TE_Audiograms_20200629.pdf). 2020년 자료와 실제 규격·브랜드 예시를 확인했다. | 반복되는 브랜드 위치와 제한된 포인트 색, 한 화면에서 우선할 핵심 메시지. 붉은 로고나 전용 폰트를 복사하지 않음. |
 
 BBC 사례는 과거 프로젝트 자료이며 FT 저장소는 2021년 보관 처리됐다. AJ 연구도 2021년의 관찰이다. 이를 2026년의 플랫폼 규칙이나 전체 뉴스 채널의 공통 운영 방식으로 주장하지 않는다. Reuters는 편집 기준·제품 문서 확인 범위이며 Instagram 전체 캐러셀 직접 관찰로 표현하지 않는다.
 
@@ -44,6 +53,8 @@ BBC 사례는 과거 프로젝트 자료이며 FT 저장소는 2021년 보관 �
 - AI 이미지는 일러스트임을 표시하고, 실제 사건의 증거 사진으로 보이게 만들지 않는다. 사진·일러스트·그림 속 한글에 편집 문구를 의존하지 않는다.
 
 ## 라이선스와 검증 한계
+
+현재 Canva 마스터는 차콜 `#1B2023`, 딥그린 `#202725`, 부드러운 흰색 `#F3F0E7`, 버터 옐로 `#F4D66A`로 직접 제작했다. 표지의 가상 예시는 기존 저장소의 AI 연출 이미지 `assets/card-art/lab.jpg`, 닫는 표지는 승인된 `assets/branding/space-penguin-company.png`를 사용한다. 외부 레퍼런스의 영화 장면이나 Canva 로고를 자산으로 가져오지 않았다. 실제 Canva 초안 8장 미리보기와 남은 검증은 [마스터 문서](CANVA_READING_MASTERS_20261104.md)에 기록했다.
 
 BBC·Guardian·Reuters·FT의 로고, 전용 글꼴, 사진, 카드 문구를 서비스 자산으로 가져오지 않는다. 레이아웃·편집 구조만 참고하고 기존 허용된 한국어 글꼴과 자체 디자인을 사용한다. FT Story Playbook의 MIT는 소프트웨어에만 해당하며 FT 콘텐츠에는 별도 저작권이 있음을 README가 명시한다. 외부 코드는 이번 배경 기능에 복사하지 않았다.
 

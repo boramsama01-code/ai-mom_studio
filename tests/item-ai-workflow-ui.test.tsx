@@ -6,7 +6,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { EditPanel, ItemDetailPage } from "../client/src/pages/ItemDetail";
 import { emptyPayload } from "../shared/payloads";
 import { aiProviderLabels } from "../shared/aiProviders";
-import { activateDraftRecoveryScope } from "../client/src/draftRecovery";
+import { activateDraftRecoveryScope, readDraftRecovery, writeDraftRecovery } from "../client/src/draftRecovery";
+import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
+import { ApiError } from "../client/src/api";
+import type { FamilyDialogueMetadata } from "../shared/familyDialogue";
 
 const mocks = vi.hoisted(() => ({
   api: vi.fn(), blob: vi.fn(), toast: vi.fn(), navigate: vi.fn(),
@@ -40,6 +43,15 @@ const warning = "기사 요약은 저장했습니다. 카드 문구는 완성하
 const workflow = (warnings: string[] = []) => ({ version: 1, summary: { provider: "gemini", model: "gemini-summary-fixture" }, copy: warnings.length ? null : { provider: "openai", model: "gpt-copy-fixture" }, warnings });
 let host: HTMLDivElement, root: Root, client: QueryClient, detail: any;
 let generate: (body: any) => Promise<any>;
+let confirmCaption: (body: any) => Promise<any>;
+const recoveryScope = "isolated-item-ai-workflow-session";
+function familyDraft() {
+  const metadata = familyDialogueMetadataFixture(4);
+  metadata.dependencies.caption = "needs_review";
+  metadata.captionPackage!.contentRevision = 3;
+  detail.current.payload = { ...emptyPayload("science_dialogue", "현재 저장한 8장 원고"), ...metadata, cardCopy: familyDialogueCardFixture(), rendererProvider: "canva" };
+  detail.item.edited = detail.current.payload;
+}
 
 beforeEach(() => {
   vi.clearAllMocks(); sessionStorage.clear(); localStorage.clear();
@@ -57,6 +69,7 @@ beforeEach(() => {
     detail.current = { id: 5, revisionNo: 2, author: "llm", model: "gemini-summary-fixture", payload: { ...emptyPayload("science_dialogue", "저장된 새 요약"), cardCopy: copy(), aiWorkflow: workflow() } };
     return structuredClone(detail.item);
   };
+  confirmCaption = async () => { throw new Error("Manual caption confirmation must be isolated explicitly"); };
   HTMLElement.prototype.scrollIntoView = vi.fn();
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:item-ai-fixture") });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
@@ -65,8 +78,16 @@ beforeEach(() => {
     if (path === "/status") return { integrations: { aiProvider: "anthropic", gemini: true, openai: true, anthropic: true, flags: { dryRun: false, autoPublish: true } }, workerConnected: true, globalStop: false };
     if (path === "/studio/ai-status") return { defaultProvider: "anthropic", text: { gemini: true, openai: true, anthropic: true }, image: true };
     if (path === "/canva/status") return { connected: false };
+    if (path === "/canva/editorial/status") return { configured: false, connected: false, autofill: false, capabilities: [] };
+    if (path === "/channels/2/canva/masters" || path === `${itemPath}/canva/jobs`) return { items: [] };
     if (path === itemPath) return structuredClone(detail);
     if (path === `${itemPath}/generate`) return generate(options?.body);
+    if (path === `${itemPath}/publication-draft` && options?.method === "PATCH") {
+      if (options.body.version !== detail.publicationDraft.version) throw new ApiError(409, "게시 준비가 다른 곳에서 변경됐습니다.");
+      detail.publicationDraft = { version: detail.publicationDraft.version + 1, captions: structuredClone(options.body.captions), options: structuredClone(options.body.options) };
+      return structuredClone(detail.publicationDraft);
+    }
+    if (path === `${itemPath}/card-copy/caption-confirm`) return confirmCaption(options?.body);
     if (path === `${itemPath}/card-copy`) {
       if (options?.method === "PATCH") {
         detail.item.version++; detail.current.id++; detail.current.revisionNo++;
@@ -74,7 +95,8 @@ beforeEach(() => {
         detail.current.payload.cardCopy = structuredClone(options.body.copy);
         if (detail.current.payload.aiWorkflow) detail.current.payload.aiWorkflow.warnings = [];
       }
-      return { version: detail.item.version, revisionId: detail.current?.id ?? 0, hasSavedCopy: !!detail.current?.payload.cardCopy, copy: structuredClone(detail.current?.payload.cardCopy ?? copy()) };
+      const metadata = detail.current?.payload.cardCopy?.version === 2 ? Object.fromEntries(Object.keys(familyDialogueMetadataFixture()).map(key => [key, structuredClone(detail.current.payload[key])])) : {};
+      return { version: detail.item.version, revisionId: detail.current?.id ?? 0, hasSavedCopy: !!detail.current?.payload.cardCopy, ...metadata, copy: structuredClone(detail.current?.payload.cardCopy ?? copy()) };
     }
     throw new Error(`Unexpected isolated API call: ${path}`);
   });
@@ -177,6 +199,114 @@ describe("source workspace role models and partial generation recovery", () => {
     await render(); await click("원고·이미지 자동 만들기");
     expect(writes().map(([path]) => path)).toEqual([`${itemPath}/generate`]);
     expect(host.querySelector('[data-testid="source-generation-warnings"]')?.textContent).toContain(warning);
+  });
+
+  it.each([true, false])("keeps a new v2 deck and its one generated cover for review before Canva (receipt includes copy: %s)", async receiptIncludesCopy => {
+    detail.current = null; detail.item.currentRevisionId = null;
+    generate = async () => {
+      const metadata = familyDialogueMetadataFixture(5);
+      metadata.pageDesigns.cover.background = { ...metadata.pageDesigns.cover.background, kind: "image", assetId: 81 };
+      const payload = { ...emptyPayload("science_dialogue", "원문을 확인한 8장 초안"), ...metadata, cardCopy: familyDialogueCardFixture(), rendererProvider: "canva", aiWorkflow: workflow() };
+      detail.item = { ...detail.item, version: 2, currentRevisionId: 5, edited: payload };
+      detail.current = { id: 5, revisionNo: 1, author: "llm", payload };
+      return { ...structuredClone(detail.item), edited: receiptIncludesCopy ? structuredClone(payload) : {}, generationWarnings: [] };
+    };
+    await render(); await click("원고·이미지 자동 만들기");
+    expect(writes().map(([path]) => path)).toEqual([`${itemPath}/generate`]);
+    expect(detail.current.payload.cardCopy.version).toBe(2); expect(detail.current.payload.pageDesigns.cover.background.assetId).toBe(81);
+    expect(host.querySelectorAll(".family-page-strip>button")).toHaveLength(8);
+    const notice = host.querySelector('[data-testid="family-generation-next-step"]');
+    expect(notice?.textContent).toContain("8장 원고와 표지 배경을 저장했습니다");
+    expect(notice?.textContent).toContain("Canva 8장 만들기"); expect(notice?.textContent).toContain("스튜디오 초안");
+    expect(host.querySelector('[aria-label="Canva 8장 디자인"]')).not.toBeNull();
+    expect(mocks.api.mock.calls.some(([path]) => /\/(card|approve|canva\/jobs)$/.test(path) && writes().some(([writePath]) => writePath === path))).toBe(false);
+  });
+});
+
+describe("manual v2 caption recovery", () => {
+  it.each([false, true])("uses the existing caption input and records manual comparison without AI or export calls (retained Canva output: %s)", async canvaOutputReused => {
+    familyDraft();
+    confirmCaption = async body => {
+      expect(body).toEqual({ version: 1, publicationDraftVersion: 2, textConfirmed: true });
+      const metadata: FamilyDialogueMetadata = familyDialogueMetadataFixture(5);
+      metadata.captionPackage = { origin: "manual", contentRevision: 5, coreQuestion: metadata.editorialPlan.coreQuestion, fullCaption: detail.publicationDraft.captions.instagram, sourceCredit: metadata.captionPackage!.sourceCredit, confirmation: { comparedRevision: 4, publicationDraftVersion: 2, confirmedAt: "2026-11-04T00:00:00Z", captionHash: "a".repeat(64) } };
+      metadata.dependencies.caption = "current"; metadata.dependencies.review = "needs_review";
+      detail.item = { ...detail.item, version: 2, currentRevisionId: 5, reviewStatus: "pending" };
+      detail.current = { ...detail.current, id: 5, revisionNo: 2, payload: { ...detail.current.payload, ...metadata } };
+      return { version: 2, revisionId: 5, hasSavedCopy: true, copy: detail.current.payload.cardCopy, ...metadata, canvaOutputReused, ...(canvaOutputReused ? { retainedOutputAssetId: 91 } : {}) };
+    };
+    await render(); await click("게시 준비에서 캡션 직접 수정");
+    const caption = host.querySelector<HTMLTextAreaElement>('[aria-label="인스타그램 캡션"]')!;
+    await input(caption, "직접 쓴 캡션입니다. 현재 카드의 질문과 기사 출처를 대조했습니다.");
+    expect(button("캡션 저장 · 현재 카드와 대조 확정").disabled).toBe(true);
+    const confirmed = host.querySelector<HTMLInputElement>('[data-testid="family-manual-caption"] input[type="checkbox"]')!;
+    expect(confirmed.disabled).toBe(true);
+    await click("중심 질문을 캡션에 추가");
+    expect(caption.value).toBe(`직접 쓴 캡션입니다. 현재 카드의 질문과 기사 출처를 대조했습니다.\n\n${detail.current.payload.editorialPlan.coreQuestion}`);
+    await act(async () => confirmed.click()); await click("캡션 저장 · 현재 카드와 대조 확정");
+    expect(writes().map(([path]) => path)).toEqual([`${itemPath}/publication-draft`, `${itemPath}/card-copy/caption-confirm`]);
+    expect(host.querySelectorAll('[aria-label="인스타그램 캡션"]')).toHaveLength(1);
+    expect(detail.current.payload.captionPackage).toMatchObject({ origin: "manual", contentRevision: 5, fullCaption: caption.value });
+    expect(detail.current.payload.captionPackage).not.toHaveProperty("hook");
+    expect(host.querySelector('.family-caption pre')?.textContent).toBe(caption.value);
+    expect(host.querySelector('.family-caption summary')?.textContent).toContain("저장된 카드와 일치");
+    expect(host.textContent).toContain(canvaOutputReused ? "기존 8장 출력을 유지했습니다" : "현재 원고로 8장 이미지를 다시 만들고");
+    expect(detail.item.reviewStatus).toBe("pending");
+  });
+
+  it("keeps text typed during preparation save and requires another comparison before confirming its binding", async () => {
+    familyDraft();
+    let release!: (value: any) => void, persisted: any;
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (path, options) => {
+      if (path === `${itemPath}/publication-draft` && options?.method === "PATCH") { persisted = await fallback(path, options); return new Promise(resolve => { release = resolve; }); }
+      return fallback(path, options);
+    });
+    await render(); await click("게시 준비에서 캡션 직접 수정");
+    const caption = host.querySelector<HTMLTextAreaElement>('[aria-label="인스타그램 캡션"]')!;
+    expect(host.querySelectorAll('[aria-label="인스타그램 캡션"]')).toHaveLength(1);
+    await input(caption, "먼저 읽고 확인한 수동 캡션");
+    await click("중심 질문을 캡션에 추가");
+    const confirmed = host.querySelector<HTMLInputElement>('[data-testid="family-manual-caption"] input[type="checkbox"]')!;
+    expect(confirmed.disabled).toBe(false); await act(async () => confirmed.click());
+    await act(async () => button("캡션 저장 · 현재 카드와 대조 확정").click()); await settle();
+    await input(caption, "저장 요청을 기다리며 추가로 고친 수동 캡션");
+    await act(async () => release(persisted)); await settle();
+    expect(caption.value).toBe("저장 요청을 기다리며 추가로 고친 수동 캡션");
+    expect(confirmed.checked).toBe(false);
+    expect(host.textContent).toContain("대조 확인 중 카드나 캡션이 바뀌었습니다");
+    expect(writes().map(([path]) => path)).toEqual([`${itemPath}/publication-draft`]);
+  });
+
+  it("keeps manual caption input when the server rejects a stale content version", async () => {
+    familyDraft(); confirmCaption = async () => { throw new ApiError(409, "원고가 다른 곳에서 바뀌었습니다. 입력은 유지했습니다."); };
+    await render(); await click("게시 준비에서 캡션 직접 수정");
+    const caption = host.querySelector<HTMLTextAreaElement>('[aria-label="인스타그램 캡션"]')!;
+    await input(caption, "충돌이 나도 보존할 직접 작성한 캡션");
+    await click("중심 질문을 캡션에 추가");
+    const captionBeforeRequest = caption.value;
+    const confirmed = host.querySelector<HTMLInputElement>('[data-testid="family-manual-caption"] input[type="checkbox"]')!;
+    await act(async () => confirmed.click()); await click("캡션 저장 · 현재 카드와 대조 확정");
+    expect(caption.value).toBe(captionBeforeRequest); expect(host.textContent).toContain("원고가 다른 곳에서 바뀌었습니다");
+    expect(writes().map(([path]) => path)).toEqual([`${itemPath}/publication-draft`, `${itemPath}/card-copy/caption-confirm`]);
+    expect(writes()[1][1].body).toEqual({ version: 1, publicationDraftVersion: 2, textConfirmed: true });
+    expect(detail.current.id).toBe(4);
+  });
+
+  it("keeps an old v1 cover direction recoverable without making it an active v2 publishing intent", async () => {
+    familyDraft();
+    const value = { regenerateCover: true, coverInstruction: "이전 형식에서 작성한 표지 지시를 보관합니다." };
+    expect(writeDraftRecovery(recoveryScope, "item:2:9:cover-redraw", { baseVersion: "4:0:builtin:classic", baseValue: { regenerateCover: false, coverInstruction: "" }, value, slot: "previous-editor", expectedToken: null }).ok).toBe(true);
+    await render();
+    expect(host.querySelector('[aria-label="표지 그림 새로 그리기"]')).toBeNull();
+    expect(host.textContent).not.toContain("표지 다시 그리기 요청이 남아 있습니다");
+    expect(host.textContent).not.toContain("현재 디자인은 글자 중심입니다");
+    await click("게시 준비에서 캡션 직접 수정");
+    await click("중심 질문을 캡션에 추가");
+    expect(host.querySelector<HTMLInputElement>('[data-testid="family-manual-caption"] input[type="checkbox"]')!.disabled).toBe(false);
+    const recovered = readDraftRecovery(recoveryScope, "item:2:9:cover-redraw", candidate => candidate as typeof value);
+    expect(recovered.ok && recovered.value?.value).toEqual(value);
+    expect(writes()).toHaveLength(0);
   });
 });
 

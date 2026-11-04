@@ -7,7 +7,7 @@ import { emptyExperience, experienceImageUrl } from "@shared/experience";
 import { StudioTrashButton, StudioTrashView, TrashedStudioDetail } from "./StudioTrash";
 import { SourceStudioCard } from "./SourceStudioCard";
 import { aiProviderLabels, type AiProvider } from "@shared/aiProviders";
-import { defaultChannelAiSettings, type ChannelAiRuntime } from "@shared/channelAi";
+import { legacyChannelAiSettings, type ChannelAiRuntime } from "@shared/channelAi";
 import { AiUsageGuide } from "../AiUsageGuide";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -39,7 +39,7 @@ const stages: Array<{ id: Stage; label: string }> = [{ id: "idea", label: "ì•„ì
 const formats: readonly Format[] = studioOutputFormats;
 function useStudioChannels(includeArchived = false) {
   const { allChannels } = useChannel();
-  return allChannels.filter(c => (includeArchived || c.active) && !(c.slug === "science-dialogue" && allChannels.some(other => other.slug === "current-dialogue"))).map(c => ({ id: studioKey(c.slug), name: c.name, role: c.description, active: c.active, accent: c.accentColor, categories: c.categories, aiSettings: c.aiSettings ?? defaultChannelAiSettings(), effectiveAiSettings: (c as typeof c & Partial<ChannelAiRuntime>).effectiveAiSettings,
+  return allChannels.filter(c => (includeArchived || c.active) && !(c.slug === "science-dialogue" && allChannels.some(other => other.slug === "current-dialogue"))).map(c => ({ id: studioKey(c.slug), name: c.name, role: c.description, active: c.active, accent: c.accentColor, categories: c.categories, aiSettings: legacyChannelAiSettings(c.aiSettings), effectiveAiSettings: (c as typeof c & Partial<ChannelAiRuntime>).effectiveAiSettings,
     image: (c.slug === "opportunities" ? "pempem" : c.slug === "current-dialogue" ? "pengpeng" : c.slug === "penguin" ? "pengki" : c.slug === "fryday" ? "penguin" : null) as Character | null }));
 }
 const characters = STUDIO_CHARACTERS;

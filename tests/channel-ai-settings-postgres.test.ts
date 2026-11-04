@@ -35,11 +35,11 @@ describe("channel AI configuration on real PostgreSQL", () => {
     const list = await f.agent.get("/api/channels");
     expect(list.status).toBe(200);
     for (const channel of list.body) {
-      expect(channel.effectiveAiSettings).toMatchObject({ summary: { provider: "gemini", model: "gemini-default" }, copy: { provider: "openai", model: "gpt-default" }, image: { provider: "openai", model: "gpt-image-default" } });
+      expect(channel.effectiveAiSettings).toMatchObject({ summary: { provider: "gemini", model: "gemini-4-argon" }, copy: { provider: "openai", model: "gpt-6-astra" }, image: { provider: "openai", model: "gpt-image-2.5-sunburst" } });
       expect(channel.aiAvailability).toEqual({ gemini: true, openai: true, anthropic: true });
     }
     expect(JSON.stringify(list.body)).not.toContain("isolated-");
-    expect(await resolveChannelAiSettings(f.db, f.channel.id, "summary")).toEqual({ provider: "gemini", model: "gemini-default" });
+    expect(await resolveChannelAiSettings(f.db, f.channel.id, "summary")).toEqual({ provider: "gemini", model: "gemini-4-argon" });
   });
 
   it("isolates settings by channel and serializes competing updates with the existing version contract", async () => {
@@ -50,7 +50,7 @@ describe("channel AI configuration on real PostgreSQL", () => {
     expect(results.map(result => result.status).sort()).toEqual([200, 409]);
     const saved = results.find(result => result.status === 200)!.body;
     expect(await resolveChannelAiSettings(first.db, first.channel.id, "copy")).toEqual(saved.aiSettings.copy);
-    expect(await resolveChannelAiSettings(second.db, second.channel.id, "copy")).toEqual({ provider: "openai", model: "gpt-default" });
+    expect(await resolveChannelAiSettings(second.db, second.channel.id, "copy")).toEqual({ provider: "openai", model: "gpt-6-astra" });
     expect((await first.agent.patch(`/api/channels/${first.channel.id}`).set(first.headers).send({ version: saved.version, aiSettings: { ...one, image: { provider: "gemini", model: "gemini-image" } } })).status).toBe(400);
   });
 

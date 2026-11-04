@@ -2,6 +2,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import sharp from "sharp";
 import type { CardCopy } from "../../shared/cardCopy";
 import { cardCopySchema } from "../../shared/cardCopy";
+import { defaultPageDesigns, familyCardCopySchema, pageDesignsSchema, type CardCopyV2, type FamilyPageId, type PageDesigns } from "../../shared/familyDialogue";
+import { familyPageText, familyPageTitle } from "./familyDialogueCard";
 import { channels, contentItems, contentRevisions, mediaAssets, studioCards } from "../../shared/schema";
 import type { DB } from "../db";
 import { audit } from "../audit";
@@ -18,7 +20,7 @@ export const CARD_PAGE_ARTWORK_KIND = "card_page_art";
 export const CARD_PAGE_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
 export const CARD_PAGE_UPLOAD_MAX_DATA_URL = 12 * 1024 * 1024;
 export const CARD_PAGE_ARTWORK_MAX_PIXELS = 40_000_000;
-export type CardPageId = "cover" | `body-${number}`;
+export type CardPageId = "cover" | `body-${number}` | FamilyPageId;
 export type CardPageArtworkSource = "ai" | "upload";
 export type CardPageArtworkMap = Map<number, Buffer> & { credits: Map<number, string> };
 export const cardPageArtworkCredit = (source: string) => source === "ai" ? "AI 일러스트 · OpenAI" : "직접 등록 이미지";
@@ -34,21 +36,23 @@ export type CardPageArtworkInput = {
   actor: string;
 };
 type Background = { assetId: number; opacity?: number };
-type CopyBackgrounds = { cover: { background?: Background | null }; pages: Array<{ background?: Background | null }> };
 
 /** Asset IDs remain usable in later revisions of this item, never in another item/channel. */
-export function cardPageArtworkIds(copy: CardCopy): number[] {
-  const value = copy as CardCopy & CopyBackgrounds;
-  const ids = [value.cover.background, ...value.pages.map(page => page.background)]
-    .filter((background): background is Background => background != null)
-    .map(background => background.assetId);
+export function cardPageArtworkIds(copy: CardCopy | CardCopyV2, pageDesigns?: PageDesigns, includeHistory = false): number[] {
+  const ids = copy.version === 2
+    ? Object.values(pageDesigns ?? defaultPageDesigns()).flatMap(design => [
+      ...((includeHistory || design.background.kind === "image") && design.background.assetId ? [design.background.assetId] : []),
+      ...(includeHistory ? design.previousAssetIds ?? [] : []),
+    ])
+    : [copy.cover.background, ...copy.pages.map(page => page.background)]
+      .filter((background): background is Background => background != null).map(background => background.assetId);
   if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new HttpError(400, "페이지 배경 이미지 ID를 확인해 주세요.");
   return [...new Set(ids)];
 }
 
 /** Saving references must not transfer every JPEG out of PostgreSQL again. */
-export async function assertCardPageArtworkOwnership(db: DB, itemId: number, channelId: number, copy: CardCopy) {
-  const ids = cardPageArtworkIds(copy);
+export async function assertCardPageArtworkOwnership(db: DB, itemId: number, channelId: number, copy: CardCopy | CardCopyV2, pageDesigns?: PageDesigns) {
+  const ids = cardPageArtworkIds(copy, pageDesigns, true);
   if (!ids.length) return;
   const rows = await db.select({ id: mediaAssets.id, mime: mediaAssets.mime }).from(mediaAssets)
     .innerJoin(contentRevisions, and(eq(contentRevisions.id, mediaAssets.revisionId), eq(contentRevisions.contentItemId, itemId)))
@@ -57,7 +61,14 @@ export async function assertCardPageArtworkOwnership(db: DB, itemId: number, cha
 }
 
 /** The live preview only needs the selected page's bytes; final export loads all. */
-export async function loadCardPageArtworkForPage(db: DB, itemId: number, channelId: number, copy: CardCopy, pageIndex: number) {
+export async function loadCardPageArtworkForPage(db: DB, itemId: number, channelId: number, copy: CardCopy | CardCopyV2, pageIndex: number, pageDesigns?: PageDesigns) {
+  if (copy.version === 2) {
+    const page = copy.pages[pageIndex];
+    if (!page) throw new HttpError(400, "배경을 볼 페이지를 확인해 주세요.");
+    const designs = defaultPageDesigns();
+    designs[page.id] = (pageDesigns ?? designs)[page.id];
+    return loadCardPageArtwork(db, itemId, channelId, copy, designs);
+  }
   return loadCardPageArtwork(db, itemId, channelId, { ...copy,
     cover: pageIndex === 0 ? copy.cover : { ...copy.cover, background: undefined },
     pages: copy.pages.map((page, index) => index + 1 === pageIndex ? page : { ...page, background: undefined }),
@@ -78,8 +89,8 @@ async function scopedArtwork(db: DB, itemId: number, channelId: number, ids: num
 }
 
 /** Shared by draft save, preview and final rendering. Map keys are immutable asset IDs. */
-export async function loadCardPageArtwork(db: DB, itemId: number, channelId: number, copy: CardCopy): Promise<CardPageArtworkMap> {
-  const rows = await scopedArtwork(db, itemId, channelId, cardPageArtworkIds(copy));
+export async function loadCardPageArtwork(db: DB, itemId: number, channelId: number, copy: CardCopy | CardCopyV2, pageDesigns?: PageDesigns): Promise<CardPageArtworkMap> {
+  const rows = await scopedArtwork(db, itemId, channelId, cardPageArtworkIds(copy, pageDesigns));
   return Object.assign(new Map(rows.map(asset => [asset.id, asset.bytes])), {
     credits: new Map(rows.map(asset => [asset.id, cardPageArtworkCredit(asset.source)])),
   });
@@ -122,7 +133,15 @@ export async function decodeCardPageUpload(dataUrl: string) {
   return normalizeCardPageArtwork(bytes, match[1]);
 }
 
-function selectedPage(copy: CardCopy, pageId: CardPageId) {
+function selectedPage(copy: CardCopy | CardCopyV2, pageId: CardPageId, pageDesigns?: PageDesigns) {
+  if (copy.version === 2) {
+    const page = copy.pages.find(value => value.id === pageId);
+    if (!page) throw new HttpError(400, "배경을 적용할 카드 페이지를 확인해 주세요.");
+    const design = (pageDesigns ?? defaultPageDesigns())[page.id];
+    return { title: familyPageTitle(page), subtitle: "", body: familyPageText(page).join("\n"), role: page.id,
+      background: design.background.kind === "image" && design.background.assetId ? { assetId: design.background.assetId } : undefined,
+    };
+  }
   if (pageId === "cover") return copy.cover;
   // Positional body-N addresses support older saved pages with descriptive IDs.
   const match = /^body-([1-9])$/.exec(pageId);
@@ -143,9 +162,12 @@ async function pageSnapshot(db: DB, input: CardPageArtworkInput) {
     if (board) assertStudioActive(board);
     const [revision] = item.currentRevisionId ? await tx.select().from(contentRevisions)
       .where(and(eq(contentRevisions.id, item.currentRevisionId), eq(contentRevisions.contentItemId, item.id))) : [];
-    const savedCopy = cardCopySchema.safeParse(revision?.payload.cardCopy);
+    const rawCopy = revision?.payload.cardCopy;
+    const savedCopy = rawCopy && typeof rawCopy === "object" && "version" in rawCopy && rawCopy.version === 2 ? familyCardCopySchema.safeParse(rawCopy) : cardCopySchema.safeParse(rawCopy);
     if (!revision || !savedCopy.success) throw new HttpError(409, "카드 문구를 먼저 저장한 뒤 페이지 배경을 만들어 주세요.");
-    const page = selectedPage(savedCopy.data, input.pageId);
+    const savedDesigns = pageDesignsSchema.safeParse(savedCopy.data.version === 2 ? revision.payload.pageDesigns ?? defaultPageDesigns() : defaultPageDesigns());
+    if (!savedDesigns.success) throw new HttpError(409, "페이지 디자인을 확인하고 저장한 뒤 배경을 만들어 주세요.");
+    const page = selectedPage(savedCopy.data, input.pageId, savedDesigns.data);
     await assertGenerationActive(tx as unknown as DB);
     return { item, revision, copy: savedCopy.data, page };
   });

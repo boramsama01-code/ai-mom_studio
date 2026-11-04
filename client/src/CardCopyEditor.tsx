@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import { cardCopyLimits, cardCopySchema, cardPageBackgroundSchema, NEWS_EDITORIAL_LABELS, NEWS_EDITORIAL_ROLES, type CardCopy, type CardPageBackground } from "@shared/cardCopy";
 import type { AiSelection } from "@shared/channelAi";
@@ -13,11 +13,15 @@ import { z } from "zod";
 import { useDraftRecovery } from "./useDraftRecovery";
 import { RecoveryNotice } from "./RecoveryNotice";
 import { PageBackgroundEditor, type PageArtworkResult } from "./PageBackgroundEditor";
+import type { StoredCardCopy } from "@shared/storedCardCopy";
+import { familyDialogueMetadataSchema, type FamilyDialogueMetadata } from "@shared/familyDialogue";
+import { FamilyDialogueEditor, familyCopyText, type FamilyDialogueResponse, type FamilyProposal } from "./FamilyDialogueEditor";
 
-export type CardCopyResponse = { version: number; revisionId: number; copy: CardCopy; hasSavedCopy: boolean; recoveryNotice?: string; recommendedStoryFormat?: "discussion8" | null; ai?: Record<"summary" | "copy" | "image", AiSelection> };
+export type CardCopyResponse = { version: number; revisionId: number; copy: CardCopy; hasSavedCopy: boolean; recoveryNotice?: string; recommendedStoryFormat?: "discussion8" | "family_dialogue_8" | null; ai?: Record<"summary" | "copy" | "image", AiSelection> };
+export type StoredCardCopyResponse = Omit<CardCopyResponse, "copy"> & { copy: StoredCardCopy } & Partial<FamilyDialogueMetadata>;
 type AiStatus = { defaultProvider: AiProvider; text: Record<AiProvider, boolean>; image?: boolean };
 type Proposal = Omit<CardCopyResponse, "hasSavedCopy"> & { model?: string; selectedPage?: number; scope?: "all" | "page"; jobId?: number };
-type Props = {
+export type CardCopyEditorProps = {
   channelId: number;
   itemId: number;
   itemVersion?: number;
@@ -29,8 +33,12 @@ type Props = {
   renderDisabled?: boolean;
   onTemplateChange?: (key: string) => void;
   onDirtyChange?: (dirty: boolean) => void;
-  onSaved?: (saved: CardCopyResponse) => void;
-  onSaveAndRender?: (saved: CardCopyResponse) => Promise<unknown>;
+  onSaved?: (saved: StoredCardCopyResponse) => void;
+  onSaveAndRender?: (saved: StoredCardCopyResponse) => Promise<unknown>;
+  onApplyCaption?: (caption: string) => void;
+  onEditCaption?: () => void;
+  /** Internal dispatcher guard for a remote schema-version change. */
+  formatConflict?: boolean;
   renderLabel?: string;
 };
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -49,11 +57,36 @@ const recoveryCopySchema = z.object({
 const parseRecoveryCopy = (value: unknown): CardCopy | null => { const parsed = recoveryCopySchema.safeParse(value); return parsed.success ? parsed.data : null; };
 
 /** The preview uses the same renderer as the saved images. Caption/alt text are separate. */
-export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, coverMode = "reuse", previewRevision, showAi = true, disabled = false, renderDisabled = false, onTemplateChange, onDirtyChange, onSaved, onSaveAndRender, renderLabel = "카드뉴스 만들기" }: Props) {
+export function CardCopyEditor(props: CardCopyEditorProps) {
+  const loaded = useQuery({ queryKey: ["card-copy", props.channelId, props.itemId], queryFn: () => api<StoredCardCopyResponse>(`/channels/${props.channelId}/items/${props.itemId}/card-copy`), retry: false });
+  const guard = useDirtyGuard(), dirtyRef = useRef(false), formatRef = useRef<1 | 2 | null>(null), snapshots = useRef<Partial<Record<1 | 2, StoredCardCopyResponse>>>({});
+  const callbacks = useRef(props); callbacks.current = props; const [, rerender] = useState(0);
+  const onDirty = useCallback((dirty: boolean) => { dirtyRef.current = dirty; callbacks.current.onDirtyChange?.(dirty); }, []);
+  const onSaved = useCallback((saved: StoredCardCopyResponse) => {
+    // An explicit conversion save is the only dirty-edit path that changes the
+    // editor implementation. A passive refetch must not unmount an active draft.
+    if (formatRef.current !== saved.copy.version) { formatRef.current = saved.copy.version; dirtyRef.current = false; }
+    callbacks.current.onSaved?.(saved);
+  }, []);
+  if (loaded.data) {
+    snapshots.current[loaded.data.copy.version] = loaded.data;
+    if (formatRef.current === null || !dirtyRef.current) formatRef.current = loaded.data.copy.version;
+  }
+  const active = formatRef.current ?? 1, snapshot = snapshots.current[active], formatConflict = !!loaded.data && loaded.data.copy.version !== active;
+  const safeProps = { ...props, onDirtyChange: onDirty, onSaved, formatConflict };
+  let editor;
+  if (active === 2 && snapshot?.copy.version === 2) {
+    const metadata = familyDialogueMetadataSchema.safeParse(Object.fromEntries(Object.keys(familyDialogueMetadataSchema.shape).map(key => [key, (snapshot as Record<string, unknown>)[key]])));
+    editor = metadata.success ? <FamilyDialogueEditor {...safeProps} initial={{ ...snapshot, ...metadata.data, copy: snapshot.copy } as FamilyDialogueResponse} refresh={() => loaded.refetch()} />
+      : <ErrorBox error={new Error("8장 원고의 저장 정보를 불러오지 못했습니다. 기존 데이터를 유지했습니다. 최신 저장본을 다시 확인해 주세요.")} retry={() => loaded.refetch()} />;
+  } else editor = <LegacyCardCopyEditor {...safeProps} loaded={{ ...loaded, data: snapshot } as UseQueryResult<CardCopyResponse, Error>} />;
+  return <>{formatConflict && <div className="notice warn stack" role="alert"><strong>다른 곳에서 카드 형식을 바꿔 저장했습니다. 현재 입력은 이 화면에 유지했습니다.</strong><p>현재 내용을 확인한 뒤 새 저장본을 불러오세요. 입력을 버릴지는 이동 확인에서 선택합니다.</p><button className="btn" onClick={() => guard.confirmLeave(() => { dirtyRef.current = false; formatRef.current = loaded.data!.copy.version; rerender(value => value + 1); })}>새 형식의 저장본 확인·불러오기</button></div>}{editor}</>;
+}
+
+function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, templateKey, coverMode = "reuse", previewRevision, showAi = true, disabled = false, renderDisabled = false, formatConflict = false, onTemplateChange, onDirtyChange, onSaved, onSaveAndRender, renderLabel = "카드뉴스 만들기" }: CardCopyEditorProps & { loaded: UseQueryResult<CardCopyResponse, Error> }) {
   const path = `/channels/${channelId}/items/${itemId}/card-copy`;
   const queryKey = ["card-copy", channelId, itemId];
   const qc = useQueryClient(), guard = useDirtyGuard(), uid = useId();
-  const loaded = useQuery({ queryKey, queryFn: () => api<CardCopyResponse>(path), retry: false });
   const [base, setBase] = useState<CardCopyResponse | null>(null), baseRef = useRef<CardCopyResponse | null>(null);
   const [copy, setCopy] = useState<CardCopy | null>(null), copyRef = useRef<CardCopy | null>(null);
   const [selected, setSelected] = useState(0);
@@ -62,6 +95,7 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
   const [saveError, setSaveError] = useState<Error | null>(null), [aiError, setAiError] = useState<Error | null>(null);
   const [conflicting, setConflicting] = useState<CardCopyResponse | null>(null), [conflictLoading, setConflictLoading] = useState(false);
   const [proposal, setProposal] = useState<(Proposal & { source: string; selectedPage: number }) | null>(null);
+  const [familyProposal, setFamilyProposal] = useState<(FamilyProposal & { source: string }) | null>(null), [familyApplying, setFamilyApplying] = useState(false);
   const appliedProposal = useRef<number | null>(null);
   const [instructions, setInstructions] = useState("");
   const [providerChoice, setProviderChoice] = useState<AiProvider | null>(null);
@@ -98,8 +132,8 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
     value: copy, serverValue: base?.copy ?? null, dirty, ready: !!base && !!copy,
     parse: parseRecoveryCopy, onRestore: next => { if (next) { put(next); setProposal(null); setSaveError(null); callbacks.current.onTemplateChange?.(next.templateKey); } },
   });
-  const busy = disabled || !!recovery.pending || rendering || (generating && !generation.cancelled);
-  const locked = busy || saving || conflictLoading || backgroundBusy;
+  const busy = disabled || !!recovery.pending || rendering || familyApplying || (generating && !generation.cancelled);
+  const locked = busy || saving || conflictLoading || backgroundBusy || formatConflict;
   useEffect(() => {
     const next = loaded.data;
     if (!next || (baseRef.current && next.version <= baseRef.current.version)) return;
@@ -122,6 +156,7 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
     finally { setConflictLoading(false); }
   }
   async function saveNow(): Promise<CardCopyResponse> {
+    if (formatConflict) throw new Error("다른 형식으로 저장된 원고를 먼저 확인해 주세요. 현재 입력은 유지했습니다.");
     if (recovery.pending) throw new Error("기기 복구본을 먼저 불러오거나 버려 주세요.");
     if (serial.current) { await serial.current; return saveNow(); }
     const current = baseRef.current, snapshot = copyRef.current;
@@ -190,7 +225,8 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
     catch (error) { setSaveError(error as Error); }
     finally { action.current = null; setRendering(false); }
   }
-  async function generate(rebuild = false) {
+  async function generate(rebuild = false): Promise<void> {
+    if (generation.unresolved && generation.pendingBody?.formatId === "family_dialogue_8") return generateFamily();
     if (((!aiReady || (rebuild && !summaryReady)) && !generation.unresolved) || locked || conflicting || action.current) return;
     action.current = "generate";
     setGenerating(true); setAiError(null); setProposal(null);
@@ -205,6 +241,29 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
       setProposal({ ...next, source: generationSource.current ?? (next.version === saved.version ? JSON.stringify(saved.copy) : ""), selectedPage: next.selectedPage ?? selectedPage });
     } catch (error) { setAiError(error as Error); }
     finally { action.current = null; setGenerating(false); }
+  }
+  async function generateFamily(): Promise<void> {
+    if (generation.unresolved && generation.pendingBody?.formatId !== "family_dialogue_8") return generate();
+    if (locked || conflicting || action.current) return;
+    action.current = "generate"; setGenerating(true); setAiError(null); setFamilyProposal(null);
+    try {
+      const saved = generation.unresolved ? baseRef.current! : await saveNow();
+      const source = JSON.stringify(saved.copy);
+      const result = await generation.run<FamilyProposal>(`${path}/generate`, { version: saved.version, baseRevision: saved.revisionId, formatId: "family_dialogue_8", templateKey: saved.copy.templateKey, scope: "all", ...(instructions.trim() ? { instructions: instructions.trim() } : {}) });
+      if (!result.copy) throw new Error(result.reviewFlags?.map(flag => flag.message).join("\n") || "원문 또는 근거가 더 필요합니다. 기존 문구는 유지했습니다.");
+      setFamilyProposal({ ...result, source });
+    } catch (error) { setAiError(error as Error); }
+    finally { action.current = null; setGenerating(false); }
+  }
+  async function applyFamilyProposal() {
+    if (!familyProposal?.copy || familyProposal.lateResult || familyProposal.version !== baseRef.current?.version || familyProposal.source !== JSON.stringify(copyRef.current) || locked || action.current) return;
+    action.current = "render"; setFamilyApplying(true); setSaveError(null);
+    try {
+      const saved = await api<FamilyDialogueResponse>(path, { method: "PATCH", body: { version: baseRef.current!.version, copy: familyProposal.copy, pageDesigns: familyProposal.pageDesigns, fieldLocks: familyProposal.fieldLocks ?? {}, parentGuide: familyProposal.parentGuide, captionPackage: familyProposal.captionPackage, proposalJobId: familyProposal.jobId } });
+      recovery.clear(); callbacks.current.onSaved?.(saved); callbacks.current.onTemplateChange?.(saved.copy.templateKey);
+      qc.setQueryData(queryKey, saved); void qc.invalidateQueries({ queryKey: ["ch", channelId, "item", itemId] }); void qc.invalidateQueries({ queryKey: ["studio"] });
+    } catch (error) { setSaveError(error as Error); if (error instanceof ApiError && error.status === 409) await loadConflict(); }
+    finally { action.current = null; setFamilyApplying(false); }
   }
   function update(field: "title" | "subtitle" | "body", value: string) {
     const current = copyRef.current; if (!current) return;
@@ -253,7 +312,8 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
     <div className="card-copy-heading"><div><h3 id={`${uid}-heading`}>문구·미리보기</h3><p className="small muted">카드를 선택해서 글을 고치세요. 게시물 캡션과 별도로 저장합니다.</p></div><span className={`badge ${dirty ? "warn" : "ok"}`} role="status">{saving ? "문구 저장 중…" : dirty ? "저장하지 않은 수정" : base.hasSavedCopy ? "문구 저장됨" : "원고에서 가져온 문구"}</span></div>
     <RecoveryNotice recovery={recovery} formatValue={value => value ? copyText(value) : ""} />
     {base.recoveryNotice && <p className="notice warn small" role="status">{base.recoveryNotice} 문구를 저장하기 전까지 기존 저장 내용은 바뀌지 않습니다.</p>}
-    {showAi && (base.recommendedStoryFormat === "discussion8" || copy.storyFormat === "discussion8") && <div className="card-copy-story-action"><div><strong>뉴스 한 편에서 시작하는 8장 대화</strong><p className="hint">표지 → 요약 → 의미 → 질문 → 두 시선 → 개념 정의 → 활동 → 닫는 표지</p><p className="hint">기사 요약 {aiProviderLabels[summaryProvider]} · 문구 {aiProviderLabels[provider]} · <GuardedLink href="/settings">채널별 AI 설정</GuardedLink></p></div><button className="btn primary" disabled={locked || invalid || !!conflicting || ((!aiReady || !summaryReady) && !generation.unresolved)} onClick={() => void generate(true)}>{generating ? "원문을 확인하고 8장 구성 중…" : generation.unresolved ? "기존 AI 작업 결과 확인" : "8장 뉴스 대화로 다시 구성"}</button>{(!aiReady || !summaryReady) && <p className="hint">선택한 요약·문구 AI를 연결한 뒤 사용할 수 있습니다. 기존 문구는 직접 편집하고 저장할 수 있어요.</p>}</div>}
+    {showAi && (base.recommendedStoryFormat || copy.storyFormat === "discussion8") && <div className="card-copy-story-action"><div><strong>{base.hasSavedCopy ? "새 8장 편집기로 전환 제안" : "기사 한 편으로 8장 대화 만들기"}</strong><p className="hint">사실 2~3개, 중심 질문, 두 가지 개념 모드, 부모 대화 안내를 각각 편집합니다. 기존 원고는 새 제안을 확인하고 저장하기 전까지 유지됩니다.</p></div><button className="btn primary" disabled={locked || invalid || !!conflicting} onClick={() => void generateFamily()}>{familyApplying ? "새 버전 저장 중…" : generating ? "원문에서 새 구성 제안 중…" : base.hasSavedCopy ? "새 8장 형식 자동 제안" : "8장 카드뉴스 자동 만들기"}</button></div>}
+    {showAi && (base.recommendedStoryFormat === "discussion8" || copy.storyFormat === "discussion8") && <details className="card-copy-legacy-tools"><summary>이전 카드 형식을 유지하는 도구</summary><div className="card-copy-story-action"><div><strong>뉴스 한 편에서 시작하는 8장 대화</strong><p className="hint">표지 → 요약 → 의미 → 질문 → 두 시선 → 개념 정의 → 활동 → 닫는 표지</p><p className="hint">기사 요약 {aiProviderLabels[summaryProvider]} · 문구 {aiProviderLabels[provider]} · <GuardedLink href="/settings">채널별 AI 설정</GuardedLink></p></div><button className="btn primary" disabled={locked || invalid || !!conflicting || ((!aiReady || !summaryReady) && !generation.unresolved)} onClick={() => void generate(true)}>{generating ? "원문을 확인하고 8장 구성 중…" : generation.unresolved ? "기존 AI 작업 결과 확인" : "8장 뉴스 대화로 다시 구성"}</button>{(!aiReady || !summaryReady) && <p className="hint">선택한 요약·문구 AI를 연결한 뒤 사용할 수 있습니다. 기존 문구는 직접 편집하고 저장할 수 있어요.</p>}</div></details>}
     <div hidden={!showAi && !generation.unresolved}><details className="card-copy-ai-tools"><summary>AI로 문구 다듬기</summary><div className="card-copy-ai"><label className="field">문구 작성 AI<select value={provider} disabled={locked || generation.unresolved} onChange={event => setProviderChoice(event.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}{status.data && !status.data.text[p] ? " · 연결 필요" : ""}</option>)}</select></label><div><button className="btn" disabled={generating || locked || (!aiReady && !generation.unresolved) || invalid || !!conflicting} onClick={() => void generate()}>{generating ? "템플릿에 맞춰 작성 중…" : generation.unresolved ? "기존 AI 작업 결과 확인" : dirty || !base.hasSavedCopy ? "문구 저장 후 AI 제안받기" : "AI로 템플릿 문구 제안받기"}</button><p className="hint">선택한 템플릿에 맞는 제목·부제·본문을 제안합니다. 확인 후 적용하며, 선택한 AI의 API 요금·한도가 적용됩니다.</p></div></div>
     {providerChoice && <button className="btn ghost sm" disabled={locked || generation.unresolved} onClick={() => setProviderChoice(null)}>채널 기본 AI로 되돌리기</button>}
     {status.error && <ErrorBox error={status.error} retry={() => status.refetch()} />}
@@ -264,6 +324,7 @@ export function CardCopyEditor({ channelId, itemId, itemVersion, templateKey, co
     {generation.unresolved && <div className="stack"><p className="small muted">기존 요청의 결과를 확인합니다. 응답이 없어도 새 유료 작업을 자동으로 시작하지 않습니다.</p><div><button className="btn sm" disabled={generation.cancelling} onClick={() => void generation.cancel()}>{generation.cancelling ? "중단 확인 중…" : "AI 요청 중단"}</button></div></div>}
     {generation.cancelled && <p className="notice small" role="status">AI 요청을 중단했습니다. 직접 편집·저장을 계속할 수 있습니다.</p>}
     {generation.cancelError && <ErrorBox error={generation.cancelError} />}
+    {familyProposal?.copy && <div className="notice card-copy-proposal stack"><strong>새 8장 형식 제안 · 기존 원고는 유지 중</strong><div className="card-copy-compare"><div><h4>기존 원고</h4><pre>{copyText(copy)}</pre></div><div><h4>새 8장 원고</h4><pre>{familyCopyText(familyProposal.copy)}</pre></div></div>{familyProposal.reviewFlags?.map((flag, i) => <p className="hint" key={i}>{flag.message}</p>)}<div className="row"><button className="btn primary" disabled={locked || familyProposal.lateResult || familyProposal.version !== base.version || familyProposal.source !== JSON.stringify(copy)} onClick={() => void applyFamilyProposal()}>새 8장 원고로 저장·전환</button><button className="btn ghost" onClick={() => setFamilyProposal(null)}>기존 원고 유지</button></div><p className="hint">새 콘텐츠 버전으로 저장하며 이전 저장 원고는 이력에 남습니다. 전환 후 각 칸을 직접 수정할 수 있습니다.</p>{(familyProposal.lateResult || familyProposal.version !== base.version || familyProposal.source !== JSON.stringify(copy)) && <p role="alert">제안 뒤 원고가 달라졌습니다. 현재 작업을 유지하고 최신 원고로 다시 제안받아 주세요.</p>}</div>}
     {proposal && <div className="notice card-copy-proposal stack"><strong>AI 문구 제안 · 아직 카드에 반영하지 않았어요</strong><details open><summary>{proposal.copy.pages.length + 1}장 제안 전체 보기</summary><pre>{copyText(proposal.copy)}</pre></details><div className="row">{proposal.scope !== "all" && <button className="btn primary sm" disabled={locked || !canApplyProposal || proposal.copy.storyFormat !== copy.storyFormat || (proposal.selectedPage > 0 && !proposal.copy.pages[proposal.selectedPage - 1])} onClick={() => {
       const index = proposal.selectedPage;
       appliedProposal.current = proposal.jobId ?? null;

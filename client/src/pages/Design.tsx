@@ -1,3 +1,4 @@
+import { CanvaMasterSettings } from "../CanvaEditorial";
 /**
  * 카드 디자인 — 템플릿 고르기, 내 배경 템플릿 올리기, Canva 자동 채우기, 대량 제작·망고보드용 글자 내보내기
  */
@@ -90,6 +91,7 @@ export function DesignPage() {
       <DefaultTemplate cid={current.id} accent={current.accentColor} />
       <UploadTemplate cid={current.id} />
       <CanvaSection cid={current.id} brandTemplateId={current.canvaBrandTemplateId ?? null} />
+      <CanvaMasterSettings key={current.id} channelId={current.id} showPreparedMasters={/al+igodang|알리고당/i.test(`${current.slug} ${current.name}`)} />
       <BulkSection cid={current.id} kind={current.contentType} />
     </>
   );
@@ -266,11 +268,11 @@ function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: 
   return (
     <section className="panel stack" style={{ marginTop: 16 }}>
       <div className="row between">
-        <h2 style={{ margin: 0 }}>Canva 자동 채우기</h2>
+        <h2 style={{ margin: 0 }}>Canva 계정 연결</h2>
         {s && <Badge kind={s.connected ? "ok" : "warn"}>{s.connected ? "Canva 연결됨" : s.configured ? "연결 전" : "앱 정보 필요"}</Badge>}
       </div>
       <p className="small muted" style={{ margin: 0 }}>
-        Canva에서 만든 <b>브랜드 템플릿</b>의 글자 칸(데이터 필드)에 제목·일정 등을 자동으로 넣어 새 디자인을 만듭니다. 만든 디자인은 Canva에서 다듬은 뒤 버튼 하나로 카드 이미지로 가져옵니다. Canva Pro·Teams·Enterprise 계정이 필요합니다.
+        8장 원고는 아래의 Canva 마스터를 사용합니다. 연결한 계정의 실제 기능·권한을 확인하며, ChatGPT의 Canva 연결과 이 스튜디오의 연결은 별개입니다.
       </p>
       {!s ? (
         <Loading lines={1} />
@@ -301,9 +303,10 @@ function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: 
       ) : (
         <div className="stack">
           <div className="row">
-            <span className="small muted">템플릿 선택</span>
+            <a className="btn sm" href="/api/canva/connect">Canva 다시 연결</a>
             <button className="btn sm ghost" onClick={() => disconnect.mutate()}>연결 해제</button>
           </div>
+          <details className="content-options"><summary>기존 카드용 브랜드 템플릿 (선택)</summary>
           {list.isLoading ? (
             <Loading lines={1} />
           ) : list.error ? (
@@ -318,7 +321,7 @@ function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: 
               ))}
             </div>
           ) : (
-            <p className="small muted">브랜드 템플릿이 없습니다. Canva에서 디자인을 브랜드 템플릿으로 게시하세요.</p>
+            <p className="small muted">등록된 브랜드 템플릿이 없습니다. 8장 마스터는 일반 디자인 ID로도 등록할 수 있습니다.</p>
           )}
           <form className="row" onSubmit={(e) => { e.preventDefault(); save.mutate(manual.trim() || null); }}>
             <input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="또는 브랜드 템플릿 ID 직접 입력" style={{ flex: "1 1 240px", width: "auto" }} aria-label="브랜드 템플릿 ID" />
@@ -337,6 +340,7 @@ function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: 
             </div>
           )}
           {dataset.error && <ErrorBox error={dataset.error} />}
+          </details>
         </div>
       )}
     </section>

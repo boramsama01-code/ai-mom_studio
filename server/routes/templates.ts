@@ -297,6 +297,7 @@ templateRoutes.post(
     const templateId = body.brandTemplateId || ch.canvaBrandTemplateId;
     if (!templateId) throw new HttpError(400, "채널 설정 → 카드 디자인에서 Canva 브랜드 템플릿을 먼저 고르세요.");
     const { item, rev, fields } = await itemFields(ch, intParam(req.params.id));
+    if ((rev.payload.cardCopy as { version?: number } | undefined)?.version === 2) throw new HttpError(409, "8장 Canva 원고는 편집기의 새 디자인 만들기를 이용해 주세요.");
     let r;
     try {
       r = await autofillFromBrandTemplate(getDb(), { brandTemplateId: templateId, title: `[우주펭귄상회] ${item.title}`, fields: Object.fromEntries(fields.map((f) => [f.key, f.value])) });
@@ -316,6 +317,7 @@ templateRoutes.post(
   ah(async (req, res) => {
     const ch = await loadChannel(req.params.cid);
     const { item, rev } = await itemFields(ch, intParam(req.params.id));
+    if ((rev.payload.cardCopy as { version?: number } | undefined)?.version === 2) throw new HttpError(409, "8장 Canva 원고는 최신 디자인 가져오기로 8장을 함께 가져와 주세요.");
     const d = item.canvaDesign;
     if (!d) throw new HttpError(400, "먼저 'Canva로 디자인 만들기'를 실행하세요.");
     if (d.revisionId !== rev.id) throw new HttpError(409, "Canva 디자인이 이전 버전 내용으로 만들어졌습니다. 내용이 바뀌었으니 Canva 디자인을 다시 만드세요.");

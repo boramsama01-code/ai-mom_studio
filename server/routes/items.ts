@@ -2,6 +2,12 @@ import { validSubcategory } from "../../shared/channelCategories";
 import { studioCards } from "../../shared/schema";
 import { cardCopyFromPayload, loadCardPages, planCarousel, renderCarouselPage } from "../services/cardCarousel";
 import { channelAiSelection } from "../services/channelAi";
+import { familyCardCopySchema, pageDesignsSchema } from "../../shared/familyDialogue";
+import { storedCardCopySchema } from "../../shared/storedCardCopy";
+import { FAMILY_METADATA_KEYS, familyExecutionPlan, familyGenerateSchema, familyMetadataFromPayload, proposeFamilyDialogue, synchronizeFamilyQuestion } from "../services/familyEditorial";
+import { assertFamilyEvidenceForCopy, confirmFamilyCaption, familyCaptionConfirmSchema, familyProposalMetadata, familySaveSchema, saveFamilyCardCopy } from "../services/familyEditorialPersistence";
+import { familyEvidenceView, loadFamilyEvidence } from "../services/familyEvidence";
+import { completeGenerationResult } from "../services/generationContext";
 import { proposeNewsDiscussion } from "../services/newsEditorial";
 import { articleAnalysisSchema, aiWorkflowSchema } from "../../shared/articleAnalysis";
 import { assertNewsEditorialResources, loadNewsEditorialSources } from "../services/newsEditorialSources";
@@ -294,7 +300,10 @@ itemRoutes.patch(
     const body = parse(editSchema, req.body);
     let payload: Record<string, unknown> | null = null;
     if (body.payload) {
-      const r = payloadSchemaFor(item.kind).safeParse(body.payload);
+      // Source editors cannot author the server's evidence analysis or model history.
+      const sourceFields = { ...body.payload };
+      for (const key of ["articleAnalysis", "aiWorkflow", "cardCopy", ...FAMILY_METADATA_KEYS, "rendererProvider", "canvaExport"]) delete sourceFields[key];
+      const r = payloadSchemaFor(item.kind).safeParse(sourceFields);
       if (!r.success) throw new HttpError(400, `초안 형식 오류 — ${r.error.issues.slice(0, 4).map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`);
       payload = r.data as Record<string, unknown>;
     }
@@ -303,13 +312,23 @@ itemRoutes.patch(
       const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
       if (fresh.version !== body.version) conflict(fresh);
       // Older editors/imports only know source fields. Omission is not a request
-      // to erase the separately edited words already used by a card.
+      // to erase separately edited card words or trusted analysis/model history.
       if (payload) {
         const { cardCopy: _unownedCopy, ...ownedFields } = payload;
         payload = ownedFields;
         const [previous] = fresh.currentRevisionId ? await tx.select({ payload: contentRevisions.payload }).from(contentRevisions).where(eq(contentRevisions.id, fresh.currentRevisionId)) : [];
-        const savedCopy = cardCopySchema.safeParse(previous?.payload.cardCopy);
+        const savedCopy = storedCardCopySchema.safeParse(previous?.payload.cardCopy);
         if (savedCopy.success) payload = { ...payload, cardCopy: savedCopy.data };
+        if (savedCopy.success && savedCopy.data.version === 2) {
+          const family = familyMetadataFromPayload(previous!.payload);
+          if (!family) throw new HttpError(409, "저장된 8장 원고의 근거 메타데이터를 확인해 주세요. 기존 원고는 유지했습니다.");
+          Object.assign(payload, family, { dependencies: { ...family.dependencies, caption: family.captionPackage ? "needs_review" : "not_generated", review: family.editorialReview ? "needs_review" : "not_generated", render: "needs_review" } });
+          for (const key of ["rendererProvider", "canvaExport"]) if (previous!.payload[key] !== undefined) payload[key] = previous!.payload[key];
+        }
+        const savedAnalysis = articleAnalysisSchema.safeParse(previous?.payload.articleAnalysis);
+        if (savedAnalysis.success) payload.articleAnalysis = savedAnalysis.data;
+        const savedWorkflow = aiWorkflowSchema.safeParse(previous?.payload.aiWorkflow);
+        if (savedWorkflow.success) payload.aiWorkflow = savedWorkflow.data;
       }
       const upd = await tx
         .update(contentItems)
@@ -473,14 +492,15 @@ itemRoutes.post(
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
     const db = getDb();
     const { provider, templateKey, version, requestId } = parse(z.object({ version: zVersion.optional(), requestId: z.string().uuid().optional(), provider: z.enum(aiProviders).optional(), templateKey: z.string().min(1).max(40).optional() }).strict(), req.body ?? {});
+    const logicalRequestId = requestId ?? randomUUID();
     if (templateKey) await resolveCardCopyStyle(templateKey, ch.id);
-    const ai = { summary: channelAiSelection(ch, "summary", { provider }), copy: channelAiSelection(ch, "copy") };
-    const result = await runSourceGeneration(db, { type: "source_generate", itemId: item.id, channelId: ch.id, version: version ?? item.version, requestId, intent: { provider: provider ?? null, templateKey: templateKey ?? null }, configuration: ai, actor: actorOf(req) }, async () => {
+    const ai = { summary: channelAiSelection(ch, "summary", { provider }), copy: channelAiSelection(ch, "copy"), familyPlan: familyExecutionPlan(ch, item.currentRevisionId ?? 0) };
+    const result = await runSourceGeneration(db, { type: "source_generate", itemId: item.id, channelId: ch.id, version: version ?? item.version, requestId: logicalRequestId, intent: { provider: provider ?? null, templateKey: templateKey ?? null }, configuration: ai, actor: actorOf(req) }, async () => {
       if (item.kind === "notice") {
         const r = await extractForItem(db, item.id, new LlmBudget(4), new Date(), undefined, provider, templateKey, ai);
         if (!r.ok) throw new HttpError(r.kind === "not_configured" ? 503 : 400, r.error);
       } else {
-        const r = await generateDialogueDraft(db, item.id, new Date(), provider, templateKey, ai);
+        const r = await generateDialogueDraft(db, item.id, new Date(), provider, templateKey, { ...ai, explicitRetry: true, requestId: logicalRequestId });
         if (!r.ok) throw new HttpError(400, r.error);
       }
       await audit(db, { actor: actorOf(req), action: "generate", entity: "content_item", entityId: item.id, channelId: ch.id });
@@ -525,6 +545,15 @@ itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
   const query = parse(z.object({ templateKey: z.string().min(1).max(40).optional() }).strict(), req.query);
   const revision = await cardCopyRevision(item);
+  if ((revision.payload.cardCopy as { version?: unknown } | undefined)?.version === 2) {
+    const savedFamily = parse(familyCardCopySchema, revision.payload.cardCopy), metadata = familyMetadataFromPayload(revision.payload);
+    if (!metadata) throw new HttpError(409, "저장된 8장 카드의 근거·편집 기록을 읽을 수 없습니다. 기존 원고는 유지했습니다.");
+    const copy = query.templateKey ? { ...savedFamily, templateKey: query.templateKey } : savedFamily;
+    await resolveCardCopyStyle(copy.templateKey, ch.id);
+    const evidence = familyEvidenceView(await loadFamilyEvidence(getDb(), item, metadata.evidenceBinding));
+    res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, ...metadata, evidence, hasSavedCopy: true, recommendedStoryFormat: "family_dialogue_8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") } });
+    return;
+  }
   const saved = cardCopySchema.safeParse(revision.payload.cardCopy);
   let key = query.templateKey || (saved.success ? saved.data.templateKey : null) || ch.cardTemplate || "builtin:classic";
   let style, templateRecovery: string | undefined;
@@ -544,13 +573,19 @@ itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     const { cardCopy: _oldCopy, ...sourcePayload } = revision.payload;
     const copy = cardCopyFromPayload({ kind: item.kind, payload: invalidSavedCopy ? sourcePayload : revision.payload, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style, key);
     const recoveryNotice = templateRecovery ?? (invalidSavedCopy ? "이전 카드 문구의 형식을 읽을 수 없어 원문 요약에서 편집 문구를 가져왔습니다. 기존 저장본은 유지했으며, 내용을 확인한 뒤 저장하면 새 버전으로 기록됩니다." : undefined);
-    res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, hasSavedCopy: saved.success && !templateRecovery, recommendedStoryFormat: item.kind === "notice" ? null : "discussion8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") }, ...(recoveryNotice ? { recoveryNotice } : {}) });
+    res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, hasSavedCopy: saved.success && !templateRecovery, recommendedStoryFormat: item.kind === "notice" ? null : "family_dialogue_8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") }, ...(recoveryNotice ? { recoveryNotice } : {}) });
   } catch (error) { cardCopyRenderError(error); }
 }));
 
 /** A text edit becomes an immutable content revision; existing image files stay intact. */
 itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  if (req.body?.copy?.version === 2) {
+    const body = parse(familySaveSchema, req.body);
+    await resolveCardCopyStyle(body.copy.templateKey, ch.id);
+    res.json(await saveFamilyCardCopy(getDb(), item.id, ch.id, body, actorOf(req)));
+    return;
+  }
   const body = parse(z.object({ version: zVersion, copy: cardCopySchema, proposalJobId: z.number().int().positive().optional() }).strict(), req.body);
   await resolveCardCopyStyle(body.copy.templateKey, ch.id);
   const result = await getDb().transaction(async tx => {
@@ -560,6 +595,13 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     if (board) assertStudioActive(board);
     const [current] = fresh.currentRevisionId ? await tx.select().from(contentRevisions).where(and(eq(contentRevisions.id, fresh.currentRevisionId), eq(contentRevisions.contentItemId, item.id))) : [];
     if (!current) throw new HttpError(409, "현재 초안이 없습니다. 먼저 원문 초안을 저장해 주세요.");
+    // Already-open legacy clients strip storyFormat, roles, columns and artwork
+    // while parsing a new eight-page response. A current CAS version alone does
+    // not make that lossy downgrade safe. Only the upgraded editor can save it.
+    const storedCopy = current.payload.cardCopy as { storyFormat?: unknown; version?: unknown } | null | undefined;
+    if (storedCopy?.version === 2 || storedCopy?.storyFormat === "discussion8" && body.copy.storyFormat !== "discussion8") {
+      throw new HttpError(409, "8장 카드가 저장된 원고입니다. 이전 형식으로 저장하려 해 중단했습니다. 입력한 문구를 복사한 뒤 페이지를 새로고침해 주세요. 저장된 카드·배경·참고자료는 유지됩니다.", { code: "editor_reload_required" });
+    }
     await assertCardPageArtworkOwnership(tx as unknown as import("../db").DB, item.id, ch.id, body.copy);
     await assertNewsEditorialResources(tx as unknown as import("../db").DB, fresh, body.copy);
     const payload: Record<string, unknown> = { ...current.payload, cardCopy: body.copy };
@@ -582,12 +624,42 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     await audit(tx, { actor: actorOf(req), action: "edit_card_copy", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { revisionId: revision.id, templateKey: body.copy.templateKey, pages: body.copy.pages.length + 1 } });
     return { version: fresh.version + 1, revisionId: revision.id, copy: body.copy, hasSavedCopy: true };
   });
-  res.json({ ...result, recommendedStoryFormat: item.kind === "notice" ? null : "discussion8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") } });
+  res.json({ ...result, recommendedStoryFormat: item.kind === "notice" ? null : "family_dialogue_8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") } });
+}));
+
+/** Explicit manual confirmation reads the already saved publication caption. */
+itemRoutes.post("/channels/:cid/items/:id/card-copy/caption-confirm", ah(async (req, res) => {
+  const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  const body = parse(familyCaptionConfirmSchema, req.body);
+  res.json(await confirmFamilyCaption(getDb(), item.id, ch.id, body, actorOf(req)));
 }));
 
 /** Explicit AI action returns a proposal; it never overwrites saved/operator copy. */
 itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  if (req.body?.formatId === "family_dialogue_8") {
+    const body = parse(familyGenerateSchema, req.body), db = getDb();
+    const configuration = familyExecutionPlan(ch, body.baseRevision);
+    const { version, requestId, ...intent } = body;
+    const result = await runSourceGeneration(db, { type: "card_copy_generate", channelId: ch.id, itemId: item.id, version, requestId, intent, configuration, actor: actorOf(req) }, async () => {
+      await resolveCardCopyStyle(body.templateKey, ch.id);
+      const revision = await cardCopyRevision(item);
+      const [board] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
+      if (board) assertStudioActive(board);
+      const proposed = await proposeFamilyDialogue(db, item, ch, revision, body, configuration);
+      // Preserve a late response as a comparison-only proposal. Content is never
+      // written here; explicit apply uses the item CAS and original revision.
+      return db.transaction(async tx => {
+        const [fresh] = await tx.select().from(contentItems).where(and(eq(contentItems.id, item.id), eq(contentItems.channelId, ch.id))).for("update");
+        const response = { ...proposed, lateResult: !fresh || fresh.version !== body.version || fresh.currentRevisionId !== revision.id };
+        await completeGenerationResult(tx as unknown as import("../db").DB, response);
+        await audit(tx, { actor: actorOf(req), action: "propose_family_card_copy", entity: "content_item", entityId: item.id, channelId: ch.id, detail: { scope: body.scope, baseRevision: revision.id, status: response.status, lateResult: response.lateResult, stages: proposed.generationRuns?.length ?? 0 } });
+        return response;
+      });
+    });
+    res.json(result);
+    return;
+  }
   const body = parse(z.object({ version: zVersion, requestId: z.string().uuid().optional(), templateKey: z.string().min(1).max(40), provider: z.enum(aiProviders).optional(), instructions: z.string().trim().max(1500).optional(), selectedPage: z.number().int().min(0).max(9).optional(), storyFormat: z.literal("discussion8").optional(), refreshAnalysis: z.boolean().optional() }).strict(), req.body);
   const db = getDb();
   const ai = { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy", { provider: body.provider }) };
@@ -618,6 +690,23 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
 /** Same layout/fonts as final JPEG; no source writes or image-generation calls. */
 itemRoutes.post("/channels/:cid/items/:id/card-copy/preview", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  if (req.body?.copy?.version === 2) {
+    const body = parse(z.object({ version: zVersion, copy: familyCardCopySchema, pageDesigns: pageDesignsSchema, page: z.number().int().min(0).max(7), proposalJobId: z.number().int().positive().optional() }).strict(), req.body);
+    if (item.version !== body.version) conflict(item);
+    const db = getDb(), revision = await cardCopyRevision(item);
+    const saved = body.proposalJobId ? (await familyProposalMetadata(db, item, revision.id, body.proposalJobId)).metadata : familyMetadataFromPayload(revision.payload);
+    if (!saved) throw new HttpError(409, "8장 제안의 고정 근거를 확인한 뒤 미리보기해 주세요.");
+    const metadata = synchronizeFamilyQuestion(body.copy, saved);
+    await assertFamilyEvidenceForCopy(db, item, body.copy, metadata);
+    const style = await resolveCardCopyStyle(body.copy.templateKey, ch.id);
+    try {
+      const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, ...metadata, cardCopy: body.copy, pageDesigns: body.pageDesigns }, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, revision.payload), checkedDate: kstToday(new Date()) }, style);
+      const images = await loadCardPageArtworkForPage(db, item.id, ch.id, body.copy, body.page, body.pageDesigns);
+      const bytes = await renderCarouselPage(plan, body.page, style, null, "우주펭귄상회 스튜디오 · 본문 근거 확인", images);
+      res.set("Cache-Control", "no-store").type("image/jpeg").send(bytes);
+    } catch (error) { cardCopyRenderError(error); }
+    return;
+  }
   const body = parse(z.object({ version: zVersion, copy: cardCopySchema, page: z.number().int().min(0).max(9), coverMode: z.enum(["ai", "typography", "reuse"]).optional() }).strict(), req.body);
   if (item.version !== body.version) conflict(item);
   if (body.page > body.copy.pages.length) throw new HttpError(400, "카드 페이지를 확인해 주세요.");
@@ -645,6 +734,8 @@ itemRoutes.post(
       .refine(value => !value.regenerateCover || value.coverMode === "ai", "새 표지 생성은 AI 표지에서만 사용할 수 있습니다.")
       .refine(value => !value.regenerateCover || (value.version !== undefined && value.requestId !== undefined), "새 표지를 만들려면 최신 원고 버전과 요청 ID가 필요합니다.")
       .refine(value => !value.coverInstruction || value.regenerateCover, "표지 수정 지시는 새 표지 생성과 함께 요청해 주세요."), req.body ?? {});
+    const savedRevision = item.currentRevisionId ? await cardCopyRevision(item) : null;
+    if ((savedRevision?.payload.cardCopy as { version?: unknown } | undefined)?.version === 2 && savedRevision?.payload.rendererProvider === "canva") throw new HttpError(409, "이 원고는 Canva 이미지로 발행하도록 선택했습니다. Canva에서 최신 8장을 가져오거나, '스튜디오 자체 이미지로 전환'을 직접 선택한 뒤 생성해 주세요.", { code: "explicit_renderer_switch_required" });
     const imageAi = channelAiSelection(ch, "image");
     const render = async () => {
       const r = await renderCardForItem(getDb(), item.id, new Date(), body.templateKey, { version: body.version, coverMode: body.coverMode, regenerateCover: body.regenerateCover, coverInstruction: body.coverInstruction, actor: actorOf(req), imageAi });
@@ -713,7 +804,10 @@ itemRoutes.get(
     if (!a) throw new HttpError(404, "이미지 없음");
     res.setHeader("content-type", a.mime);
     res.setHeader("cache-control", "private, max-age=86400, immutable");
-    if (req.query.download === "1") res.setHeader("content-disposition", `attachment; filename="spacepenguin-card-${a.contentItemId}-r${a.revisionId}.jpg"`);
+    if (req.query.download === "1") {
+      const extension = a.mime === "image/png" ? "png" : a.mime === "image/webp" ? "webp" : a.mime === "image/jpeg" ? "jpg" : "bin";
+      res.setHeader("content-disposition", `attachment; filename="spacepenguin-card-${a.contentItemId}-r${a.revisionId}.${extension}"`);
+    }
     res.send(a.bytes);
   }),
 );

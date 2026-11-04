@@ -3,6 +3,7 @@ import { env } from "../env";
 import { AiServiceError, callTool, LlmBudget, openaiRequest, type AiProvider } from "./llm";
 import { STUDIO_CHARACTER_GUIDE } from "../../shared/studioCharacters";
 import { GEMINI_MAX_ATTEMPTS } from "./gemini";
+import { providerResponseId, providerUsage } from "./structuredAi";
 
 export function studioAiStatus() {
   return {
@@ -142,7 +143,12 @@ export async function generateStudioImage(opts: { prompt: string; instruction?: 
   if (typeof b64 !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64) || b64.length > 21_000_000) throw new AiServiceError("생성된 그림을 읽을 수 없습니다.", "parse");
   const bytes = Buffer.from(b64, "base64");
   if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new AiServiceError("생성된 그림 형식이 PNG가 아닙니다.", "parse");
-  return { bytes, mimeType: "image/png" as const, model, provider: "openai" as const, usage: { inputTokens: Number(response.usage?.input_tokens) || 0, outputTokens: Number(response.usage?.output_tokens) || 0 } };
+  const usage = providerUsage(response.usage?.input_tokens, response.usage?.output_tokens);
+  const actualModel = typeof response.model === "string" ? response.model : null;
+  return { bytes, mimeType: "image/png" as const, model: actualModel ?? model, provider: "openai" as const,
+    usage: { inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0 }, usageStatus: usage.usageStatus,
+    provenance: { provider: "openai" as const, requestedModel: model, actualModel, requestId: providerResponseId(response.id), ...usage, status: "completed" as const },
+  };
 }
 
 

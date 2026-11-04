@@ -206,10 +206,10 @@ try {
     assert.equal(await selection.locator('option[value="9"]').textContent(),"테스트로 만든 동네 채널");
     await noOverflow(page,"created-channel-form");
     await page.screenshot({path:`${outputDir}/created-channel-${width}.png`});
-    assert.equal(await page.getByLabel("기사 요약 AI",{exact:true}).inputValue(),"gemini");
+    assert.equal(await page.getByLabel("원문·근거 분석 AI",{exact:true}).inputValue(),"gemini");
     assert.equal(await page.getByLabel("카드뉴스 문구 AI",{exact:true}).inputValue(),"openai");
     assert.equal(await page.getByLabel("이미지 제작 AI",{exact:true}).inputValue(),"openai");
-    await page.getByLabel("기사 요약 모델 ID",{exact:true}).fill("gemini-browser-summary");
+    await page.getByLabel("원문·근거 분석 모델 ID",{exact:true}).fill("gemini-browser-summary");
     await page.getByLabel("카드뉴스 문구 모델 ID",{exact:true}).fill("gpt-browser-copy");
     await page.getByLabel("이미지 제작 모델 ID",{exact:true}).fill("gpt-image-browser");
     await noOverflow(page,"channel-ai-role-models");
@@ -217,7 +217,7 @@ try {
     await page.screenshot({path:`${outputDir}/channel-ai-roles-${width}.png`});
     await page.getByRole("button",{name:"채널 설정 저장",exact:true}).click();
     await page.getByRole("status").filter({hasText:"채널 설정 저장됨"}).waitFor();
-    assert.deepEqual(aiSettingSaves,[{summary:{provider:"gemini",model:"gemini-browser-summary"},copy:{provider:"openai",model:"gpt-browser-copy"},image:{provider:"openai",model:"gpt-image-browser"}}]);
+    assert.deepEqual(aiSettingSaves,[{version:2,roleModels:{article_analysis:{provider:"gemini",model:"gemini-browser-summary"},resource_research:{provider:"gemini",model:"gemini-4-argon"},card_copy:{provider:"openai",model:"gpt-browser-copy"},caption:{inherit:"card_copy"},image_brief:{inherit:"card_copy"},image_generation:{provider:"openai",model:"gpt-image-browser"},editorial_review:{inherit:"card_copy"}}}]);
     assert.equal(directory.find(channel=>channel.id===4).aiSettings,null,"another channel's AI must remain unchanged");
     await page.getByRole("button",{name:"이 채널 콘텐츠 보기",exact:true}).click();
     await page.waitForURL(origin+"/");assert.equal(await selection.inputValue(),"9");

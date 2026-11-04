@@ -12,11 +12,13 @@ import { HttpError } from "../routes/util";
 import { layoutCollectionBody, renderCollectionBody, renderCollectionCover } from "./cardCollection";
 import { cardCopyFromStored, cardCopySchema, type CardCopy } from "../../shared/cardCopy";
 import { checkEditorialCard, renderEditorialCard } from "./editorialCard";
+import { defaultPageDesigns, familyCardCopySchema, pageDesignsSchema, type CardCopyV2, type PageDesigns } from "../../shared/familyDialogue";
+import { checkFamilyDialogueCard, familyBrandName, familyPageText, familyPageTitle, renderFamilyDialogueCard, type FamilyCardContext } from "./familyDialogueCard";
 
 type Block = CardModel["blocks"][number];
 type Section = { title: string; blocks: Block[] };
 export type ModelInput = Parameters<typeof buildCardModel>[0];
-export type CarouselPlan = { base: CardModel; pages: CardModel[]; count: number; copy?: CardCopy };
+export type CarouselPlan = { base: CardModel; pages: CardModel[]; count: number; copy?: CardCopy; family?: { copy: CardCopyV2; designs: PageDesigns; context: FamilyCardContext } };
 export type CarouselPageImages = ReadonlyMap<number, Buffer> & { credits?: ReadonlyMap<number, string> };
 const block = (field: string, label: string, text: unknown): Block => ({ field, label, text: Array.isArray(text) ? text.filter(Boolean).join("\n\n") : String(text ?? ""), maxLines: 30 });
 
@@ -45,6 +47,22 @@ export function carouselSections(kind: string, p: Record<string, any>): Section[
 /** Measure real typography. Overflow continues on another page; text is never sliced away. */
 export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan {
   const base = buildCardModel(input);
+  if (input.payload.cardCopy?.version === 2) {
+    const parsed = familyCardCopySchema.safeParse(input.payload.cardCopy);
+    if (!parsed.success) throw new HttpError(422, "8장 원고의 필드와 순서를 확인해 주세요. 기존 문구는 유지했습니다.");
+    const designResult = pageDesignsSchema.safeParse(input.payload.pageDesigns ?? defaultPageDesigns());
+    if (!designResult.success) throw new HttpError(422, "페이지 디자인 저장값을 확인해 주세요. 기존 문구와 배경은 유지했습니다.");
+    const copy = parsed.data, designs = designResult.data;
+    const context: FamilyCardContext = { brandName: familyBrandName(copy, input.channelName), accent: input.accent, sourceCredit: base.footer };
+    const models = copy.pages.map(page => {
+      checkFamilyDialogueCard(page, designs[page.id], context, style);
+      return { ...base, title: familyPageTitle(page), subtitle: undefined,
+        blocks: familyPageText(page).map((text, i) => ({ field: `cardCopy.pages.${page.page - 1}.fields.${i}`, text, maxLines: 30 })),
+        badge: `${String(page.page).padStart(2, "0")} / 08`,
+      };
+    });
+    return { base: models[0], pages: models.slice(1), count: 8, family: { copy, designs, context } };
+  }
   const copy = cardCopyFromStored(input.payload);
   if (copy) {
     const count = copy.pages.length + 1;
@@ -153,6 +171,13 @@ export async function renderCarouselCover(model: CardModel, count: number, art: 
 /** One exact final page, shared by the editor preview, saved deck and publication export. */
 export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, style: CardStyle, art: Buffer | null, credit: string, pageImages: CarouselPageImages = new Map()): Promise<Buffer> {
   if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= plan.count) throw new HttpError(400, "카드 페이지를 확인해 주세요.");
+  if (plan.family) {
+    const { copy, designs, context } = plan.family, page = copy.pages[pageIndex], design = designs[page.id];
+    const assetId = design.background.kind === "image" ? design.background.assetId : undefined;
+    const image = assetId ? pageImages.get(assetId) : undefined;
+    if (design.background.kind === "image" && (!assetId || !image)) throw new HttpError(422, "이 페이지에 선택한 배경을 불러올 수 없습니다. 저장한 원고는 유지했습니다. 배경을 다시 선택해 주세요.");
+    return renderFamilyDialogueCard(page, design, context, style, image ?? null, assetId ? pageImages.credits?.get(assetId) ?? "배경 이미지" : "");
+  }
   const model = pageIndex === 0 ? plan.base : plan.pages[pageIndex - 1];
   const background = pageIndex === 0 ? plan.copy?.cover.background : plan.copy?.pages[pageIndex - 1].background;
   const bytes = background ? pageImages.get(background.assetId) : undefined;

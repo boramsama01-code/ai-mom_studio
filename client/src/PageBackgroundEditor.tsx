@@ -3,21 +3,21 @@ import { api, ApiError } from "./api";
 import { ErrorBox, GuardedLink } from "./ui";
 import { useDraftRecovery } from "./useDraftRecovery";
 import { RecoveryNotice } from "./RecoveryNotice";
-import type { CardCopyResponse } from "./CardCopyEditor";
+import { isCardPageArtworkId } from "@shared/cardPageArtworkId";
 
 type Background = { assetId: number; opacity?: number };
 export type PageArtworkResult = { assetId: number; version: number; pageId: string; source: "ai" | "upload"; credit: string; jobId: number };
 type Pending = { requestId: string; pageId: string; version: number; priorAssetId: number | null; mode: "ai" | "upload" };
 type Props = {
-  channelId: number; itemId: number; pageIndex: number; background?: Background;
-  disabled: boolean; showAi: boolean; imageReady: boolean; imageModel?: string;
-  save: () => Promise<CardCopyResponse>;
+  channelId: number; itemId: number; pageIndex: number; pageId?: string; background?: Background;
+  disabled: boolean; showAi: boolean; imageReady: boolean; imageModel?: string; showOpacityControl?: boolean;
+  save: () => Promise<{ version: number }>;
   onApply: (result: PageArtworkResult, priorAssetId: number | null) => boolean;
   onChange: (background?: Background) => void;
   onBusyChange: (busy: boolean) => void;
 };
 const readPending = (key: string): Pending | null => {
-  try { const v = JSON.parse(sessionStorage.getItem(key) ?? "null"); return v && /^[0-9a-f-]{36}$/i.test(v.requestId) && /^(cover|body-[1-9])$/.test(v.pageId) && Number.isSafeInteger(v.version) && ["ai", "upload"].includes(v.mode) ? v : null; }
+  try { const v = JSON.parse(sessionStorage.getItem(key) ?? "null"); return v && /^[0-9a-f-]{36}$/i.test(v.requestId) && isCardPageArtworkId(v.pageId) && Number.isSafeInteger(v.version) && ["ai", "upload"].includes(v.mode) ? v : null; }
   catch { return null; }
 };
 const fileDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
@@ -28,7 +28,7 @@ const fileDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
 /** Keeps only small request metadata in session storage, never pasted image bytes. */
 export function PageBackgroundEditor(props: Props) {
   const { channelId, itemId, pageIndex, background, disabled, showAi, imageReady, imageModel } = props;
-  const pageId = pageIndex === 0 ? "cover" : `body-${pageIndex}`;
+  const pageId = props.pageId ?? (pageIndex === 0 ? "cover" : `body-${pageIndex}`);
   const path = `/channels/${channelId}/items/${itemId}/card-copy`;
   const storageKey = `spacepenguin.generation:${channelId}:${itemId}:page-background`;
   const [pending, setPending] = useState<Pending | null>(() => readPending(storageKey));
@@ -40,7 +40,7 @@ export function PageBackgroundEditor(props: Props) {
   const recovery = useDraftRecovery<Record<string, string>>({
     recoveryKey: `item:${channelId}:${itemId}:page-background-directions`, label: "페이지별 그림 지시", version: 0,
     value: instructions, serverValue: {}, dirty: Object.values(instructions).some(value => value.trim()), ready: true,
-    parse: value => value && typeof value === "object" && !Array.isArray(value) && Object.entries(value).every(([key, text]) => /^(cover|body-[1-9])$/.test(key) && typeof text === "string" && text.length <= 2000) ? value as Record<string, string> : null,
+    parse: value => value && typeof value === "object" && !Array.isArray(value) && Object.entries(value).every(([key, text]) => isCardPageArtworkId(key) && typeof text === "string" && text.length <= 2000) ? value as Record<string, string> : null,
     onRestore: setInstructions,
   });
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; latest.current.onBusyChange(false); }; }, []);
@@ -57,7 +57,7 @@ export function PageBackgroundEditor(props: Props) {
       setNotice("그림을 만드는 동안 원고나 배경 선택이 바뀌었습니다. 현재 입력은 유지했습니다. 아래 결과를 확인하고 사용할 페이지를 선택해 주세요.");
     } else {
       setAvailableResult(null); persist(null);
-      setNotice(`${result.credit}를 ${request.pageId === "cover" ? "표지" : `${Number(request.pageId.slice(5)) + 1}페이지`}에 선택했습니다. 문구와 함께 저장하면 확정됩니다.`);
+      setNotice(`${result.credit}를 요청한 페이지에 선택했습니다. 문구와 함께 저장하면 확정됩니다.`);
     }
   }
   async function lookup() {
@@ -114,7 +114,7 @@ export function PageBackgroundEditor(props: Props) {
       {showAi && <><label className="field">이 페이지 그림 지시<textarea rows={3} maxLength={2000} value={instructions[pageId] ?? ""} disabled={blocked} placeholder="예: 두 사람이 서로 다른 기준으로 같은 로봇을 바라보는 장면. 중앙에는 글을 위한 여백." onChange={event => setInstructions(value => ({ ...value, [pageId]: event.target.value }))} /></label><button className="btn" disabled={blocked || !imageReady} onClick={() => void start("ai")}>{busy ? "배경 작업 중…" : background ? "이 페이지 배경 다시 만들기 · 이미지 1장" : "이 페이지 배경 자동 만들기 · 이미지 1장"}</button><p className="hint">{imageModel ? `${imageModel} · ` : ""}선택한 페이지만 생성합니다. 기존 그림은 새 결과를 선택하고 저장할 때까지 유지합니다.</p></>}
       {showAi && !imageReady && <p className="hint">이미지 AI 연결이 필요합니다. <GuardedLink href="/connections?service=openai">OpenAI 연결 설정</GuardedLink>에서 연결하거나 직접 이미지를 선택할 수 있어요.</p>}
       <div className="page-background-upload" tabIndex={0} aria-label="페이지 배경 이미지 붙여넣기 영역"><span>이미지를 복사한 뒤 이 영역에 붙여넣거나 파일을 선택하세요.</span><input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" aria-label="페이지 배경 이미지 파일" disabled={blocked} onChange={event => { const file = event.target.files?.[0]; if (file) void start("upload", file); event.target.value = ""; }} /><button className="btn" disabled={blocked} onClick={() => fileInput.current?.click()}>배경 이미지 선택</button><span className="hint">PNG·JPG·WEBP, 8MB 이하. 문구는 이미지 위에 별도로 배치합니다.</span></div>
-      {background && <><label className="field">배경 선명도 {background.opacity ?? 100}%<input type="range" min={0} max={100} value={background.opacity ?? 100} disabled={blocked} onChange={event => props.onChange({ ...background, opacity: Number(event.target.value) })} /></label><button className="btn ghost" disabled={blocked} onClick={() => props.onChange(undefined)}>이 페이지 배경 빼기</button></>}
+      {background && <>{props.showOpacityControl !== false && <label className="field">배경 선명도 {background.opacity ?? 100}%<input type="range" min={0} max={100} value={background.opacity ?? 100} disabled={blocked} onChange={event => props.onChange({ ...background, opacity: Number(event.target.value) })} /></label>}<button className="btn ghost" disabled={blocked} onClick={() => props.onChange(undefined)}>이 페이지 배경 빼기</button></>}
       {availableResult && <div className="notice stack"><strong>확인 후 사용할 수 있는 배경</strong><img className="page-background-thumb" src={`/api${path}/background/${availableResult.assetId}`} alt="기존 요청에서 완성된 배경" /><button className="btn" disabled={disabled || busy} onClick={() => { props.onChange({ assetId: availableResult.assetId, opacity: 100 }); setAvailableResult(null); persist(null); setNotice("선택한 페이지에 배경을 불러왔습니다. 문구와 함께 저장해 주세요."); }}>{pageIndex === 0 ? "현재 표지" : `현재 ${pageIndex + 1}페이지`}에 이 배경 사용</button><button className="btn ghost" disabled={busy} onClick={() => { setAvailableResult(null); persist(null); setNotice("현재 배경을 유지했습니다."); }}>현재 배경 유지</button></div>}
       {pending && !availableResult && <div className="notice stack"><span>응답을 놓쳐도 같은 요청의 결과만 확인합니다.</span><div className="row"><button className="btn" disabled={busy} onClick={() => void lookup()}>기존 배경 작업 결과 확인</button><button className="btn ghost" onClick={() => void cancel()}>배경 요청 중단</button></div></div>}
       {notice && <p className="hint" role="status">{notice}</p>}

@@ -14,8 +14,10 @@ import { channelAiSelection } from "../services/channelAi";
 import { generateNewsCardCopy } from "../services/newsEditorial";
 import { generateCardCopy } from "../services/llm";
 import type { AiSelection } from "../../shared/channelAi";
+import type { AiExecutionPlan } from "../../shared/aiProvenance";
+import { generateFamilySourceDraft } from "../services/familySourceDraft";
 
-export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider, templateKey?: string, options: { budget?: LlmBudget; summary?: AiSelection; copy?: AiSelection } = {}) {
+export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider, templateKey?: string, options: { budget?: LlmBudget; summary?: AiSelection; copy?: AiSelection; familyPlan?: AiExecutionPlan; explicitRetry?: boolean; requestId?: string } = {}) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
   if (!item) return { ok: false as const, error: "항목 없음" };
   if (item.kind !== "science_dialogue" && item.kind !== "current_dialogue")
@@ -38,6 +40,12 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   const sources: LlmSource[] = docs
     .filter((d) => d.fetchStatus === "ok" && d.fetchedText)
     .map((d) => ({ source_id: d.id, kind: d.kind, url: d.originalUrl, title: d.title, published: d.publishedRaw, text: d.fetchedText! }));
+
+  // New article-backed news uses the complete v2 workflow. Existing saved decks
+  // retain their format until the operator explicitly applies a new proposal.
+  if (!previousRevision?.payload.cardCopy && primary && sources.some(source => source.source_id === primary.id && source.text.trim().length >= 100)) {
+    return generateFamilySourceDraft(db, item, channel, selectedTemplate, { budget: options.budget, plan: options.familyPlan, explicitRetry: options.explicitRetry, requestId: options.requestId });
+  }
 
   if (item.kind === "current_dialogue" && !sources.length)
     return { ok: false as const, error: "시사 대화는 원문이 확보된 자료가 있어야 생성합니다(제목만으로 생성하지 않음)." };

@@ -120,6 +120,20 @@
       "when": 1793664000003,
       "tag": "0016_channel_ai_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793664000004,
+      "tag": "0017_family_editorial_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793664000005,
+      "tag": "0018_canva_editorial",
+      "breakpoints": true
     }
   ]
 }

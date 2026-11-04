@@ -10,6 +10,9 @@ import sharp from "sharp";
 import { cardCopySchema } from "../shared/cardCopy.ts";
 import { planCarousel, renderCarouselPage } from "../server/services/cardCarousel.ts";
 import { discussionCardCopyFixture } from "../tests/fixtures/discussionCardCopy.ts";
+import { familyCardCopySchema } from "../shared/familyDialogue.ts";
+import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "../tests/fixtures/familyDialogueCard.ts";
+import { familyPageTitle } from "../server/services/familyDialogueCard.ts";
 
 const require = createRequire(import.meta.url);
 let playwright;
@@ -26,29 +29,31 @@ const channels = [{ id: 3, slug: "current-dialogue", name: "Alligodang", active:
 const ai = { defaultProvider: "gemini", text: { gemini: true, openai: true, anthropic: false }, image: true };
 const legacyCopy = () => ({ version: 1, templateKey: "set:n03", cover: { title: "기존 원고의 제목", subtitle: "직접 저장한 문구는 먼저 유지합니다" }, pages: Array.from({ length: 4 }, (_, i) => ({ id: `body-${i + 1}`, title: `직접 저장한 본문 ${i + 1}`, subtitle: "원문에서 확인한 내용", body: "기존에 저장한 문구입니다. 새 제안을 확인한 뒤 명시적으로 적용하기 전까지 그대로 보존해야 합니다." })) });
 const style = { layout: "minimal", collection: "n03" };
-const plan = copy => planCarousel({ kind: "current_dialogue", payload: { title: "브라우저 테스트 자료", summary: "합성 자료의 사실과 해석을 구분합니다.", cardCopy: copy }, channelName: "Alligodang", channelSlug: "news", accent: "#32756b", sourceOrg: "브라우저 테스트 자료", checkedDate: "2026-11-04" }, style);
+const plan = (copy, pageDesigns) => planCarousel({ kind: "current_dialogue", payload: { title: "브라우저 테스트 자료", summary: "합성 자료의 사실과 해석을 구분합니다.", cardCopy: copy, ...(pageDesigns ? { pageDesigns } : {}) }, channelName: "Alligodang", channelSlug: "news", accent: "#32756b", sourceOrg: "브라우저 테스트 자료", checkedDate: "2026-11-04" }, style);
 const imageCache = new Map();
-async function cardImage(copy, pageIndex, backgrounds) {
-  const key = JSON.stringify([copy, pageIndex]);
-  if (!imageCache.has(key)) imageCache.set(key, renderCarouselPage(plan(copy), pageIndex, style, null, "", backgrounds));
+async function cardImage(copy, pageIndex, backgrounds, pageDesigns) {
+  const key = JSON.stringify([copy, pageIndex, pageDesigns]);
+  if (!imageCache.has(key)) imageCache.set(key, renderCarouselPage(plan(copy, pageDesigns), pageIndex, style, null, "", backgrounds));
   return imageCache.get(key);
 }
 const uploadImage = await sharp({ create: { width: 360, height: 450, channels: 3, background: "#a9cac2" } }).png().toBuffer();
 const pasteImage = await sharp({ create: { width: 360, height: 450, channels: 3, background: "#d2a27b" } }).png().toBuffer();
 
 function fixture() {
-  const state = { saved: { version: 3, revisionId: 30, hasSavedCopy: true, recommendedStoryFormat: "discussion8", ai: roles, copy: legacyCopy() }, writes: [], aiAttempts: 0, cards: [], nextAssetId: 800, nextBackgroundId: 9000 };
+  const state = { saved: { version: 3, revisionId: 30, hasSavedCopy: true, recommendedStoryFormat: "discussion8", ai: roles, copy: legacyCopy() }, writes: [], aiAttempts: 0, familyAttempts: 0, cards: [], nextAssetId: 800, nextBackgroundId: 9000 };
   const backgrounds = Object.assign(new Map(), { credits: new Map() }), assets = new Map();
   const makeAsset = () => {
     const id = state.nextAssetId; state.nextAssetId += 10;
     const copy = clone(state.saved.copy);
-    const asset = { id, revisionId: state.saved.revisionId, templateKey: copy.templateKey, source: "builtin", createdAt: stamp, carousel: { version: 1, altVersion: 1, cover: { kind: "typography", credit: "합성 자료 · 실제 카드 렌더러" }, pages: [copy.cover, ...copy.pages].map((page, i) => ({ id: id + i, title: page.title, sha256: `fixture-${id + i}`, altText: `합성 자료의 ${i + 1}페이지. ${page.title}` })) } };
-    asset.carousel.pages.forEach((page, index) => assets.set(page.id, { copy, index }));
+    const titles = copy.version === 2 ? copy.pages.map(familyPageTitle) : [copy.cover, ...copy.pages].map(page => page.title);
+    const asset = { id, revisionId: state.saved.revisionId, templateKey: copy.templateKey, source: "builtin", createdAt: stamp, carousel: { version: 1, altVersion: 1, rendererProvider: "builtin", cover: { kind: "typography", credit: "합성 자료 · 실제 카드 렌더러" }, pages: titles.map((title, i) => ({ id: id + i, title, sha256: `fixture-${id + i}`, altText: `합성 자료의 ${i + 1}페이지. ${title}` })) } };
+    asset.carousel.pages.forEach((page, index) => assets.set(page.id, { copy, index, pageDesigns: clone(state.saved.pageDesigns) }));
     state.cards.unshift(asset); return asset;
   };
   makeAsset();
   const detail = () => {
     const payload = { title: "기존 원고의 제목", event_at: null, published_at: stamp, checked_at: stamp, summary: "이 기사는 테스트용 인터뷰의 전망을 전합니다.", why_it_matters: "사실과 전망을 구분하는 연습입니다.", verified_facts: ["인터뷰가 진행됐습니다."], under_verification: [], perspectives: [], discussion_questions: ["무엇을 평가했나요?", "무엇이 달라졌나요?", "어떤 근거가 필요한가요?"], glossary: [], parent_hints: [], sources: [], evidence: [], independent_source_count: 1, cardCopy: clone(state.saved.copy) };
+    if (state.saved.copy.version === 2) for (const key of Object.keys(familyDialogueMetadataFixture())) payload[key] = clone(state.saved[key]);
     const current = { id: state.saved.revisionId, revisionNo: state.saved.revisionId - 27, author: "operator", payload, createdAt: stamp };
     return {
       item: { id: 9828, channelId: 3, primarySourceId: 1, title: "기존 원고의 제목", kind: "current_dialogue", origin: "collected", version: state.saved.version, currentRevisionId: state.saved.revisionId, reviewStatus: "pending", evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: payload, canvaDesign: null, createdAt: stamp, updatedAt: stamp, subcategory: null }, current,
@@ -69,6 +74,8 @@ function fixture() {
     else if (pathname === "/api/status") data = { globalStop: false, workerConnected: true, integrations: { aiProvider: "gemini", gemini: true, openai: true, anthropic: false, flags: { dryRun: true, autoPublish: false } } };
     else if (pathname === "/api/studio/ai-status") data = ai;
     else if (pathname === "/api/canva/status") data = { connected: false };
+    else if (pathname === "/api/canva/editorial/status") data = { configured: false, connected: false, autofill: false, capabilities: [] };
+    else if (pathname === "/api/channels/3/canva/masters" || pathname === `${itemPath}/canva/jobs`) data = { items: [] };
     else if (pathname === "/api/studio/cards/2828") data = studio();
     else if (pathname === "/api/studio/cards") data = { cards: [studio().card], ai, notes: "", notesVersion: 1 };
     else if (pathname === "/api/channels/3/templates") data = { current: "set:n03", items: [{ key: "set:n03", name: "뉴스 대화", description: "하나의 기사, 여러 관점", kind: "builtin", family: "news", pageCount: 5 }] };
@@ -76,13 +83,25 @@ function fixture() {
     else if (pathname === copyPath && method === "GET") data = clone(state.saved);
     else if (pathname === copyPath && method === "PATCH") {
       assert.equal(body.version, state.saved.version, "copy changes must use the current accepted version");
-      const copy = cardCopySchema.parse(body.copy); plan(copy);
-      assert.equal(body.proposalJobId, state.saved.copy.storyFormat !== "discussion8" && copy.storyFormat === "discussion8" ? 502 : undefined, "apply the verified proposal ID once; later manual saves must not reuse it");
-      state.saved = { ...state.saved, version: state.saved.version + 1, revisionId: state.saved.revisionId + 1, copy: clone(copy) };
+      const copy = body.copy.version === 2 ? familyCardCopySchema.parse(body.copy) : cardCopySchema.parse(body.copy); plan(copy, body.pageDesigns);
+      const expectedJob = copy.version === 2 && state.saved.copy.version === 1 ? 602 : state.saved.copy.storyFormat !== "discussion8" && copy.storyFormat === "discussion8" ? 502 : undefined;
+      assert.equal(body.proposalJobId, expectedJob, "apply the verified proposal ID once; later manual saves must not reuse it");
+      const nextRevision = state.saved.revisionId + 1;
+      const metadata = copy.version === 2 ? { ...(state.saved.copy.version === 1 ? familyDialogueMetadataFixture(nextRevision) : Object.fromEntries(Object.keys(familyDialogueMetadataFixture()).map(key => [key, state.saved[key]]))), pageDesigns: clone(body.pageDesigns), fieldLocks: clone(body.fieldLocks ?? {}) } : {};
+      if (copy.version === 2 && state.saved.copy.version === 2 && JSON.stringify(copy) !== JSON.stringify(state.saved.copy)) metadata.dependencies = { ...metadata.dependencies, caption: "needs_review", render: "needs_review" };
+      state.saved = { ...state.saved, ...metadata, version: state.saved.version + 1, revisionId: nextRevision, copy: clone(copy) };
       data = clone(state.saved);
     } else if (pathname === `${copyPath}/preview` && method === "POST") {
-      return route.fulfill({ contentType: "image/jpeg", body: await cardImage(body.copy, body.page, backgrounds) });
+      if (body.copy.version === 2) {
+        assert.deepEqual(Object.keys(body).filter(key => key !== "proposalJobId").sort(), ["copy", "page", "pageDesigns", "version"], "v2 preview uses the strict semantic preview contract");
+      }
+      return route.fulfill({ contentType: "image/jpeg", body: await cardImage(body.copy, body.page, backgrounds, body.pageDesigns) });
     } else if (pathname === `${copyPath}/generate` && method === "POST") {
+      if (body.formatId === "family_dialogue_8") {
+        assert.equal(body.scope, "all"); assert.equal(body.version, state.saved.version); assert.equal(body.baseRevision, state.saved.revisionId); assert.match(body.requestId, /^[0-9a-f-]{36}$/i);
+        state.familyAttempts++;
+        return route.fulfill({ json: { ...clone(state.saved), ...familyDialogueMetadataFixture(state.saved.revisionId), copy: familyDialogueCardFixture(), scope: "all", status: "ready", reviewFlags: [], baseRevision: state.saved.revisionId, lateResult: false, jobId: 602 } });
+      }
       assert.equal(body.version, state.saved.version); assert.equal(body.storyFormat, "discussion8"); assert.equal(body.refreshAnalysis, true);
       assert.equal(body.selectedPage, undefined, "rebuilding all eight pages must not be limited to the selected legacy page");
       assert.equal(body.provider, undefined, "the channel copy provider must remain the default"); assert.match(body.requestId, /^[0-9a-f-]{36}$/i);
@@ -91,7 +110,7 @@ function fixture() {
       data = { ...clone(state.saved), copy: discussionCardCopyFixture(), model: roles.copy.model, scope: "all", selectedPage: 0, jobId: 502 };
     } else if (pathname === `${copyPath}/background` && method === "POST") {
       assert.equal(body.version, state.saved.version); assert.equal(body.mode, "upload", "this regression must not request paid background generation");
-      assert.match(body.pageId, /^body-[1-7]$/); assert.match(body.requestId, /^[0-9a-f-]{36}$/i); assert.match(body.imageData, /^data:image\/png;base64,/);
+      assert.match(body.pageId, /^(?:body-[1-7]|news_summary)$/); assert.match(body.requestId, /^[0-9a-f-]{36}$/i); assert.match(body.imageData, /^data:image\/png;base64,/);
       const assetId = state.nextBackgroundId++;
       const normalized = await sharp(Buffer.from(body.imageData.split(",")[1], "base64")).jpeg().toBuffer();
       backgrounds.set(assetId, normalized); backgrounds.credits.set(assetId, "직접 등록 이미지");
@@ -107,7 +126,7 @@ function fixture() {
       data = { version: 1, values: asset.carousel.pages.map(page => page.altText) };
     } else if (/^\/api\/channels\/3\/media\/\d+$/.test(pathname) && method === "GET") {
       const asset = assets.get(Number(pathname.split("/").at(-1))); assert(asset);
-      return route.fulfill({ contentType: "image/jpeg", body: await cardImage(asset.copy, asset.index, backgrounds) });
+      return route.fulfill({ contentType: "image/jpeg", body: await cardImage(asset.copy, asset.index, backgrounds, asset.pageDesigns) });
     } else return false;
     await route.fulfill({ json: data }); return true;
   }
@@ -178,9 +197,10 @@ try {
     try {
       await page.goto(`${origin}/studio/2828`); await title(page).waitFor(); await previewReady(page);
       assert.equal(await pageButtons(page).count(), 5); assert.equal(state.writes.filter(write => !write.path.endsWith('/preview')).length, 0);
-      assert.match(await page.locator('.card-copy-story-action').innerText(), /기사 요약 Gemini · 문구 GPT/);
       const sourceModels = await page.locator('[data-testid="source-role-models"]').textContent();
       for (const selection of Object.values(roles)) assert(sourceModels?.includes(selection.model), `source editor must use the channel's resolved ${selection.model} model`);
+      await page.locator('details.card-copy-legacy-tools > summary').click();
+      assert.match(await page.locator('.card-copy-legacy-tools .card-copy-story-action').innerText(), /기사 요약 Gemini · 문구 GPT/);
       const original = clone(state.saved.copy), rebuild = page.getByRole('button', { name: '8장 뉴스 대화로 다시 구성', exact: true });
       await rebuild.click(); await page.getByText(/합성 503 응답/).waitFor();
       assert.equal(await title(page).inputValue(), original.cover.title); assert.deepEqual(state.saved.copy, original); assert.equal(await pageButtons(page).count(), 5);
@@ -230,16 +250,67 @@ try {
       // artifact's identity even while the publication details are still closed.
       await final.locator(`.card-carousel-stage img[src="/api/channels/3/media/${rendered.carousel.pages[0].id}"]`).waitFor({ state: 'attached' });
       await page.getByRole('button', { name: '이미지 확인 · 게시 준비 열기', exact: true }).click();
-      await final.waitFor(); assert.equal(await final.locator('.page-dots button').count(), 8);
-      await final.locator('.page-dots button').nth(4).click();
+      // AltTextEditor has its own eight-page selector. Count the rendered
+      // carousel's navigation rather than combining two independent controls.
+      const finalPageButtons = final.locator('.card-carousel-controls > .page-dots > button');
+      await final.waitFor(); assert.equal(await finalPageButtons.count(), 8);
+      await finalPageButtons.nth(4).click();
       const finalImage = final.locator(`.card-carousel-stage img[src="/api/channels/3/media/${rendered.carousel.pages[4].id}"]`);
       await finalImage.waitFor(); await finalImage.evaluate(img => img.decode());
       assert.deepEqual(await finalImage.evaluate(img => [img.naturalWidth, img.naturalHeight]), [1080, 1350]);
       await finalImage.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${outputDir}/final-${width}.png` });
       assert.equal(state.writes.filter(write => write.path.endsWith('/background')).length, 2);
       assert.equal(state.writes.filter(write => /\/(approve|publish|deliveries)(\/|$)/.test(write.path)).length, 0);
+      // A v2 conversion has a different schema and must be explicit. The old
+      // deck and its final assets remain intact until this save succeeds.
+      await page.getByRole('button', { name: '새 8장 형식 자동 제안', exact: true }).click();
+      const convert = page.getByRole('button', { name: '새 8장 원고로 저장·전환', exact: true }); await convert.waitFor();
+      assert.equal(state.saved.copy.version, 1);
+      await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === copyPath && response.request().method() === 'PATCH' && response.ok()), convert.click()]);
+      const family = page.locator('.family-dialogue-editor'); await family.waitFor();
+      assert.equal(state.saved.copy.version, 2); assert.equal(await family.locator('.family-page-strip>button').count(), 8);
+      await family.getByRole('button', { name: '5페이지 · 두 가지 시선', exact: true }).click();
+      const viewA = family.locator('textarea[id$="-fields.viewA.body"]');
+      await viewA.fill('내가 덧붙인 판단 기준도 저장하고 다시 확인할 수 있어요.');
+      const familySave = family.getByRole('button', { name: '문구·디자인 저장', exact: true });
+      await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === copyPath && response.request().method() === 'PATCH' && response.ok()), familySave.click()]);
+      await family.locator('.card-copy-heading .badge', { hasText: '저장됨' }).waitFor();
+      assert.equal(state.saved.copy.pages[4].fields.viewA.body, '내가 덧붙인 판단 기준도 저장하고 다시 확인할 수 있어요.');
+      assert.equal(state.saved.copy.pages[4].layout, 'stacked');
+      await page.reload(); await family.waitFor(); await family.getByRole('button', { name: '5페이지 · 두 가지 시선', exact: true }).click();
+      assert.equal(await viewA.inputValue(), '내가 덧붙인 판단 기준도 저장하고 다시 확인할 수 있어요.');
+      await previewReady(page); await layoutFits(page, `v2 views ${width}`);
+      await page.screenshot({ path: `${outputDir}/v2-perspectives-${width}.png` });
+      await family.getByRole('button', { name: '6페이지 · 개념 다듬기', exact: true }).click();
+      const conceptMode = family.getByLabel('개념을 다루는 방식', { exact: false });
+      const originalDefinition = await family.locator('textarea[id$="-fields.definitionA"]').inputValue();
+      await conceptMode.selectOption('scientific_explanation');
+      assert.equal(await family.locator('textarea[id$="-fields.acceptedDefinition"]').inputValue(), '');
+      assert.equal(await familySave.isDisabled(), true, 'changing concept mode must not invent a scientific definition');
+      await conceptMode.selectOption('value_definition');
+      assert.equal(await family.locator('textarea[id$="-fields.definitionA"]').inputValue(), originalDefinition);
+      await family.getByRole('button', { name: '2페이지 · 뉴스 요약', exact: true }).click();
+      assert.equal(await family.locator('.family-facts textarea').count(), 2);
+      await openBackground(page);
+      await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === `${copyPath}/background` && response.ok()), family.getByLabel('페이지 배경 이미지 파일', { exact: true }).setInputFiles({ name: 'v2-source-background.png', mimeType: 'image/png', buffer: uploadImage })]);
+      await family.locator('.page-background-thumb[src$="/9002"]').waitFor();
+      await family.locator('.family-design > summary').click();
+      const focusSlider = family.locator('.family-design label').filter({ hasText: '가로 초점' }).locator('input');
+      await focusSlider.evaluate(node => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(node, '80'); node.dispatchEvent(new Event('input', { bubbles: true })); node.dispatchEvent(new Event('change', { bubbles: true })); });
+      await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === copyPath && response.request().method() === 'PATCH' && response.ok()), familySave.click()]);
+      await family.locator('.card-copy-heading .badge', { hasText: '저장됨' }).waitFor();
+      assert.equal(state.saved.pageDesigns.news_summary.background.assetId, 9002); assert.equal(state.saved.pageDesigns.news_summary.background.focalX, 80);
+      assert.equal(state.saved.pageDesigns.perspectives.background.kind, 'brand', 'background changes must remain scoped to one semantic page');
+      await family.locator('.family-parent-guide > summary').click(); assert.equal(await family.locator('.family-timing li').count(), 4);
+      assert.match(await family.locator('.family-caption > summary').innerText(), /재검토 필요/);
+      await family.getByRole('button', { name: '7페이지 · 작은 활동', exact: true }).click();
+      assert.equal(await family.locator('textarea[id$="-fields.optionalActivity.action"]').count(), 0);
+      await previewReady(page); await layoutFits(page, `v2 optional activity ${width}`);
+      await page.screenshot({ path: `${outputDir}/v2-activity-${width}.png` });
+      assert.equal(state.writes.filter(write => write.path.endsWith('/background')).length, 3);
+      assert.equal(state.writes.filter(write => /\/(approve|publish|deliveries)(\/|$)/.test(write.path)).length, 0);
       assert.deepEqual(errors, []); assert.deepEqual(external, []);
-      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'no horizontal overflow or covered save action'], mockRebuildRequests: state.aiAttempts, uploadedBackgrounds: 2, actualPaidCalls: 0, publicationRequests: 0 });
+      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 3, actualPaidCalls: 0, publicationRequests: 0 });
       await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2)); console.log(`News editorial regression passed at ${width}px (${engine}).`);
     } catch (error) {
       results.push({ width, engine, passed: false, error: error.message, apiErrors: errors }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));

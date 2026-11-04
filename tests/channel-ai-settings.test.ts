@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { channelAiSettingsSchema, defaultChannelAiSettings, resolveAiSelection } from "../shared/channelAi";
+import { channelAiSettingsSchema, defaultChannelAiSettings, legacyChannelAiSettings, resolveAiSelection } from "../shared/channelAi";
 import { channelCreateSchema } from "../shared/channelSettings";
 import { callTool, LlmBudget } from "../server/services/llm";
 import { generateStudioImage } from "../server/services/studioAi";
@@ -11,9 +11,9 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 describe("per-channel AI role contracts", () => {
   it("uses Gemini summaries, GPT copy and OpenAI images independently of global preference", () => {
     vi.stubEnv("AI_PROVIDER", "anthropic");
-    expect(resolveAiSelection(null, "summary", models)).toEqual({ provider: "gemini", model: "gemini-default" });
-    expect(resolveAiSelection(undefined, "copy", models)).toEqual({ provider: "openai", model: "gpt-default" });
-    expect(resolveAiSelection(null, "image", models)).toEqual({ provider: "openai", model: "gpt-image-default" });
+    expect(resolveAiSelection(null, "summary", models)).toEqual({ provider: "gemini", model: "gemini-4-argon" });
+    expect(resolveAiSelection(undefined, "copy", models)).toEqual({ provider: "openai", model: "gpt-6-astra" });
+    expect(resolveAiSelection(null, "image", models)).toEqual({ provider: "openai", model: "gpt-image-2.5-sunburst" });
   });
 
   it("isolates saved models by channel and discards incompatible models on a temporary provider override", () => {
@@ -46,7 +46,7 @@ describe("per-channel AI role contracts", () => {
   it("validates new custom channel settings and treats blank model names as explicit inheritance", () => {
     const aiSettings = { ...defaultChannelAiSettings(), copy: { provider: "openai", model: "   " } };
     const parsed = channelCreateSchema.parse({ name: "새 편집실", aiSettings });
-    expect(parsed.aiSettings?.copy.model).toBe("");
+    expect(legacyChannelAiSettings(parsed.aiSettings).copy.model).toBe("");
     expect(channelCreateSchema.safeParse({ name: "새 편집실", aiSettings: { ...aiSettings, secret: "not-allowed" } }).success).toBe(false);
   });
 });

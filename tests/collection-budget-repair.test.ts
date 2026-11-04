@@ -19,6 +19,7 @@ vi.mock("../server/services/llm", async original => ({
     state.draftInvocations++;
     expect(budget.take()).toBe(true); state.attemptedCalls++;
     if (state.summaryFails) {
+      budget.usageUnknown = true;
       expect(budget.take()).toBe(false);
       return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달" };
     }
@@ -65,7 +66,7 @@ it("shares the collection budget with auto-draft and counts a failed attempt wit
   expect(state.attemptedCalls).toBe(1);
   expect(state.draftInvocations).toBe(1);
   expect(state.reported.actualCalls.llm).toBe(1);
-  expect(state.reported.llmUsage).toEqual({ calls: 1, inputTokens: 0, outputTokens: 0 });
+  expect(state.reported.llmUsage).toEqual({ calls: 1, inputTokens: 0, outputTokens: 0, usageStatus: "usage_unknown" });
 });
 
 it("uses configured channel roles despite an unavailable global writer and pins both models before source collection", async () => {
@@ -87,7 +88,7 @@ it("uses configured channel roles despite an unavailable global writer and pins 
   expect(state.snapshot.ai).toEqual({ summary: { provider: "gemini", model: "gemini-summary-before" }, copy: { provider: "openai", model: "gpt-copy-before" } });
   expect(state.snapshot.channel.cardTemplate).toBe("builtin:classic");
   expect(state.saved.payload.aiWorkflow).toMatchObject({ summary: state.snapshot.ai.summary, copy: state.snapshot.ai.copy, warnings: [] });
-  expect(state.reported.llmUsage).toEqual({ calls: 2, inputTokens: 18, outputTokens: 9 });
+  expect(state.reported.llmUsage).toEqual({ calls: 2, inputTokens: 18, outputTokens: 9, usageStatus: "known" });
   expect(state.attemptedCalls).toBe(2);
 });
 
