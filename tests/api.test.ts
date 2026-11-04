@@ -22,7 +22,7 @@ const { runCollect, extractForItem } = await import("../server/worker/collect");
 const { publishDue, renderCardForItem } = await import("../server/worker/publish");
 const { enqueueJob, claimJob, recoverExpired } = await import("../server/worker/queue");
 const { LlmBudget } = await import("../server/services/llm");
-const { env } = await import("../server/env");
+const { resolveChannelAiSettings } = await import("../server/services/channelAi");
 const schema = await import("../shared/schema");
 const { eq, sql } = await import("drizzle-orm");
 
@@ -212,15 +212,16 @@ describe("추출·운영자 편집 보존·채널 격리", () => {
   it("운영자 편집본은 재추출로 덮어쓰지 않고, 일정 변경은 재검토로", async () => {
     const db = getDb();
     const [item] = await db.select().from(schema.contentItems).where(sql`${schema.contentItems.excluded} = false and ${schema.contentItems.channelId} = 1`).limit(1);
+    const summarySelection = await resolveChannelAiSettings(db, item.channelId, "summary"), copySelection = await resolveChannelAiSettings(db, item.channelId, "copy");
     fakeExtract.mockResolvedValueOnce({ ok: true, data: payload(), model: "gemini-summary-fixture", usage: { inputTokens: 10, outputTokens: 5 }, droppedEvidence: 0 });
     const r = await extractForItem(db, item.id, new LlmBudget(2), NOW);
     expect(r.ok).toBe(true);
     let [cur] = await db.select().from(schema.contentItems).where(eq(schema.contentItems.id, item.id));
     expect(cur.scheduleStatus).toBe("upcoming");
     expect(cur.evidenceStatus).toBe("secondary_only");
-    expect(fakeExtract.mock.calls[0][0]).toMatchObject({ provider: "gemini", model: env.geminiModel });
+    expect(fakeExtract.mock.calls[0][0]).toMatchObject(summarySelection);
     expect(fakeCopy).toHaveBeenCalledOnce();
-    expect(fakeCopy.mock.calls[0][0]).toMatchObject({ provider: "openai", model: env.openaiModel });
+    expect(fakeCopy.mock.calls[0][0]).toMatchObject(copySelection);
     const [generated] = await db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, cur.currentRevisionId!));
     expect(generated.payload.cardCopy).toEqual(cardCopyFixture());
     expect(generated.payload.aiWorkflow).toMatchObject({ summary: { provider: "gemini", model: "gemini-summary-fixture" }, copy: { provider: "openai", model: "gpt-copy-fixture" }, warnings: [] });

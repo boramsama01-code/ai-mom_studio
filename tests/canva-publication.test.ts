@@ -78,7 +78,7 @@ describe("Canva approval artifact binding", () => {
     await expect(assertCanvaReusableArtifact(db, state.input)).rejects.toMatchObject({ status: 409 });
   });
   it('requires the current saved publication caption to match an explicit manual confirmation', async () => {
-    const old = state.input.revision.payload.captionPackage, fullCaption = `직접 확인한 캡션\n${old.coreQuestion}`;
+    const old = state.input.revision.payload.captionPackage, fullCaption = `  직접 확인한 캡션\n${old.coreQuestion}\n  `;
     const manual = { origin: 'manual' as const, contentRevision: 1, coreQuestion: old.coreQuestion, fullCaption, sourceCredit: old.sourceCredit, confirmation: { comparedRevision: 1, publicationDraftVersion: 7, confirmedAt: '2026-11-04T00:00:00.000Z', captionHash: sha256(fullCaption) } };
     state.job!.input.payload.captionPackage = manual as any;
     state.input.revision.payload.captionPackage = { ...manual, contentRevision: 2 };

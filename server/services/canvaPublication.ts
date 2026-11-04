@@ -50,7 +50,7 @@ async function checkCanvaArtifact(db: DB, input: ArtifactInput, requireCurrentCa
   if (requireCurrentCaption && (!caption || caption.contentRevision !== revision.id || metadata.dependencies.caption !== "current" || caption.coreQuestion !== metadata.editorialPlan.coreQuestion)) invalid("캡션이 현재 원고 버전과 연결되지 않았습니다. 현재 원고의 캡션을 확인·저장해 주세요. 카드 이미지가 같다면 기존 8장을 재사용합니다.");
   if (requireCurrentCaption && caption?.origin === "manual") {
     const savedCaption = item.publicationDraft?.captions.instagram;
-    if (typeof savedCaption !== "string" || savedCaption.trim() !== caption.fullCaption || sha256(savedCaption) !== caption.confirmation.captionHash) invalid("직접 대조한 뒤 게시 캡션이 다시 바뀌었습니다. 저장된 캡션과 현재 카드를 다시 대조 확인해 주세요.");
+    if (typeof savedCaption !== "string" || savedCaption !== caption.fullCaption || sha256(savedCaption) !== caption.confirmation.captionHash) invalid("직접 대조한 뒤 게시 캡션이 다시 바뀌었습니다. 저장된 캡션과 현재 카드를 다시 대조 확인해 주세요.");
   }
   if (asset.kind !== "card" || asset.source !== "canva" || asset.mime !== "image/jpeg" || asset.width !== 1080 || asset.height !== 1350 || asset.carousel?.rendererProvider !== "canva" || !isDeepStrictEqual(asset.carousel.copy, copy.data)) invalid("Canva에서 확정한 8장 출력이 아닙니다. 다른 렌더러의 이미지나 단일 페이지는 승인할 수 없습니다.");
 

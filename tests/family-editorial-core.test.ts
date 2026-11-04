@@ -47,6 +47,24 @@ describe("v2 editorial contracts and evidence", () => {
     if (copy.pages[6].id === "activity") copy.pages[6].fields.optionalActivity = { label: "허구의 논문", action: "이 문헌에서 증거를 찾아보세요.", resourceId: "R99" };
     expect(validateFamilyEvidenceReferences(copy, bundle).map(error => error.code)).toContain("invalid_activity_resource");
   });
+  it("cannot relabel a summary forecast as a question or interpretation to bypass attribution and conditions", () => {
+    const bundle = familyEvidenceFixture();
+    for (const claimType of ["question", "editorial_interpretation", "hypothetical", "attributed_statement"] as const) {
+      const copy = familyDialogueCardFixture(); copy.pages[1].claimRefs[0].claimType = claimType;
+      expect(validateFamilyEvidenceReferences(copy, bundle).map(error => error.code)).toContain("summary_claim_type");
+    }
+    // Real questions, hypotheses and editorial interpretations on their own
+    // pages remain valid; the stricter rule applies to news facts only.
+    expect(validateFamilyEvidenceReferences(familyDialogueCardFixture(), bundle)).toEqual([]);
+  });
+  it("does not qualify an attributed forecast or another page's field as a scientific definition", () => {
+    const copy = familyDialogueCardFixture(), bundle = familyEvidenceFixture();
+    copy.pages[5] = { id: "concept", type: "concept", page: 6, layout: "scientific_explanation", fields: { mode: "scientific_explanation", title: "속력", concept: "평균 속력", acceptedDefinition: "거리를 시간으로 나눈 값", exampleOrNonExample: "같은 거리를 더 빨리 이동해요.", fillIn: "내 말로 설명하면 ___" }, claimRefs: [{ fieldPath: "fields.acceptedDefinition", claimType: "research_finding", factIds: ["F1"], resourceIds: [] }] };
+    expect(validateFamilyEvidenceReferences(copy, bundle).map(error => error.code)).toContain("definition_evidence_type");
+    copy.pages[5].claimRefs[0].fieldPath = "pages.cover.fields.acceptedDefinition";
+    const codes = validateFamilyEvidenceReferences(copy, bundle).map(error => error.code);
+    expect(codes).toContain("invalid_evidence_path"); expect(codes).toContain("definition_needs_source");
+  });
   it("does not accept a scientific definition without a source reference", () => {
     const copy = familyDialogueCardFixture();
     copy.pages[5] = { id: "concept", type: "concept", page: 6, layout: "scientific_explanation", fields: { mode: "scientific_explanation", title: "속력", concept: "평균 속력", acceptedDefinition: "거리를 시간으로 나눈 값", exampleOrNonExample: "같은 거리를 더 빨리 이동해요.", fillIn: "내 말로 설명하면 ___" }, claimRefs: [] };

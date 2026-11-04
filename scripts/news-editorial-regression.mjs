@@ -13,6 +13,8 @@ import { discussionCardCopyFixture } from "../tests/fixtures/discussionCardCopy.
 import { familyCardCopySchema } from "../shared/familyDialogue.ts";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "../tests/fixtures/familyDialogueCard.ts";
 import { familyPageTitle } from "../server/services/familyDialogueCard.ts";
+import { familyEvidenceFixture } from "../tests/fixtures/familyEvidence.ts";
+import { familyEvidenceView, validateFamilyEvidenceReferences } from "../server/services/familyEvidence.ts";
 
 const require = createRequire(import.meta.url);
 let playwright;
@@ -40,6 +42,7 @@ const uploadImage = await sharp({ create: { width: 360, height: 450, channels: 3
 const pasteImage = await sharp({ create: { width: 360, height: 450, channels: 3, background: "#d2a27b" } }).png().toBuffer();
 
 function fixture() {
+  const evidenceBundle = familyEvidenceFixture(9828, 3), evidence = familyEvidenceView(evidenceBundle);
   const state = { saved: { version: 3, revisionId: 30, hasSavedCopy: true, recommendedStoryFormat: "discussion8", ai: roles, copy: legacyCopy() }, writes: [], aiAttempts: 0, familyAttempts: 0, cards: [], nextAssetId: 800, nextBackgroundId: 9000 };
   const backgrounds = Object.assign(new Map(), { credits: new Map() }), assets = new Map();
   const makeAsset = () => {
@@ -84,12 +87,16 @@ function fixture() {
     else if (pathname === copyPath && method === "PATCH") {
       assert.equal(body.version, state.saved.version, "copy changes must use the current accepted version");
       const copy = body.copy.version === 2 ? familyCardCopySchema.parse(body.copy) : cardCopySchema.parse(body.copy); plan(copy, body.pageDesigns);
+      if (copy.version === 2) {
+        assert.equal(body.evidence, undefined, "read-only evidence DTO must not be authored by the client");
+        assert.deepEqual(validateFamilyEvidenceReferences(copy, evidenceBundle), [], "manual v2 saves must satisfy the actual evidence binding validator");
+      }
       const expectedJob = copy.version === 2 && state.saved.copy.version === 1 ? 602 : state.saved.copy.storyFormat !== "discussion8" && copy.storyFormat === "discussion8" ? 502 : undefined;
       assert.equal(body.proposalJobId, expectedJob, "apply the verified proposal ID once; later manual saves must not reuse it");
       const nextRevision = state.saved.revisionId + 1;
       const metadata = copy.version === 2 ? { ...(state.saved.copy.version === 1 ? familyDialogueMetadataFixture(nextRevision) : Object.fromEntries(Object.keys(familyDialogueMetadataFixture()).map(key => [key, state.saved[key]]))), pageDesigns: clone(body.pageDesigns), fieldLocks: clone(body.fieldLocks ?? {}) } : {};
       if (copy.version === 2 && state.saved.copy.version === 2 && JSON.stringify(copy) !== JSON.stringify(state.saved.copy)) metadata.dependencies = { ...metadata.dependencies, caption: "needs_review", render: "needs_review" };
-      state.saved = { ...state.saved, ...metadata, version: state.saved.version + 1, revisionId: nextRevision, copy: clone(copy) };
+      state.saved = { ...state.saved, ...metadata, ...(copy.version === 2 ? { evidence: clone(evidence) } : {}), version: state.saved.version + 1, revisionId: nextRevision, copy: clone(copy) };
       data = clone(state.saved);
     } else if (pathname === `${copyPath}/preview` && method === "POST") {
       if (body.copy.version === 2) {
@@ -100,7 +107,7 @@ function fixture() {
       if (body.formatId === "family_dialogue_8") {
         assert.equal(body.scope, "all"); assert.equal(body.version, state.saved.version); assert.equal(body.baseRevision, state.saved.revisionId); assert.match(body.requestId, /^[0-9a-f-]{36}$/i);
         state.familyAttempts++;
-        return route.fulfill({ json: { ...clone(state.saved), ...familyDialogueMetadataFixture(state.saved.revisionId), copy: familyDialogueCardFixture(), scope: "all", status: "ready", reviewFlags: [], baseRevision: state.saved.revisionId, lateResult: false, jobId: 602 } });
+        return route.fulfill({ json: { ...clone(state.saved), ...familyDialogueMetadataFixture(state.saved.revisionId), evidence: clone(evidence), copy: familyDialogueCardFixture(), scope: "all", status: "ready", reviewFlags: [], baseRevision: state.saved.revisionId, lateResult: false, jobId: 602 } });
       }
       assert.equal(body.version, state.saved.version); assert.equal(body.storyFormat, "discussion8"); assert.equal(body.refreshAnalysis, true);
       assert.equal(body.selectedPage, undefined, "rebuilding all eight pages must not be limited to the selected legacy page");
@@ -291,6 +298,35 @@ try {
       assert.equal(await family.locator('textarea[id$="-fields.definitionA"]').inputValue(), originalDefinition);
       await family.getByRole('button', { name: '2페이지 · 뉴스 요약', exact: true }).click();
       assert.equal(await family.locator('.family-facts textarea').count(), 2);
+      // Manual facts must retain real source references even when every AI is
+      // unavailable. This same interaction runs at all three viewport widths.
+      const factText = '게이츠는 AI가 전문 업무에서 앞설 가능성을 전망했어요.';
+      const firstFact = family.locator('textarea[id$="-fields.facts.0"]');
+      const originalSiblingRefs = clone(state.saved.copy.pages[1].claimRefs.filter(ref => ref.fieldPath === 'fields.facts.1'));
+      const familyAttemptsBeforeManual = state.familyAttempts;
+      await firstFact.fill(factText);
+      const evidenceControl = family.locator('.family-field-evidence[data-field-path="pages.news_summary.fields.facts.0"]');
+      await evidenceControl.locator('summary').click();
+      assert.match(await evidenceControl.innerText(), /재연결 필요/);
+      assert.match(await evidenceControl.innerText(), /발언자: 빌 게이츠/);
+      assert.match(await evidenceControl.innerText(), /전문 업무의 성과/);
+      const connectEvidence = evidenceControl.getByRole('button', { name: '대조한 근거를 이 칸에 연결', exact: true });
+      assert.equal(await connectEvidence.isDisabled(), true);
+      await evidenceControl.locator('[data-evidence-id="fact:F1"]').check();
+      assert.equal(await connectEvidence.isDisabled(), true, 'selection alone must not count as a source comparison');
+      await evidenceControl.locator('[data-evidence-confirm]').check();
+      await layoutFits(page, `v2 evidence confirmation ${width}`);
+      await evidenceControl.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${outputDir}/v2-evidence-${width}.png` });
+      await connectEvidence.click();
+      await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === copyPath && response.request().method() === 'PATCH' && response.ok()), familySave.click()]);
+      await family.locator('.card-copy-heading .badge', { hasText: '저장됨' }).waitFor();
+      assert.equal(state.saved.copy.pages[1].fields.facts[0], factText);
+      assert.deepEqual(state.saved.copy.pages[1].claimRefs.find(ref => ref.fieldPath === 'fields.facts.0'), { fieldPath: 'fields.facts.0', claimType: 'forecast', factIds: ['F1'], resourceIds: [] });
+      assert.deepEqual(state.saved.copy.pages[1].claimRefs.filter(ref => ref.fieldPath === 'fields.facts.1'), originalSiblingRefs);
+      assert.equal(state.familyAttempts, familyAttemptsBeforeManual, 'manual evidence comparison must not call AI');
+      await page.reload(); await family.waitFor(); await family.getByRole('button', { name: '2페이지 · 뉴스 요약', exact: true }).click();
+      assert.equal(await firstFact.inputValue(), factText);
+      assert.match(await evidenceControl.locator('summary').innerText(), /연결됨/);
       await openBackground(page);
       await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === `${copyPath}/background` && response.ok()), family.getByLabel('페이지 배경 이미지 파일', { exact: true }).setInputFiles({ name: 'v2-source-background.png', mimeType: 'image/png', buffer: uploadImage })]);
       await family.locator('.page-background-thumb[src$="/9002"]').waitFor();
@@ -310,7 +346,7 @@ try {
       assert.equal(state.writes.filter(write => write.path.endsWith('/background')).length, 3);
       assert.equal(state.writes.filter(write => /\/(approve|publish|deliveries)(\/|$)/.test(write.path)).length, 0);
       assert.deepEqual(errors, []); assert.deepEqual(external, []);
-      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 3, actualPaidCalls: 0, publicationRequests: 0 });
+      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 3, actualPaidCalls: 0, publicationRequests: 0 });
       await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2)); console.log(`News editorial regression passed at ${width}px (${engine}).`);
     } catch (error) {
       results.push({ width, engine, passed: false, error: error.message, apiErrors: errors }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));

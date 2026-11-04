@@ -5,8 +5,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import sharp from "sharp";
 import { approvals, canvaAssetUploads, canvaMasters, canvaRenderJobs, contentItems, contentRevisions, mediaAssets } from "../shared/schema";
 import { CANVA_MAPPING_VERSION, canvaVariant, expectedCanvaDataset } from "../shared/canvaEditorial";
-import { familyDialogueCardFixture, familyDialogueMetadataFixture, scientificFamilyCardFixture } from "./fixtures/familyDialogueCard";
-import { emptyPayload } from "../shared/payloads";
+import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
+import { createFamilyPgFixture } from './fixtures/familyEvidencePg';
 import { resetDb, setTestEnv } from "./helpers";
 
 setTestEnv();
@@ -21,7 +21,7 @@ const { canvaInputHash } = await import("../server/services/canvaEditorialAssets
 const { CanvaRestError } = await import("../server/services/canvaRest");
 const { loadCardPages } = await import("../server/services/cardCarousel");
 const { sha256 } = await import("../server/services/text");
-let pngs: Buffer[], jpegs: Buffer[];
+let pngs: Buffer[], jpegs: Buffer[], recoveryDesignId: string;
 beforeAll(async () => {
   await resetDb();
   pngs = await Promise.all(Array.from({ length: 8 }, (_, index) => sharp({ create: { width: 1080, height: 1350, channels: 3, background: { r: 25 * index, g: 70, b: 120 } } }).png().toBuffer()));
@@ -30,6 +30,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   vi.restoreAllMocks();
   for (const mock of Object.values(api)) mock.mockReset();
+  // A real design cannot belong to fixtures from different contents. Preserve
+  // prior rows for inspection, but give every test its own provider identity.
+  recoveryDesignId = `Drecovered_${randomUUID()}`;
   // Tests share only this isolated DB; leave prior fixtures inspectable but not runnable.
   await getDb().update(canvaRenderJobs).set({ status: "cancelled" });
   api.principal.mockResolvedValue({ userId: "user_test", teamId: "team_test" });
@@ -48,9 +51,9 @@ beforeEach(async () => {
 
 describe('manually reconciling an unknown Canva design on PostgreSQL', () => {
   function request(f: Awaited<ReturnType<typeof fixture>>, overrides: { version?: number; designId?: string; expectedRecoveryToken?: string } = {}) {
-    return { channelId: 2, itemId: f.item.id, jobId: f.job.id, version: f.item.version, designId: 'Drecovered_design', confirmed: true as const, expectedRecoveryToken: canvaRecoveryToken(f.job)!, actor: 'test-operator', ...overrides };
+    return { channelId: 2, itemId: f.item.id, jobId: f.job.id, version: f.item.version, designId: recoveryDesignId, confirmed: true as const, expectedRecoveryToken: canvaRecoveryToken(f.job)!, actor: 'test-operator', ...overrides };
   }
-  function designFor(f: Awaited<ReturnType<typeof fixture>>, id = 'Drecovered_design') {
+  function designFor(f: Awaited<ReturnType<typeof fixture>>, id = recoveryDesignId) {
     api.design.mockResolvedValue({ id, title: `${f.item.title} · ${f.job.requestId.slice(0, 8)}`, owner: { userId: 'user_test', teamId: 'team_test' }, pageCount: 8, updatedAt: 123, editUrl: `https://www.canva.com/design/${id}/edit` });
   }
   it('serializes duplicate confirmations, preserves the original request, and only exports the existing design', async () => {
@@ -61,7 +64,7 @@ describe('manually reconciling an unknown Canva design on PostgreSQL', () => {
     expect(linked).toMatchObject({ status: 'queued', phase: 'export_prepare', purpose: 'import', requestId: f.job.requestId, requestHash: f.job.requestHash, autofillJobId: null, exportJobId: null, result: { reconciled: true, reconciliation: { sourceRevisionId: f.revision.id, sourceInputHash: canvaInputHash(linked.input), requestTitleMatched: true, original: { sourceRevisionId: f.revision.id, requestHash: f.job.requestHash } } } });
     expect(api.submitAutofill).not.toHaveBeenCalled(); expect(api.submitExport).not.toHaveBeenCalled();
     await Promise.all([runCanvaJobs(f.db, 1), runCanvaJobs(f.db, 1)]);
-    expect(api.submitExport).toHaveBeenCalledOnce(); expect(api.submitExport.mock.calls[0][1]).toBe('Drecovered_design');
+    expect(api.submitExport).toHaveBeenCalledOnce(); expect(api.submitExport.mock.calls[0][1]).toBe(recoveryDesignId);
     const lookups = api.design.mock.calls.length;
     await reconcileCanvaJob(f.db, intent);
     expect(api.design).toHaveBeenCalledTimes(lookups); expect(api.submitExport).toHaveBeenCalledOnce();
@@ -76,7 +79,7 @@ describe('manually reconciling an unknown Canva design on PostgreSQL', () => {
     const copy = familyDialogueCardFixture(); copy.pages.find(page => page.id === 'cover')!.fields.headline = '새로 저장한 중심 질문';
     const revision = await f.db.transaction(tx => createRevision(tx, { contentItemId: f.item.id, author: 'operator', payload: { ...f.revision.payload, cardCopy: copy } }));
     await f.db.update(contentItems).set({ version: f.item.version + 1 }).where(eq(contentItems.id, f.item.id));
-    api.design.mockResolvedValue({ id: 'Drecovered_design', title: '사용자가 바꾼 제목', owner: { userId: 'user_test', teamId: 'team_test' }, pageCount: 8, updatedAt: 123, editUrl: null });
+    api.design.mockResolvedValue({ id: recoveryDesignId, title: '사용자가 바꾼 제목', owner: { userId: 'user_test', teamId: 'team_test' }, pageCount: 8, updatedAt: 123, editUrl: null });
     api.dataset.mockRejectedValue(new CanvaRestError('필드 접근 제한', 403, 'permission_denied'));
     await expect(reconcileCanvaJob(f.db, request(f))).rejects.toMatchObject({ status: 409, extra: { code: 'source_changed' } });
     const linked = await reconcileCanvaJob(f.db, request(f, { version: f.item.version + 1 }));
@@ -97,9 +100,9 @@ describe('manually reconciling an unknown Canva design on PostgreSQL', () => {
   it.each(['account', 'owner', 'team', 'pages', 'missing_version'])('rejects %s mismatch without changing the unknown outcome', async mismatch => {
     const f = await fixture('autofill_submitting', { status: 'result_unknown' }); designFor(f);
     if (mismatch === 'account') api.principal.mockResolvedValue({ userId: 'another_user', teamId: 'team_test' });
-    if (mismatch === 'owner' || mismatch === 'team') api.design.mockResolvedValue({ id: 'Drecovered_design', title: f.item.title, owner: { userId: mismatch === 'owner' ? 'another_user' : 'user_test', teamId: mismatch === 'team' ? 'another_team' : 'team_test' }, pageCount: 8, updatedAt: 123, editUrl: null });
+    if (mismatch === 'owner' || mismatch === 'team') api.design.mockResolvedValue({ id: recoveryDesignId, title: f.item.title, owner: { userId: mismatch === 'owner' ? 'another_user' : 'user_test', teamId: mismatch === 'team' ? 'another_team' : 'team_test' }, pageCount: 8, updatedAt: 123, editUrl: null });
     if (mismatch === 'pages') api.pages.mockResolvedValue({ validEightPageMaster: false, items: [] });
-    if (mismatch === 'missing_version') api.design.mockResolvedValue({ id: 'Drecovered_design', owner: { userId: 'user_test', teamId: 'team_test' }, pageCount: 8, updatedAt: null, editUrl: null });
+    if (mismatch === 'missing_version') api.design.mockResolvedValue({ id: recoveryDesignId, owner: { userId: 'user_test', teamId: 'team_test' }, pageCount: 8, updatedAt: null, editUrl: null });
     await expect(reconcileCanvaJob(f.db, request(f))).rejects.toMatchObject({ status: mismatch === 'account' ? 409 : 422 });
     expect(await saved(f.job.id)).toMatchObject({ status: 'result_unknown', designId: null }); expect(api.submitAutofill).not.toHaveBeenCalled(); expect(api.submitExport).not.toHaveBeenCalled();
   });
@@ -112,7 +115,7 @@ describe('manually reconciling an unknown Canva design on PostgreSQL', () => {
     expect(api.submitAutofill).not.toHaveBeenCalled(); expect(api.submitExport).not.toHaveBeenCalled();
   });
   it('distinguishes replaying the original recovery from explicitly recovering a later unknown export', async () => {
-    const f = await fixture('export_submitting', { status: 'result_unknown', designId: 'Drecovered_design', autofillJobId: 'autofill_original' }); designFor(f);
+    const f = await fixture('export_submitting', { status: 'result_unknown', designId: recoveryDesignId, autofillJobId: 'autofill_original' }); designFor(f);
     const first = request(f); await reconcileCanvaJob(f.db, first);
     api.submitExport.mockRejectedValueOnce(new CanvaRestError('응답 미확정', undefined, 'result_unknown', true)).mockResolvedValue({ id: 'export_after_confirmation', status: 'in_progress' });
     const unknown = await runNow(f.job.id); expect(unknown).toMatchObject({ status: 'result_unknown', phase: 'export_submitting' });
@@ -133,18 +136,17 @@ describe('manually reconciling an unknown Canva design on PostgreSQL', () => {
 });
 afterAll(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); await closeDb(); });
 
-async function fixture(phase: string, patch: Partial<typeof canvaRenderJobs.$inferInsert> = {}) {
-  const db = getDb(), copy = familyDialogueCardFixture(), metadata = familyDialogueMetadataFixture();
+async function fixture(phase: string, patch: Partial<typeof canvaRenderJobs.$inferInsert> = {}, options: { scientific?: boolean } = {}) {
+  const db = getDb();
+  const { item, revision, copy, metadata } = await createFamilyPgFixture(db, { channelId: 2, rendererProvider: 'canva', scientific: options.scientific });
   const dataset = expectedCanvaDataset(canvaVariant(copy)); api.dataset.mockResolvedValue(dataset);
   const image = { field: "P01_IMAGE", bytes: Buffer.from(`isolated-image-${randomUUID()}`), hash: "" }; image.hash = sha256(image.bytes);
   api.prepare.mockResolvedValue([image]);
-  const [item] = await db.insert(contentItems).values({ channelId: 2, kind: "current_dialogue", title: "Canva recovery fixture", relevance: "relevant" }).returning();
-  const revision = await db.transaction(tx => createRevision(tx, { contentItemId: item.id, author: "operator", payload: { ...emptyPayload("current_dialogue", item.title), ...metadata, cardCopy: copy } }));
   const [master] = await db.insert(canvaMasters).values({ channelId: 2, sourceId: `master_${randomUUID()}`, sourceType: "design", sourceUpdatedAt: "123", ...canvaVariant(copy), templateVersion: randomUUID(), principal: "team_test:user_test", dataset, datasetHash: canvaInputHash(dataset), pageIds: Array.from({ length: 8 }, (_, index) => `page_${index + 1}`), validatedAt: new Date() }).returning();
   const requestId = randomUUID(), intent = { channelId: 2, itemId: item.id, version: item.version, masterId: master.id, importFromJobId: null };
   const uploadedImages = Object.fromEntries(Object.entries(dataset).filter(([, field]) => field.type === "image").map(([field]) => [field, { assetId: `asset_${field}`, hash: image.hash }]));
   const [job] = await db.insert(canvaRenderJobs).values({ channelId: 2, contentItemId: item.id, sourceRevisionId: revision.id, sourceVersion: item.version, masterId: master.id, requestId, requestHash: canvaInputHash(intent), principal: master.principal, phase, input: { payload: revision.payload, title: item.title, copy, pageDesigns: metadata.pageDesigns, evidenceSetId: metadata.evidenceBinding.evidenceSetId, mappingVersion: CANVA_MAPPING_VERSION, datasetHash: master.datasetHash }, result: phase === "images" ? null : { uploadedImages }, ...patch }).returning();
-  return { db, item, revision, master, job, image, request: { ...intent, importFromJobId: undefined, requestId, actor: "test-operator" } };
+  return { db, item, revision, copy, metadata, master, job, image, request: { ...intent, importFromJobId: undefined, requestId, actor: "test-operator" } };
 }
 async function saved(id: number) { return (await getDb().select().from(canvaRenderJobs).where(eq(canvaRenderJobs.id, id)))[0]; }
 async function runNow(id: number) { await getDb().update(canvaRenderJobs).set({ nextRunAt: new Date(0) }).where(eq(canvaRenderJobs.id, id)); await runCanvaJobs(getDb(), 1); return saved(id); }
@@ -279,10 +281,10 @@ describe("Canva durable dispatch and recovery on PostgreSQL", () => {
     expect(api.dataset).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled();
   });
   it('admits an existing copy after master changes and current layout changes, then waits for explicit review', async () => {
-    const f = await fixture('complete', { status: 'failed', designId: 'Dexisting_copy' });
+    const f = await fixture('complete', { status: 'failed', designId: 'Dexisting_copy' }, { scientific: true });
     await f.db.update(canvaMasters).set({ status: 'design_changed' }).where(eq(canvaMasters.id, f.master.id));
-    const copy = scientificFamilyCardFixture(); copy.pages.find(page => page.id === 'perspectives')!.layout = 'columns';
-    const revision = await f.db.transaction(tx => createRevision(tx, { contentItemId: f.item.id, author: 'operator', payload: { ...f.revision.payload, cardCopy: copy } }));
+    const copy = familyDialogueCardFixture(); copy.pages.find(page => page.id === 'perspectives')!.layout = 'columns';
+    const revision = await f.db.transaction(tx => createRevision(tx, { contentItemId: f.item.id, author: 'operator', payload: { ...f.revision.payload, cardCopy: copy, editorialPlan: { ...f.metadata.editorialPlan, conceptMode: 'value_definition', keyConcept: '똑똑함' } } }));
     await f.db.update(contentItems).set({ version: f.item.version + 1 }).where(eq(contentItems.id, f.item.id));
     const makeRequest = () => ({ ...f.request, version: f.item.version + 1, requestId: randomUUID(), importFromJobId: f.job.id, masterId: f.master.id + 99999 });
     const [imported, duplicate] = await Promise.all([enqueueCanvaRender(f.db, makeRequest()), enqueueCanvaRender(f.db, makeRequest())]);
@@ -301,15 +303,15 @@ describe("Canva durable dispatch and recovery on PostgreSQL", () => {
     expect(api.submitExport).toHaveBeenCalledOnce(); expect(api.dataset).not.toHaveBeenCalled(); expect(api.submitAutofill).not.toHaveBeenCalled(); expect(api.submitUpload).not.toHaveBeenCalled();
   });
   it('retains ready-master, current-variant and stacked-layout requirements for new creation', async () => {
-    const f = await fixture('complete', { status: 'failed', designId: 'Dexisting_copy' });
+    const f = await fixture('complete', { status: 'failed', designId: 'Dexisting_copy' }, { scientific: true });
     const create = () => enqueueCanvaRender(f.db, { ...f.request, requestId: randomUUID() });
     await f.db.update(canvaMasters).set({ status: 'design_changed' }).where(eq(canvaMasters.id, f.master.id));
     await expect(create()).rejects.toMatchObject({ status: 422 });
     await f.db.update(canvaMasters).set({ status: 'ready' }).where(eq(canvaMasters.id, f.master.id));
-    const columns = familyDialogueCardFixture(); columns.pages.find(page => page.id === 'perspectives')!.layout = 'columns';
+    const columns = structuredClone(f.copy); columns.pages.find(page => page.id === 'perspectives')!.layout = 'columns';
     await f.db.update(contentRevisions).set({ payload: { ...f.revision.payload, cardCopy: columns } }).where(eq(contentRevisions.id, f.revision.id));
     await expect(create()).rejects.toMatchObject({ status: 422, message: expect.stringContaining('상하 배치') });
-    await f.db.update(contentRevisions).set({ payload: { ...f.revision.payload, cardCopy: scientificFamilyCardFixture() } }).where(eq(contentRevisions.id, f.revision.id));
+    await f.db.update(contentRevisions).set({ payload: { ...f.revision.payload, cardCopy: familyDialogueCardFixture(), editorialPlan: { ...f.metadata.editorialPlan, conceptMode: 'value_definition', keyConcept: '똑똑함' } } }).where(eq(contentRevisions.id, f.revision.id));
     await expect(create()).rejects.toMatchObject({ status: 422, message: expect.stringContaining('마스터') });
     expect(await f.db.select().from(canvaRenderJobs).where(eq(canvaRenderJobs.contentItemId, f.item.id))).toHaveLength(1);
     expect(api.submitAutofill).not.toHaveBeenCalled();
@@ -334,7 +336,14 @@ describe("Canva durable dispatch and recovery on PostgreSQL", () => {
     api.getExport.mockResolvedValue({ id: "export_known", status: "success", result: { urls: Array.from({ length: 8 }, (_, index) => `https://export-download.canva.com/opaque-${index}`) } });
     const result = await runNow(f.job.id); expect(result.status).toBe("ready");
     const rows = await f.db.select().from(mediaAssets).where(eq(mediaAssets.revisionId, result.outputRevisionId!));
-    expect(rows.filter(row => row.kind === "canva_export_original").map(row => row.sha256)).toEqual(pngs.map(sha256));
+    const originalManifest = result.result!.originals as Array<{ id: number; page: number; sha256: string }>;
+    expect(originalManifest.map(page => page.page)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(originalManifest.map(page => page.sha256)).toEqual(pngs.map(sha256));
+    expect(rows.filter(row => row.kind === 'canva_export_original')).toHaveLength(8);
+    const orderedOriginals = originalManifest.map(page => rows.find(row => row.id === page.id));
+    expect(orderedOriginals.every(row => row?.kind === 'canva_export_original' && row.mime === 'image/png')).toBe(true);
+    expect(orderedOriginals.map(row => row?.sha256)).toEqual(pngs.map(sha256));
+    expect(orderedOriginals.map(row => row?.bytes)).toEqual(pngs);
     expect(rows.filter(row => row.kind === "card")).toHaveLength(1); expect(rows.filter(row => row.kind === "carousel_page")).toHaveLength(7);
     const [latestCard] = await f.db.select().from(mediaAssets).where(and(eq(mediaAssets.contentItemId, f.item.id), eq(mediaAssets.kind, "card"))).orderBy(desc(mediaAssets.id)).limit(1);
     expect(latestCard.id).toBe(result.outputAssetId); expect(latestCard.carousel?.pages).toHaveLength(8);

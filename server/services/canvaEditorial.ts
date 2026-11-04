@@ -8,12 +8,14 @@ import { HttpError } from '../routes/util';
 import { createRevision, invalidateApprovals } from '../content';
 import { audit } from '../audit';
 import { sha256 } from './text';
-import { canvaInputHash, prepareCanvaImages, downloadCanvaExport, publicationJpegs } from './canvaEditorialAssets';
+import { canvaInputHash, prepareCanvaImages, downloadCanvaExport, publicationJpegs, assertCanvaDesignSettings } from './canvaEditorialAssets';
 import * as rest from './canvaRest';
 import { ensureSourceWorkspace } from './sourceWorkspace';
 import { canvaRecoveryToken } from './canvaReconciliation';
 import { canvaReconciliations } from '../../shared/canvaReconciliation';
 import { checkCanvaTextLimits } from '../../shared/canvaTextLimits';
+import { familyMetadataFromPayload } from './familyEditorial';
+import { assertFamilyEvidenceForCopy } from './familyEditorialPersistence';
 
 type Job=typeof canvaRenderJobs.$inferSelect;
 type Master=typeof canvaMasters.$inferSelect;
@@ -68,6 +70,11 @@ export async function enqueueCanvaRender(db:DB,a:{channelId:number;itemId:number
     const payload=revision.payload;
     const parsed=familyCardCopySchema.safeParse(payload.cardCopy),designs=pageDesignsSchema.safeParse(payload.pageDesigns),evidence=evidenceBindingSchema.safeParse(payload.evidenceBinding);
     if(!parsed.success || !designs.success || !evidence.success) throw new HttpError(422,'새 8장 원고와 근거·이미지 설정을 저장한 뒤 Canva로 만들어 주세요.');
+    const metadata=familyMetadataFromPayload(payload);
+    if(!metadata)throw new HttpError(422,'현재 원고의 편집 기획과 근거 기록을 먼저 확인해 주세요.');
+    // Do not spend an external upload/autofill/export request on an unbound or
+    // foreign evidence set. Final approval repeats this check for its revision.
+    await assertFamilyEvidenceForCopy(tx as DB,item,parsed.data,metadata);
     const variant=canvaVariant(parsed.data);
     if(purpose==='create'&&parsed.data.pages.find(p=>p.id==='perspectives')!.layout==='columns') throw new HttpError(422,'등록된 Canva 마스터는 두 시선의 상하 배치입니다. 상하 배치를 선택하거나 자체 이미지로 만들어 주세요.');
     const [prior]=a.importFromJobId?await tx.select().from(canvaRenderJobs).where(and(eq(canvaRenderJobs.id,a.importFromJobId),eq(canvaRenderJobs.contentItemId,item.id),eq(canvaRenderJobs.channelId,a.channelId))):[];
@@ -79,6 +86,7 @@ export async function enqueueCanvaRender(db:DB,a:{channelId:number;itemId:number
       :await tx.select().from(canvaMasters).where(and(eq(canvaMasters.channelId,a.channelId),eq(canvaMasters.status,'ready'),eq(canvaMasters.conceptMode,variant.conceptMode),eq(canvaMasters.hasExternalActivity,variant.hasExternalActivity),...(a.masterId?[eq(canvaMasters.id,a.masterId)]:[]))).orderBy(desc(canvaMasters.id)).limit(1);
     if(!master) throw new HttpError(purpose==='import'?404:422,purpose==='import'?'이 콘텐츠의 기존 Canva 마스터 기록을 찾을 수 없습니다.':'이 개념·활동 구조에 맞는 Canva 마스터를 먼저 등록해 주세요.');
     assertCanvaTextFits(parsed.data,master,purpose);
+    if(purpose==='create')assertCanvaDesignSettings(designs.data);
     const [pending]=await tx.select().from(canvaRenderJobs).where(and(eq(canvaRenderJobs.contentItemId,item.id),inArray(canvaRenderJobs.status,active))).limit(1);
     if(pending){if(pending.sourceVersion===a.version&&pending.masterId===master.id&&pending.purpose===purpose&&(purpose==='create'||pending.designId===prior?.designId))return pending;throw new HttpError(409,'진행 중인 Canva 작업을 먼저 확인하거나 대기를 취소해 주세요.');}
     const input:Input={payload,title:item.title,copy:parsed.data,pageDesigns:designs.data,evidenceSetId:evidence.data.evidenceSetId,mappingVersion:CANVA_MAPPING_VERSION,datasetHash:master.datasetHash};
@@ -147,6 +155,11 @@ async function uploadOne(db:DB,job:Job,image:{hash:string;bytes:Buffer;field:str
 /** One bounded state transition. No process-local promise is the durable source of truth. */
 async function processCanvaStep(db:DB,job:Job){
   const input=asInput(job);
+  if(job.phase==='validate'||job.phase==='export_prepare') {
+    const metadata=familyMetadataFromPayload(input.payload);
+    if(!metadata)throw new HttpError(422,'이 Canva 작업의 원고·근거 기록을 확인할 수 없습니다. 기존 결과는 보존했습니다.');
+    await assertFamilyEvidenceForCopy(db,{id:job.contentItemId,channelId:job.channelId},input.copy,metadata);
+  }
   const [master]=await db.select().from(canvaMasters).where(eq(canvaMasters.id,job.masterId));
   if(!master) throw new HttpError(404,'Canva 마스터 등록을 찾을 수 없습니다.');
   if(job.phase==='validate'){

@@ -118,6 +118,57 @@ describe("v2 article generation and durable proposal application", () => {
 });
 
 describe("v2 PostgreSQL ownership and compatibility boundaries", () => {
+  it("saves manually edited facts only after explicitly reconnecting the current owned evidence", async () => {
+    const f = await fixture(), read = await f.agent.get(`${f.endpoint}/card-copy`); expect(read.status).toBe(200);
+    const fact = read.body.evidence.facts.find((value: any) => value.id === "F1");
+    expect(fact).toMatchObject({ claimType: "forecast", speaker: "빌 게이츠", timeScope: "미래 전망", conditions: ["전문 업무의 성과"], evidenceExcerpt: expect.any(String), sourceScope: "article_body" });
+    const copy = structuredClone(f.copy), summary = copy.pages[1];
+    if (summary.id !== "news_summary") throw new Error("summary fixture missing");
+    summary.fields.facts[0] = "게이츠는 전문 업무에서 AI가 앞설 가능성을 이야기했어요.";
+    summary.claimRefs = summary.claimRefs.filter(ref => ref.fieldPath !== "fields.facts.0");
+    const unbound = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send(saveBody(f, { copy }));
+    expect(unbound.status).toBe(422); expect(unbound.body.code).toBe("missing_fact_binding"); expect((await latest(f.item.id)).revision).toEqual(f.revision);
+    summary.claimRefs.push({ fieldPath: "fields.facts.0", claimType: fact.claimType, factIds: [fact.id], resourceIds: [] });
+    const saved = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send(saveBody(f, { copy }));
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200); expect(saved.body.copy).toEqual(copy); expect(saved.body.evidenceBinding).toEqual(f.metadata.evidenceBinding);
+    expect(saved.body.dependencies.caption).toBe("needs_review"); expect((await latest(f.item.id)).item.reviewStatus).toBe("pending");
+    const [original] = await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)); expect(original).toEqual(f.revision); expect(fetch).not.toHaveBeenCalled();
+  });
+  it("rejects unknown evidence, forecast promotion and factual-summary type bypasses after manual editing", async () => {
+    const f = await fixture();
+    for (const mutation of [
+      { factIds: ["F99"], claimType: "forecast", resourceIds: [], code: "unknown_evidence" },
+      { factIds: ["F1"], claimType: "forecast", resourceIds: ["R99"], code: "unknown_evidence" },
+      { factIds: ["F1"], claimType: "research_finding", resourceIds: [], code: "summary_claim_type" },
+      { factIds: ["F1"], claimType: "question", resourceIds: [], code: "summary_claim_type" },
+      { factIds: ["F1"], claimType: "editorial_interpretation", resourceIds: [], code: "summary_claim_type" },
+      { factIds: ["F1"], claimType: "hypothetical", resourceIds: [], code: "summary_claim_type" },
+    ]) {
+      const copy = structuredClone(f.copy), { code, ...ref } = mutation;
+      copy.pages[1].claimRefs[0] = { ...copy.pages[1].claimRefs[0], ...ref } as typeof copy.pages[1]["claimRefs"][number];
+      const response = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send(saveBody(f, { copy }));
+      expect(response.status, JSON.stringify(response.body)).toBe(422); expect(response.body.code).toBe(code);
+    }
+    const copy = structuredClone(f.copy); if (copy.pages[1].id === "news_summary") copy.pages[1].fields.facts[0] = "게이츠는 AI가 인간보다 우월하다고 입증했어요.";
+    const certainty = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send(saveBody(f, { copy })); expect(certainty.status).toBe(422); expect(certainty.body.code).toBe("forecast_attribution");
+    expect((await latest(f.item.id)).revision).toEqual(f.revision); expect(fetch).not.toHaveBeenCalled();
+  });
+  it("preserves numeric forecast conditions and permits a science definition only with its own qualified evidence", async () => {
+    const f = await fixture({ numericForecast: true }), copy = structuredClone(f.copy);
+    if (copy.pages[1].id === "news_summary") copy.pages[1].fields.facts[0] = "게이츠는 AI가 전문 업무에서 앞설 것으로 전망했어요.";
+    const dropped = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send(saveBody(f, { copy })); expect(dropped.status).toBe(422); expect(dropped.body.code).toBe("numeric_condition_lost");
+    if (copy.pages[1].id === "news_summary") copy.pages[1].fields.facts[0] = "게이츠는 12030년 평가 대상 112개 전문 업무에서 AI가 앞설 가능성을 말했어요.";
+    const changedNumbers = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send(saveBody(f, { copy })); expect(changedNumbers.status).toBe(422); expect(changedNumbers.body.code).toBe("numeric_condition_lost");
+    if (copy.pages[1].id === "news_summary") copy.pages[1].fields.facts[0] = "게이츠는 2030년 평가 대상 12개 전문 업무에서 AI가 앞설 가능성을 말했어요.";
+    const saved = await f.agent.patch(`${f.endpoint}/card-copy`).set(f.headers).send(saveBody(f, { copy })); expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    const science = await fixture({ scientific: true }), definition = structuredClone(science.copy), concept = definition.pages[5];
+    if (concept.id !== "concept" || concept.fields.mode !== "scientific_explanation") throw new Error("science fixture missing");
+    concept.fields.acceptedDefinition = "평균 속력은 이동 거리를 걸린 시간으로 나눈 값입니다.";
+    concept.claimRefs = [{ fieldPath: "fields.acceptedDefinition", claimType: "research_finding", factIds: ["F1"], resourceIds: [] }];
+    const wrong = await science.agent.patch(`${science.endpoint}/card-copy`).set(science.headers).send(saveBody(science, { copy: definition })); expect(wrong.status).toBe(422); expect(wrong.body.code).toBe("definition_evidence_type");
+    concept.claimRefs[0].factIds = ["F3"];
+    const linked = await science.agent.patch(`${science.endpoint}/card-copy`).set(science.headers).send(saveBody(science, { copy: definition })); expect(linked.status, JSON.stringify(linked.body)).toBe(200); expect(linked.body.copy).toEqual(definition); expect(fetch).not.toHaveBeenCalled();
+  });
   it("admits a paid stage once under PostgreSQL concurrency and reuses its completed result", async () => {
     const f = await fixture(), entered = deferred(), release = deferred(), mock = createFamilyProviderMock({ onStage: async call => { if (call.stage === "editorial_plan") { entered.resolve(); await release.promise; } } }); vi.stubGlobal("fetch", vi.fn(mock.fetch));
     const [channel] = await getDb().select().from(channels).where(eq(channels.id, f.item.channelId));
@@ -159,7 +210,7 @@ describe("v2 PostgreSQL ownership and compatibility boundaries", () => {
     const captions = { instagram, telegram: "다른 채널의 입력은 유지합니다." };
     const publication = await f.agent.patch(`${f.endpoint}/publication-draft`).set(f.headers).send({ version: 0, captions, options: { destinationIds: [], timing: "later", scheduledAtKst: "" } }); expect(publication.status).toBe(200);
     const response = await f.agent.post(`${f.endpoint}/card-copy/caption-confirm`).set(f.headers).send({ version: f.item.version, publicationDraftVersion: publication.body.version, textConfirmed: true });
-    expect(response.status, JSON.stringify(response.body)).toBe(200); expect(response.body.captionPackage).toMatchObject({ origin: "manual", contentRevision: response.body.revisionId, fullCaption: instagram.trim(), confirmation: { comparedRevision: f.revision.id, captionHash: sha256(instagram) } });
+    expect(response.status, JSON.stringify(response.body)).toBe(200); expect(response.body.captionPackage).toMatchObject({ origin: "manual", contentRevision: response.body.revisionId, fullCaption: instagram, confirmation: { comparedRevision: f.revision.id, captionHash: sha256(instagram) } });
     expect(response.body.captionPackage).not.toHaveProperty("hook"); expect(response.body.captionPackage).not.toHaveProperty("hashtags"); expect(response.body.dependencies.caption).toBe("current"); expect(response.body.canvaOutputReused).toBe(false);
     const current = await latest(f.item.id); expect(current.item.publicationDraft).toEqual(publication.body); expect(current.item.reviewStatus).toBe("pending"); expect(current.revision.payload.cardCopy).toEqual(f.copy); expect(current.revision.payload.evidenceBinding).toEqual(f.metadata.evidenceBinding);
     const [original] = await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)); expect(original).toEqual(f.revision); expect(fetch).not.toHaveBeenCalled();

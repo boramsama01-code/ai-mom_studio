@@ -97,25 +97,39 @@ function namedIn(text: string, name: string | null) {
   const full = norm(name), last = full.split(" ").at(-1)!;
   return norm(text).includes(full) || [...last].length >= 2 && norm(text).includes(last);
 }
+const numericTokens = (text: string) => [...text.matchAll(/\d+(?:\.\d+)?\s*(?:%|년|명|개월|개|주|배|도|일)?/g)].map(match => match[0].replace(/\s+/g, ""));
 export function validateFamilyEvidenceReferences(copy: CardCopyV2, bundle: FamilyEvidenceBundle, plan?: EditorialPlan, parentGuide?: ParentGuide | null): ReviewFlag[] {
   const flags: ReviewFlag[] = [], facts = new Map(bundle.evidenceSet.facts.map(fact => [fact.id, fact])), resources = new Map(bundle.evidenceSet.resources.map(resource => [resource.id, resource]));
   for (const page of copy.pages) {
     for (const ref of page.claimRefs) {
       const path = `pages.${page.id}.${ref.fieldPath.replace(new RegExp(`^pages\\.${page.id}\\.`), "")}`;
+      if (familyFieldValue(copy, path) === undefined) flags.push({ path, code: "invalid_evidence_path", message: "근거는 현재 페이지에 실제로 있는 문구 칸에 연결해 주세요." });
       if (ref.factIds.some(id => !facts.has(id)) || ref.resourceIds.some(id => !resources.has(id))) flags.push({ path, code: "unknown_evidence", message: "이 revision의 고정 근거 묶음에 없는 사실·자료 ID입니다." });
       if (["reported_event", "research_finding", "attributed_statement", "forecast"].includes(ref.claimType) && !ref.factIds.length && !ref.resourceIds.length) flags.push({ path, code: "missing_evidence", message: "사실·발언·전망 문구에 실제 근거를 연결해 주세요." });
       const linked = ref.factIds.map(id => facts.get(id)).filter(fact => !!fact);
+      const linkedResources = ref.resourceIds.map(id => resources.get(id)).filter(resource => !!resource);
+      const factualTypes = ["reported_event", "research_finding", "attributed_statement", "forecast"];
+      if (page.id === "news_summary" && /^pages\.news_summary\.fields\.facts(?:\.[0-2])?$/.test(path)) {
+        const changedForecast = linked.some(fact => fact.claimType === "forecast") && ref.claimType !== "forecast";
+        const changedStatement = !linked.some(fact => fact.claimType === "forecast") && linked.some(fact => fact.claimType === "attributed_statement") && ref.claimType !== "attributed_statement";
+        if (!factualTypes.includes(ref.claimType) || linked.some(fact => !factualTypes.includes(fact.claimType)) || changedForecast || changedStatement) flags.push({ path, code: "summary_claim_type", message: "뉴스 요약은 근거의 사실·발언·전망 유형을 유지해야 합니다. 질문·해석·가정으로 바꿔 근거 확인을 생략할 수 없습니다." });
+      }
+      if (page.id === "concept" && page.fields.mode === "scientific_explanation" && path === "pages.concept.fields.acceptedDefinition") {
+        const allowedFact = (fact: typeof linked[number]) => ["reported_event", "research_finding"].includes(fact.claimType) && !["conflicting", "insufficient"].includes(fact.verificationStatus) && fact.sourceScope !== "search_result";
+        const allowedResource = (resource: typeof linkedResources[number]) => ["definition", "paper", "online"].includes(resource.kind) && resource.scope !== "search_result";
+        if (!["reported_event", "research_finding"].includes(ref.claimType) || !linked.length && !linkedResources.length || linked.some(fact => !allowedFact(fact)) || linkedResources.some(resource => !allowedResource(resource))) flags.push({ path, code: "definition_evidence_type", message: "통용 정의에는 실제 읽은 정의·논문·설명 자료 또는 확인된 사실을 연결해 주세요. 전망·발언·가정이나 방문 안내를 정의의 근거로 쓸 수 없습니다." });
+      }
       if (linked.some(fact => fact.claimType === "forecast" || fact.claimType === "attributed_statement") && ["reported_event", "research_finding"].includes(ref.claimType)) flags.push({ path, code: "claim_promotion", message: "발언·전망을 입증된 사건·연구 결과로 바꿀 수 없습니다." });
       const sentence = fieldText(copy, page.id, ref.fieldPath), pageText = JSON.stringify(page.fields);
       if (ref.claimType === "forecast" && (!/(전망|예측|예상|가능성|내다보|수 있)/.test(sentence) || !linked.some(fact => namedIn(pageText, fact.speaker)))) flags.push({ path, code: "forecast_attribution", message: "미래 전망의 발언자·조건·불확실성을 유지해 주세요." });
       if (ref.claimType === "attributed_statement" && !linked.some(fact => namedIn(pageText, fact.speaker))) flags.push({ path, code: "statement_attribution", message: "확인된 발언자의 이름을 같은 카드에 남겨 주세요." });
-      const numericConditions = linked.flatMap(fact => [...fact.conditions, fact.timeScope ?? ""]).flatMap(value => value.match(/\d+(?:\.\d+)?(?:%|년|명|개|개월|주|배|도|일)?/g) ?? []);
-      if (["reported_event", "research_finding", "attributed_statement", "forecast"].includes(ref.claimType) && numericConditions.some(value => !pageText.includes(value))) flags.push({ path, code: "numeric_condition_lost", message: "근거의 시점·인원·평가 범위 같은 수치 조건을 같은 카드에 유지해 주세요." });
+      const numericConditions = linked.flatMap(fact => [...fact.conditions, fact.timeScope ?? ""]).flatMap(numericTokens), pageNumbers = new Set(numericTokens(pageText));
+      if (["reported_event", "research_finding", "attributed_statement", "forecast"].includes(ref.claimType) && numericConditions.some(value => !pageNumbers.has(value))) flags.push({ path, code: "numeric_condition_lost", message: "근거의 시점·인원·평가 범위 같은 수치 조건을 같은 카드에 유지해 주세요." });
     }
     if (page.id === "news_summary") page.fields.facts.forEach((_fact, index) => {
       if (!page.claimRefs.some(ref => ["fields.facts", `fields.facts.${index}`, `pages.news_summary.fields.facts.${index}`].includes(ref.fieldPath) && (ref.factIds.length || ref.resourceIds.length))) flags.push({ path: `pages.news_summary.fields.facts.${index}`, code: "missing_fact_binding", message: "뉴스 요약의 각 사실에 근거를 연결해 주세요." });
     });
-    if (page.id === "concept" && page.fields.mode === "scientific_explanation" && !page.claimRefs.some(ref => ref.fieldPath.endsWith("fields.acceptedDefinition") && (ref.factIds.length || ref.resourceIds.length))) flags.push({ path: "pages.concept.fields.acceptedDefinition", code: "definition_needs_source", message: "과학적 통용 정의의 실제 근거가 필요합니다." });
+    if (page.id === "concept" && page.fields.mode === "scientific_explanation" && !page.claimRefs.some(ref => ["fields.acceptedDefinition", "pages.concept.fields.acceptedDefinition"].includes(ref.fieldPath) && (ref.factIds.length || ref.resourceIds.length))) flags.push({ path: "pages.concept.fields.acceptedDefinition", code: "definition_needs_source", message: "과학적 통용 정의의 실제 근거가 필요합니다." });
     if (page.id === "activity") {
       for (const [field, activity] of [["homeActivity", page.fields.homeActivity], ["optionalActivity", page.fields.optionalActivity]] as const) {
         if (!activity) continue;

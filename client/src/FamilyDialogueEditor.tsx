@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { familyCardCopySchema, familyDialogueMetadataSchema, familyFieldDescriptors, familyFieldValue, FAMILY_PAGE_LABELS, type CardCopyV2, type FamilyDialogueMetadata, type FamilyFieldDescriptor, type FamilyPage, type FamilyPageId, type PageDesign, type ReviewFlag } from "@shared/familyDialogue";
+import { defaultPageDesigns, familyCardCopySchema, familyDialogueMetadataSchema, familyFieldDescriptors, familyFieldValue, FAMILY_PAGE_LABELS, type CardCopyV2, type ClaimRef, type FamilyDialogueMetadata, type FamilyFieldDescriptor, type FamilyPage, type FamilyPageId, type PageDesign, type ReviewFlag } from "@shared/familyDialogue";
 import type { AiSelection } from "@shared/channelAi";
 import type { FamilyEvidenceView } from "@shared/familyEvidence";
 import { api, apiBlob, ApiError } from "./api";
@@ -32,13 +32,23 @@ function textOf(value: unknown): string {
 export const familyCopyText = (copy: CardCopyV2) => copy.pages.map(page => `${page.page}. ${FAMILY_PAGE_LABELS[page.id]}\n${textOf(page.fields)}`).join("\n\n");
 const copyText = familyCopyText;
 function pageValue(page: FamilyPage, path: string): unknown { return path.split(".").reduce<unknown>((value, key) => value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined, page); }
+const localRefPath = (page: FamilyPage, ref: ClaimRef) => ref.fieldPath.startsWith(`pages.${page.id}.`) ? ref.fieldPath.slice(`pages.${page.id}.`.length) : ref.fieldPath;
+function individualFactRefs(page: FamilyPage): ClaimRef[] {
+  return page.claimRefs.flatMap(ref => page.id === "news_summary" && localRefPath(page, ref) === "fields.facts"
+    ? page.fields.facts.map((_fact, index) => ({ ...ref, fieldPath: `fields.facts.${index}` })) : [ref]);
+}
 function replacePageField(page: FamilyPage, path: string, value: unknown): FamilyPage {
   const next = structuredClone(page), segments = path.split(".");
   let cursor: any = next;
   for (const segment of segments.slice(0, -1)) { if (["__proto__", "prototype", "constructor"].includes(segment)) throw new Error("수정할 칸을 확인해 주세요."); cursor = cursor[segment]; }
   cursor[segments.at(-1)!] = value;
-  next.claimRefs = next.claimRefs.filter(ref => {
-    const local = ref.fieldPath.replace(`pages.${page.id}.`, "");
+  next.claimRefs = individualFactRefs(page).filter(ref => {
+    const local = localRefPath(page, ref);
+    if (path === "fields.facts" && Array.isArray(value) && /^fields\.facts\.\d+$/.test(local)) {
+      // Adding/removing the last row must not erase refs for unchanged siblings.
+      const nextText = pageValue(next, local);
+      return nextText !== undefined && nextText === pageValue(page, local);
+    }
     return local !== path && !local.startsWith(`${path}.`) && !path.startsWith(`${local}.`);
   });
   return next;
@@ -56,6 +66,39 @@ const sourceScopeLabels: Record<FamilyEvidenceView["sources"][number]["scope"], 
 const claimTypeLabels: Record<FamilyEvidenceView["facts"][number]["claimType"], string> = { reported_event: "보도된 사건", research_finding: "연구 결과", attributed_statement: "발언·주장", forecast: "전망·예측", editorial_interpretation: "편집자의 해석", hypothetical: "가정한 상황" };
 function externalEvidenceUrl(value: string | null | undefined) {
   try { const url = new URL(value ?? ""); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : null; } catch { return null; }
+}
+function fieldEvidenceOptions(definition: boolean, evidence?: FamilyEvidenceView) {
+  const facts = (evidence?.facts ?? []).filter(fact => definition
+    ? ["reported_event", "research_finding"].includes(fact.claimType) && !["conflicting", "insufficient"].includes(fact.verificationStatus) && fact.sourceScope !== "search_result"
+    : ["reported_event", "research_finding", "attributed_statement", "forecast"].includes(fact.claimType));
+  const resources = definition ? (evidence?.resources ?? []).filter(resource => ["definition", "paper", "online"].includes(resource.kind) && resource.scope !== "search_result").sort((a, b) => Number(b.kind === "definition") - Number(a.kind === "definition")) : [];
+  return { facts, resources };
+}
+type EvidenceChoice = { factIds: string[]; resourceIds: string[] };
+function FieldEvidence({ page, path, value, evidence, bindingId, disabled, onConfirm, onReload }: {
+  page: FamilyPage; path: string; value: string; evidence?: FamilyEvidenceView; bindingId: string; disabled: boolean;
+  onConfirm: (choice: EvidenceChoice, text: string, evidenceSetId: string) => boolean; onReload: () => Promise<void>;
+}) {
+  const definition = page.id === "concept", current = evidence?.evidenceSetId === bindingId;
+  const options = fieldEvidenceOptions(definition, current ? evidence : undefined);
+  const refs = individualFactRefs(page).filter(ref => localRefPath(page, ref) === path), refSignature = stable(refs);
+  const linked = refs.some(ref => ref.factIds.length || ref.resourceIds.length);
+  const [choice, setChoice] = useState<EvidenceChoice>({ factIds: [], resourceIds: [] }), [confirmed, setConfirmed] = useState(false), [loading, setLoading] = useState(false), [error, setError] = useState<Error | null>(null);
+  useEffect(() => { setChoice({ factIds: [], resourceIds: [] }); setConfirmed(false); setError(null); }, [value, bindingId, evidence?.evidenceSetId, refSignature]);
+  function toggle(kind: keyof EvidenceChoice, id: string, checked: boolean) { setConfirmed(false); setChoice(previous => ({ ...previous, [kind]: checked ? [...previous[kind], id] : previous[kind].filter(value => value !== id) })); }
+  const blocked = disabled || loading || !current, hasSelection = choice.factIds.length + choice.resourceIds.length > 0;
+  return <details className="family-field-evidence" data-field-path={`pages.${page.id}.${path}`}><summary>원문 근거 확인 · {linked ? "연결됨" : "재연결 필요"}</summary><div className="stack">
+    {!linked && <p className="notice warn small" role="status">이 칸의 현재 문구에 근거를 연결해야 저장할 수 있습니다. 다른 칸의 근거는 유지합니다.</p>}
+    {!current ? <><p className="notice warn small">현재 원고와 같은 버전의 근거를 불러와야 선택할 수 있습니다. 입력한 문구는 유지합니다.</p><button type="button" className="btn sm" disabled={disabled || loading} onClick={() => { setLoading(true); setError(null); void onReload().catch(setError).finally(() => setLoading(false)); }}>{loading ? "근거 불러오는 중…" : "현재 원문 근거 다시 불러오기"}</button></> : <>
+      <p className="hint">{definition ? "확인한 정의·논문·설명 자료에서 현재 문장을 직접 뒷받침하는 근거만 선택하세요. 전망·발언·가정, 검색 요약은 통용 정의의 근거로 선택할 수 없습니다." : "기사에서 확인한 사실·발언을 선택하세요. 발언자·전망의 성격·시점·수치 조건을 현재 카드에도 유지해야 합니다."}</p>
+      {options.facts.map(fact => <div className="family-evidence-entry" key={fact.id}><label className="check"><input type="checkbox" data-evidence-id={`fact:${fact.id}`} checked={choice.factIds.includes(fact.id)} disabled={blocked} onChange={event => toggle("factIds", fact.id, event.target.checked)} /><span>{claimTypeLabels[fact.claimType]} · {fact.statement}</span></label>{fact.speaker && <p className="small">발언자: {fact.speaker}</p>}{fact.timeScope && <p className="small">시점·범위: {fact.timeScope}</p>}{!!fact.conditions.length && <p className="small">유지할 조건: {fact.conditions.join(" · ")}</p>}<blockquote>{fact.evidenceExcerpt}</blockquote><p className="hint">읽은 범위: {sourceScopeLabels[fact.sourceScope]}{["conflicting", "insufficient"].includes(fact.verificationStatus) && " · 근거의 충돌·부족을 함께 확인해 주세요."}</p></div>)}
+      {options.resources.map(resource => { const url = externalEvidenceUrl(resource.url); return <div className="family-evidence-entry" key={resource.id}><label className="check"><input type="checkbox" data-evidence-id={`resource:${resource.id}`} checked={choice.resourceIds.includes(resource.id)} disabled={blocked} onChange={event => toggle("resourceIds", resource.id, event.target.checked)} /><span>{resource.title}</span></label>{url && <a href={url} target="_blank" rel="noopener noreferrer">확인한 원문 열기 ↗</a>}<blockquote>{resource.evidenceExcerpt}</blockquote><p className="hint">읽은 범위: {sourceScopeLabels[resource.scope]} · 확인: {fmtDate(resource.checkedAt)} (한국 시간)</p><p className="small">읽을 부분: {resource.readingTarget}</p></div>; })}
+      {!options.facts.length && !options.resources.length && <p className="notice warn small">이 칸에 연결할 수 있는 확인된 근거가 없습니다. 원문 자료를 보완한 뒤 근거를 다시 확인해 주세요. 임의의 자료 ID나 주소를 만들지 않습니다.</p>}
+      <label className="check"><input type="checkbox" data-evidence-confirm checked={confirmed} disabled={blocked || !hasSelection || !value.trim()} onChange={event => setConfirmed(event.target.checked)} /><span>발췌를 읽고 현재 문구가 주체·조건·뜻을 유지하는지 직접 대조했습니다.</span></label>
+      <button type="button" className="btn sm" disabled={blocked || !hasSelection || !confirmed || !value.trim()} onClick={() => { if (!onConfirm(choice, value, bindingId)) setError(new Error("문구나 근거 버전이 바뀌었습니다. 현재 입력을 유지했으니 다시 대조해 주세요.")); setConfirmed(false); }}>대조한 근거를 이 칸에 연결</button>
+      <p className="hint">연결은 편집 중인 원고에 반영합니다. ‘문구·디자인 저장’을 눌러 확정하세요. AI는 호출하지 않습니다.</p>
+    </>}{error && <ErrorBox error={error} />}
+  </div></details>;
 }
 function FamilyEvidenceDetails({ draft }: { draft: FamilyDialogueResponse }) {
   const evidence = draft.evidence;
@@ -96,6 +139,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const generation = useGenerationRequest(channelId, itemId, "card-copy");
   const dirty = !same(editable(base), editable(draft)), parsed = familyCardCopySchema.safeParse(draft.copy), invalid = !parsed.success;
   const page = draft.copy.pages[selected], design = draft.pageDesigns[page.id];
+  const fixedOutroDesign = design.alignment === "center" && design.background.kind === "brand" && (design.background.color ?? "#1B2023").toUpperCase() === "#1B2023";
   const signatureFor = (value: FamilyDialogueResponse, index: number) => stable({ page: value.copy.pages[index], design: value.pageDesigns[value.copy.pages[index].id], template: value.copy.templateKey, version: value.version, previewRevision });
   const signature = signatureFor(draft, selected), previewCurrent = preview?.signature === signature;
   const recovery = useDraftRecovery<FamilyDialogueResponse>({
@@ -114,6 +158,33 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const busy = disabled || saving || rendering || backgroundBusy || !!recovery.pending || formatConflict, aiBusy = generating && !generation.cancelled;
   function put(value: FamilyDialogueResponse) { draftRef.current = value; setDraft(value); }
   function adopt(value: FamilyDialogueResponse) { baseRef.current = value; setBase(value); put(value); appliedProposal.current = null; modeDrafts.current = {}; modeLockDrafts.current = {}; setStructureNotice(null); setConflict(null); setProposal(null); setSaveError(null); }
+  async function reloadEvidence() {
+    const response = await api<StoredCardCopyResponse>(path);
+    if (response.copy.version !== 2 || response.version !== baseRef.current.version || response.revisionId !== baseRef.current.revisionId) { setConflict(response); throw new Error("다른 곳에서 저장한 원고가 있습니다. 현재 입력을 유지했으니 저장본과 먼저 비교해 주세요."); }
+    const latest = response as FamilyDialogueResponse, current = draftRef.current;
+    if (!latest.evidence || latest.evidence.evidenceSetId !== current.evidenceBinding.evidenceSetId) throw new Error("현재 편집 원고와 같은 근거 묶음을 찾을 수 없습니다. 원문·제안 버전을 확인해 주세요.");
+    baseRef.current = { ...baseRef.current, evidence: latest.evidence }; setBase(baseRef.current);
+    put({ ...current, evidence: latest.evidence });
+  }
+  function connectFieldEvidence(pageId: FamilyPageId, localPath: string, choice: EvidenceChoice, text: string, bindingId: string): boolean {
+    const current = draftRef.current, selectedPage = current.copy.pages.find(value => value.id === pageId);
+    if (!selectedPage || current.evidenceBinding.evidenceSetId !== bindingId || current.evidence?.evidenceSetId !== bindingId || pageValue(selectedPage, localPath) !== text || !text.trim()) return false;
+    const required = pageId === "news_summary" && /^fields\.facts\.\d+$/.test(localPath) || pageId === "concept" && selectedPage.id === "concept" && selectedPage.fields.mode === "scientific_explanation" && localPath === "fields.acceptedDefinition";
+    if (!required) return false;
+    const options = fieldEvidenceOptions(pageId === "concept", current.evidence);
+    if (!choice.factIds.length && !choice.resourceIds.length || choice.factIds.some(id => !options.facts.some(fact => fact.id === id)) || choice.resourceIds.some(id => !options.resources.some(resource => resource.id === id))) return false;
+    const references = new Map<ClaimRef["claimType"], ClaimRef>();
+    for (const fact of options.facts.filter(fact => choice.factIds.includes(fact.id))) {
+      const ref = references.get(fact.claimType) ?? { fieldPath: localPath, claimType: fact.claimType, factIds: [], resourceIds: [] };
+      ref.factIds.push(fact.id); references.set(fact.claimType, ref);
+    }
+    if (choice.resourceIds.length) {
+      const ref = references.get("research_finding") ?? { fieldPath: localPath, claimType: "research_finding", factIds: [], resourceIds: [] };
+      ref.resourceIds = options.resources.filter(resource => choice.resourceIds.includes(resource.id)).map(resource => resource.id); references.set(ref.claimType, ref);
+    }
+    const copy = { ...current.copy, pages: current.copy.pages.map(value => value.id === pageId ? { ...value, claimRefs: [...individualFactRefs(value).filter(ref => localRefPath(value, ref) !== localPath), ...references.values()] } : value) };
+    put(invalidateDerived({ ...current, copy })); setSaveError(null); return true;
+  }
   useEffect(() => {
     if (initial.version <= baseRef.current.version) return;
     if (same(editable(draftRef.current), editable(baseRef.current))) adopt(initial); else setConflict(initial);
@@ -217,8 +288,17 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     const { assetId: _removed, ...background } = old.background;
     updateDesign(id, { ...old, previousAssetIds, background: { ...background, kind: assetId ? "image" : "brand", ...(assetId ? { assetId } : {}) } });
   }
+  function useApprovedOutroDesign() {
+    const previous = draftRef.current.pageDesigns.outro;
+    const previousAssetIds = [...new Set([...(previous.previousAssetIds ?? []), ...(previous.background.assetId ? [previous.background.assetId] : [])])].slice(-20);
+    updateDesign("outro", { ...defaultPageDesigns().outro, previousAssetIds });
+    setStructureNotice("승인된 닫는 표지 배치를 편집기에 선택했습니다. 저장하면 확정됩니다. 이전 배경 이미지는 기록에 보관했고 문구는 유지했습니다.");
+  }
   function applyBackground(result: PageArtworkResult, prior: number | null): boolean {
     const id = result.pageId as FamilyPageId, current = draftRef.current.pageDesigns[id];
+    // An older outro request can still be recovered. Keep its image as an
+    // explicit proposal for another page instead of altering the fixed close.
+    if (id === "outro") return false;
     if (!current || baseRef.current.version !== result.version || (current.background.kind === "image" ? current.background.assetId ?? null : null) !== prior) return false;
     selectAsset(id, result.assetId); return true;
   }
@@ -288,6 +368,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
       {systemOwned ? <p className="hint">채널에 저장한 브랜드 정보입니다. 채널 설정에서 변경할 수 있습니다.</p> : <div className="family-field-actions"><label><input type="checkbox" checked={locked} disabled={disabled || !!recovery.pending} onChange={event => lockField(d.fieldPath, event.target.checked)} />자동 재작성에서 이 칸 유지</label>{showAi && <button type="button" className="btn sm ghost" disabled={busy || aiBusy || locked} aria-pressed={selectedField === d.fieldPath} onClick={() => { setSelectedField(d.fieldPath); if (aiPanel.current) { aiPanel.current.open = true; aiPanel.current.scrollIntoView({ behavior: "smooth", block: "nearest" }); } }}>이 칸 재작성 선택</button>}</div>}
       {count > d.initialBudget && <p className="hint">권장 길이를 넘었습니다. 저장은 가능하며 실제 배치에서 넘치는 칸을 확인할 수 있습니다.</p>}
       {count > d.manualMax && <p className="card-copy-error" role="alert">저장 한도 {d.manualMax}자를 넘었습니다. 붙여넣은 내용은 그대로 유지했습니다. 이 칸을 나눠 정리한 뒤 저장해 주세요.</p>}
+      {(page.id === "news_summary" && /^fields\.facts\.\d+$/.test(path) || page.id === "concept" && page.fields.mode === "scientific_explanation" && path === "fields.acceptedDefinition") && <FieldEvidence key={`${page.id}:${path}`} page={page} path={path} value={text} evidence={draft.evidence} bindingId={draft.evidenceBinding.evidenceSetId} disabled={busy || aiBusy || !!conflict} onConfirm={(choice, text, bindingId) => connectFieldEvidence(page.id, path, choice, text, bindingId)} onReload={reloadEvidence} />}
     </div>;
   };
   const caption = draft.captionPackage, captionCurrent = !!caption && caption.contentRevision === base.revisionId && draft.dependencies.caption === "current" && !dirty && caption.coreQuestion === draft.editorialPlan.coreQuestion;
@@ -320,6 +401,13 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
         </figure>
         <p className="hint">현재 입력의 자체 렌더입니다. 게시할 완성본은 Canva 내보내기 미리보기에서 확인하세요. 미리보기는 유료 이미지 생성을 요청하지 않습니다.</p>
         {previewError && <ErrorBox error={previewError} retry={() => setPreviewRetry(value => value + 1)} />}
+        {page.id === "outro" ? <div className="notice small stack" data-testid="family-outro-fixed-design">
+          <strong>승인된 닫는 표지 디자인</strong>
+          <p>8장은 승인된 브랜드 마무리로, Canva의 고정 배경·중앙 정렬·기존 로고를 사용합니다. 마지막 행동 안내는 문구 입력칸에서 계속 수정할 수 있습니다.</p>
+          {!fixedOutroDesign && <><p>기존 배경·정렬 설정은 자체 렌더용으로 보관하고 있습니다. Canva로 만들려면 승인된 닫는 표지 배치를 선택하고 저장해 주세요.</p><button className="btn" disabled={busy || aiBusy || !!conflict} onClick={useApprovedOutroDesign}>승인된 닫는 표지 배치 사용</button></>}
+          {!!designHistory.outro?.length && <button className="btn ghost" disabled={busy || aiBusy || !!conflict} onClick={() => { const history = designHistory.outro ?? []; if (history.length) { updateDesign("outro", history.at(-1)!, false); setDesignHistory(value => ({ ...value, outro: history.slice(0, -1) })); } }}>이전 닫는 표지 배치 되돌리기</button>}
+        </div> : <>
+        <p className="hint" data-testid="family-canva-design-scope">Canva는 등록된 템플릿의 정렬·글자색을 사용합니다. 왼쪽 정렬이나 밝은 배경은 자체 렌더 또는 Canva에서 직접 편집해 주세요.</p>
         <details className="family-design"><summary>이 페이지 배치·배경 조절</summary><div className="stack">
           <label className="field">문구 정렬<select value={design.alignment} disabled={busy} onChange={event => updateDesign(page.id, { ...design, alignment: event.target.value as "center" | "left" })}><option value="center">중앙 정렬 · 기본</option><option value="left">왼쪽 정렬</option></select></label>
           <label className="field">바탕<select value={design.background.kind} disabled={busy} onChange={event => updateDesign(page.id, { ...design, background: { ...design.background, kind: event.target.value as "none" | "brand" | "image" } })}><option value="none">배경 없음 · 흰색</option><option value="brand">브랜드 색상</option>{design.background.assetId && <option value="image">선택한 이미지</option>}</select></label>
@@ -329,6 +417,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
           {!!sourceAssets.length && <details><summary>이 콘텐츠의 이전 이미지 불러오기</summary><div className="family-asset-grid">{sourceAssets.map(id => <button key={id} className="btn" disabled={busy} onClick={() => selectAsset(page.id, id)} aria-label={`저장 이미지 ${id} 선택`}><img src={`/api${path}/background/${id}`} alt="저장한 배경 이미지" /><span>이 페이지에 사용</span></button>)}</div></details>}
         </div></details>
         <PageBackgroundEditor channelId={channelId} itemId={itemId} pageIndex={selected} pageId={page.id} background={design.background.kind === "image" && design.background.assetId ? { assetId: design.background.assetId } : undefined} showOpacityControl={false} disabled={busy || aiBusy || !!conflict} showAi={showAi} imageReady={!!aiStatus.data?.image} imageModel={base.ai?.image.model} save={saveNow} onBusyChange={setBackgroundBusy} onApply={applyBackground} onChange={background => selectAsset(page.id, background?.assetId)} />
+        </>}
       </div>
     </div>
     {showAi && <details ref={aiPanel} className="family-ai"><summary>자동으로 문구 다듬기{aiBusy ? " · 작업 중" : aiError ? " · 확인할 오류 있음" : ""}</summary><div className="stack"><p className="hint">{selectedField ? `선택한 칸: ${familyFieldDescriptors(page).find(value => selectedField.startsWith(value.fieldPath))?.label ?? selectedField}` : `선택한 장: ${FAMILY_PAGE_LABELS[page.id]}`} · 잠근 칸은 자동으로 바꾸지 않습니다.</p><label className="field">고치고 싶은 점<textarea rows={3} maxLength={2000} value={instructions} onChange={event => setInstructions(event.target.value)} placeholder="예: 전망이라는 성격은 유지하고, 일상에서 비교할 수 있는 짧은 문장으로 다듬어 주세요." /></label><div className="row"><button className="btn primary" disabled={busy || aiBusy || !!conflict || !!selectedField && !!draft.fieldLocks[selectedField]} onClick={() => void generate()}>{generation.unresolved ? "이전 요청 결과 확인" : aiBusy ? "자동 제안 중…" : selectedField ? "선택한 칸 자동 제안" : "이 페이지 자동 제안"}</button>{selectedField && <button className="btn ghost" onClick={() => setSelectedField(null)}>페이지 전체 선택</button>}<button className="btn ghost" disabled={busy || aiBusy || !!conflict || generation.unresolved} onClick={() => void generate("all")}>8장 전체 다시 제안</button>{generation.unresolved && <button className="btn ghost" disabled={generation.cancelling} onClick={() => void generation.cancel()}>요청 중단</button>}</div><p className="hint">제안은 원고를 덮어쓰지 않습니다. 결과를 확인하고 직접 적용한 뒤 저장합니다.</p></div></details>}

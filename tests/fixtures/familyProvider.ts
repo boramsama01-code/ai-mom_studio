@@ -38,6 +38,7 @@ export function familyMockStageData(stage: FamilyMockStage, input: any): unknown
     return analysis;
   }
   if (stage === "editorial_plan") return draft.editorialPlan;
+  if (stage === "resource_research") return { homeActivity: { title: "주장과 근거 나눠 보기", materials: ["기사 원문", "종이"], steps: ["원문에서 주장과 그 근거를 다른 색으로 표시해요."], minutes: 5, closingQuestion: "무엇을 더 확인하면 좋을까요?" }, verifiedResources: [], operatorNotes: [] };
   if (stage === "card_copy") {
     draft.editorialPlan = input.editorialPlan; draft.parentGuide.coreQuestion = input.editorialPlan.coreQuestion;
     draft.cardCopy.templateKey = input.templateContract.templateKey;

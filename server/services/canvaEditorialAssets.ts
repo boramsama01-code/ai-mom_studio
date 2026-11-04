@@ -18,13 +18,33 @@ export function canonicalJson(value:unknown):string {
 }
 export const canvaInputHash=(value:unknown)=>sha256(canonicalJson(value));
 
+/** The fixed masters have light type and an approved static outro. Reject
+ * unsupported studio options instead of silently dropping them at Autofill. */
+export function assertCanvaDesignSettings(pageDesigns:PageDesigns) {
+  for(const [index,id] of CANVA_PAGE_IDS.entries()) {
+    const design=pageDesigns[id],bg=design.background;
+    if(design.alignment!=='center')throw new HttpError(422,`${index+1}장: 등록된 Canva 마스터는 중앙 정렬입니다. 원고는 보존했습니다. 중앙 정렬을 선택하거나 자체 이미지·Canva 직접 편집을 사용해 주세요.`,{code:'canva_layout_unsupported'});
+    if(id==='outro') {
+      if(bg.kind!=='brand'||(bg.color??FAMILY_PAGE_COLORS.outro).toLowerCase()!==FAMILY_PAGE_COLORS.outro.toLowerCase())throw new HttpError(422,'8장: Canva 닫는 표지는 승인된 브랜드 배치로 고정되어 있습니다. 편집기에서 승인된 닫는 표지 배치를 선택하거나 Canva에서 직접 수정해 주세요. 기존 입력은 보존했습니다.',{code:'canva_layout_unsupported'});
+      continue;
+    }
+    if(bg.kind==='none')throw new HttpError(422,`${index+1}장: 이 Canva 템플릿은 밝은 글자를 사용하므로 흰색 배경을 자동 적용하지 않습니다. 어두운 브랜드 배경을 선택하거나 자체 이미지·Canva 직접 편집을 사용해 주세요.`,{code:'canva_layout_unsupported'});
+    if(bg.kind==='brand') {
+      const color=bg.color??FAMILY_PAGE_COLORS[id];
+      const values=[1,3,5].map(offset=>parseInt(color.slice(offset,offset+2),16)/255).map(value=>value<=.04045?value/12.92:((value+.055)/1.055)**2.4);
+      const lightness=.2126*values[0]+.7152*values[1]+.0722*values[2];
+      if(lightness>.14)throw new HttpError(422,`${index+1}장: 선택한 단색 배경은 Canva 템플릿의 밝은 글자와 구분하기 어렵습니다. 더 어두운 색을 선택하거나 Canva에서 글자색도 함께 수정해 주세요. 저장한 색은 변경하지 않았습니다.`,{code:'canva_layout_unsupported'});
+    }
+  }
+}
+
 /** Text remains in Canva. Only the selected photograph/background is prepared here. */
 export async function prepareCanvaImages(db:DB,a:{itemId:number;channelId:number;copy:CardCopyV2;pageDesigns:PageDesigns}) {
+  assertCanvaDesignSettings(a.pageDesigns);
   const images:Array<{field:string;bytes:Buffer;hash:string}>=[];
   for(const [index,id] of CANVA_PAGE_IDS.entries()){
     if(id==='outro') continue;
     const design=a.pageDesigns[id],bg=design.background;
-    if(design.alignment!=='center') throw new HttpError(422,'등록된 Canva 마스터는 중앙 정렬입니다. 중앙 정렬을 선택하거나 자체 이미지로 만들어 주세요.');
     // The approved reading-news cover is full bleed, like the body background
     // frames. Cropping, focal point and overlay therefore survive Autofill.
     const width=1080,height=1350;

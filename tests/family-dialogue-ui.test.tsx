@@ -8,8 +8,10 @@ import type { FamilyDialogueResponse } from "../client/src/FamilyDialogueEditor"
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
 import { cardCopyFixture } from "./fixtures/cardCopy";
 import { ApiError } from "../client/src/api";
-import { familyFieldValue } from "../shared/familyDialogue";
+import { defaultPageDesigns, familyFieldValue } from "../shared/familyDialogue";
 import type { FamilyEvidenceView } from "../shared/familyEvidence";
+import { familyEvidenceFixture } from "./fixtures/familyEvidence";
+import { familyEvidenceView, validateFamilyEvidenceReferences } from "../server/services/familyEvidence";
 
 const mocks = vi.hoisted(() => ({ api: vi.fn(), blob: vi.fn(), guard: { setDirty: vi.fn() } }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api, apiBlob: mocks.blob }));
@@ -64,6 +66,31 @@ function acceptValidLocks() {
     saved = { ...saved, ...structuredClone(body), version: saved.version + 1, revisionId: saved.revisionId + 1, hasSavedCopy: true };
     return structuredClone(saved);
   };
+}
+function requireActualEvidence(bundle = familyEvidenceFixture(28, 3), initial = fresh()) {
+  initial.evidence = familyEvidenceView(bundle); saved = initial;
+  patch = async body => {
+    const current = saved as FamilyDialogueResponse;
+    const flags = validateFamilyEvidenceReferences(body.copy, bundle, current.editorialPlan, body.parentGuide ?? current.parentGuide);
+    if (flags.length) throw new ApiError(422, flags[0].message, { code: flags[0].code, field: flags[0].path, reviewFlags: flags });
+    saved = { ...current, ...structuredClone(body), version: current.version + 1, revisionId: current.revisionId + 1, hasSavedCopy: true };
+    return structuredClone(saved);
+  };
+  return bundle;
+}
+function evidencePanel(path: string) {
+  const panel = host.querySelector<HTMLDetailsElement>(`.family-field-evidence[data-field-path="${path}"]`);
+  if (!panel) throw new Error(`Missing evidence control ${path}`);
+  return panel;
+}
+async function connectEvidence(path: string, evidenceId: string) {
+  const panel = evidencePanel(path), option = panel.querySelector<HTMLInputElement>(`[data-evidence-id="${evidenceId}"]`)!;
+  expect(option).not.toBeNull(); expect(option.disabled).toBe(false);
+  await act(async () => option.click()); await settle();
+  const confirmed = panel.querySelector<HTMLInputElement>("[data-evidence-confirm]")!;
+  expect(confirmed.disabled).toBe(false); await act(async () => confirmed.click()); await settle();
+  const connect = [...panel.querySelectorAll("button")].find(node => node.textContent === "대조한 근거를 이 칸에 연결")!;
+  expect(connect.disabled).toBe(false); await act(async () => connect.click()); await settle();
 }
 
 describe("family dialogue v2 editor", () => {
@@ -240,5 +267,149 @@ describe("family dialogue v2 editor", () => {
     expect(host.querySelector('[data-testid="family-evidence-stale"]')?.textContent).toContain("문구를 저장한 뒤 다시 열어 주세요");
     expect(host.querySelector('[data-testid="family-evidence-details"]')).toBeNull();
     expect(host.querySelector('.family-evidence a[href="https://source.example/interview"]')).toBeNull();
+  });
+
+  it("uses a fixed brand notice on the outro, leaves its wording editable, and explains the scope of other page controls", async () => {
+    await render();
+    expect(host.querySelector('[data-testid="family-canva-design-scope"]')?.textContent).toContain("Canva는 등록된 템플릿의 정렬·글자색을 사용합니다");
+    expect(host.querySelector(".family-design")).not.toBeNull(); expect(host.querySelector(".page-background-editor")).not.toBeNull();
+    const before = structuredClone((saved as FamilyDialogueResponse).pageDesigns.outro);
+    await selectPage("8페이지 · 닫는 표지");
+    expect(host.querySelector('[data-testid="family-outro-fixed-design"]')?.textContent).toContain("고정 배경·중앙 정렬·기존 로고");
+    expect(host.querySelector(".family-design")).toBeNull(); expect(host.querySelector(".page-background-editor")).toBeNull();
+    expect(host.querySelector('input[aria-label="페이지 배경 이미지 파일"]')).toBeNull();
+    expect([...host.querySelectorAll("button")].some(node => node.textContent === "승인된 닫는 표지 배치 사용")).toBe(false);
+    expect(field("fields.cta").readOnly).toBe(false);
+    await input("fields.cta", "다음 대화를 위해 저장해 주세요."); await click("문구·디자인 저장");
+    expect(saved.copy.pages[7]).toMatchObject({ fields: { cta: "다음 대화를 위해 저장해 주세요." } });
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro).toEqual(before);
+    await selectPage("7페이지 · 작은 활동");
+    expect(host.querySelector(".family-design")).not.toBeNull(); expect(host.querySelector(".page-background-editor")).not.toBeNull();
+    expect(mocks.api.mock.calls.some(([request]) => request.endsWith("/background") || request.endsWith("/generate"))).toBe(false);
+  });
+
+  it("preserves an existing outro design until an explicit draft reset, retaining the old asset history and undo", async () => {
+    const initial = fresh();
+    initial.pageDesigns.outro = { ...initial.pageDesigns.outro, alignment: "left", previousAssetIds: [70, 71], background: { kind: "image", assetId: 81, color: "#FAFAFA", fit: "contain", focalX: 23, focalY: 68, brightness: 73, overlay: 62 } };
+    saved = initial;
+    const originalDesign = structuredClone(initial.pageDesigns.outro), originalCopy = structuredClone(initial.copy);
+    await render(); await selectPage("8페이지 · 닫는 표지");
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro).toEqual(originalDesign);
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(0);
+    await input("fields.cta", "직접 쓴 마지막 안내를 보존합니다."); await click("문구·디자인 저장");
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro).toEqual(originalDesign);
+    expect(saved.copy.pages[7]).toMatchObject({ fields: { cta: "직접 쓴 마지막 안내를 보존합니다." } });
+    const writesBeforeReset = mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH").length;
+    await click("승인된 닫는 표지 배치 사용");
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro).toEqual(originalDesign);
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(writesBeforeReset);
+    expect(host.textContent).toContain("이전 배경 이미지는 기록에 보관했고 문구는 유지했습니다");
+    await click("이전 닫는 표지 배치 되돌리기"); expect(button("승인된 닫는 표지 배치 사용").disabled).toBe(false);
+    expect(field("fields.cta").value).toBe("직접 쓴 마지막 안내를 보존합니다.");
+    await click("승인된 닫는 표지 배치 사용"); await click("문구·디자인 저장");
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro).toEqual({ ...defaultPageDesigns().outro, previousAssetIds: [70, 71, 81] });
+    expect(saved.copy.pages.slice(0, 7)).toEqual(originalCopy.pages.slice(0, 7));
+    expect(saved.copy.pages[7]).toMatchObject({ fields: { cta: "직접 쓴 마지막 안내를 보존합니다." } });
+    await render(null); client.clear(); await render(); await selectPage("8페이지 · 닫는 표지");
+    expect(host.querySelector(".page-background-editor")).toBeNull();
+    expect([...host.querySelectorAll("button")].some(node => node.textContent === "승인된 닫는 표지 배치 사용")).toBe(false);
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro.previousAssetIds).toContain(81);
+    expect(mocks.api.mock.calls.some(([request]) => request.endsWith("/background") || request.endsWith("/generate"))).toBe(false);
+  });
+
+  it("recovers an old outro image as a proposal without silently changing the approved close", async () => {
+    const requestId = "10000000-0000-4000-8000-000000000099";
+    sessionStorage.setItem("spacepenguin.generation:3:28:page-background", JSON.stringify({ requestId, pageId: "outro", version: 3, priorAssetId: null, mode: "ai" }));
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (request, options) => request === `${path}/background-requests/${requestId}`
+      ? { status: "succeeded", response: { assetId: 82, version: 3, pageId: "outro", source: "ai", credit: "기존 요청에서 만든 그림", jobId: 99 } }
+      : fallback(request, options));
+    await render(); await click("기존 배경 작업 결과 확인");
+    expect(host.textContent).toContain("확인 후 사용할 수 있는 배경");
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro).toEqual(defaultPageDesigns().outro);
+    expect(mocks.api.mock.calls.some(([, options]) => options?.method === "PATCH")).toBe(false);
+    await click("현재 표지에 이 배경 사용"); await click("문구·디자인 저장");
+    expect((saved as FamilyDialogueResponse).pageDesigns.cover.background).toMatchObject({ kind: "image", assetId: 82 });
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro).toEqual(defaultPageDesigns().outro);
+    expect(mocks.api.mock.calls.some(([request]) => request.endsWith("/background") || request.endsWith("/generate"))).toBe(false);
+  });
+
+  it.each([false, true])("manually edits one summary fact, explicitly reconnects its actual evidence, and saves/reopens without losing sibling refs (legacy aggregate: %s)", aggregate => {
+    return (async () => {
+      const initial = fresh(), summary = initial.copy.pages[1]; if (summary.id !== "news_summary") throw new Error("summary required");
+      if (aggregate) {
+        summary.fields.facts[1] = "게이츠는 전문 업무에서 AI의 성과를 전망했어요.";
+        summary.claimRefs = [{ fieldPath: "fields.facts", claimType: "forecast", factIds: ["F1"], resourceIds: [] }];
+      }
+      requireActualEvidence(undefined, initial);
+      await render(); await selectPage("2페이지 · 뉴스 요약");
+      const text = "게이츠는 AI가 전문 업무에서 앞설 가능성을 전망했어요.";
+      await input("fields.facts.0", text);
+      expect(evidencePanel("pages.news_summary.fields.facts.0").querySelector("summary")?.textContent).toContain("재연결 필요");
+      expect(evidencePanel("pages.news_summary.fields.facts.1").querySelector("summary")?.textContent).toContain("연결됨");
+      await click("문구·디자인 저장");
+      expect(host.textContent).toContain("뉴스 요약의 각 사실에 근거를 연결"); expect(field("fields.facts.0").value).toBe(text);
+      const failedBody = mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH").at(-1)![1].body;
+      expect(failedBody.copy.pages[1].claimRefs).toEqual([{ fieldPath: "fields.facts.1", claimType: aggregate ? "forecast" : "attributed_statement", factIds: [aggregate ? "F1" : "F2"], resourceIds: [] }]);
+      const panel = evidencePanel("pages.news_summary.fields.facts.0");
+      expect(panel.textContent).toContain("발언자: 빌 게이츠"); expect(panel.textContent).toContain("전문 업무의 성과");
+      await connectEvidence("pages.news_summary.fields.facts.0", "fact:F1"); await click("문구·디자인 저장");
+      expect((saved as FamilyDialogueResponse).copy.pages[1].claimRefs).toContainEqual({ fieldPath: "fields.facts.0", claimType: "forecast", factIds: ["F1"], resourceIds: [] });
+      expect(saved.copy.pages[1]).toMatchObject({ fields: { facts: [text, summary.fields.facts[1]] } });
+      await render(null); client.clear(); await render(); await selectPage("2페이지 · 뉴스 요약");
+      expect(field("fields.facts.0").value).toBe(text);
+      expect(evidencePanel("pages.news_summary.fields.facts.0").querySelector("summary")?.textContent).toContain("연결됨");
+      expect(mocks.api.mock.calls.some(([request]) => request.endsWith("/generate"))).toBe(false);
+    })();
+  });
+
+  it("requires fresh evidence for a new fact and removes only the deleted row's binding", async () => {
+    requireActualEvidence(); await render(); await selectPage("2페이지 · 뉴스 요약");
+    await click("사실 한 칸 추가"); await input("fields.facts.2", "게이츠는 전문 업무의 미래를 전망했어요.");
+    expect(evidencePanel("pages.news_summary.fields.facts.2").querySelector("summary")?.textContent).toContain("재연결 필요");
+    await connectEvidence("pages.news_summary.fields.facts.2", "fact:F1"); await click("문구·디자인 저장");
+    expect((saved as FamilyDialogueResponse).copy.pages[1].claimRefs).toHaveLength(3);
+    await click("마지막 사실 칸 빼기"); await click("문구·디자인 저장");
+    expect((saved as FamilyDialogueResponse).copy.pages[1].claimRefs).toEqual(fresh().copy.pages[1].claimRefs);
+    await click("사실 한 칸 추가");
+    expect(evidencePanel("pages.news_summary.fields.facts.2").querySelector("summary")?.textContent).toContain("재연결 필요");
+    expect(mocks.api.mock.calls.some(([request]) => request.endsWith("/generate"))).toBe(false);
+  });
+
+  it("switches to a scientific definition and saves it against an inspected resource without any AI call", async () => {
+    const bundle = familyEvidenceFixture(28, 3), resource = evidenceFixture(bundle.evidenceSet.evidenceSetId).resources[0];
+    Object.assign(resource, { kind: "definition", sourceId: "definition-1", title: "평균 속력의 통용 정의 · 모의 자료", url: "https://source.example/speed-definition", scope: "provided_document", evidenceExcerpt: "평균 속력은 이동한 총거리를 걸린 총시간으로 나눈 값이다.", readingTarget: "평균 속력의 정의 문장과 단위를 읽으세요." });
+    bundle.evidenceSet.resources = [resource, { ...resource, id: "R2", kind: "visit" }, { ...resource, id: "R3", kind: "paper", scope: "search_result" }];
+    bundle.researchedSources = [{ ...bundle.snapshot.sources[0], id: "definition-1", documentId: null, role: "provided", title: resource.title, scope: "provided_document", requestedUrl: resource.url, finalUrl: resource.url, text: resource.evidenceExcerpt }];
+    requireActualEvidence(bundle);
+    await render(createElement(CardCopyEditor, { channelId: 3, itemId: 28, showAi: false })); await selectPage("6페이지 · 개념 다듬기");
+    await conceptMode("scientific_explanation"); await input("fields.title", "평균 속력 알아보기"); await input("fields.concept", "평균 속력");
+    await input("fields.acceptedDefinition", resource.evidenceExcerpt); await input("fields.exampleOrNonExample", "10미터를 5초 동안 이동했다면 초속 2미터예요.");
+    await click("문구·디자인 저장"); expect(host.textContent).toContain("과학적 통용 정의의 실제 근거");
+    const panel = evidencePanel("pages.concept.fields.acceptedDefinition");
+    expect(panel.querySelector('[data-evidence-id="fact:F1"]')).toBeNull(); expect(panel.querySelector('[data-evidence-id="fact:F2"]')).toBeNull();
+    expect(panel.querySelector('[data-evidence-id="resource:R2"]')).toBeNull(); expect(panel.querySelector('[data-evidence-id="resource:R3"]')).toBeNull();
+    expect(panel.textContent).toContain(resource.evidenceExcerpt); expect(panel.querySelector('a[href="https://source.example/speed-definition"]')).not.toBeNull();
+    await connectEvidence("pages.concept.fields.acceptedDefinition", "resource:R1"); await click("문구·디자인 저장");
+    expect((saved as FamilyDialogueResponse).copy.pages[5].claimRefs).toContainEqual({ fieldPath: "fields.acceptedDefinition", claimType: "research_finding", factIds: [], resourceIds: ["R1"] });
+    await render(null); client.clear(); await render(); await selectPage("6페이지 · 개념 다듬기");
+    expect(field("fields.acceptedDefinition").value).toBe(resource.evidenceExcerpt);
+    expect(evidencePanel("pages.concept.fields.acceptedDefinition").querySelector("summary")?.textContent).toContain("연결됨");
+    expect(mocks.api.mock.calls.some(([request]) => request.endsWith("/generate"))).toBe(false);
+  });
+
+  it("offers only the matching evidence view and reloads it without losing the operator's unsaved wording", async () => {
+    const bundle = familyEvidenceFixture(28, 3); requireActualEvidence(bundle);
+    (saved as FamilyDialogueResponse).evidence = { ...familyEvidenceView(bundle), evidenceSetId: "old-evidence" };
+    await render(); await selectPage("2페이지 · 뉴스 요약"); await input("fields.facts.0", "게이츠는 AI의 전문 업무 성과를 전망했어요.");
+    const panel = evidencePanel("pages.news_summary.fields.facts.0"); expect(panel.querySelector("[data-evidence-id]")).toBeNull();
+    const reload = [...panel.querySelectorAll("button")].find(node => node.textContent === "현재 원문 근거 다시 불러오기")!;
+    (saved as FamilyDialogueResponse).evidence = familyEvidenceView(bundle);
+    await act(async () => reload.click()); await settle();
+    expect(field("fields.facts.0").value).toBe("게이츠는 AI의 전문 업무 성과를 전망했어요.");
+    expect(panel.querySelector('[data-evidence-id="fact:F1"]')).not.toBeNull();
+    await connectEvidence("pages.news_summary.fields.facts.0", "fact:F1"); await click("문구·디자인 저장");
+    expect(saved.copy.pages[1]).toMatchObject({ fields: { facts: ["게이츠는 AI의 전문 업무 성과를 전망했어요.", "기사는 인터뷰 발언을 전하며 미래를 이야기해요."] } });
+    expect(mocks.api.mock.calls.some(([request]) => request.endsWith("/generate"))).toBe(false);
   });
 });

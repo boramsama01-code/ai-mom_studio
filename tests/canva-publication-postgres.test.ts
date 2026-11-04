@@ -31,7 +31,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   for (const mock of Object.values(api)) mock.mockReset();
   await getDb().update(canvaRenderJobs).set({ status: "cancelled" });
-  for (const [key, value] of Object.entries({ CLOUDINARY_CLOUD_NAME: "fixture", CLOUDINARY_API_KEY: "fixture", CLOUDINARY_API_SECRET: "fixture", AUTO_PUBLISH: "true", DRY_RUN: "false", INLINE_WORKER: "false" })) vi.stubEnv(key, value);
+  for (const [key, value] of Object.entries({ CLOUDINARY_CLOUD_NAME: "fixture", CLOUDINARY_API_KEY: "fixture", CLOUDINARY_API_SECRET: "fixture", AUTO_PUBLISH: "true", DRY_RUN: "false", INLINE_WORKER: "false", INSTAGRAM_API_VERSION: "v26.0" })) vi.stubEnv(key, value);
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Real external API calls prohibited in Canva publication test"); }));
   api.identity.mockImplementation(async (token: string) => ({ ok: true, ...publicationAccounts.get(token)! }));
   api.export.mockResolvedValue({ id: "export_known", status: "success", result: { urls: Array.from({ length: 8 }, (_, index) => `https://export-download.canva.com/opaque-${index}`) } });
@@ -61,7 +61,7 @@ async function exportedFixture() {
 it("approves one exact eight-page Canva artifact using real evidence and preserves its JPEG approval hash", async () => {
   const f = await exportedFixture();
   const result = await approveItem(f.db, f.request);
-  expect(result.ok).toBe(true); if (!result.ok) throw new Error(result.error);
+  expect(result.ok, !result.ok ? result.error : undefined).toBe(true); if (!result.ok) throw new Error(result.error);
   expect(result.approval.cardSha256).toBe(cardApprovalHash(await loadCardPages(f.db, f.asset)));
   expect(result.approval.revisionId).toBe(f.revision.id); expect(result.approval.mediaAssetId).toBe(f.asset.id);
   expect(await f.db.select().from(deliveries).where(eq(deliveries.approvalId, result.approval.id))).toHaveLength(1);
@@ -144,7 +144,7 @@ it('reuses all sixteen exact artifact bytes after a stale caption is manually co
   for (const mock of [api.export, api.design, api.download, api.jpegs]) expect(mock).not.toHaveBeenCalled();
   await f.db.update(contentItems).set({ reviewStatus: 'reviewed' }).where(eq(contentItems.id, f.item.id));
   const result = await approveItem(f.db, { ...f.request, revisionId: confirmed.revisionId, mediaAssetId: asset.id, captions, publicationDraftVersion: 2, requestId: randomUUID() });
-  expect(result.ok).toBe(true); if (!result.ok) throw new Error(result.error);
+  expect(result.ok, !result.ok ? result.error : undefined).toBe(true); if (!result.ok) throw new Error(result.error);
   expect(result.approval.cardSha256).toBe(cardApprovalHash(oldPages)); expect(result.approval.revisionId).toBe(confirmed.revisionId); expect(result.approval.mediaAssetId).toBe(asset.id);
 });
 

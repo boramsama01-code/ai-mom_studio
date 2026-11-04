@@ -3,7 +3,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { login, naverResponse, resetDb, setTestEnv } from "./helpers";
-import { discussionCardCopyFixture } from "./fixtures/discussionCardCopy";
+import { createFamilyProviderMock } from "./fixtures/familyProvider";
+import { defaultChannelRoleSettings } from "../shared/channelAi";
 
 setTestEnv();
 
@@ -27,7 +28,6 @@ const { runCollect } = await import("../server/worker/collect");
 const { clusterArticles, rankClusters, toArticle, tokenize, outletOf, blockedReason } = await import("../server/services/discover");
 const { mapNaverItem } = await import("../server/services/naver");
 const { __resetNaverProviderForTest } = await import("../server/services/naver");
-const { env } = await import("../server/env");
 const schema = await import("../shared/schema");
 const { eq } = await import("drizzle-orm");
 
@@ -149,12 +149,15 @@ describe("수집 실행 안의 자동 발굴", () => {
     expect(r.counts.discoveryPicked).toBe(0);
   });
 
-  it("화제 선정 뒤 채널의 Gemini 요약·OpenAI 카드 문구를 별도 생성하고 호출 예산을 공유한다", async () => {
+  it("화제 선정 뒤 고정된 채널별 모델로 새 8장 원고·캡션·표지를 만들고 호출 예산을 공유한다", async () => {
     // 앞 테스트에서 저장한 과학 채널 항목 지우기(세션 테이블은 유지)
     const { getPool } = await import("../server/db");
     await getPool().query(`delete from studio_revisions where card_id in (select id from studio_cards where source_item_id in (select id from content_items where channel_id = ${SCIENCE}));
       delete from studio_cards where source_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_sources where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from media_assets where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from family_editorial_stages where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from family_evidence_records where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_revisions where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_items where channel_id = ${SCIENCE};`);
     vi.stubEnv("AI_PROVIDER", "anthropic"); vi.stubEnv("ANTHROPIC_API_KEY", "curator-fixture-key"); vi.stubEnv("ANTHROPIC_MODEL", "claude-curator-fixture");
@@ -165,35 +168,27 @@ describe("수집 실행 안의 자동 발굴", () => {
       const fossil = args.candidates.find((c) => c.titles[0].includes("공룡"))!;
       return { ok: true, model: "claude-curator-fixture", usage: { inputTokens: 100, outputTokens: 50 }, droppedEvidence: 0, data: { picks: [{ candidate_id: fossil.id, reason: "화석으로 과거를 추론하는 과정을 이야기하기 좋음", angle: "뼈 몇 조각으로 어떻게 새 종이라고 알 수 있을까?" }] } };
     });
-    fakeScience.mockImplementation(async (args: { model: string; sources: Array<{ source_id: number; text: string }>; budget: { take(): boolean; inputTokens: number; outputTokens: number } }) => {
-      if (!args.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달" };
-      args.budget.inputTokens += 1000;
-      args.budget.outputTokens += 500;
-      return {
-      ok: true, model: args.model, usage: { inputTokens: 1000, outputTokens: 500 }, droppedEvidence: 0,
-      data: { topic: "공룡 화석", age_band: "중1~3", key_question: "뼈 몇 조각으로 새 종을 알 수 있을까?", background: ["a", "b", "c"], discussion_questions: ["1", "2", "3"], scientific_basis: "x", misconceptions: [], parent_hints: [], safe_activity: null, sources: [], evidence: [], articleAnalysis: {
-        version: 1, articleType: "report", centralEvent: "새 화석의 발견을 다룬 보도입니다.",
-        claims: [{ id: "claim-1", kind: "reported_fact", statement: "기사가 화석 연구를 다룹니다.", speaker: null, source_id: args.sources[0].source_id, quote: args.sources[0].text.slice(0, 80) }],
-        limitations: ["확보한 기사 범위에서 검토했습니다."], keyConcepts: [{ term: "종", meaning: "분류의 기준을 검토할 개념" }],
-      } },
-      };
-    });
-    fakeNewsCopy.mockImplementation(async (args: { model: string; budget: { take(): boolean; inputTokens: number; outputTokens: number } }) => {
-      if (!args.budget.take()) return { ok: false, kind: "budget", error: "이번 실행의 LLM 호출 한도 도달" };
-      args.budget.inputTokens += 800; args.budget.outputTokens += 400;
-      return { ok: true, data: discussionCardCopyFixture(), model: args.model, usage: { inputTokens: 800, outputTokens: 400 }, droppedEvidence: 0 };
-    });
+    const aiSettings = defaultChannelRoleSettings();
+    aiSettings.roleModels.article_analysis = { provider: "gemini", model: "gemini-discovery-analysis" };
+    aiSettings.roleModels.card_copy = { provider: "openai", model: "gpt-discovery-copy" };
+    aiSettings.roleModels.caption = { provider: "openai", model: "gpt-discovery-caption" };
+    aiSettings.roleModels.image_generation = { provider: "openai", model: "gpt-image-discovery" };
+    aiSettings.editorial = { additionalResourcesAutoSearch: false, visitScope: "off" };
+    const [originalChannel] = await getDb().select().from(schema.channels).where(eq(schema.channels.id, SCIENCE));
+    await getDb().update(schema.channels).set({ aiSettings }).where(eq(schema.channels.id, SCIENCE));
+    const provider = createFamilyProviderMock(); vi.stubGlobal("fetch", vi.fn(provider.fetch));
     try {
       const db = getDb();
       const r = await runCollect(db, SCIENCE, { trigger: "cli", now: NOW, naverFetch, fetchSource: okFetch });
       expect(fakeCurate).toHaveBeenCalledOnce();
       expect(r.counts.discoveryPicked).toBe(1);
-      expect(r.counts.drafted).toBe(1);
-      expect(fakeScience).toHaveBeenCalledOnce();
-      expect(fakeScience.mock.calls[0][0]).toMatchObject({ provider: "gemini", model: env.geminiModel, analyzeSource: true });
-      expect(fakeNewsCopy).toHaveBeenCalledOnce();
-      expect(fakeNewsCopy.mock.calls[0][0]).toMatchObject({ provider: "openai", model: env.openaiModel });
-      expect(fakeNewsCopy.mock.calls[0][0].budget).toBe(fakeScience.mock.calls[0][0].budget);
+      expect(r.counts.drafted, JSON.stringify(r.errors)).toBe(1);
+      expect(fakeScience).not.toHaveBeenCalled(); expect(fakeNewsCopy).not.toHaveBeenCalled();
+      expect(provider.calls.find(call => call.stage === "article_analysis")?.url).toContain("gemini-discovery-analysis");
+      expect(provider.calls.find(call => call.stage === "card_copy")?.body.model).toBe("gpt-discovery-copy");
+      expect(provider.calls.find(call => call.stage === "caption")?.body.model).toBe("gpt-discovery-caption");
+      expect(provider.calls.filter(call => call.stage === "image_generation")).toHaveLength(1);
+      expect(provider.calls.find(call => call.stage === "image_generation")?.body.model).toBe("gpt-image-discovery");
       const [item] = await db.select().from(schema.contentItems).where(eq(schema.contentItems.channelId, SCIENCE));
       expect(item.discovery).toMatchObject({ pickedBy: "claude", angle: "뼈 몇 조각으로 어떻게 새 종이라고 알 수 있을까?" });
       expect(item.currentRevisionId).not.toBeNull();
@@ -201,14 +196,19 @@ describe("수집 실행 안의 자동 발굴", () => {
       expect(item.title).toBe("뼈 몇 조각으로 새 종을 알 수 있을까?");
       expect((item.discovery as { headline: string }).headline).toContain("공룡");
       const [run] = await db.select().from(schema.runs).where(eq(schema.runs.id, r.runId));
-      expect(run.llmUsage).toMatchObject({ calls: 3 }); // curation + summary + card copy share one allowance.
-      expect((run.snapshot as any).ai).toEqual({ summary: { provider: "gemini", model: env.geminiModel }, copy: { provider: "openai", model: env.openaiModel } });
+      expect(run.llmUsage).toMatchObject({ calls: provider.calls.length + 1 }); // Curation and every editorial/image stage share one allowance.
+      expect(run.llmUsage!.calls).toBeLessThanOrEqual(originalChannel.budget.llmCallsPerRun);
+      expect((run.snapshot as any).ai).toEqual({ summary: { provider: "gemini", model: "gemini-discovery-analysis" }, copy: { provider: "openai", model: "gpt-discovery-copy" } });
       const [revision] = await db.select().from(schema.contentRevisions).where(eq(schema.contentRevisions.id, item.currentRevisionId!));
-      expect(revision.payload.cardCopy).toEqual(discussionCardCopyFixture());
-      expect(revision.payload.articleAnalysis).toMatchObject({ articleType: "report" });
+      expect(revision.payload.cardCopy).toMatchObject({ version: 2, formatId: "family_dialogue_8" }); expect((revision.payload.cardCopy as any).pages).toHaveLength(8);
+      expect(revision.payload.pageDesigns).toMatchObject({ cover: { background: { kind: "image", assetId: expect.any(Number) } } });
+      expect(revision.payload.captionPackage).toMatchObject({ contentRevision: revision.id });
+      expect(revision.payload.rendererProvider).toBe("canva");
+      expect(revision.payload.evidenceBinding).toMatchObject({ sourceAnalysisId: expect.any(String) });
       expect(revision.payload.aiWorkflow).toMatchObject({ summary: { provider: "gemini" }, copy: { provider: "openai" }, warnings: [] });
     } finally {
-      vi.unstubAllEnvs();
+      await getDb().update(schema.channels).set({ aiSettings: originalChannel.aiSettings }).where(eq(schema.channels.id, SCIENCE));
+      vi.unstubAllEnvs(); vi.unstubAllGlobals();
     }
   });
 
@@ -217,6 +217,9 @@ describe("수집 실행 안의 자동 발굴", () => {
     await getPool().query(`delete from studio_revisions where card_id in (select id from studio_cards where source_item_id in (select id from content_items where channel_id = ${SCIENCE}));
       delete from studio_cards where source_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_sources where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from media_assets where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from family_editorial_stages where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
+      delete from family_evidence_records where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_revisions where content_item_id in (select id from content_items where channel_id = ${SCIENCE});
       delete from content_items where channel_id = ${SCIENCE};`);
     vi.stubEnv("ANTHROPIC_API_KEY", "configured-test-key");
@@ -224,6 +227,7 @@ describe("수집 실행 안의 자동 발굴", () => {
     vi.stubEnv("COLLECT_REVIEW_NOTIFICATIONS", String(collectionOnly));
     vi.stubEnv("TELEGRAM_REVIEW_CHAT_ID", "configured-test-destination");
     fakeCurate.mockClear(); fakeScience.mockClear(); fakeNewsCopy.mockClear(); fakeReview.mockClear();
+    const external = vi.fn(() => { throw new Error("Collection-only must not contact AI providers"); }); vi.stubGlobal("fetch", external);
     try {
       const r = await runCollect(getDb(), SCIENCE, { trigger: "schedule", now: NOW, naverFetch, fetchSource: okFetch, collectionOnly });
       expect(r.counts.discoveryPicked).toBe(2);
@@ -232,9 +236,10 @@ describe("수집 실행 안의 자동 발굴", () => {
       expect(fakeScience).not.toHaveBeenCalled();
       expect(fakeNewsCopy).not.toHaveBeenCalled();
       expect(fakeReview).not.toHaveBeenCalled();
+      expect(external).not.toHaveBeenCalled();
       const [run] = await getDb().select().from(schema.runs).where(eq(schema.runs.id, r.runId));
       expect(run.llmUsage).toMatchObject({ calls: 0 });
-    } finally { vi.unstubAllEnvs(); }
+    } finally { vi.unstubAllEnvs(); vi.unstubAllGlobals(); }
   });
 
   it("연결 확인은 대기 작업을 실행하지 않으며 수집 연결을 게시 워커 동작으로 표시하지 않는다", async () => {
