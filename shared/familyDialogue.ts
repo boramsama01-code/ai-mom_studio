@@ -31,7 +31,7 @@ function pageSchema(ai: boolean) {
   const o = (budget: number) => t(budget).nullable();
   const view = z.object({ label: t(10), body: t(45) }).strict();
   const activity = z.object({ label: t(18), action: t(60), resourceId: z.string().regex(/^R[1-9][0-9]*$/).nullable() }).strict();
-  const base = { page: z.number().int().min(1).max(8), layout: z.string().min(1).max(80), claimRefs: z.array(claimRefSchema).max(40), ...(ai ? {} : { displayOverrides: familyDisplayOverridesSchema.optional() }) };
+  const base = { page: z.number().int().min(1).max(8), layout: z.string().min(1).max(80), claimRefs: z.array(claimRefSchema).max(40), displayOverrides: familyDisplayOverridesSchema.optional() };
   const page = <Id extends FamilyPageId, T extends z.ZodType>(id: Id, fields: T) => z.object({ ...base, id: z.literal(id), type: z.literal(id), fields }).strict();
   return z.discriminatedUnion("id", [
     page("cover", z.object({ headline: t(24), subtitle: t(36, false) }).strict()),
@@ -52,6 +52,7 @@ export type FamilyPage = z.infer<typeof familyPageSchema>;
 export type PageFields = { [Id in FamilyPageId]: Extract<FamilyPage, { id: Id }>['fields'] };
 const makeCardSchema = (ai: boolean) => z.object({ version: z.literal(2), formatId: z.literal(FAMILY_FORMAT_ID), templateKey: z.string().min(1).max(120), pages: z.array(pageSchema(ai)).length(8) }).strict().superRefine((copy, ctx) => {
   copy.pages.forEach((page, index) => {
+    if (ai && page.displayOverrides !== undefined) ctx.addIssue({ code: "custom", path: ["pages", index, "displayOverrides"], message: "표시 문구 수정값은 AI가 생성하지 않습니다. 기존 운영자 수정값을 유지해 주세요." });
     if (page.id !== FAMILY_PAGE_IDS[index] || page.type !== page.id || page.page !== index + 1) ctx.addIssue({ code: "custom", path: ["pages", index], message: "8장 카드의 고정 ID·역할·페이지 순서를 유지해 주세요." });
     for (const [refIndex, ref] of page.claimRefs.entries()) {
       if (!familyFieldExists(page, ref.fieldPath)) ctx.addIssue({ code: "custom", path: ["pages", index, "claimRefs", refIndex, "fieldPath"], message: "근거 연결이 현재 페이지의 실제 문구 필드를 가리켜야 합니다." });

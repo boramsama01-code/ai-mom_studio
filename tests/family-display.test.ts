@@ -57,7 +57,7 @@ describe("editable family display copy", () => {
     copy.pages[1].displayOverrides = { kicker: "함께 읽기", sourceCredit: "", pageNumber: "둘째 장" };
     expect(canvaDisplaySupportErrors(copy, legacy)).toHaveLength(3);
     expect(() => canvaTextFields(copy, { dataset: legacy })).toThrow("표시 문구");
-    expect(copy.pages[1].displayOverrides.sourceCredit).toBe("");
+    expect(copy.pages[1].displayOverrides?.sourceCredit).toBe("");
     expect(canvaDisplaySupportErrors(copy, {})).toHaveLength(3);
   });
 
