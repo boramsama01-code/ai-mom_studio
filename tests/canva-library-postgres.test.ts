@@ -20,6 +20,8 @@ const {canvaInputHash}=await import('../server/services/canvaEditorialAssets');
 const {CANVA_LIBRARY_SETTING,getCanvaLibraryConfig,getCanvaTemplateLibrary,getCanvaLibraryPreview,configureCanvaLibrary,invalidateCanvaLibraryConnection,resetCanvaLibraryBackoff,syncCanvaTemplateLibrary,runCanvaLibraryPreviewJobs,checkedCanvaLibrarySelection}=await import('../server/services/canvaTemplateLibrary');
 const {enqueueCanvaRender,runCanvaJobs,canvaJobDto}=await import('../server/services/canvaEditorial');
 const {reconcileCanvaJob,canvaRecoveryToken}=await import('../server/services/canvaReconciliation');
+const {tryBackgroundImageWork}=await import('../server/services/readingCardRaster');
+const {HttpError}=await import('../server/routes/util');
 const folderId='FAfixture';let sourceId:string,version:number;
 const sourcePages=()=>Array.from({length:8},(_,index)=>({id:`page_${index+1}`,pageNumber:index+1,width:1080,height:1350,thumbnailUrl:null}));
 const dataset=()=>Object.fromEntries(CANVA_READING_TEXT_FIELDS.map(name=>[name,{type:'text'}]));
@@ -87,6 +89,20 @@ describe('Canva folder metadata and preview persistence',()=>{
     await sync();api.submitPreview.mockRejectedValue(new CanvaRestError('결과 형식 미확인',502,'invalid_response',true,'known_export'));
     await previewTick();expect((await previewJobs())[0]).toMatchObject({status:'queued',phase:'polling',exportJobId:'known_export'});
     await previewTick();await previewTick();expect(api.submitPreview).toHaveBeenCalledOnce();expect(api.getPreview).toHaveBeenCalledWith(expect.anything(),'known_export');expect((await designRow()).previewStatus).toBe('ready');
+  });
+  it('defers preview downloads behind image admission while retaining the same accepted export ID',async()=>{
+    await sync();await previewTick();await previewTick();
+    let release!:()=>void;const wait=new Promise<void>(resolve=>{release=resolve;});const busy=tryBackgroundImageWork(async()=>{await wait;});
+    try{
+      await previewTick();expect(api.download).not.toHaveBeenCalled();
+      expect((await previewJobs())[0]).toMatchObject({status:'queued',phase:'download',exportJobId:'export_preview'});expect(api.submitPreview).toHaveBeenCalledOnce();
+    }finally{release();await busy;}
+    await previewTick();expect((await designRow()).previewStatus).toBe('ready');expect(api.submitPreview).toHaveBeenCalledOnce();
+  });
+  it('retries a bounded download using the saved export rather than issuing another POST',async()=>{
+    await sync();await previewTick();await previewTick();api.download.mockRejectedValueOnce(new HttpError(503,'preview time budget',{code:'preview_download_retry'}));
+    await previewTick();expect((await previewJobs())[0]).toMatchObject({status:'queued',phase:'download',exportJobId:'export_preview',errorCode:'preview_download_retry'});
+    await previewTick();expect((await designRow()).previewStatus).toBe('ready');expect(api.submitPreview).toHaveBeenCalledOnce();
   });
   it('retains cached images and backs off the whole preview queue on export quota exhaustion',async()=>{
     await ready();version=124;await sync();api.submitPreview.mockRejectedValue(new CanvaRestError('한도',429,'rate_limited',false,null,{reason:'quota_exceeded'}));

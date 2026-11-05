@@ -7,6 +7,26 @@ export const CANVA_LIBRARY_DEFAULT_FOLDER_ID = 'FAHZ9dTp-H8';
 export const CANVA_LIBRARY_SYNC_INTERVAL_SECONDS = 120;
 export const CANVA_LIBRARY_MAPPING_VERSION = 'canva-folder-reading8/v1';
 export const CANVA_LIBRARY_MAX_PREVIEW_PAGES = 20;
+export const CANVA_LIBRARY_PREVIEW_MAX_WIDTH = 540;
+export const CANVA_LIBRARY_PREVIEW_MAX_HEIGHT = 720;
+export const CANVA_LIBRARY_PREVIEW_MAX_PIXELS = CANVA_LIBRARY_PREVIEW_MAX_WIDTH * CANVA_LIBRARY_PREVIEW_MAX_HEIGHT;
+const CANVA_PREVIEW_MIN_EXPORT_AXIS = 40;
+
+/** A single requested axis preserves Canva's own page ratio. Pick a size that
+ * fits every page, including a design with different page dimensions. The
+ * original dimensions remain in the catalog and native-production snapshot. */
+export function canvaLibraryPreviewGeometry<T extends {width:number|null;height:number|null}>(pages:T[]):{format:{width:number;height?:never}|{height:number;width?:never};pages:Array<T&{width:number;height:number}>}|null {
+  if(!pages.length||pages.length>CANVA_LIBRARY_MAX_PREVIEW_PAGES||pages.some(page=>!page.width||!page.height||!Number.isFinite(page.width)||!Number.isFinite(page.height)||page.width<=0||page.height<=0))return null;
+  const width=Math.floor(Math.min(CANVA_LIBRARY_PREVIEW_MAX_WIDTH,...pages.map(page=>Math.min(page.width!,CANVA_LIBRARY_PREVIEW_MAX_HEIGHT*page.width!/page.height!))));
+  const height=Math.floor(Math.min(CANVA_LIBRARY_PREVIEW_MAX_HEIGHT,...pages.map(page=>Math.min(page.height!,CANVA_LIBRARY_PREVIEW_MAX_WIDTH*page.height!/page.width!))));
+  const byWidth=width>=CANVA_PREVIEW_MIN_EXPORT_AXIS?pages.map(page=>({...page,width,height:Math.max(1,Math.round(page.height!*width/page.width!))})):null;
+  const byHeight=height>=CANVA_PREVIEW_MIN_EXPORT_AXIS?pages.map(page=>({...page,width:Math.max(1,Math.round(page.width!*height/page.height!)),height})):null;
+  if(!byWidth&&!byHeight)return null;
+  const area=(sizes:typeof byWidth)=>sizes?.reduce((sum,page)=>sum+page.width*page.height,0)??0;
+  const useHeight=!!byHeight&&(!byWidth||area(byHeight)>area(byWidth)||area(byHeight)===area(byWidth)&&width<CANVA_LIBRARY_PREVIEW_MAX_WIDTH&&height===CANVA_LIBRARY_PREVIEW_MAX_HEIGHT);
+  const result=useHeight?{format:{height},pages:byHeight!}:{format:{width},pages:byWidth!};
+  return result.pages.some(page=>page.width>CANVA_LIBRARY_PREVIEW_MAX_WIDTH||page.height>CANVA_LIBRARY_PREVIEW_MAX_HEIGHT)?null:result;
+}
 
 const nullableText = z.string().nullable();
 export const canvaLibraryPageSchema = z.object({

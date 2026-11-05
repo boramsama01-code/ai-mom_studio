@@ -5,8 +5,25 @@ const MAX_PENDING_PAGES=4;
 const PAGE_TIMEOUT_MS=30_000;
 let pendingPages=0;
 let activeWorkers=0,maxObservedWorkers=0;
+let activeBackgroundWork=0,maxObservedHeavyWork=0,deferredBackgroundWork=0;
 let tail:Promise<void>=Promise.resolve();
-export function readingRasterState(){return {pendingPages,activeWorkers,maxObservedWorkers,admissionLimit:MAX_PENDING_PAGES};}
+export function readingRasterState(){return {pendingPages,activeWorkers,maxObservedWorkers,activeBackgroundWork,maxObservedHeavyWork,deferredBackgroundWork,admissionLimit:MAX_PENDING_PAGES};}
+
+/** Background image downloads/decoding use the same admission as native card
+ * rasterization. Reserve synchronously, before allocating any input buffers.
+ * Foreground callers already waiting take priority; background callers defer
+ * their durable job instead of adding another large task to this queue. */
+export async function tryBackgroundImageWork<T>(work:()=>Promise<T>):Promise<{accepted:false}|{accepted:true;value:T}>{
+  if(pendingPages||activeBackgroundWork){deferredBackgroundWork++;return {accepted:false};}
+  const previous=tail;
+  let release!:()=>void;
+  tail=new Promise<void>(resolve=>{release=resolve;});
+  activeBackgroundWork++;
+  maxObservedHeavyWork=Math.max(maxObservedHeavyWork,activeWorkers+activeBackgroundWork);
+  await previous;
+  try{return {accepted:true,value:await work()};}
+  finally{activeBackgroundWork--;release();}
+}
 
 /** A single short-lived isolate owns the SVG tree and native raster buffers.
  * Destroy it before starting another page; no font or user-state work runs in
@@ -31,6 +48,7 @@ function rasterPage(svg:string,timeoutMs:number):Promise<Buffer>{
   return new Promise((resolve,reject)=>{
     const worker=new Worker(new URL('./readingCardRasterWorker.mjs',import.meta.url),{workerData:{svg},execArgv:[]});
     activeWorkers++;maxObservedWorkers=Math.max(maxObservedWorkers,activeWorkers);
+    maxObservedHeavyWork=Math.max(maxObservedHeavyWork,activeWorkers+activeBackgroundWork);
     let settled=false;
     const timer=setTimeout(()=>{void finish(new HttpError(503,'이미지 처리 시간이 초과되었습니다. 원고와 이전 결과는 유지했습니다. 다시 미리보기를 만들어 주세요.'));},timeoutMs);
     const finish=async(error?:Error,bytes?:Uint8Array)=>{

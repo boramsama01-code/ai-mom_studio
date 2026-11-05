@@ -3,10 +3,11 @@ import { and, asc, desc, eq, inArray, isNull, lte, notInArray, or, sql } from 'd
 import { z } from 'zod';
 import type { DB } from '../db';
 import { appSettings, canvaLibraryDesigns, canvaLibraryPreviewJobs, canvaLibraryPreviews, type CanvaLibraryStoredPage } from '../../shared/schema';
-import { CANVA_LIBRARY_DEFAULT_FOLDER_ID, CANVA_LIBRARY_SYNC_INTERVAL_SECONDS, canvaFolderDatasetErrors, canvaFolderSnapshotSchema, parseCanvaFolderId, type CanvaLibraryItem, type CanvaTemplateLibraryState } from '../../shared/canvaTemplateLibrary';
+import { CANVA_LIBRARY_DEFAULT_FOLDER_ID, CANVA_LIBRARY_SYNC_INTERVAL_SECONDS, canvaFolderDatasetErrors, canvaFolderSnapshotSchema, canvaLibraryPreviewGeometry, parseCanvaFolderId, type CanvaLibraryItem, type CanvaTemplateLibraryState } from '../../shared/canvaTemplateLibrary';
 import { canvaConfigured, canvaConnected } from './canva';
 import { canvaInputHash } from './canvaEditorialAssets';
 import { downloadCanvaLibraryExport } from './canvaLibraryAssets';
+import { tryBackgroundImageWork } from './readingCardRaster';
 import { HttpError } from '../routes/util';
 import * as rest from './canvaRest';
 
@@ -193,7 +194,7 @@ export async function syncCanvaTemplateLibrary(db:DB){
         const confirmed=await rest.getCanvaDesign(db,item.id);
         if(design.updatedAt!==confirmed.updatedAt||version!==null&&version!==String(confirmed.updatedAt))continue;
         const sourceVersion=design.updatedAt===null?null:String(design.updatedAt),status=sourceVersion===null?{status:'unavailable',reason:'Canva 원본의 수정 버전을 확인할 수 없어 자동 채우기를 준비하지 않았습니다.'}:canvaLibraryDesignStatus(design.pageCount,pages,dataset);
-        const canPreview=sourceVersion!==null&&pages.length>0&&pages.every(page=>page.width!==null&&page.height!==null&&page.width*page.height<=40_000_000);
+        const canPreview=sourceVersion!==null&&canvaLibraryPreviewGeometry(pages)!==null&&pages.every(page=>page.width!==null&&page.height!==null&&page.width*page.height<=40_000_000);
         await fencedSync(db,config,async tx=>{
           await tx.update(canvaLibraryDesigns).set({title:design.title??item.title,sourceUpdatedAt:sourceVersion,metadataVersion:datasetTransient?null:sourceVersion??'unversioned',editUrl:design.editUrl??item.editUrl,pageCount:design.pageCount,pages,dataset,datasetHash:canvaInputHash(dataset),...status,
           ...(datasetUnavailable&&sourceVersion!==null&&status.status==='needs_fields'?{status:datasetTransient?'unavailable':'needs_fields',reason:datasetTransient?'자동 채우기 필드를 확인하지 못해 다음 동기화에서 다시 확인합니다. 미리보기와 직접 편집은 사용할 수 있습니다.':'이 디자인의 자동 채우기 필드를 아직 읽을 수 없습니다. Canva에서 표준 원고 라벨을 연결한 뒤 원본을 저장해 주세요. 미리보기와 직접 편집은 사용할 수 있습니다.'}:{}),
@@ -272,7 +273,7 @@ async function previewStep(db:DB,job:PreviewJob,config:Config){
     });
     if(!claimed)throw new HttpError(409,'미리보기 작업을 다른 처리기가 인계했습니다.',{code:'lease_lost'});
     job.phase='submitting';
-    const output=await rest.submitCanvaLibraryExport(db,design.sourceId,job.pages.map(page=>page.pageNumber));
+    const output=await rest.submitCanvaLibraryExport(db,design.sourceId,job.pages);
     await persistPreviewExport(db,job,output.id);return;
   }
   if(!job.exportJobId)throw new HttpError(409,'미리보기 내보내기의 접수 결과가 미확정입니다. 중복 요청하지 않았습니다.',{code:'result_unknown'});
@@ -281,7 +282,9 @@ async function previewStep(db:DB,job:PreviewJob,config:Config){
   if(output.status==='in_progress')return savePreviewStep(db,job,{},5000);
   if(job.phase==='polling')return savePreviewStep(db,job,{phase:'download'});
   if(job.phase!=='download')throw new HttpError(409,'미리보기의 저장된 작업 단계를 확인할 수 없습니다.',{code:'result_unknown'});
-  const images=await downloadCanvaLibraryExport(output.result!.urls,job.pages),source=await rest.getCanvaDesign(db,design.sourceId);
+  const prepared=await tryBackgroundImageWork(()=>downloadCanvaLibraryExport(output.result!.urls,job.pages));
+  if(!prepared.accepted)return savePreviewStep(db,job,{},5000);
+  const images=prepared.value,source=await rest.getCanvaDesign(db,design.sourceId);
   if(String(source.updatedAt)!==job.sourceVersion)return savePreviewStep(db,job,{status:'superseded'});
   await db.transaction(async tx=>{
     const [setting]=await tx.select().from(appSettings).where(eq(appSettings.key,CANVA_LIBRARY_SETTING)).for('update');const activeConfig=configValue(setting?.value);
@@ -321,7 +324,7 @@ export async function runCanvaLibraryPreviewJobs(db:DB){
       await persistPreviewExport(db,job,error.jobId);return;
     }
     const failure=canvaLibraryFailure(error,job.attempts),unknown=job.phase==='submitting'&&(!(error instanceof rest.CanvaRestError)||error.outcomeUnknown);
-    const retry=!unknown&&(failure.reconnect||['rate_limited','quota_exceeded','provider_unavailable','result_unknown','sync_superseded'].includes(failure.code));
+    const retry=!unknown&&(failure.reconnect||['rate_limited','quota_exceeded','provider_unavailable','result_unknown','sync_superseded','preview_download_retry'].includes(failure.code));
     await savePreviewStep(db,job,{status:unknown?'result_unknown':retry?'queued':'failed',phase:job.phase==='submitting'&&!unknown?'prepare':job.phase,errorCode:unknown?'result_unknown':failure.code,errorMessage:failure.message},failure.delay);
     await db.transaction(async tx=>{
       const [setting]=await tx.select().from(appSettings).where(eq(appSettings.key,CANVA_LIBRARY_SETTING)).for('update');const current=configValue(setting?.value);

@@ -4,6 +4,8 @@ import type { DB } from "../db";
 import type { CanvaDataset, CanvaField } from "../../shared/canvaEditorial";
 import { canvaProviderErrorCodeSchema, type CanvaFailureReason, type CanvaProviderErrorCode } from "../../shared/canvaCapabilities";
 import { accessToken, CANVA_API, CanvaError } from "./canva";
+import { canvaLibraryPreviewGeometry } from '../../shared/canvaTemplateLibrary';
+import type { CanvaLibraryStoredPage } from '../../shared/schema';
 
 export type CanvaRestOptions = { fetchImpl?: typeof fetch; signal?: AbortSignal };
 export type CanvaRestErrorCode = "not_connected" | "auth_required" | "permission_denied" | "not_found" | "export_expired" | "rate_limited" | "invalid_request" | "provider_unavailable" | "result_unknown" | "invalid_response" | "cancelled" | "job_failed";
@@ -167,11 +169,13 @@ function libraryExportJob(response: unknown, submitted: boolean, expectedId?: st
   if (header.status === 'in_progress') return header;
   return { ...header, result: { urls: validate(z.array(canvaUrl).min(1).max(20), raw!.urls, false, header.id, submitted) } };
 }
-export async function submitCanvaLibraryExport(db: DB, id: string, pages: number[], options: CanvaRestOptions = {}): Promise<CanvaRestJob<CanvaExportResult>> {
-  validate(z.array(z.number().int().min(1).max(500)).min(1).max(20).refine(value => new Set(value).size === value.length), pages, true);
-  // No width/height override: retain the actual Canva page ratio and reduce the
-  // downloaded bytes locally only after validating each page's dimensions.
-  return libraryExportJob(await rest(db, '/exports', options, { method: 'POST', json: { design_id: validId(id), format: { type: 'png', as_single_image: false, pages } } }), true);
+export async function submitCanvaLibraryExport(db: DB, id: string, sourcePages: CanvaLibraryStoredPage[], options: CanvaRestOptions = {}): Promise<CanvaRestJob<CanvaExportResult>> {
+  const pages=validate(z.array(z.number().int().min(1).max(500)).min(1).max(20).refine(value => new Set(value).size === value.length), sourcePages.map(page=>page.pageNumber), true);
+  const geometry=canvaLibraryPreviewGeometry(sourcePages);
+  if(!geometry)throw new CanvaRestError('Canva 미리보기를 만들 페이지 크기를 확인해 주세요.',400,'invalid_request');
+  // Canva preserves the page ratio when exactly one axis is requested. Fetch
+  // small preview PNGs; publication export keeps its separate full-size path.
+  return libraryExportJob(await rest(db, '/exports', options, { method: 'POST', json: { design_id: validId(id), format: { type: 'png', ...geometry.format, as_single_image: false, pages } } }), true);
 }
 export async function getCanvaLibraryExportJob(db: DB, id: string, options: CanvaRestOptions = {}): Promise<CanvaRestJob<CanvaExportResult>> {
   return libraryExportJob(await rest(db, `/exports/${validId(id)}`, options), false, id);
