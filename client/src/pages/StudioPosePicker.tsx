@@ -1,12 +1,10 @@
-import { createContext, useContext, useId, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { StudioCharacter, StudioPanel } from "@shared/studio";
-import { STUDIO_CHARACTERS, STUDIO_FAMILY_REFERENCE_URL, STUDIO_POSE_CATEGORIES, poseImageUrl, poseLabel, poseSheetUrl } from "@shared/studioCharacters";
+import { STUDIO_CHARACTERS, STUDIO_FAMILY_REFERENCE_URL, STUDIO_POSE_CATEGORIES, poseImageUrl, poseLabel } from "@shared/studioCharacters";
+import { FINAL_POSE_VERSION, FINAL_STUDIO_ASSETS, FINAL_FACE_FILTERS, finalAssetUrl, finalPose } from "@shared/studioFinalAssets";
 
 type PoseReference = NonNullable<StudioPanel["poseRefs"]>[number];
 const poseNumber = (pose: number) => String(pose).padStart(3, "0");
-
-/** The accepted family reference is mother / father / youngest / eldest. */
-const familyPosition: Record<StudioCharacter, number> = { pengpeng: 1, pempem: 0, penguin: 3, pengki: 2 };
 
 const ArtworkContext = createContext<{ retry: number; failed: () => void } | null>(null);
 
@@ -33,18 +31,18 @@ function ArtworkPreview({ source, alt, lazy = false }: { source: string; alt: st
 }
 
 export function CharacterPortrait({ character, className = "" }: { character: StudioCharacter; className?: string }) {
-  const artwork = useArtwork(STUDIO_FAMILY_REFERENCE_URL);
+  const artwork = useArtwork(poseImageUrl(character, 1, FINAL_POSE_VERSION));
   const characterInfo = STUDIO_CHARACTERS.find(c => c.id === character)!;
   return <span className={`studio-character-portrait ${className}`}>
-    <img src={artwork.src} alt={`${characterInfo.name} 기준 그림`} hidden={artwork.failed} onError={artwork.onError} decoding="async" style={{ left: `${familyPosition[character] * -100}%` }} />
+    <img src={artwork.src} alt={`${characterInfo.name} 기준 그림`} hidden={artwork.failed} onError={artwork.onError} decoding="async" />
     {artwork.failed && <span className="studio-artwork-missing">그림 로딩 실패</span>}
   </span>;
 }
 
-export function PoseThumbnail({ character, pose, className = "" }: { character: StudioCharacter; pose: number; className?: string }) {
+export function PoseThumbnail({ character, pose, assetVersion, className = "" }: { character: StudioCharacter; pose: number; assetVersion?: typeof FINAL_POSE_VERSION; className?: string }) {
   // The packaged artwork has uneven cell margins. The authenticated image
   // endpoint uses measured bounds so helmets, feet and props stay intact.
-  const artwork = useArtwork(poseImageUrl(character, pose));
+  const artwork = useArtwork(poseImageUrl(character, pose, assetVersion));
   return <span className={`studio-pose-thumbnail ${className}`}>
     <img alt="" src={artwork.src} hidden={artwork.failed} onError={artwork.onError} loading="lazy" decoding="async" />
     {artwork.failed && <span className="studio-artwork-missing">그림 로딩 실패</span>}
@@ -68,37 +66,69 @@ export function StudioRegisteredCharacters({ cast, onChange, disabled, onChooseP
   </section>;
 }
 
-function PoseBrowser({ character, currentPose, disabled, onApply }: {
-  character: StudioCharacter; currentPose?: number; disabled: boolean;
-  onApply: (reference: PoseReference) => void;
+function ArtworkDialog({ source, title, onClose }: { source: string; title: string; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    if (dialog?.showModal) dialog.showModal();
+    else dialog?.setAttribute("open", "");
+  }, []);
+  return <dialog ref={ref} className="studio-artwork-dialog" aria-label={title} onClose={onClose} onCancel={onClose}>
+    <div className="studio-artwork-dialog-heading"><strong>{title}</strong><button type="button" className="btn" autoFocus onClick={onClose}>닫기</button></div>
+    <ArtworkPreview source={source} alt={title} />
+    <a className="btn" href={source} download={`${title}.png`}>투명 PNG 다운로드</a>
+  </dialog>;
+}
+
+function PoseBrowser({ character, currentReference, disabled, onApply }: {
+  character: StudioCharacter; currentReference?: PoseReference; disabled: boolean;
+  onApply?: (reference: PoseReference) => void;
 }) {
-  const [previewPose, setPreviewPose] = useState(currentPose ?? 1);
+  const [previewPose, setPreviewPose] = useState(currentReference?.pose ?? 1);
+  const [version, setVersion] = useState(currentReference && !currentReference.assetVersion ? "legacy" : FINAL_POSE_VERSION);
   const [category, setCategory] = useState("all");
+  const [query, setQuery] = useState("");
+  const [enlarged, setEnlarged] = useState(false);
+  const assetVersion = version === FINAL_POSE_VERSION ? FINAL_POSE_VERSION : undefined;
   const characterInfo = STUDIO_CHARACTERS.find(c => c.id === character)!;
-  const poses = Array.from({ length: 100 }, (_, index) => index + 1).filter(pose => category === "all" || Math.floor((pose - 1) / 10) === Number(category));
-  const previewCategory = STUDIO_POSE_CATEGORIES[Math.floor((previewPose - 1) / 10)];
+  const poses = Array.from({ length: 100 }, (_, index) => index + 1).filter(pose => {
+    const asset = finalPose(character, pose)!;
+    const categoryMatches = category === "all" || (assetVersion ? asset.comic_face_type === category : Math.floor((pose - 1) / 10) === Number(category));
+    return categoryMatches && (!query.trim() || `${assetVersion ? `${asset.id} ${asset.title} ${asset.description}` : poseLabel(character, pose)} ${poseNumber(pose)}`.includes(query.trim()));
+  });
+  const preview = assetVersion ? finalPose(character, previewPose) : undefined;
+  const label = poseLabel(character, previewPose, assetVersion);
+  const source = poseImageUrl(character, previewPose, assetVersion);
+  const isApplied = currentReference?.pose === previewPose && currentReference?.assetVersion === assetVersion;
+  function changeVersion(next: string) { setVersion(next); setCategory("all"); setQuery(""); }
   return <div className="studio-pose-browser">
     <div className="studio-pose-browse-header">
-      <label className="field small">동작 모아보기<select value={category} disabled={disabled} onChange={event => setCategory(event.target.value)}>
-        <option value="all">전체 100개</option>
-        {STUDIO_POSE_CATEGORIES.map((name, index) => <option key={name} value={String(index)}>{name} · {index * 10 + 1}–{index * 10 + 10}</option>)}
+      <label className="field small">그림 버전<select value={version} disabled={disabled} onChange={event => changeVersion(event.target.value)}><option value={FINAL_POSE_VERSION}>최종 포즈 · 100개</option><option value="legacy">이전 포즈 · 기존 선택 유지</option></select></label>
+      <label className="field small">{assetVersion ? "표정 모아보기" : "동작 모아보기"}<select value={category} disabled={disabled} onChange={event => setCategory(event.target.value)}>
+        {assetVersion ? FINAL_FACE_FILTERS.map(([value, text]) => <option key={value} value={value}>{text}</option>) : <><option value="all">전체 100개</option>{STUDIO_POSE_CATEGORIES.map((name, index) => <option key={name} value={String(index)}>{name} · {index * 10 + 1}–{index * 10 + 10}</option>)}</>}
       </select></label>
-      <a className="btn sm ghost" href={poseSheetUrl(character)} download={`${characterInfo.name}-100포즈.png`}>100포즈 원본 ↓</a>
+      <label className="field small">포즈 찾기<input value={query} disabled={disabled} placeholder="이름·설명·번호" onChange={event => setQuery(event.target.value)} /></label>
     </div>
+    {!assetVersion && <p className="small muted">이전에 저장한 포즈입니다. 최종 포즈로 바꾸려면 그림 버전을 선택한 뒤 이 컷에 적용해 주세요.</p>}
     <div className="studio-pose-browser-body">
       <div className="studio-pose-grid" role="group" aria-label={`${characterInfo.name} 포즈 목록`}>
-        {poses.map(pose => <button type="button" key={pose} disabled={disabled} className={`studio-pose-tile ${currentPose === pose ? "applied" : ""}`} aria-pressed={previewPose === pose} aria-label={`${poseLabel(character, pose)} 미리보기`} onClick={() => setPreviewPose(pose)}>
-          <PoseThumbnail character={character} pose={pose} />
-          <span className="studio-pose-number">{poseNumber(pose)}{currentPose === pose && <span aria-label="이 컷에 선택됨"> ✓</span>}</span>
+        {poses.map(pose => <button type="button" key={pose} disabled={disabled} className={`studio-pose-tile ${currentReference?.pose === pose && currentReference?.assetVersion === assetVersion ? "applied" : ""}`} aria-pressed={previewPose === pose} aria-label={`${poseLabel(character, pose, assetVersion)} 미리보기`} onClick={() => setPreviewPose(pose)}>
+          <PoseThumbnail character={character} pose={pose} assetVersion={assetVersion} />
+          <span className="studio-pose-number">{assetVersion ? finalPose(character, pose)!.id : poseNumber(pose)}</span>
+          {assetVersion && <span className="studio-pose-title">{finalPose(character, pose)!.title}</span>}
         </button>)}
+        {!poses.length && <p className="small muted">조건에 맞는 포즈가 없습니다.</p>}
       </div>
       <aside className="studio-pose-preview" aria-label="선택할 포즈 미리보기">
-        <PoseThumbnail character={character} pose={previewPose} className="large" />
-        <strong>{characterInfo.name} · {poseNumber(previewPose)}</strong>
-        <span className="small muted">{previewCategory}</span>
-        <button type="button" className="btn primary" disabled={disabled || currentPose === previewPose} onClick={() => onApply({ character, pose: previewPose })}>{currentPose === previewPose ? "이 컷에 선택됨" : "이 컷에 적용"}</button>
+        <PoseThumbnail character={character} pose={previewPose} assetVersion={assetVersion} className="large" />
+        <strong>{label}</strong>
+        <span className="small muted">{preview?.description ?? STUDIO_POSE_CATEGORIES[Math.floor((previewPose - 1) / 10)]}</span>
+        <button type="button" className="btn" onClick={() => setEnlarged(true)}>크게 보기</button>
+        <a className="btn sm ghost" href={source} download={`${label}.png`}>투명 PNG 다운로드</a>
+        {onApply && <button type="button" className="btn primary" disabled={disabled || isApplied} onClick={() => onApply({ character, pose: previewPose, ...(assetVersion ? { assetVersion } : {}) })}>{isApplied ? "이 컷에 선택됨" : "이 컷에 적용"}</button>}
       </aside>
     </div>
+    {enlarged && <ArtworkDialog source={source} title={label} onClose={() => setEnlarged(false)} />}
   </div>;
 }
 
@@ -115,38 +145,53 @@ export function StudioPosePicker({ cast, value, onChange, disabled, panelIndex, 
   const currentCharacter = available.find(character => character.id === activeCharacter)?.id ?? available[0]?.id;
   function apply(reference: PoseReference) {
     onChange([...selected.filter(item => item.character !== reference.character), reference].sort((a, b) => STUDIO_CHARACTERS.findIndex(c => c.id === a.character) - STUDIO_CHARACTERS.findIndex(c => c.id === b.character)));
-    setAnnouncement(`${poseLabel(reference.character, reference.pose)}를 선택했습니다. 콘텐츠를 저장하면 이 컷에 유지됩니다.`);
+    setAnnouncement(`${poseLabel(reference.character, reference.pose, reference.assetVersion)}를 선택했습니다. 콘텐츠를 저장하면 이 컷에 유지됩니다.`);
   }
   function remove(reference: PoseReference) {
     onChange(selected.filter(item => item.character !== reference.character));
-    setAnnouncement(`${poseLabel(reference.character, reference.pose)} 선택을 해제했습니다.`);
+    setAnnouncement(`${poseLabel(reference.character, reference.pose, reference.assetVersion)} 선택을 해제했습니다.`);
   }
   return <section className="studio-pose-picker" aria-label={`${panelIndex + 1}컷 캐릭터 포즈`}><ReferenceImages>
     <div className="studio-pose-picker-heading"><div><strong>캐릭터 포즈</strong><span className="small muted">인물마다 100개 · 이 컷의 표정과 동작 고르기</span></div><button type="button" className="btn sm" aria-expanded={open && !!currentCharacter} aria-controls={listId} disabled={disabled || !available.length} onClick={() => setOpen(current => !current)}>{open && currentCharacter ? "목록 접기" : selected.length ? "포즈 바꾸기" : "포즈 선택"}</button></div>
     {!available.length && <p className="small muted">위에서 등장인물을 먼저 선택해 주세요.</p>}
     {selected.length > 0 && <div className="studio-pose-selections">{selected.map(reference => <div className="studio-pose-selection" key={reference.character}>
-      <PoseThumbnail character={reference.character} pose={reference.pose} />
-      <div><strong>{poseLabel(reference.character, reference.pose)}</strong><a href={poseImageUrl(reference.character, reference.pose)} download={`${poseLabel(reference.character, reference.pose)}.png`}>참조 이미지 ↓</a></div>
-      <button type="button" className="studio-pose-remove" aria-label={`${poseLabel(reference.character, reference.pose)} 선택 해제`} disabled={disabled} onClick={() => remove(reference)}>×</button>
+      <PoseThumbnail character={reference.character} pose={reference.pose} assetVersion={reference.assetVersion} />
+      <div><strong>{poseLabel(reference.character, reference.pose, reference.assetVersion)}</strong><a href={poseImageUrl(reference.character, reference.pose, reference.assetVersion)} download={`${poseLabel(reference.character, reference.pose, reference.assetVersion)}.png`}>참조 이미지 ↓</a></div>
+      <button type="button" className="studio-pose-remove" aria-label={`${poseLabel(reference.character, reference.pose, reference.assetVersion)} 선택 해제`} disabled={disabled} onClick={() => remove(reference)}>×</button>
     </div>)}</div>}
     {selected.length > 0 && <p className="studio-pose-help small muted">{imageMode === "api" ? "선택한 포즈와 가족 기준 그림이 이 컷의 API 생성에 함께 사용됩니다." : "ChatGPT에는 가족 기준 그림과 위 참조 이미지를 함께 첨부하세요. 선택한 포즈 설명은 프롬프트에 포함됩니다."}</p>}
     <div id={listId} hidden={!open || !currentCharacter}>
       <div className="studio-pose-character-tabs" role="group" aria-label={`${panelIndex + 1}컷 포즈를 고를 캐릭터`}>{available.map(character => <button type="button" key={character.id} disabled={disabled} aria-pressed={currentCharacter === character.id} onClick={() => setActiveCharacter(character.id)}><CharacterPortrait character={character.id} /><span>{character.name}<small>{character.age}살</small></span></button>)}</div>
-      {open && currentCharacter && <PoseBrowser key={currentCharacter} character={currentCharacter} currentPose={selected.find(reference => reference.character === currentCharacter)?.pose} disabled={disabled} onApply={apply} />}
+      {open && currentCharacter && <PoseBrowser key={currentCharacter} character={currentCharacter} currentReference={selected.find(reference => reference.character === currentCharacter)} disabled={disabled} onApply={apply} />}
     </div>
     <span className="studio-pose-status small" role="status" aria-live="polite">{announcement}</span>
   </ReferenceImages></section>;
 }
 
+function SupplementaryAssets() {
+  const [group, setGroup] = useState("FA");
+  const [selectedId, setSelectedId] = useState("FA001");
+  const [enlarged, setEnlarged] = useState(false);
+  const assets = FINAL_STUDIO_ASSETS.filter(asset => asset.id.startsWith(group));
+  const selected = assets.find(asset => asset.id === selectedId) ?? assets[0];
+  function selectGroup(value: string) { setGroup(value); setSelectedId(`${value}001`); }
+  return <section className="panel studio-supplementary-assets"><h2>함께하는 장면 · 비언어 말풍선</h2>
+    <div className="studio-pose-character-tabs" role="group" aria-label="함께하는 장면과 말풍선 종류">
+      {[["FA", "네 가족 · 12개"], ["CP", "펭펭·펨펨 · 12개"], ["SB", "펭긴·펭키 · 12개"], ["FX", "말풍선 · 12개"]].map(([key, label]) => <button type="button" key={key} aria-pressed={key === group} onClick={() => selectGroup(key)}>{label}</button>)}
+    </div>
+    <div className="studio-pose-browser-body"><div className="studio-pose-grid" role="group" aria-label="함께하는 장면과 말풍선 목록">{assets.map(asset => <button type="button" key={asset.id} className="studio-pose-tile" aria-label={`${asset.id} ${asset.title} 미리보기`} aria-pressed={selected.id === asset.id} onClick={() => setSelectedId(asset.id)}><ArtworkPreview source={finalAssetUrl(asset.id)} alt={asset.title} lazy /><span className="studio-pose-number">{asset.id}</span><span className="studio-pose-title">{asset.title.replaceAll("_", " ")}</span></button>)}</div>
+    <aside className="studio-pose-preview" aria-label="함께하는 장면과 말풍선 미리보기"><ArtworkPreview source={finalAssetUrl(selected.id)} alt={selected.title} /><strong>{selected.id} · {selected.title.replaceAll("_", " ")}</strong><span className="small muted">{selected.description}</span><button type="button" className="btn" onClick={() => setEnlarged(true)}>크게 보기</button><a className="btn sm" href={finalAssetUrl(selected.id)} download={`${selected.id}.png`}>투명 PNG 다운로드</a></aside></div>
+    {enlarged && <ArtworkDialog source={finalAssetUrl(selected.id)} title={selected.title} onClose={() => setEnlarged(false)} />}
+  </section>;
+}
+
 export function StudioCharacterArchive() {
+  const [active, setActive] = useState<StudioCharacter>("pengpeng");
   return <ReferenceImages>
-    <section className="panel studio-family-reference"><div><h1>캐릭터 · 100포즈 가이드</h1><p>펭펭, 펨펨, 김펭긴, 김펭키 순서로 모았어요. 각 캐릭터의 100개 포즈를 웹툰의 ‘그림 → 캐릭터 포즈’에서 선택할 수 있습니다.</p><a className="btn sm" href={STUDIO_FAMILY_REFERENCE_URL} download="우주펭귄상회-가족-기준그림.png">가족 기준 그림 ↓</a></div><ArtworkPreview source={STUDIO_FAMILY_REFERENCE_URL} alt="확정된 우주펭귄상회 네 가족. 머스터드 숄을 두른 펨펨, 몸통이 큰 펭펭, 기타를 든 김펭키, 감자튀김과 큐브를 든 김펭긴." /></section>
-    <section className="studio-character-archive">{STUDIO_CHARACTERS.map(character => <article className="panel studio-pose-archive-card" key={character.id}>
-      <div className="studio-pose-archive-title"><CharacterPortrait character={character.id} /><div><h2>{character.name}<span>{character.age}살</span></h2><p className="small muted">{character.role}</p></div><span className="studio-pose-count">100포즈</span></div>
-      <p>{character.detail}</p>
-      <a href={poseSheetUrl(character.id)} target="_blank" rel="noopener noreferrer" className="studio-pose-sheet-link" aria-label={`${character.name} 100포즈 크게 보기`}><ArtworkPreview source={poseSheetUrl(character.id)} alt={`${character.name}의 표정과 동작 100개를 10행 10열로 정리한 포즈 가이드`} lazy /></a>
-      <div className="row"><a className="btn sm" href={poseSheetUrl(character.id)} download={`${character.name}-100포즈.png`}>100포즈 이미지 ↓</a><a className="btn sm ghost" href={poseSheetUrl(character.id)} target="_blank" rel="noopener noreferrer">크게 보기 ↗</a></div>
-    </article>)}</section>
-    <section className="panel studio-canon"><h2>공통 외형 기준</h2><p>작고 동그란 흰 점 눈, 길고 노란 부리, 목이 보이지 않는 투명 유리헬멧과 손으로 그린 듯한 검정 선을 유지합니다. 아빠는 듬직한 몸통, 엄마는 머스터드 숄과 초승달 목걸이·짧은 속눈썹, 정수리 꽁지는 막내에게만 있습니다.</p><p className="small muted">포즈는 동작과 표정 참고용입니다. 인물의 색상과 체형은 가족 기준 그림을 함께 참고합니다.</p></section>
+    <section className="panel studio-family-reference"><div><h1>캐릭터 · 최종 포즈 보관함</h1><p>개인 포즈 400개, 함께하는 장면 36개, 말풍선 12개와 가족 기본 모델을 모았어요. 포즈를 눌러 크게 보고 투명 PNG를 내려받을 수 있습니다.</p><a className="btn sm" href={STUDIO_FAMILY_REFERENCE_URL} download="우주펭귄상회-가족-최종기본모델.png">가족 기본 모델 ↓</a></div><ArtworkPreview source={STUDIO_FAMILY_REFERENCE_URL} alt="맑은 투명 헬멧의 최종 가족 모델. 펭펭, 펨펨, 펭긴, 펭키 순서." /></section>
+    <section className="studio-character-archive">{STUDIO_CHARACTERS.map(character => <article className="panel studio-pose-archive-card" key={character.id}><div className="studio-pose-archive-title"><CharacterPortrait character={character.id} /><div><h2>{character.name}<span>{character.age}살</span></h2><p className="small muted">{character.role}</p></div><span className="studio-pose-count">100포즈</span></div><p>{character.detail}</p><button type="button" className="btn" aria-pressed={active === character.id} onClick={() => setActive(character.id)}>{character.name} 포즈 보기</button></article>)}</section>
+    <section className="panel" aria-label="최종 개인 포즈 보관함"><PoseBrowser key={active} character={active} disabled={false} /></section>
+    <SupplementaryAssets />
+    <section className="panel studio-canon"><h2>공통 외형 기준</h2><p>작고 넓게 떨어진 흰 점눈, 노란 부리, 목이 보이지 않는 투명 유리헬멧, 매끈한 펜 윤곽과 무광 페인트 채색을 유지합니다. 볼 눌림·짝눈·찌글찌글한 놀람도 헬멧의 원형과 투명도를 유지합니다. 정수리 꽁지는 막내에게만 있습니다.</p><p>펭펭의 카메라는 한 대, 펨펨은 원인과 해결책부터 짚는 완전 T. 펭긴은 큐브, 펭키는 기타를 지닙니다.</p></section>
   </ReferenceImages>;
 }

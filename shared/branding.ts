@@ -2,7 +2,7 @@
 export const BRAND_REVISION = "20261101-spacepenguin";
 export const CHANNEL_BRANDS = {
   penguin: { name: "우주펭귄상회", korean: "우주펭귄상회", description: "우주펭귄 가족의 이야기와 캐릭터" },
-  fryday: { name: "Fryday", korean: "프라이데이", description: "김펭긴의 감자튀김과 음식 탐구" },
+  fryday: { name: "Fryday", korean: "프라이데이", description: "펭긴의 감자튀김과 음식 탐구" },
   highscoop: { name: "Highscoop", korean: "하이스쿱", description: "입시·모집·새로운 배움의 기회" },
   news: { name: "Alligodang", korean: "알리고당", description: "아이와 함께 나누는 뉴스·과학·세상 이야기" },
 } as const;

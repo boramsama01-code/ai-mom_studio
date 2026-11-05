@@ -25,7 +25,8 @@ export type StudioStage = typeof studioStages[number];
 export type StudioProvider = AiProvider;
 
 const date = z.string().refine(v => v === "" || (/^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(new Date(`${v}T00:00:00Z`).getTime()) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v), "올바른 날짜를 입력하세요.");
-export const studioPoseReferenceSchema = z.object({ character: z.enum(studioCharacters), pose: z.number().int().min(1).max(100) }).strict();
+// Unversioned references retain their original sheet cells when old drafts reopen.
+export const studioPoseReferenceSchema = z.object({ character: z.enum(studioCharacters), pose: z.number().int().min(1).max(100), assetVersion: z.literal("final-v1.4").optional() }).strict();
 export const studioPanelSchema = z.object({
   scene: z.string().max(4000), dialogue: z.string().max(3000), imageId: z.number().int().positive().nullable().default(null),
   // Optional in TypeScript for existing callers; Zod fills the default for saved legacy panels.

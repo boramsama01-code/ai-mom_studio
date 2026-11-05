@@ -23,6 +23,7 @@ await writeFile(target, bytes);
 console.log("Studio sample image restored and verified.");
 
 await import("./restore-studio-pose-assets.mjs");
+await import("./restore-studio-final-assets.mjs");
 
 
 await import("./restore-cardnews14-fonts.mjs");
