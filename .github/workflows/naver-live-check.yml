@@ -1,0 +1,25 @@
+name: Private Naver connection smoke check
+on:
+  push:
+    branches: [debug/collection-regression-20261106]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APP_ENV: production
+      APP_DATABASE_URL: ${{ secrets.APP_DATABASE_URL }}
+      APP_SESSION_SECRET: ${{ secrets.APP_SESSION_SECRET }}
+      APP_SECRETS_KEY: ${{ secrets.APP_SECRETS_KEY }}
+      NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+      NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: node --import tsx scripts/check-naver-live.ts
