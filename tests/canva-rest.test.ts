@@ -175,4 +175,19 @@ describe("safe Canva failures and request limits", () => {
     const error = await exchangeCode(db, { code: "isolated-code", verifier: "isolated-verifier", redirectUri: "https://studio.example/callback" }, fetchImpl).catch(value => value);
     expect(error.message).not.toContain("never-print"); expect(error.code).toBe("auth_required"); expect(fetchImpl).toHaveBeenCalledOnce();
   });
+  it.each([[401, "invalid_client", "Client ID"], [400, "invalid_grant", "PKCE"], [400, "invalid_scope", "권한"]] as const)("explains OAuth HTTP %i %s without exposing provider data or retrying", async (status, providerError, guidance) => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ error: providerError, error_description: "never-print-client-secret", access_token: "never-print-access-token" }, status));
+    const error = await exchangeCode(db, { code: "isolated-code", verifier: "isolated-verifier", redirectUri: "https://studio.example/callback" }, fetchImpl).catch(value => value);
+    expect(error).toMatchObject({ status, code: "auth_required" });
+    expect(error.message).toContain(`HTTP ${status}`); expect(error.message).toContain(providerError); expect(error.message).toContain(guidance);
+    expect(error.message).not.toContain("never-print"); expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it("does not echo unrecognized OAuth errors or accept malformed success responses", async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(json({ error: "never-print-client-secret", message: "never-print-access-token" }, 400)).mockResolvedValueOnce(json(null));
+    const input = { code: "isolated-code", verifier: "isolated-verifier", redirectUri: "https://studio.example/callback" };
+    const unknown = await exchangeCode(db, input, fetchImpl).catch(value => value);
+    expect(unknown.message).toContain("HTTP 400"); expect(unknown.message).not.toContain("never-print");
+    await expect(exchangeCode(db, input, fetchImpl)).rejects.toMatchObject({ status: 200, code: "auth_invalid_response" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });

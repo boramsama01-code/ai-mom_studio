@@ -75,8 +75,25 @@ async function tokenRequest(body: Record<string, string>, fetchImpl: typeof fetc
     signal: AbortSignal.timeout(15_000),
     redirect: "error",
   }); } catch { throw new CanvaError("Canva 인증 응답을 받지 못했습니다. 계정 연결 상태를 확인해 주세요.", undefined, "auth_response_unknown"); }
-  const j = (await res.json().catch(() => ({}))) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string; message?: string };
-  if (!res.ok || !j.access_token || !j.refresh_token || !Number.isFinite(j.expires_in) || Number(j.expires_in) <= 0) throw new CanvaError("Canva 인증 정보를 갱신하지 못했습니다. 앱의 연결 권한을 확인한 뒤 계정을 다시 연결해 주세요.", res.status, "auth_required");
+  const payload: unknown = await res.json().catch(() => null);
+  const j = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+  if (!res.ok) {
+    // Only documented OAuth error names may leave this boundary. Provider
+    // descriptions can contain credentials and must never reach UI or logs.
+    const reasons: Record<string, string> = {
+      invalid_client: "Client ID와 Client secret이 같은 Canva 앱의 값인지 확인해 주세요.",
+      invalid_grant: "인증 코드·갱신 토큰 또는 PKCE 검증이 거절됐습니다. 다시 연결하고 콜백 주소를 확인해 주세요.",
+      invalid_scope: "Canva 앱에 등록한 권한과 연결 시 요청한 권한이 일치하는지 확인해 주세요.",
+      invalid_request: "인증 요청 형식과 Canva 앱의 콜백 주소를 확인해 주세요.",
+      unauthorized_client: "이 Canva 앱에서 현재 인증 방식을 사용할 수 있는지 개발자 설정을 확인해 주세요.",
+      unsupported_grant_type: "Canva 인증 요청의 grant_type을 확인해 주세요.",
+    };
+    const reason = typeof j.error === "string" && Object.hasOwn(reasons, j.error) ? j.error : null;
+    const advice = reason ? reasons[reason] : res.status === 429 ? "Canva 호출 한도에 도달했습니다. 잠시 후 다시 확인해 주세요." : res.status >= 500 ? "Canva 인증 서버가 요청을 처리하지 못했습니다. 잠시 후 다시 확인해 주세요." : "Canva 앱의 연결 설정을 확인해 주세요.";
+    throw new CanvaError(`Canva 인증 요청이 거절되었습니다(HTTP ${res.status}${reason ? `, ${reason}` : ""}). ${advice}`, res.status, "auth_required");
+  }
+  if (typeof j.access_token !== "string" || !j.access_token.trim() || typeof j.refresh_token !== "string" || !j.refresh_token.trim() || !Number.isFinite(j.expires_in) || Number(j.expires_in) <= 0)
+    throw new CanvaError("Canva 인증 서버의 응답 형식을 확인할 수 없습니다. 연결을 완료한 것으로 처리하지 않았습니다.", res.status, "auth_invalid_response");
   return j as { access_token: string; refresh_token: string; expires_in: number };
 }
 
