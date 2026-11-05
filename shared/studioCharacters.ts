@@ -28,13 +28,13 @@ export const STUDIO_CHARACTERS: ReadonlyArray<{
     sheetUrl: "/studio-assets/poses-v2/pempem.png", grid: STUDIO_POSE_GRID,
   },
   {
-    id: "penguin", name: "김펭긴", age: 13, role: "첫째 · Fryday",
+    id: "penguin", name: "펭긴", age: 13, role: "첫째 · Fryday",
     detail: "감자튀김과 큐브를 좋아하는 13살 첫째예요.",
     appearance: "큰 머리와 작은 몸통, 막내보다 살짝 큼. 선물받은 큐브를 늘 지닌다. 머리 위 꽁지 없음. 13살 학생이며 대학원생이 아님.",
     sheetUrl: "/studio-assets/poses-v2/penguin.png", grid: STUDIO_POSE_GRID,
   },
   {
-    id: "pengki", name: "김펭키", age: 12, role: "막내 · 우주펭귄상회",
+    id: "pengki", name: "펭키", age: 12, role: "막내 · 우주펭귄상회",
     detail: "노란 가방과 하늘색 기타를 든 12살 막내예요.",
     appearance: "큰 머리와 작은 몸통, 형보다 조금 작지만 유아 체형은 아님. 노란 스트랩의 하늘색 기타를 늘 지닌다. 가족 중 유일하게 헬멧 안 정수리에 작은 두 가닥 꽁지.",
     sheetUrl: "/studio-assets/poses-v2/pengki.png", grid: STUDIO_POSE_GRID,

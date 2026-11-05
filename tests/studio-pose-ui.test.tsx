@@ -136,9 +136,9 @@ describe("studio pose picker", () => {
   it("registers all final PNGs and switches between individual and supplementary assets", async () => {
     await act(async () => root.render(<StudioCharacterArchive />));
     const headings = Array.from(container.querySelectorAll(".studio-pose-archive-title h2")).map(element => element.textContent);
-    expect(headings).toEqual(["펭펭40살", "펨펨37살", "김펭긴13살", "김펭키12살"]);
+    expect(headings).toEqual(["펭펭40살", "펨펨37살", "펭긴13살", "펭키12살"]);
     expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(112);
-    await click(button("김펭키 포즈 보기"));
+    await click(button("펭키 포즈 보기"));
     expect(container.querySelector<HTMLImageElement>(".studio-pose-tile img")?.getAttribute("src")).toBe(poseImageUrl("pengki", 1, FINAL_POSE_VERSION));
     await click(button("말풍선 · 12개"));
     expect(container.querySelector<HTMLImageElement>(".studio-supplementary-assets .studio-pose-tile img")?.getAttribute("src")).toBe(finalAssetUrl("FX001"));
@@ -152,7 +152,7 @@ describe("registered characters in the authoring page", () => {
     await act(async () => root.render(<StudioRegisteredCharacters cast={["pengki"]} onChange={onChange} disabled={false} onChoosePoses={onChoosePoses} />));
     const panel = container.querySelector('[data-testid="studio-registered-characters"]')!;
     expect(panel.closest("[hidden]")).toBeNull();
-    expect([...panel.querySelectorAll(".studio-registered-name")].map(name => name.textContent)).toEqual(["펭펭40살100포즈", "펨펨37살100포즈", "김펭긴13살100포즈", "김펭키12살100포즈"]);
+    expect([...panel.querySelectorAll(".studio-registered-name")].map(name => name.textContent)).toEqual(["펭펭40살100포즈", "펨펨37살100포즈", "펭긴13살100포즈", "펭키12살100포즈"]);
     const portraits = [...panel.querySelectorAll<HTMLImageElement>(".studio-character-portrait img")];
     expect(portraits).toHaveLength(4);
     expect(portraits.every((image, index) => image.getAttribute("src") === poseImageUrl(STUDIO_CHARACTERS[index].id, 1, FINAL_POSE_VERSION) && !image.hidden)).toBe(true);

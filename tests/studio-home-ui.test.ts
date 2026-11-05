@@ -250,7 +250,7 @@ describe("홈과 단계별 제작 화면", () => {
     expect(registered.closest("[hidden]")).toBeNull();
     expect(registered.closest("details")?.open).toBe(false);
     await openDetails("캐릭터·포즈 설정");
-    for (const name of ["펭펭", "펨펨", "김펭긴", "김펭키"]) expect(registered.textContent).toContain(name);
+    for (const name of ["펭펭", "펨펨", "펭긴", "펭키"]) expect(registered.textContent).toContain(name);
     expect(registered.querySelectorAll("img").length).toBeGreaterThanOrEqual(4);
     expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(0);
     await input(host.querySelector("#studio-title") as HTMLInputElement, "포즈를 고른 웹툰");

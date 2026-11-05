@@ -11,7 +11,7 @@ const draft = () => studioContentSchema.parse({ title: "가족 회의", characte
 describe("approved family pose catalog", () => {
   it("retains stable IDs while showing the approved names in age order and 400 addressable poses", () => {
     expect(STUDIO_CHARACTERS.map(c => [c.id, c.name, c.age])).toEqual([
-      ["pengpeng", "펭펭", 40], ["pempem", "펨펨", 37], ["penguin", "김펭긴", 13], ["pengki", "김펭키", 12],
+      ["pengpeng", "펭펭", 40], ["pempem", "펨펨", 37], ["penguin", "펭긴", 13], ["pengki", "펭키", 12],
     ]);
     const paths = STUDIO_CHARACTERS.flatMap(c => Array.from({ length: STUDIO_POSE_COUNT }, (_, i) => poseImageUrl(c.id, i + 1)));
     expect(new Set(paths).size).toBe(400);
@@ -52,13 +52,13 @@ describe("saved pose selections", () => {
       expect(updated.panels.map(p => p.poseRefs)).toEqual(content.panels.map(p => p.poseRefs));
     }
     const guide = studioImageContext(content, 3);
-    expect(guide).toContain("김펭키");
+    expect(guide).toContain("펭키");
     expect(guide).toContain("10행 10열");
     expect(guide).toContain("/api/studio/characters/pengki/poses/100");
     expect(guide).not.toContain("/api/studio/characters/pengpeng/poses/1");
     expect(studioPoseGuide(content.panels[2])).toBe("");
     const copied = studioChatGptImagePrompt(content, 3, "우주펭귄상회");
-    expect(copied).toContain("김펭키 · 코믹 액션 100");
+    expect(copied).toContain("펭키 · 코믹 액션 100");
     expect(copied).toContain("길고 뾰족한 노란 부리");
     expect(copied).toContain("원본 첨부를 요청");
     expect(copied).not.toContain("뾰족한 검은 부리");
