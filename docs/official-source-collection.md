@@ -12,7 +12,7 @@ HighScoop은 학교·기관의 모집 공고를 먼저 확인하고, ALLligodang
 | HighScoop | 한국과학영재학교 | 공개 공지 중 모집·입학·체험 후보. 제한된 입학 사이트에 접근하지 않음 |
 | HighScoop | 동국대학교 과학영재교육원 | 입학 공지 게시판 |
 | ALLligodang | KAIST | 연구 뉴스 |
-| ALLligodang | 문화체육관광부 | 공식 보도자료 RSS. 관광 제목은 여행 소분류 |
+| ALLligodang | 문화체육관광부 | 공식 보도자료 RSS와 동일 기관의 첨부 PDF. 관광 제목은 여행 소분류 |
 | ALLligodang | 과학기술정보통신부 | 공식 RSS 주소 등록, 반복 시간 초과로 비활성. 목록과 원문 재검증 후 활성화 |
 
 정확한 URL·선택자는 `server/services/officialCatalog.ts`에 있다. 기존 운영자가 중지하거나 수정한 출처는 재시작 시 덮어쓰지 않는다. 초기 GED 설정이 원래 값 그대로인 경우에만 마이그레이션에서 10건을 100건으로 확장한다.

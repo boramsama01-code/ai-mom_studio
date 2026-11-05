@@ -17,7 +17,7 @@ for (const source of sources) {
     const sample = result.entries.find(e => !source.config.recruitmentOnly || classifyNotice(e.title) === "candidate") ?? result.entries[0];
     const inspectFetch: typeof safeFetch = async (url, opts) => {
       const res = await safeFetch(url, opts);
-      if (process.argv.includes("--inspect")) {
+      if (process.argv.includes("--inspect") && res.contentType.includes("html")) {
         const $ = load(decodePublicText(res.body, res.contentType));
         console.log(JSON.stringify({ name: source.name, articleMarkup: { expected: sample.title, url: res.finalUrl,
           heads: $("h1,h2,h3,h4,meta[property='og:title'],meta[name='twitter:title']").toArray().map(el => $(el).prop("outerHTML")?.slice(0, 600)).slice(0, 35),
@@ -27,7 +27,8 @@ for (const source of sources) {
       }
       return res;
     };
-    const article = await fetchPublisherArticle(sample.url, inspectFetch, { title: sample.title, takeExtraCall: () => false });
+    let extra = 1;
+    const article = await fetchPublisherArticle(sample.url, inspectFetch, { title: sample.title, takeExtraCall: () => extra-- > 0 });
     console.log(JSON.stringify({ name: source.name, article: article.ok ? { ok: true, finalUrl: article.finalUrl, textLength: article.text.length, preview: article.text.slice(0, 300), end: article.text.slice(-200), attachments: article.attachments.map(a => ({ kind: a.kind, status: a.status })) } : article }));
   }
   if (process.argv.includes("--inspect")) {

@@ -59,7 +59,7 @@ export function extractHtml(html: string, baseUrl: string, context: ArticleConte
   $("script,style,noscript,iframe,svg,header,footer,nav,form,aside,button,[hidden],[aria-hidden='true'],.related-news,.related-articles,.article-tools,.share-buttons,.advertisement").remove();
   $("br").replaceWith("\n");
   $("p,div,section,li,h1,h2,h3,h4,tr").append("\n");
-  const selectors = [".board_view.bd_noti", ".board_view > .view_body", "#dic_area", "#newsct_article", "#harmonyContainer", "#articletxt", "#cont_newstext", "#news_body_id", "#CmAdContent", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",
+  const selectors = [".prog_bord_view > .prog_contents", ".prog_bord_view .prog_contents", ".board_view.bd_noti", ".board_view > .view_body", "#dic_area", "#newsct_article", "#harmonyContainer", "#articletxt", "#cont_newstext", "#news_body_id", "#CmAdContent", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",
     "#article-view-content-div", "#articleBodyContents", "#articleBody", "#article-body", "#article_body", "#article_content", "#articleContent", "#newsEndContents", "#news_content", "#newsContent", "#news_text", "#news_txt", "section.news_view", ".article-body", ".article_body", ".article_view", ".article_txt", ".article-text", ".article-content", ".article__body", ".news-article-body", ".news-text", ".news_body", "article",
     "[class*='board_view']", "[class*='bbs_view']", "[class*='view_cont']", "[class*='viewCont']"];
   let text = "";
@@ -151,6 +151,30 @@ export async function fetchAndExtract(url: string, fetchImpl = safeFetch, contex
     if (context.title && articleHeadlines(html, res.finalUrl).length && !matchesPrimaryArticleHeadline(html, context.title, res.finalUrl))
       return { ok: false, status: "unsupported", error: "원문 페이지의 주기사 제목이 수집 제목과 일치하지 않아 본문을 저장하지 않았습니다. 원문 주소를 확인하거나 본문을 직접 붙여넣어 주세요.", finalUrl: res.finalUrl };
     const { title, text, attachments } = extractHtml(html, res.finalUrl, context);
+    // MCST press releases publish the actual document as an attachment. The page's
+    // HTML paragraphs can contain only licensing/login text, which is not a body.
+    const final = new URL(res.finalUrl);
+    const mcstDocument = final.hostname.replace(/^www\./, "") === "mcst.go.kr" && /\/s_notice\/press\/pressView\.jsp$/.test(final.pathname) && final.searchParams.has("pSeq");
+    if (mcstDocument) {
+      const pdfs = attachments.filter(a => a.kind === "pdf");
+      const pdf = pdfs.length === 1 ? pdfs[0] : undefined;
+      if (pdf && new URL(pdf.url).hostname === final.hostname && (!context.takeExtraCall || context.takeExtraCall())) {
+        try {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) throw new Error("원문 확인 시간 한도 초과");
+          const document = await fetchImpl(pdf.url, { maxBytes: 8 * 1024 * 1024, timeoutMs: Math.min(12_000, remaining), allowedHosts: [final.hostname], accept: "application/pdf" });
+          if (new URL(document.finalUrl).hostname !== final.hostname || document.body.subarray(0, 5).toString() !== "%PDF-") throw new Error("공식 첨부 PDF 응답이 아닙니다");
+          const body = await extractPdf(document.body);
+          if (body.length < 80) throw new Error("텍스트가 없는 PDF로 직접 확인이 필요합니다");
+          pdf.status = "ok";
+          return { ok: true, finalUrl: res.finalUrl, title, text: body, hash: sha256(body), attachments, contentKind: "pdf" };
+        } catch (error) {
+          currentGenerationSignal()?.throwIfAborted();
+          pdf.status = "failed"; pdf.reason = error instanceof Error ? error.message : "PDF 추출 실패";
+        }
+      }
+      return { ok: false, status: "unsupported", error: "보도자료 본문은 첨부 문서에 있습니다. PDF를 자동 확보하지 못했거나 호출 한도에 도달했습니다. 원문에서 첨부 문서를 확인해 주세요.", attachments, finalUrl: res.finalUrl };
+    }
     if (text.length < 80) {
       if (!alternate) {
         const advertised = publicArticleAlternate(html, res.finalUrl, context);

@@ -99,11 +99,11 @@ export async function fetchBoardList(boardUrl: string, domain: string, cfg: Boar
     if (!officialUrl(boardUrl, boardUrl, domain)) throw new Error("게시판 URL이 확인한 공식 도메인과 다릅니다.");
     if (cfg.articleBaseUrl && !officialUrl(cfg.articleBaseUrl, boardUrl, domain)) throw new Error("RSS 원문 기준 주소가 공식 도메인과 다릅니다.");
     const host = new URL(boardUrl).hostname;
-    const read = async (url: string) => {
+    const read = async (url: string, config = cfg) => {
       const res = await fetchImpl(url, { maxBytes: 2 * 1024 * 1024, timeoutMs: 10000, allowedHosts: [host, host.startsWith("www.") ? host.slice(4) : `www.${host}`] });
       if (!officialUrl(res.finalUrl, boardUrl, domain)) throw new Error("공식 도메인 밖으로 이동했습니다.");
       const html = decodePublicText(res.body, res.contentType);
-      const entries = parseBoardList(html, res.finalUrl, domain, cfg);
+      const entries = parseBoardList(html, res.finalUrl, domain, config);
       if (!entries.length) throw new Error(/type=["']password|captcha|접근이 제한|로그인이 필요/i.test(html)
         ? "로그인·접근 제한 화면입니다. 원문에서 직접 확인하세요."
         : "목록을 찾지 못했습니다. 게시판 구조 변경·빈 목록·동적 화면 여부를 확인하세요.");
@@ -111,8 +111,10 @@ export async function fetchBoardList(boardUrl: string, domain: string, cfg: Boar
     };
     const url = new URL(boardUrl);
     const ged = cfg.format === "ged_selection" && url.hostname === "ged.kedi.re.kr" && url.pathname === "/slct/noti/slctNotiStat.do";
-    if (ged) { url.searchParams.set("pageUnit", "100"); url.searchParams.set("pageIndex", "1"); }
-    const first = await read(url.href);
+    const pageSize = [100, 50, 40, 30, 20, 10].find(n => n <= (cfg.maxItems ?? 100)) ?? 10;
+    const config = ged ? { ...cfg, maxItems: pageSize } : cfg;
+    if (ged) { url.searchParams.set("pageUnit", String(pageSize)); url.searchParams.set("pageIndex", "1"); }
+    const first = await read(url.href, config);
     const entries = first.entries, warnings: string[] = [];
     let pages = 1;
     if (ged) {
@@ -123,7 +125,7 @@ export async function fetchBoardList(boardUrl: string, domain: string, cfg: Boar
         if (!options.takeExtraCall?.()) { warnings.push(`GED ${totalPages}페이지 중 ${pages}페이지만 확인했습니다. 호출 한도 밖의 공고는 원문에서 확인하세요.`); break; }
         url.searchParams.set("pageIndex", String(page));
         try {
-          const next = await read(url.href);
+          const next = await read(url.href, config);
           pages++;
           const fresh = next.entries.filter(e => !seen.has(e.url));
           if (!fresh.length) { warnings.push("GED 다음 페이지가 같은 목록을 반환했습니다. 페이지 구성을 확인하세요."); break; }

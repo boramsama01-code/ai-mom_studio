@@ -482,7 +482,7 @@ function OfficialTab({ cid }: { cid: number }) {
   if (q.isLoading) return <Loading />;
   if (q.error) return <ErrorBox error={q.error} />;
   const rows = q.data!;
-  const connected = rows.filter((r) => r.adapter && r.enabled).length;
+  const connected = rows.filter((r) => r.adapter && r.enabled && r.verifiedAt && r.domain && r.boardUrl).length;
   return (
     <div className="stack">
       <div className="notice warn small">
@@ -505,11 +505,12 @@ function OfficialTab({ cid }: { cid: number }) {
                 </button>
               </div>
               <div className="row small">
+                <Badge kind={r.enabled ? "ok" : ""}>{r.enabled ? "수집 사용" : "사용 안 함"}</Badge>
                 <Badge kind={r.domain && r.verifiedAt ? "ok" : "warn"}>{r.domain && r.verifiedAt ? `도메인 확인: ${r.domain}` : "도메인 미확인"}</Badge>
                 <Badge kind={r.adapter ? "ok" : ""}>{r.adapter ? `수집기: ${r.adapter}` : "게시판 수집기 미연결"}</Badge>
                 {r.verifiedAt && <span className="muted">확인 {fmtDate(r.verifiedAt as unknown as string)}</span>}
               </div>
-              {r.lastCheckedAt && <span className="small muted">최근 확인 {fmtDate(r.lastCheckedAt as unknown as string)} · {r.lastStatus === "ok" ? `신규 ${r.lastNewCount}건` : r.lastError || "확인 필요"}</span>}
+              {r.lastCheckedAt && <span className="small muted">목록 확인 {fmtDate(r.lastCheckedAt as unknown as string)} · {r.lastStatus === "ok" ? "정상" : r.lastStatus === "partial" ? "일부 처리" : "실패"} · 신규 {r.lastNewCount}건{r.lastError ? ` · ${r.lastError}` : ""}</span>}
               {r.verificationNote && <span className="small muted">{r.verificationNote}</span>}
             </li>
           ))}
