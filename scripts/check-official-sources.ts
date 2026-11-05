@@ -12,7 +12,19 @@ for (const source of OFFICIAL_CATALOG) {
   if (result.ok) succeeded++;
   console.log(JSON.stringify({ name: source.name, url: source.boardUrl, ...result, ...(result.ok ? { total: result.entries.length, entries: result.entries.slice(0, 2) } : {}) }, null, 2));
   if (result.ok) {
-    const article = await fetchPublisherArticle(result.entries[0].url, undefined, { title: result.entries[0].title, takeExtraCall: () => false });
+    const sample = result.entries.find(e => !source.config.recruitmentOnly || /신청|모집|입학/.test(e.title)) ?? result.entries[0];
+    const inspectFetch: typeof safeFetch = async (url, opts) => {
+      const res = await safeFetch(url, opts);
+      if (process.argv.includes("--inspect")) {
+        const $ = load(decodePublicText(res.body, res.contentType));
+        console.log(JSON.stringify({ name: source.name, articleMarkup: { expected: sample.title, url: res.finalUrl,
+          heads: $("h1,h2,h3,h4,meta[property='og:title'],meta[name='twitter:title']").toArray().map(el => $(el).prop("outerHTML")?.slice(0, 600)).slice(0, 35),
+          candidates: $("[id],[class]").toArray().filter(el => /title|subject|board_view|view_cont|viewCont|bbs_view|post-content|news_view|ntt|bbsContent/i.test(($(el).attr("class") ?? "") + " " + ($(el).attr("id") ?? ""))).slice(-40).map(el => $(el).prop("outerHTML")?.slice(0, 800))
+        }}));
+      }
+      return res;
+    };
+    const article = await fetchPublisherArticle(sample.url, inspectFetch, { title: sample.title, takeExtraCall: () => false });
     console.log(JSON.stringify({ name: source.name, article: article.ok ? { ok: true, finalUrl: article.finalUrl, textLength: article.text.length, attachments: article.attachments.map(a => ({ kind: a.kind, status: a.status })) } : article }));
   }
   if (process.argv.includes("--inspect")) {

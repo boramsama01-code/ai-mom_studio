@@ -33,7 +33,7 @@ function officialUrl(value: string, pageUrl: string, domain: string): string | n
     const u = new URL(value, pageUrl);
     if (!/^https?:$/.test(u.protocol) || u.username || u.password || !officialHostMatches(u.hostname, domain)) return null;
     u.hash = "";
-    if (["wr_id", "DataId", "mng_no", "articleNo", "nttSn", "bbsSn"].some(k => u.searchParams.has(k))) {
+    if (["wr_id", "mng_no", "articleNo", "nttSn", "bbsSn"].some(k => u.searchParams.has(k))) {
       for (const k of ["page", "pageNo", "GotoPage", "thisPage", "article.offset", "articleLimit", "totalNoticeYn", "totalBoardNo", "sop", "sst", "sod", "sfl", "stx"]) u.searchParams.delete(k);
     }
     return u.href;
@@ -56,7 +56,7 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
       const url = officialUrl(href, cfg.articleBaseUrl ?? pageUrl, d);
       const title = cheerio.load(row.find("title").first().text()).text().replace(/\s+/g, " ").trim().slice(0, 500);
       const rawDate = row.find("pubDate, published, updated, dc\\:date").first().text().trim();
-      const date = new Date(rawDate);
+      const date = new Date(rawDate.replace(/\bKST\b/g, "+0900"));
       const dateText = rawDate && Number.isFinite(date.getTime()) ? new Date(date.getTime() + 9 * 3600_000).toISOString().slice(0, 10) : null;
       if (url && title && !seen.has(url)) { seen.add(url); out.push({ url, title, dateText }); }
     });
