@@ -74,7 +74,7 @@ export function extractHtml(html: string, baseUrl: string, context: ArticleConte
   $("script,style,noscript,iframe,svg,header,footer,nav,form,aside,button,[hidden],[aria-hidden='true'],.related-news,.related-articles,.article-tools,.share-buttons,.advertisement").remove();
   $("br").replaceWith("\n");
   $("p,div,section,li,h1,h2,h3,h4,tr").append("\n");
-  const selectors = [".prog_bord_view > .prog_contents", ".prog_bord_view .prog_contents", ".board_view.bd_noti", ".board_view > .view_body", "#dic_area", "#newsct_article", "#harmonyContainer", "#articletxt", "#cont_newstext", "#news_body_id", "#CmAdContent", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",
+  const selectors = [".bd-view__vcontent", ".bbsV_cont", ".viewBox", ".activity-detail-content [class*='ActivityDetailTabContent__StyledWrapper']", ".view_detail_area", ".prog_bord_view > .prog_contents", ".prog_bord_view .prog_contents", ".board_view.bd_noti", ".board_view > .view_body", "#dic_area", "#newsct_article", "#harmonyContainer", "#articletxt", "#cont_newstext", "#news_body_id", "#CmAdContent", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",
     "#article-view-content-div", "#articleBodyContents", "#articleBody", "#article-body", "#article_body", "#article_content", "#articleContent", "#newsEndContents", "#news_content", "#newsContent", "#news_text", "#news_txt", "section.news_view", ".article-body", ".article_body", ".article_view", ".article_txt", ".article-text", ".article-content", ".article__body", ".news-article-body", ".news-text", ".news_body", "article",
     "[class*='board_view']", "[class*='bbs_view']", "[class*='view_cont']", "[class*='viewCont']"];
   let text = "";

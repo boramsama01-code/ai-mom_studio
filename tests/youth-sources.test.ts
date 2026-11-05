@@ -1,8 +1,9 @@
 import { expect, it } from "vitest";
 import { parseBoardList } from "../server/services/boardAdapter";
-import { isYouthOpportunity, classifyNotice } from "../shared/noticeIntent";
+import { nonYouthAudienceReason, isYouthOpportunity, classifyNotice } from "../shared/noticeIntent";
 import { matchOfficialSource } from "../server/worker/evidence";
 import type { OfficialSource } from "../shared/schema";
+import { fetchAndExtract } from "../server/services/extract";
 
 it("reads education CMS data IDs without executing handlers or leaving the verified domain", () => {
   const html = '<table><tr><td><a class="nttInfoBtn" data-id="123" href="javascript:;" title="중학생 캠프 모집">N<em>중학생 캠프 모집</em></a></td><td data-table="date">2026.11.05.</td></tr><tr><td><a class="nttInfoBtn" data-id="//evil.example" href="javascript:;">bad</a></td></tr></table>';
@@ -41,4 +42,21 @@ it("never treats a verified aggregator domain as the organizer's official eviden
   expect(matchOfficialSource("https://linkareer.com/activity/123", [source])).toBeNull();
   const school = { ...source, domain: "ice.go.kr", adapterConfig: {} };
   expect(matchOfficialSource("https://www.ice.go.kr/notice", [school])).toBe(school);
+});
+it("checks explicit body audience fields without inferring eligibility from a keyword in prose", () => {
+  expect(nonYouthAudienceReason("AI 놀이학교\n대상초등학생\n장소과학관")).toContain("초등학생");
+  expect(nonYouthAudienceReason("청소년 지원 봉사\n모집 대상: 대학생 및 대학원생\n신청: 폼")).toContain("대학생");
+  expect(nonYouthAudienceReason("대상: 초등학생\n중학생과 고등학생\n신청방법: 온라인")).toBeNull();
+  expect(nonYouthAudienceReason("교육대상: 초·중·고등학생과 대학생")).toBeNull();
+  expect(nonYouthAudienceReason("대학생 멘토와 함께하는 중학생 실험교실입니다.")).toBeNull();
+});
+it("isolates the activity's title and body from Linkareer navigation and unrelated resumes", async () => {
+  const body = "청소년이 참가하는 환경 공모 프로젝트입니다. 응모 방법과 지역 자격을 확인해 주세요. ".repeat(4);
+  const html = `<h1>링커리어</h1><div class="activity-detail-content"><h1>청소년 환경 공모전</h1><div class="ActivityDetailTabContent__StyledWrapper-abc"><p>${body}</p></div><div class="content">${"다른 사람의 자기소개서 ".repeat(100)}</div></div>`;
+  const url = "https://linkareer.com/activity/123";
+  const fetcher = async () => ({ finalUrl: url, body: Buffer.from(html), contentType: "text/html", status: 200 });
+  const result = await fetchAndExtract(url, fetcher, { title: "청소년 환경 공모전" });
+  expect(result.ok).toBe(true);
+  if (result.ok) expect(result.text).toBe(body.trim());
+  expect((await fetchAndExtract(url, fetcher, { title: "다른 공모전" })).ok).toBe(false);
 });

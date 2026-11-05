@@ -24,4 +24,5 @@ jobs:
       - name: Check public official lists without application credentials
         run: node --import tsx scripts/check-official-sources.ts
       - name: Inspect education and youth contest public lists
+        if: always()
         run: node --import tsx scripts/inspect-public-source-candidates.ts

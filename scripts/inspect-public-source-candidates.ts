@@ -15,7 +15,7 @@ const sources = [
   ["경남 고입", "https://highschool.gne.go.kr/s10/hsa/archive/notice.do"],
   ["대구", "https://www.dge.go.kr/main/main.do"], ["충남", "https://www.cne.go.kr/cne/main.do"],
   ["링커리어", "https://linkareer.com/search?direction=DESC&page=1&q=%EC%B2%AD%EC%86%8C%EB%85%84&sort=RELEVANCE&tab=open-activity"],
-  ["위비티 청소년", "https://www.wevity.com/index.php?c=find&cidx=30&gp=1&gub=2&mode=future&s=1"],
+  ["위비티 청소년", "https://www.wevity.com/index.php?c=find&s=1&gub=2&cidx=30"],
   ["콘테스트코리아 청소년", "https://www.contestkorea.com/sub/list.php?int_gbn=1&Txt_code1[0]=28&Txt_code1[1]=29"],
   ["문체부 다운로드 함수", "https://www.mcst.go.kr/site/common/js/common_function.js?ver=20260625194422"],
   ["문체부 첨부", "https://www.mcst.go.kr/site/s_notice/press/pressView.jsp?pMenuCD=0302000000&pSeq=22829"],

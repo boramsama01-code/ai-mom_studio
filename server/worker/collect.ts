@@ -42,7 +42,7 @@ import { generateDialogueDraft } from "./generate";
 import { persistSourceFetchAttempt } from "../services/sourceFetchPersistence";
 import { assertGenerationActive, completeGenerationResult, currentGenerationSignal } from "../services/generationContext";
 import type { NoticePayload } from "../../shared/payloads";
-import { isYouthOpportunity, classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
+import { nonYouthAudienceReason, isYouthOpportunity, classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { itemPrimarySource } from "../services/itemSources";
 import { preserveCardCopy } from "../../shared/cardCopy";
 import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
@@ -315,6 +315,15 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       continue;
     }
     counts.fetchedOk++;
+    if (channel.contentType === "notice" && ["pending", "review_required"].includes(item.reviewStatus)) {
+      const [doc] = await db.select({ text: sourceDocuments.fetchedText }).from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId!));
+      const reason = nonYouthAudienceReason(doc?.text ?? "");
+      if (reason) {
+        // Preserve the source and allow review; never overwrite a concurrent edit.
+        const updated = await db.update(contentItems).set({ excluded: true, excludedReason: reason, updatedAt: now }).where(and(eq(contentItems.id, itemId), eq(contentItems.version, item.version))).returning({ id: contentItems.id });
+        if (updated.length) { counts.excluded++; counts.audienceExcluded = (counts.audienceExcluded ?? 0) + 1; continue; }
+      }
+    }
     fetchedOk.push(itemId);
     await opts.heartbeat?.();
   }

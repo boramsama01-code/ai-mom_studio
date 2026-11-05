@@ -55,6 +55,17 @@ it("stores youth aggregator posts as secondary listings and filters college ment
   expect(r.counts.newItems).toBe(1);
   expect((await getDb().select().from(sourceDocuments))[0].kind).toBe("opportunity_listing");
 });
+it("keeps the fetched source but excludes a newly found elementary-only program", async () => {
+  await board("science"); await budget(4, 2);
+  const result = await runCollect(getDb(), 1, { trigger: "cli", collectionOnly: true,
+    fetchBoard: async () => ({ ok: true, entries: [{ title: "AI 놀이학교 교육 안내 및 예약", url: "https://school.example/ai", dateText: null }] }),
+    fetchSource: async url => ({ ...await body(url), text: "대상초등학생\n장소과학관\n" + "교육 내용과 신청 방법 안내. ".repeat(20) }),
+  });
+  expect(result.counts.audienceExcluded).toBe(1);
+  const [item] = await getDb().select().from(contentItems);
+  expect(item.excluded).toBe(true); expect(item.excludedReason).toContain("초등학생");
+  expect((await getDb().select().from(sourceDocuments))[0].fetchStatus).toBe("ok");
+});
 it("collects official-only subcategories through the API even with no search rules or search budget", async () => {
   await board("camp", "캠프·체험 선발모집"); await budget(4, 2);
   const { agent, csrf } = await login(createApp());

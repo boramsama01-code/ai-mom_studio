@@ -83,6 +83,11 @@ function officialDetailHeadlines(html: string, pageUrl?: string): string[] {
   try { u = new URL(pageUrl); } catch { return []; }
   const host = u.hostname.replace(/^www\./, "");
   const selector = host === "scienceall.com" && u.pathname.startsWith("/brd/board/") && u.searchParams.has("bbsSn") ? ".board_view.bd_noti .title .tit"
+    : host === "sen.go.kr" && u.pathname === "/user/bbs/BD_selectBbs.do" && u.searchParams.has("q_bbsDocNo") ? ".bd-view .vtitle .tit"
+    : ["pen.go.kr", "ice.go.kr", "goe.go.kr", "cbe.go.kr"].includes(host) && /\/na\/ntt\/selectNttInfo\.do$/.test(u.pathname) && u.searchParams.has("nttSn") ? ".bbs_ViewA h3"
+    : host === "dje.go.kr" && u.pathname === "/boardCnts/view.do" && u.searchParams.has("boardSeq") ? "h2.tit"
+    : host === "linkareer.com" && /^\/activity\/\d+$/.test(u.pathname) ? ".activity-detail-content h1"
+    : host === "contestkorea.com" && u.pathname === "/sub/view.php" && u.searchParams.has("str_no") ? ".view_top_area h1"
     : host === "koi.or.kr" && /^\/notice\/\d{4}\/\d{2}\/\d{2}\//.test(u.pathname) ? "td.subject > b[aria-current='page']"
     : host === "mcst.go.kr" && /\/s_notice\/press\/pressView\.jsp$/.test(u.pathname) && u.searchParams.has("pSeq") ? "h3.view_title"
     : host === "ksa.hs.kr" && /^\/Home\/BoardRead\/\d+$/.test(u.pathname) && u.searchParams.has("DataId") ? ".board_view > .title_bar"
