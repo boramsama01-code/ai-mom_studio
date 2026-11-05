@@ -34,7 +34,7 @@ try{
 for(const width of widths){
  const context=await browser.newContext({viewport:{width,height:900},locale:'ko-KR',timezoneId:'Asia/Seoul',serviceWorkers:'block'});
  await context.addInitScript(()=>localStorage.setItem('spacepenguin.channel','1'));
- const page=await context.newPage(),errors=[],blocked=[],writes=[],exports=[];
+ const page=await context.newPage(),errors=[],blocked=[],writes=[],exports=[],portraitRequests=new Set();
  const ch={id:1,slug:'penguin',name:'우주펭귄상회',active:true,version:1,accentColor:'#285f6a',contentType:'manual',budget:{},categories:null};
  let detail={card:{id:8,version:1,title:'자동 이미지 작업',channel:'penguin',format:'카드뉴스',stage:'making',finishedDeck:null,experience:null,altTexts:[],subcategory:'',dueDate:'',memo:'',script:'전체 원고 유지',caption:'내 캡션',exportDesign:'editorial',sourceLabel:'브라우저 테스트용 합성 자료',panels:Array.from({length:4},(_,i)=>({scene:`장면 ${i+1}`,dialogue:`본문 ${i+1}`,imageId:i===0?91:null,poseRefs:[]})),characters:[],imagePath:'',sourceItemId:null,createdAt:stamp,updatedAt:stamp},revisions:[],jobs:[],images:[]};
  page.on('pageerror',e=>errors.push(e.message));
@@ -60,6 +60,10 @@ for(const width of widths){
    }else if(p==='/api/studio/export-check')json={errors:[],warnings:[],pageCount:6};
    else if(p==='/api/studio/cards/8/publication')json={channelId:1,channelName:ch.name,expectedUsername:'spacepenguin.co',ready:false,blockers:[],dailyLimit:0,dryRun:true,autoPublish:false,destinations:[{id:20,label:'@spacepenguin.co',enabled:true,configured:true}],deliveries:[],publicationDraft:{version:1,options:{destinationIds:[20],timing:'now',scheduledAtKst:''}}};
    else if(p==='/api/studio/characters/reference')return route.fulfill({contentType:'image/png',body:await image(0)});
+   else if(/^\/api\/studio\/characters\/(pengpeng|pempem|penguin|pengki)\/poses\/1$/.test(p)){
+     assert.equal(url.searchParams.get('version'),'final-v1.4');portraitRequests.add(p);
+     return route.fulfill({contentType:'image/png',body:await image(0)});
+   }
    else if(/^\/api\/studio\/images\/\d+$/.test(p))return route.fulfill({contentType:'image/png',body:await image(Number(p.split('/').at(-1)))});
    else if(p==='/api/studio/cards/8/export.png'){exports.push({version:url.searchParams.get('version'),page:url.searchParams.get('page')});return route.fulfill({contentType:'image/png',body:await image(Number(url.searchParams.get('page')))});}
    else{errors.push(`Unmocked ${method} ${p}`);return route.fulfill({status:404,json:{error:'fixture missing'}});}
@@ -92,7 +96,7 @@ for(const width of widths){
      assert.equal(await pages.getByRole('button',{name:`${index+1}페이지 · ${label}`,exact:true}).getAttribute('aria-pressed'),'true');
    }
    await noOverflow(page,'final-preview');await pages.scrollIntoViewIfNeeded();await page.screenshot({path:`${output}/six-page-preview-${width}.png`});
-   assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);assert.equal(writes.filter(x=>x.path.includes('/publication/')).length,0);
+   assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);assert.equal(portraitRequests.size,4);assert.equal(writes.filter(x=>x.path.includes('/publication/')).length,0);
    const result={width,browserEngine,automaticDefault:true,manualRoundTripPreserved:true,stepNavigationPreserved:true,onlyEmptyPanelsGenerated:true,oldArtworkPreserved:true,captionPreserved:true,finalPages:6,paidMockRequests:writes.filter(x=>x.path.endsWith('/generate')),errors,blocked};results.push(result);await writeFile(`${output}/results.json`,JSON.stringify(results,null,2));console.log(JSON.stringify(result));
  }catch(error){await page.screenshot({path:`${output}/failure-${width}.png`});await writeFile(`${output}/failure-${width}.html`,await page.content());await writeFile(`${output}/failure-${width}.json`,JSON.stringify({errors,blocked,writes,exports,url:page.url()},null,2));throw error;}
  finally{await context.close();}
