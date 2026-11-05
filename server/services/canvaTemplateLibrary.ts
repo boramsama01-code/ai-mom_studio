@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { DB } from '../db';
 import { appSettings, canvaLibraryDesigns, canvaLibraryPreviewJobs, canvaLibraryPreviews, type CanvaLibraryStoredPage } from '../../shared/schema';
 import { CANVA_LIBRARY_DEFAULT_FOLDER_ID, CANVA_LIBRARY_SYNC_INTERVAL_SECONDS, canvaFolderDatasetErrors, canvaFolderSnapshotSchema, canvaLibraryPreviewGeometry, parseCanvaFolderId, type CanvaLibraryItem, type CanvaTemplateLibraryState } from '../../shared/canvaTemplateLibrary';
-import { canvaConfigured, canvaConnected } from './canva';
+import { canvaConfigured, canvaConnected, canvaConfigurationProblem } from './canva';
 import { canvaInputHash } from './canvaEditorialAssets';
 import { downloadCanvaLibraryExport } from './canvaLibraryAssets';
 import { tryBackgroundImageWork } from './readingCardRaster';
@@ -57,7 +57,7 @@ export async function getCanvaTemplateLibrary(db:DB):Promise<CanvaTemplateLibrar
   return {configured,connected,autofill:connected&&config.autofill,folderId:config.folderId,folderName:config.folderName,folderUrl:`https://www.canva.com/folder/${config.folderId}`,
     enabled:config.enabled,syncIntervalSeconds:CANVA_LIBRARY_SYNC_INTERVAL_SECONDS,lastSyncedAt:config.lastSyncedAt,syncStatus:status,
     errorCode:status==='not_configured'?'not_configured':status==='not_connected'?'not_connected':config.errorCode,
-    message:status==='not_configured'?'설정에서 Canva 연결 키를 등록해 주세요.':status==='not_connected'?'Canva 계정을 연결하면 폴더의 디자인과 미리보기를 자동으로 확인합니다.':config.message,items};
+    message:status==='not_configured'?(canvaConfigurationProblem()??'설정에서 Canva 연결 키를 등록해 주세요.'):status==='not_connected'?'Canva 계정을 연결하면 폴더의 디자인과 미리보기를 자동으로 확인합니다.':config.message,items};
 }
 
 export async function configureCanvaLibrary(db:DB,input:{folderId:string;enabled:boolean}){

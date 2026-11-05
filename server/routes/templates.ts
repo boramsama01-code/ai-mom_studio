@@ -28,6 +28,7 @@ import {
   CANVA_SCOPES,
   CanvaError,
   canvaConfigured,
+  canvaConfigurationProblem,
   canvaConnected,
   disconnectCanva,
   exchangeCode,
@@ -222,14 +223,14 @@ function redirectUri() {
 templateRoutes.get(
   "/canva/status",
   ah(async (_req, res) => {
-    res.json({ configured: canvaConfigured(), connected: canvaConnected(), redirectUri: redirectUri(), scopes: CANVA_SCOPES });
+    res.json({ configured: canvaConfigured(), connected: canvaConnected(), message: canvaConfigurationProblem(), redirectUri: redirectUri(), scopes: CANVA_SCOPES });
   }),
 );
 
 templateRoutes.get(
   "/canva/connect",
   ah(async (req, res) => {
-    if (!canvaConfigured()) throw new HttpError(400, "먼저 Canva Client ID와 Client secret을 저장하세요.");
+    if (!canvaConfigured()) throw new HttpError(400, canvaConfigurationProblem() ?? "먼저 Canva Client ID와 Client secret을 저장하세요.");
     const { verifier, challenge } = pkcePair();
     const state = crypto.randomBytes(16).toString("hex");
     req.session.canvaOauth = { state, verifier };

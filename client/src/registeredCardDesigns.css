@@ -1,0 +1,34 @@
+.registered-design-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+}
+
+.registered-design-card {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border, #deded8);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.registered-design-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: contain;
+  background: #f5f4ef;
+}
+
+.registered-design-card .row { margin-top: auto; }
+
+@media (max-width: 600px) {
+  .registered-design-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .registered-design-card { padding: 10px; }
+}

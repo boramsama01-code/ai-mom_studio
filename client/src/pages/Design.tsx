@@ -1,5 +1,6 @@
 import { CanvaMasterSettings } from "../CanvaEditorial";
 import { CanvaTemplateLibrary } from "../CanvaTemplateLibrary";
+import { RegisteredCardDesigns } from "../RegisteredCardDesigns";
 /**
  * 카드 디자인 — 템플릿 고르기, 내 배경 템플릿 올리기, Canva 자동 채우기, 대량 제작·망고보드용 글자 내보내기
  */
@@ -124,6 +125,7 @@ export function DesignPage() {
     return (
       <>
         <h1>수집 카드 디자인</h1>
+        <RegisteredCardDesigns />
         <CanvaTemplateLibrary />
         <Empty>수집함에서 만드는 카드의 디자인입니다. 오른쪽 위 ‘보기 채널’에서 설정할 채널을 선택해 주세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>
       </>
@@ -138,6 +140,7 @@ export function DesignPage() {
           </p>
         </div>
       </div>
+      <RegisteredCardDesigns />
       <CanvaTemplateLibrary />
       <DefaultTemplate cid={current.id} accent={current.accentColor} />
       <UploadTemplate cid={current.id} />
@@ -295,7 +298,7 @@ function CustomRow({ cid, t }: { cid: number; t: Tpl }) {
   );
 }
 
-type CanvaStatus = { configured: boolean; connected: boolean; redirectUri: string; scopes: string[] };
+type CanvaStatus = { configured: boolean; connected: boolean; message?: string | null; redirectUri: string; scopes: string[] };
 
 function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: string | null }) {
   const qc = useQueryClient();
@@ -328,6 +331,8 @@ function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: 
       {!s ? (
         <Loading lines={1} />
       ) : !s.configured ? (
+        <div className="stack">
+        {s.message && <p className="notice" role="status">{s.message}</p>}
         <ol className="small" style={{ margin: 0, paddingLeft: 18 }}>
           <li>
             <a href="https://www.canva.com/developers/apps" target="_blank" rel="noopener noreferrer">Canva 개발자 페이지(Your apps)</a>에서 앱을 만들고 <b>Outside Canva</b>(Connect API)를 켭니다.
@@ -340,6 +345,7 @@ function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: 
           </li>
           <li>Client ID와 Client secret을 <GuardedLink href="/connections?service=canva">API 키 관리 → Canva</GuardedLink>에 저장한 뒤 이 화면으로 돌아옵니다.</li>
         </ol>
+        </div>
       ) : !s.connected ? (
         <div className="stack">
           <p className="small" style={{ margin: 0 }}>

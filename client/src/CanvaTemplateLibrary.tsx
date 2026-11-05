@@ -85,8 +85,8 @@ function syncLabel(state: CanvaTemplateLibraryState): string {
 
 function LibraryConnection({ state }: { state: CanvaTemplateLibraryState }) {
   if (!state.configured) return <div className="notice stack">
-    <strong>Studio에 Canva 계정을 연결해 주세요.</strong>
-    <p>Canva 폴더를 연결하면 표지와 내지를 직접 고친 내용이 이곳에 반영됩니다.</p>
+    <strong>Canva 자동 동기화 설정이 필요합니다.</strong>
+    <p>{state.message ?? "Canva 폴더를 연결하면 표지와 내지를 직접 고친 내용이 이곳에 반영됩니다."}</p>
     <GuardedLink className="btn" href="/connections?service=canva">Canva 앱 연결 설정</GuardedLink>
   </div>;
   if (!state.connected && state.syncStatus === "syncing") return <p className="notice small" role="status">Canva 연결과 폴더를 확인하고 있습니다. 확인이 끝나면 디자인이 표시됩니다.</p>;

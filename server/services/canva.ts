@@ -22,11 +22,18 @@ export class CanvaError extends Error {
   }
 }
 
-export function canvaConfigured() {
-  return !!(process.env.CANVA_CLIENT_ID && process.env.CANVA_CLIENT_SECRET);
+/** Detect missing settings and known placeholders, not undocumented ID formats.
+ * Never return stored credentials in an operator-facing diagnostic. */
+export function canvaConfigurationProblem(): string | null {
+  const id = process.env.CANVA_CLIENT_ID?.trim();
+  if (!id || !process.env.CANVA_CLIENT_SECRET?.trim()) return "Canva 개발자 앱에서 발급한 Client ID와 Client secret을 연결 설정에 등록해 주세요.";
+  if (["aimom", "your_client_id", "your-client-id", "client_id", "changeme"].includes(id.toLowerCase()))
+    return "Canva 앱 ID에 임시값이 등록되어 있습니다. Canva 개발자 앱에서 실제 Client ID와 Client secret을 발급받아 연결 설정을 바꿔 주세요. Canva 계정 이름이나 앱 이름은 Client ID로 사용할 수 없습니다.";
+  return null;
 }
+export function canvaConfigured() { return canvaConfigurationProblem() === null; }
 export function canvaConnected() {
-  return !!process.env.CANVA_REFRESH_TOKEN;
+  return canvaConfigured() && !!process.env.CANVA_REFRESH_TOKEN?.trim();
 }
 
 export function pkcePair() {
@@ -41,14 +48,14 @@ export function buildAuthUrl(a: { challenge: string; state: string; redirectUri:
   u.searchParams.set("code_challenge_method", "s256");
   u.searchParams.set("scope", CANVA_SCOPES.join(" "));
   u.searchParams.set("response_type", "code");
-  u.searchParams.set("client_id", process.env.CANVA_CLIENT_ID ?? "");
+  u.searchParams.set("client_id", process.env.CANVA_CLIENT_ID?.trim() ?? "");
   u.searchParams.set("state", a.state);
   u.searchParams.set("redirect_uri", a.redirectUri);
   return u.toString();
 }
 
 function basicAuth() {
-  return "Basic " + Buffer.from(`${process.env.CANVA_CLIENT_ID}:${process.env.CANVA_CLIENT_SECRET}`).toString("base64");
+  return "Basic " + Buffer.from(`${process.env.CANVA_CLIENT_ID?.trim()}:${process.env.CANVA_CLIENT_SECRET?.trim()}`).toString("base64");
 }
 
 async function saveTokens(db: DB, j: { access_token: string; refresh_token: string; expires_in: number }) {
@@ -58,6 +65,8 @@ async function saveTokens(db: DB, j: { access_token: string; refresh_token: stri
 }
 
 async function tokenRequest(body: Record<string, string>, fetchImpl: typeof fetch) {
+  const problem = canvaConfigurationProblem();
+  if (problem) throw new CanvaError(problem, 400, "not_configured");
   let res: Response;
   try { res = await fetchImpl(`${CANVA_API}/oauth/token`, {
     method: "POST",
@@ -78,7 +87,7 @@ export async function exchangeCode(db: DB, a: { code: string; verifier: string; 
 
 let refreshing: Promise<string> | null = null;
 export async function accessToken(db: DB, fetchImpl: typeof fetch = fetch): Promise<string> {
-  if (!canvaConfigured()) throw new CanvaError("Canva 앱 정보(Client ID/Secret)가 없습니다.");
+  if (!canvaConfigured()) throw new CanvaError(canvaConfigurationProblem() ?? "Canva 앱 정보(Client ID/Secret)가 없습니다.");
   if (!canvaConnected()) throw new CanvaError("Canva 계정이 연결되지 않았습니다. 채널 설정에서 'Canva 연결'을 눌러 주세요.");
   const exp = Number(process.env.CANVA_TOKEN_EXPIRES_AT || 0);
   if (process.env.CANVA_ACCESS_TOKEN && exp - Date.now() > 60_000) return process.env.CANVA_ACCESS_TOKEN;
