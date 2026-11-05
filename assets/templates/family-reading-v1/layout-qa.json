@@ -1,0 +1,595 @@
+{
+  "status": "geometric_checks_passed",
+  "issues": [],
+  "styles": [
+    {
+      "style": "ink_lime",
+      "pages": [
+        {
+          "page": 1,
+          "nativeTextCount": 5,
+          "geometryElementCount": 7,
+          "approxTextCapacities": [
+            {
+              "field": "P01_TOPIC_TAG",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 20
+            },
+            {
+              "field": "P01_HEADLINE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 16
+            },
+            {
+              "field": "P01_SUBTITLE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 58
+            },
+            {
+              "field": "P01_IMAGE_CREDIT",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 46
+            },
+            {
+              "field": "P01_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 2,
+          "nativeTextCount": 5,
+          "geometryElementCount": 5,
+          "approxTextCapacities": [
+            {
+              "field": "P02_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P02_TITLE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 28
+            },
+            {
+              "field": "P02_READING_BODY",
+              "maxLines": 10,
+              "estimatedFullWidthKoreanCharacters": 240
+            },
+            {
+              "field": "P02_SOURCE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 84
+            },
+            {
+              "field": "P02_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 3,
+          "nativeTextCount": 4,
+          "geometryElementCount": 4,
+          "approxTextCapacities": [
+            {
+              "field": "P03_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P03_READING_BODY",
+              "maxLines": 12,
+              "estimatedFullWidthKoreanCharacters": 264
+            },
+            {
+              "field": "P03_SOURCE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 84
+            },
+            {
+              "field": "P03_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 4,
+          "nativeTextCount": 5,
+          "geometryElementCount": 4,
+          "approxTextCapacities": [
+            {
+              "field": "P04_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P04_QUESTION",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 33
+            },
+            {
+              "field": "P04_SCENARIO",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 54
+            },
+            {
+              "field": "P04_IMAGE_CREDIT",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 46
+            },
+            {
+              "field": "P04_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 5,
+          "nativeTextCount": 6,
+          "geometryElementCount": 9,
+          "approxTextCapacities": [
+            {
+              "field": "P05_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P05_VIEW_A_LABEL",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 16
+            },
+            {
+              "field": "P05_VIEW_A_BODY",
+              "maxLines": 10,
+              "estimatedFullWidthKoreanCharacters": 110
+            },
+            {
+              "field": "P05_VIEW_B_LABEL",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 16
+            },
+            {
+              "field": "P05_VIEW_B_BODY",
+              "maxLines": 10,
+              "estimatedFullWidthKoreanCharacters": 110
+            },
+            {
+              "field": "P05_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 6,
+          "nativeTextCount": 9,
+          "geometryElementCount": 6,
+          "approxTextCapacities": [
+            {
+              "field": "P06_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P06_CONCEPT",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 10
+            },
+            {
+              "field": "P06_DEFINITION_INDEX_A",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 2
+            },
+            {
+              "field": "P06_DEFINITION_A",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 66
+            },
+            {
+              "field": "P06_DEFINITION_INDEX_B",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 2
+            },
+            {
+              "field": "P06_DEFINITION_B",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 66
+            },
+            {
+              "field": "P06_BOUNDARY_CASE",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 87
+            },
+            {
+              "field": "P06_FILL_IN",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 50
+            },
+            {
+              "field": "P06_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 7,
+          "nativeTextCount": 7,
+          "geometryElementCount": 5,
+          "approxTextCapacities": [
+            {
+              "field": "P07_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 25
+            },
+            {
+              "field": "P07_DURATION",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 8
+            },
+            {
+              "field": "P07_ACTIVITY_LABEL",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 28
+            },
+            {
+              "field": "P07_ACTIVITY_ACTIONS",
+              "maxLines": 5,
+              "estimatedFullWidthKoreanCharacters": 130
+            },
+            {
+              "field": "P07_ACTIVITY_HELP",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 62
+            },
+            {
+              "field": "P07_IMAGE_CREDIT",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 52
+            },
+            {
+              "field": "P07_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 8,
+          "nativeTextCount": 5,
+          "geometryElementCount": 2,
+          "approxTextCapacities": [
+            {
+              "field": "P08_PARENT_BRAND",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 23
+            },
+            {
+              "field": "P08_BRAND_LINE",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 24
+            },
+            {
+              "field": "P08_CTA",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 25
+            },
+            {
+              "field": "P08_HANDLE",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 22
+            },
+            {
+              "field": "P08_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 6
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "style": "cobalt_paper",
+      "pages": [
+        {
+          "page": 1,
+          "nativeTextCount": 5,
+          "geometryElementCount": 7,
+          "approxTextCapacities": [
+            {
+              "field": "P01_TOPIC_TAG",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 20
+            },
+            {
+              "field": "P01_HEADLINE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 16
+            },
+            {
+              "field": "P01_SUBTITLE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 58
+            },
+            {
+              "field": "P01_IMAGE_CREDIT",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 46
+            },
+            {
+              "field": "P01_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 2,
+          "nativeTextCount": 5,
+          "geometryElementCount": 5,
+          "approxTextCapacities": [
+            {
+              "field": "P02_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P02_TITLE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 28
+            },
+            {
+              "field": "P02_READING_BODY",
+              "maxLines": 10,
+              "estimatedFullWidthKoreanCharacters": 240
+            },
+            {
+              "field": "P02_SOURCE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 84
+            },
+            {
+              "field": "P02_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 3,
+          "nativeTextCount": 4,
+          "geometryElementCount": 4,
+          "approxTextCapacities": [
+            {
+              "field": "P03_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P03_READING_BODY",
+              "maxLines": 12,
+              "estimatedFullWidthKoreanCharacters": 264
+            },
+            {
+              "field": "P03_SOURCE",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 84
+            },
+            {
+              "field": "P03_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 4,
+          "nativeTextCount": 5,
+          "geometryElementCount": 4,
+          "approxTextCapacities": [
+            {
+              "field": "P04_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P04_QUESTION",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 33
+            },
+            {
+              "field": "P04_SCENARIO",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 54
+            },
+            {
+              "field": "P04_IMAGE_CREDIT",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 46
+            },
+            {
+              "field": "P04_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 5,
+          "nativeTextCount": 6,
+          "geometryElementCount": 9,
+          "approxTextCapacities": [
+            {
+              "field": "P05_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P05_VIEW_A_LABEL",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 16
+            },
+            {
+              "field": "P05_VIEW_A_BODY",
+              "maxLines": 10,
+              "estimatedFullWidthKoreanCharacters": 110
+            },
+            {
+              "field": "P05_VIEW_B_LABEL",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 16
+            },
+            {
+              "field": "P05_VIEW_B_BODY",
+              "maxLines": 10,
+              "estimatedFullWidthKoreanCharacters": 110
+            },
+            {
+              "field": "P05_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 6,
+          "nativeTextCount": 9,
+          "geometryElementCount": 6,
+          "approxTextCapacities": [
+            {
+              "field": "P06_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 30
+            },
+            {
+              "field": "P06_CONCEPT",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 10
+            },
+            {
+              "field": "P06_DEFINITION_INDEX_A",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 2
+            },
+            {
+              "field": "P06_DEFINITION_A",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 66
+            },
+            {
+              "field": "P06_DEFINITION_INDEX_B",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 2
+            },
+            {
+              "field": "P06_DEFINITION_B",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 66
+            },
+            {
+              "field": "P06_BOUNDARY_CASE",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 87
+            },
+            {
+              "field": "P06_FILL_IN",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 50
+            },
+            {
+              "field": "P06_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 7,
+          "nativeTextCount": 7,
+          "geometryElementCount": 5,
+          "approxTextCapacities": [
+            {
+              "field": "P07_KICKER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 25
+            },
+            {
+              "field": "P07_DURATION",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 8
+            },
+            {
+              "field": "P07_ACTIVITY_LABEL",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 28
+            },
+            {
+              "field": "P07_ACTIVITY_ACTIONS",
+              "maxLines": 5,
+              "estimatedFullWidthKoreanCharacters": 130
+            },
+            {
+              "field": "P07_ACTIVITY_HELP",
+              "maxLines": 2,
+              "estimatedFullWidthKoreanCharacters": 62
+            },
+            {
+              "field": "P07_IMAGE_CREDIT",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 52
+            },
+            {
+              "field": "P07_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 7
+            }
+          ]
+        },
+        {
+          "page": 8,
+          "nativeTextCount": 5,
+          "geometryElementCount": 2,
+          "approxTextCapacities": [
+            {
+              "field": "P08_PARENT_BRAND",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 23
+            },
+            {
+              "field": "P08_BRAND_LINE",
+              "maxLines": 3,
+              "estimatedFullWidthKoreanCharacters": 24
+            },
+            {
+              "field": "P08_CTA",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 25
+            },
+            {
+              "field": "P08_HANDLE",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 22
+            },
+            {
+              "field": "P08_PAGE_NUMBER",
+              "maxLines": 1,
+              "estimatedFullWidthKoreanCharacters": 6
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Text capacities are conservative full-width estimates, not a Korean-font shaping measurement. Latin letters/spaces usually need less width. Explicit newlines consume a line.",
+    "Korean fonts are not installed in this restored scratch environment; actual Canva font, line breaks, glyph bounds and native export remain to be verified.",
+    "Shape overlap is intentional for full-page color fields, card headers and photo-frame borders. No text/text or text/image bounding-box overlap was found.",
+    "P02/P03 margin accents deliberately do not claim inline semantic highlighting."
+  ],
+  "shapeBoundaryChecks": "passed"
+}

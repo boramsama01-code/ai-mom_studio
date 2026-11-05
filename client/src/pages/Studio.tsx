@@ -7,6 +7,7 @@ import { emptyExperience, experienceImageUrl } from "@shared/experience";
 import { StudioTrashButton, StudioTrashView, TrashedStudioDetail } from "./StudioTrash";
 import { SourceStudioCard } from "./SourceStudioCard";
 import { aiProviderLabels, type AiProvider } from "@shared/aiProviders";
+import { legacyChannelAiSettings, type ChannelAiRuntime } from "@shared/channelAi";
 import { AiUsageGuide } from "../AiUsageGuide";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -38,7 +39,7 @@ const stages: Array<{ id: Stage; label: string }> = [{ id: "idea", label: "아�
 const formats: readonly Format[] = studioOutputFormats;
 function useStudioChannels(includeArchived = false) {
   const { allChannels } = useChannel();
-  return allChannels.filter(c => (includeArchived || c.active) && !(c.slug === "science-dialogue" && allChannels.some(other => other.slug === "current-dialogue"))).map(c => ({ id: studioKey(c.slug), name: c.name, role: c.description, active: c.active, accent: c.accentColor, categories: c.categories,
+  return allChannels.filter(c => (includeArchived || c.active) && !(c.slug === "science-dialogue" && allChannels.some(other => other.slug === "current-dialogue"))).map(c => ({ id: studioKey(c.slug), name: c.name, role: c.description, active: c.active, accent: c.accentColor, categories: c.categories, aiSettings: legacyChannelAiSettings(c.aiSettings), effectiveAiSettings: (c as typeof c & Partial<ChannelAiRuntime>).effectiveAiSettings,
     image: (c.slug === "opportunities" ? "pempem" : c.slug === "current-dialogue" ? "pengpeng" : c.slug === "penguin" ? "pengki" : c.slug === "fryday" ? "penguin" : null) as Character | null }));
 }
 const characters = STUDIO_CHARACTERS;
@@ -311,7 +312,9 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const [uploading, setUploading] = useState<number | null>(null);
   const [publicationBusy, setPublicationBusy] = useState(false);
   const uploadingRef = useRef(false);
-  const [provider, setProvider] = useState<AiProvider>("openai");
+  const [providerOverride, setProviderOverride] = useState<{ channel: string; provider: AiProvider } | null>(null);
+  const channelAi = channels.find(channel => channel.id === form.channel);
+  const provider = providerOverride?.channel === form.channel ? providerOverride.provider : channelAi?.aiSettings.copy.provider ?? "openai";
   const [tab, setTab] = useState<"content" | "history">("content");
   const [compareId, setCompareId] = useState<number | null>(null);
   const [awaitingJob, setAwaitingJob] = useState<number | null>(null);
@@ -321,8 +324,6 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
   const [, navigate] = useLocation();
   const request = useRef<{ signature: string; id: string } | null>(null);
   const submitting = useRef(false);
-  const providerInitialized = useRef(false);
-  useEffect(() => { if (settings.data && !providerInitialized.current) { setProvider(settings.data.ai.defaultProvider); providerInitialized.current = true; } }, [settings.data]);
   useEffect(() => { if (awaitingJob && data.jobs.some(j => j.id === awaitingJob)) setAwaitingJob(null); }, [data.jobs, awaitingJob]);
   const dirty = JSON.stringify(form) !== JSON.stringify(inputOf(base));
   const newer = data.card.version > base.version;
@@ -341,7 +342,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
     retry: false,
     mutationFn: async (action: GenerationAction) => {
       const current = await saveCurrent();
-      const input = { version: current.version, kind: action.kind, provider: action.kind === "image" ? "openai" : provider,
+      const input = { version: current.version, kind: action.kind, ...(action.kind === "image" ? { provider: "openai" } : providerOverride?.channel === current.channel ? { provider: providerOverride.provider } : {}),
         instruction: action.instruction ?? "", textTarget: action.textTarget ?? "rewrite",
         ...(action.kind === "image" ? action.panelIndexes ? { panelIndexes: action.panelIndexes } : { panelIndex: action.panelIndex } : action.textTarget === "panel" ? { panelIndex: action.panelIndex } : {}) };
       const signature = JSON.stringify(input);
@@ -447,7 +448,8 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         <label className="field">형식<select id="studio-format" disabled={busy} value={form.format} onChange={e => change("format", e.target.value as Format)}>{!formats.includes(form.format) && <option value={form.format}>{form.format} · 기획용</option>}{formats.map(f => <option key={f}>{f}</option>)}</select></label>
         <WorkModeControl mode={textMode === "api" ? "auto" : "manual"} onChange={mode => setTextMode(mode === "auto" ? "api" : "chatgpt")} disabled={busy} automaticUnavailable={settings.data?.ai.text[provider] === false ? `${aiProviderLabels[provider]} 연결이 필요합니다. 연결 후 앱 안에서 원고를 만들 수 있습니다.` : null} onConfigure={() => guard.confirmLeave(() => navigate(`/connections?service=${provider}`))} />
         <div className="stack" hidden={textMode !== "api"} data-testid="studio-api-writing">
-          <label className="field">작성 AI<select value={provider} disabled={busy || working} onChange={e => { providerInitialized.current = true; setProvider(e.target.value as typeof provider); }}><option value="gemini">Gemini · 무료 등급 지원</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude</option></select></label>
+          <label className="field">작성 AI<select value={provider} disabled={busy || working} onChange={e => setProviderOverride({ channel: form.channel, provider: e.target.value as AiProvider })}><option value="gemini">Gemini</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude</option></select><span className="hint">{providerOverride?.channel === form.channel ? "이 작업에서 선택한 AI입니다. 채널 기본값은 설정에서 바꿀 수 있습니다." : `채널의 카드 문구 AI를 사용합니다${channelAi?.effectiveAiSettings?.copy.model ? ` · ${channelAi.effectiveAiSettings.copy.model}` : ""}.`}</span></label>
+          {providerOverride?.channel === form.channel && <button type="button" className="btn sm ghost" disabled={busy || working} onClick={() => setProviderOverride(null)}>채널 AI 설정 사용</button>}
           <p className="small muted">원고·컷 구성·캡션의 빈칸을 작성합니다.</p><AiUsageGuide provider={provider} />
           <button className="btn primary" disabled={!canWrite || !hasBlanks} onClick={() => run({ kind: "text", textTarget: "fill" })}>원고·컷 구성 자동 작성</button>
         </div>

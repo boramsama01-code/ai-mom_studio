@@ -14,6 +14,7 @@ import { Resvg } from "@resvg/resvg-js";
 import sharp from "sharp";
 import { TOKENS } from "../../shared/tokens";
 import { fitCardBody } from "./cardBodyFit";
+import type { CardCopyColumn, CardCopyResource, CardPageBackground, NewsEditorialRole } from "../../shared/cardCopy";
 
 export const CARD_W = 1080;
 export const CARD_H = 1350;
@@ -42,7 +43,7 @@ export function loadFonts(): Fonts {
   const dir = fontDir();
   const load = (f: string) => {
     const buf = fs.readFileSync(path.join(dir, f));
-    return opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+    return opentype.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), { lowMemory: true });
   };
   const fonts = { regular: load("Pretendard-Regular.ttf"), semibold: load("Pretendard-SemiBold.ttf"), bold: load("Pretendard-Bold.ttf") };
   // 한글 글리프가 실제로 있는지 확인
@@ -97,6 +98,16 @@ export type CardModel = {
   subtitle?: string;
   blocks: Array<{ field: string; label?: string; text: string; maxLines: number; emphasis?: boolean }>;
   footer: string; // "출처: 기관 · 확인 2026-09-28"
+  /** Only explicit discussion8 copy uses the new renderer; legacy cards retain their layout. */
+  editorial?: {
+    role: "cover" | NewsEditorialRole;
+    page: number;
+    count: number;
+    columns?: CardCopyColumn[];
+    resource?: CardCopyResource;
+    sourceIds?: number[];
+    background?: CardPageBackground;
+  };
 };
 
 function pathFor(font: opentype.Font, text: string, x: number, y: number, size: number, color: string): string {

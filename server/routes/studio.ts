@@ -146,9 +146,10 @@ studioRoutes.post("/studio/cards/:id/panels/:panelIndex/image", raw({ type: STUD
 }));
 studioRoutes.post("/studio/cards/:id/generate", ah(async (req, res) => {
   const input = parse(studioGenerationSchema, req.body);
-  const configured = studioAiStatus();
-  if (!(input.kind === "image" ? configured.image : configured.text[input.provider])) throw new HttpError(503, `${input.kind === "image" || input.provider === "openai" ? "OpenAI" : "Claude"} 연결을 먼저 설정하세요.`, { code: "ai_not_configured" });
-  const result = await queueStudioGeneration(getDb(), intParam(req.params.id), input, actorOf(req));
+  const result = await queueStudioGeneration(getDb(), intParam(req.params.id), input, actorOf(req), selection => {
+    const configured = studioAiStatus();
+    if (!(input.kind === "image" ? configured.image : configured.text[selection.provider])) throw new HttpError(503, `${selection.provider === "openai" ? "OpenAI" : selection.provider === "gemini" ? "Gemini" : "Claude"} 연결을 먼저 설정하세요.`, { code: "ai_not_configured" });
+  });
   kickInlineStudio(getDb());
   res.status(202).json(result);
 }));

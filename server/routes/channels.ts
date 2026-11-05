@@ -14,13 +14,15 @@ import type { DB } from "../db";
 import { CHANNEL_ORDER_KEY, channelIdsSchema, orderedChannels } from "../services/channelOrder";
 import { channelCategoriesSchema, channelContentTypes, channelCreateSchema } from "../../shared/channelSettings";
 import { assertAvailableChannelSlug, assertCategoryRemovalSafe, newChannelBudget } from "../services/channelSettings";
+import { channelAiSettingsSchema, defaultChannelRoleSettings } from "../../shared/channelAi";
+import { withChannelAiSettings } from "../services/channelAi";
 
 export const channelRoutes = Router();
 
 channelRoutes.get(
   "/channels",
   ah(async (_req, res) => {
-    res.json(await orderedChannels(getDb()));
+    res.json((await orderedChannels(getDb())).map(withChannelAiSettings));
   }),
 );
 
@@ -42,7 +44,7 @@ channelRoutes.put("/channels/order", ah(async (req, res) => {
     const byId = new Map(current.map(ch => [ch.id, ch]));
     return body.ids.map(id => byId.get(id)!);
   });
-  res.json(result);
+  res.json(result.map(withChannelAiSettings));
 }));
 
 const budgetSchema = z.object({
@@ -72,6 +74,7 @@ const channelPatch = z.object({
   audience: z.string().trim().min(1).max(60).optional(),
   contentType: z.enum(channelContentTypes).optional(),
   categories: channelCategoriesSchema.optional(),
+  aiSettings: channelAiSettingsSchema.nullable().optional(),
   accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   active: z.boolean().optional(),
   editorialGuide: z.string().max(4000).optional(),
@@ -84,13 +87,13 @@ channelRoutes.post("/channels", ah(async (req, res) => {
     await tx.execute(sql`select pg_advisory_xact_lock(7193203)`);
     const slug = body.slug ?? `channel-${randomUUID()}`;
     await assertAvailableChannelSlug(tx as unknown as DB, slug);
-    const [ch] = await tx.insert(channels).values({ ...body, slug,
+    const [ch] = await tx.insert(channels).values({ ...body, slug, aiSettings: body.aiSettings ?? defaultChannelRoleSettings(),
       budget: newChannelBudget(body.contentType),
     }).returning();
     await audit(tx, { actor: actorOf(req), action: "create", entity: "channel", entityId: ch.id, channelId: ch.id });
     return ch;
   });
-  res.status(201).json(created);
+  res.status(201).json(withChannelAiSettings(created));
 }));
 
 channelRoutes.patch(
@@ -111,7 +114,7 @@ channelRoutes.patch(
       await audit(tx, { actor: actorOf(req), action: "update", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { fields: Object.keys(patch) } });
       return saved;
     });
-    res.json(updated);
+    res.json(withChannelAiSettings(updated));
   }),
 );
 

@@ -1,0 +1,15 @@
+{
+  "scope": "Observed Canva import behavior for these designs",
+  "rule": {
+    "fontFamily": "Noto Sans KR",
+    "sourceWeightGte600": "bold",
+    "sourceWeightLt600": "normal"
+  },
+  "preserveOtherFamilies": true,
+  "restoreSourceWidthAndPositionAfterFormat": true,
+  "requiredQA": [
+    "re-run source geometry plan",
+    "inspect all eight actual transaction previews",
+    "verify committed live dataset"
+  ]
+}

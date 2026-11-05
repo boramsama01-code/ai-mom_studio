@@ -8,6 +8,16 @@ type WorkerRun = { id: number; workerId: string; command: string; status: string
 const jobLabels: Record<string, string> = { collect: "자료 수집", publish: "게시", studio_generate: "콘텐츠 AI 작성", source_generate: "원문 초안 AI 작성", card_copy_generate: "카드 문구 AI 제안", card_render: "카드 이미지 생성" };
 const cancellableRunningJobs = new Set(["studio_generate", "source_generate", "card_copy_generate", "card_render"]);
 
+function estimatedRunCost(run: Run): number | null {
+  // Only an observed complete usage total and the admission-time prices can be estimated.
+  // Historical rows without usageStatus must not turn a missing provider response into $0.
+  if (run.llmUsage.usageStatus !== "known") return null;
+  const snapshotChannel = run.snapshot.channel as { budget?: { llmInputTokenPriceUsdPerM?: number; llmOutputTokenPriceUsdPerM?: number } } | undefined;
+  const input = snapshotChannel?.budget?.llmInputTokenPriceUsdPerM, output = snapshotChannel?.budget?.llmOutputTokenPriceUsdPerM;
+  if (typeof input !== "number" || !Number.isFinite(input) || input < 0 || typeof output !== "number" || !Number.isFinite(output) || output < 0) return null;
+  return (run.llmUsage.inputTokens * input + run.llmUsage.outputTokens * output) / 1_000_000;
+}
+
 export function RunsPage() {
   const { selected, channels } = useChannel();
   const qc = useQueryClient();
@@ -15,8 +25,6 @@ export function RunsPage() {
   const jobs = useQuery({ queryKey: ["ch", selected, "jobs"], queryFn: () => api<Job[]>(`/jobs?${qs({ channelId: selected })}`), refetchInterval: query => query.state.data?.some(job => job.status === "running" || job.status === "queued") ? 5000 : false });
   const cancel = useMutation({ mutationFn: (id: number) => api(`/jobs/${id}/cancel`, { method: "POST", body: {} }), onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", selected] }) });
   const chName = (id: number | null) => channels.find((c) => c.id === id)?.name ?? "—";
-  const current = channels.find((c) => c.id === selected);
-  const price = current?.budget;
   return (
     <>
       <div className="page-head">
@@ -30,7 +38,7 @@ export function RunsPage() {
         {runs.isLoading ? <Loading /> : runs.error ? <ErrorBox error={runs.error} retry={() => runs.refetch()} /> : !runs.data!.runs.length ? <Empty>실행 기록이 없습니다.</Empty> : (
           <ul className="list">
             {runs.data!.runs.map((r) => {
-              const cost = price?.llmInputTokenPriceUsdPerM != null && price?.llmOutputTokenPriceUsdPerM != null ? (r.llmUsage.inputTokens * price.llmInputTokenPriceUsdPerM + r.llmUsage.outputTokens * price.llmOutputTokenPriceUsdPerM) / 1_000_000 : null;
+              const cost = estimatedRunCost(r);
               return (
                 <li key={r.id} className="list-item">
                   <div className="row between">
@@ -50,7 +58,7 @@ export function RunsPage() {
                   </div>
                   <div className="meta">
                     <span>검색 {r.actualCalls.search ?? r.actualCalls.naver ?? 0}회 · 공개 RSS 요청 {r.actualCalls.rss ?? 0}회 · 네이버 API {r.actualCalls.naver ?? 0}회 · 원문 {r.actualCalls.fetch ?? 0}/{r.plannedCalls.fetch ?? 0}회 · AI {r.actualCalls.llm ?? 0}/{r.plannedCalls.llm ?? 0}회</span>
-                    <span>토큰 입력 {r.llmUsage.inputTokens.toLocaleString()} · 출력 {r.llmUsage.outputTokens.toLocaleString()}{cost !== null ? ` · 추정 비용 $${cost.toFixed(4)}(입력한 단가 기준)` : ""}</span>
+                    <span>{r.llmUsage.usageStatus === "known" ? "토큰 입력" : "사용량 확인 필요 · 확인된 토큰 입력"} {r.llmUsage.inputTokens.toLocaleString()} · 출력 {r.llmUsage.outputTokens.toLocaleString()}{r.llmUsage.usageStatus !== "known" ? " · 비용 미확정" : cost !== null ? ` · 추정 비용 $${cost.toFixed(4)}(실행 당시 입력한 단가 기준)` : " · 비용 단가 미설정"}</span>
                   </div>
                   {r.unconnectedSources.length > 0 && <span className="small muted">미연결 공식 출처: {r.unconnectedSources.join(", ")}</span>}
                   {r.errors.length > 0 && (

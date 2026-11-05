@@ -16,6 +16,8 @@ import { audit } from "../audit";
 import { renderStudioOutput } from "./studioExport";
 import { getSetting } from "../seed";
 import { revokePublicationEligibility } from "./publicationState";
+import { channelAiSelection } from "./channelAi";
+import type { AiSelection } from "../../shared/channelAi";
 
 export const studioCardDto = (row: typeof studioCards.$inferSelect): StudioCard => ({ ...studioContentSchema.parse(row.content), id: row.id, version: row.version, sourceItemId: row.sourceItemId, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString(), trashedAt: row.trashedAt?.toISOString() ?? null });
 /** Attach immutable source output without copying rendered pages into the four-panel editor. */
@@ -188,13 +190,13 @@ export async function studioDetail(db: DB, cardId: number) {
   ]);
   return { card: (await studioCardsWithOutput(db, [card]))[0], revisions: revisions.map(studioRevisionDto), jobs: cardJobs.map(studioJobDto) };
 }
-export async function queueStudioGeneration(db: DB, cardId: number, input: StudioGeneration, actor: string) {
+export async function queueStudioGeneration(db: DB, cardId: number, input: StudioGeneration, actor: string, assertAiAvailable?: (selection: AiSelection) => void) {
   if (await getSetting(db, "global_stop", false)) throw new HttpError(409, "전역 정지 상태입니다. 정지를 해제한 뒤 생성하세요.");
   const inputHash = crypto.createHash("sha256").update(JSON.stringify({ cardId, ...input })).digest("hex");
   return db.transaction(async tx => {
     const card = await loadStudioCard(tx as unknown as DB, cardId, true);
     assertStudioActive(card);
-    await validateStudioChannel(tx as unknown as DB, card.content.channel);
+    const channel = await validateStudioChannel(tx as unknown as DB, card.content.channel);
     const reserved = await tx.insert(studioRequests).values({ requestId: input.requestId, cardId, inputHash }).onConflictDoNothing().returning();
     if (!reserved.length) {
       const [existing] = await tx.select().from(studioRequests).where(eq(studioRequests.requestId, input.requestId));
@@ -215,13 +217,15 @@ export async function queueStudioGeneration(db: DB, cardId: number, input: Studi
       const empty = indexes.find(index => !input.instruction && !card.content.panels[index].scene.trim() && !card.content.panels[index].dialogue.trim());
       if (empty !== undefined) throw new HttpError(400, `${empty + 1}컷의 장면이나 대사를 먼저 작성해 주세요. 빈칸 초안 채우기도 사용할 수 있습니다.`);
     }
+    const ai = channelAiSelection(channel, input.kind === "image" ? "image" : "copy", { provider: input.textTarget === "experience" ? "openai" : input.provider });
+    assertAiAvailable?.(ai);
     const queued = await enqueueJob(tx as unknown as DB, {
-      type: "studio_generate", maxAttempts: 1, dedupeKey: `studio:${cardId}`, requestedBy: actor,
-      payload: { cardId, ...input, snapshot: card.content },
+      type: "studio_generate", channelId: channel.id, maxAttempts: 1, dedupeKey: `studio:${cardId}`, requestedBy: actor,
+      payload: { cardId, ...input, provider: ai.provider, ai, snapshot: card.content },
     });
     if (queued.duplicate) throw new HttpError(409, "이 콘텐츠를 생성하고 있습니다. 완료 후 다시 요청하세요.", { jobId: queued.job.id });
     await tx.update(studioRequests).set({ jobId: queued.job.id }).where(eq(studioRequests.requestId, input.requestId));
-    await audit(tx, { actor, action: "generate", entity: "studio_card", entityId: cardId, detail: { jobId: queued.job.id, kind: input.kind, provider: input.provider } });
+    await audit(tx, { actor, action: "generate", entity: "studio_card", entityId: cardId, detail: { jobId: queued.job.id, kind: input.kind, provider: ai.provider, model: ai.model } });
     return { job: studioJobDto(queued.job), duplicate: false };
   });
 }

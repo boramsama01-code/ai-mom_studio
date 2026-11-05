@@ -1,0 +1,15 @@
+.collection-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 14px; }
+.collection-search { flex: 1 1 260px; margin: 0; }
+.collection-length { flex: 0 1 220px; margin: 0; }
+.collection-results { margin: -10px 0 -6px; }
+.collection-set-badge { position: absolute; left: 8px; bottom: 8px; padding: 4px 7px; border-radius: 5px; background: #172532e6; color: #fff; font-size: 10px; font-weight: 700; line-height: 1.4; }
+.collection-view-mode { display: flex; gap: 5px; }
+.collection-view-mode button { flex: 1; border: 1px solid var(--border); border-radius: 7px; padding: 8px; background: var(--surface); color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.collection-view-mode button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--bg-sunken); }
+.collection-overview { display: block; width: 100%; height: auto; border-radius: 8px; background: var(--bg-sunken); }
+.collection-pages { flex-wrap: wrap; }
+.collection-pages button { flex: 1 0 21%; }
+@media (max-width: 580px) {
+  .collection-length { flex: 1 1 200px; }
+  .collection-toolbar { gap: 10px; }
+}

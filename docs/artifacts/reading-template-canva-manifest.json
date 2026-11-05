@@ -1,0 +1,509 @@
+{
+  "version": "reading-v1-20261104-draft",
+  "status": "edited-in-transactions-not-committed",
+  "styles": [
+    {
+      "tx": "2788249261987109766",
+      "id": "DAHZ7YVE8BM",
+      "style": "ink_lime",
+      "pageOrder": [
+        1,
+        3,
+        4,
+        5,
+        6,
+        7,
+        2
+      ],
+      "photoIds": {
+        "1": "PBX32pcRbt86DKrM-LBcMLR2Wd0mZKjFR",
+        "4": "PBgQBw9mR7H60tCJ-LBDvNVhqw646sN9H",
+        "7": "PBTk2ZyH3LH8lYlF-LBVM2cj2YlVj7XFr"
+      }
+    },
+    {
+      "tx": "547708447011173160",
+      "id": "DAHZ7eGXum0",
+      "style": "cobalt_paper",
+      "pageOrder": [
+        8,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "photoIds": {
+        "1": "PBzfJW2h8Vylygqn-LB9hBMWHLcXwGCmV",
+        "4": "PBZmlyhW8mLssNr7-LBxVHMRrWsHDq8mt",
+        "7": "PBGkyGGwnWjbgtY1-LB3pL80dGTcCgPzy"
+      }
+    }
+  ],
+  "outro": {
+    "design_id": "DAHZ7WO_FWk",
+    "transaction_id": "4871164090884526046",
+    "page": 1,
+    "fit": "contain"
+  },
+  "backgroundAssets": {
+    "ink_lime": {
+      "1": "MAHZ7jxBQ0c",
+      "2": "MAHZ7gKFtX4",
+      "3": "MAHZ7qT6VH4",
+      "4": "MAHZ7k8y1co",
+      "5": "MAHZ7rMXhLQ",
+      "6": "MAHZ7hKeN88",
+      "7": "MAHZ7m8qd7s"
+    },
+    "cobalt_paper": {
+      "1": "MAHZ7k4OiBU",
+      "2": "MAHZ7mlfbMQ",
+      "3": "MAHZ7tzHaes",
+      "4": "MAHZ7mOxYLg",
+      "5": "MAHZ7oP0SE8",
+      "6": "MAHZ7v_8WH4",
+      "7": "MAHZ7uK6m7s"
+    }
+  },
+  "fieldCounts": {
+    "text": 46,
+    "image": 4
+  },
+  "nativeTextElements": [
+    {
+      "variant": "ink_lime",
+      "logicalPage": 1,
+      "sourcePage": 1,
+      "fields": [
+        {
+          "field": "P01_TOPIC_TAG",
+          "elementId": "PBX32pcRbt86DKrM-LBfxVRjMvkzR9Hwy"
+        },
+        {
+          "field": "P01_HEADLINE",
+          "elementId": "PBX32pcRbt86DKrM-LBkYrRMG51xlzcbH"
+        },
+        {
+          "field": "P01_SUBTITLE",
+          "elementId": "PBX32pcRbt86DKrM-LBftXbnfXLDbg9yk"
+        },
+        {
+          "field": "P01_IMAGE_CREDIT",
+          "elementId": "PBX32pcRbt86DKrM-LBMB8LXfFnWJgcJq"
+        },
+        {
+          "field": "P01_PAGE_NUMBER",
+          "elementId": "PBX32pcRbt86DKrM-LBkjbB5ZJgNk68vB"
+        }
+      ]
+    },
+    {
+      "variant": "ink_lime",
+      "logicalPage": 2,
+      "sourcePage": 3,
+      "fields": [
+        {
+          "field": "P02_KICKER",
+          "elementId": "PB3v43GZ8LV9Y9Ms-LB3PJRXMLxNfZDGN"
+        },
+        {
+          "field": "P02_TITLE",
+          "elementId": "PB3v43GZ8LV9Y9Ms-LBQKVjngRFkmctcz"
+        },
+        {
+          "field": "P02_READING_BODY",
+          "elementId": "PB3v43GZ8LV9Y9Ms-LB6SZXxxTvNCPQSy"
+        },
+        {
+          "field": "P02_SOURCE",
+          "elementId": "PB3v43GZ8LV9Y9Ms-LBkShQgsftrBjfgf"
+        },
+        {
+          "field": "P02_PAGE_NUMBER",
+          "elementId": "PB3v43GZ8LV9Y9Ms-LBT49MMKJLzKdNSx"
+        }
+      ]
+    },
+    {
+      "variant": "ink_lime",
+      "logicalPage": 3,
+      "sourcePage": 4,
+      "fields": [
+        {
+          "field": "P03_KICKER",
+          "elementId": "PB7KMD5w2P5HH7hr-LB1N7zW608WgYQB1"
+        },
+        {
+          "field": "P03_READING_BODY",
+          "elementId": "PB7KMD5w2P5HH7hr-LB87Shb1LN66xlS7"
+        },
+        {
+          "field": "P03_SOURCE",
+          "elementId": "PB7KMD5w2P5HH7hr-LBX6Rn6gbdJ8d7pv"
+        },
+        {
+          "field": "P03_PAGE_NUMBER",
+          "elementId": "PB7KMD5w2P5HH7hr-LBMnXyRj1WYdHKMz"
+        }
+      ]
+    },
+    {
+      "variant": "ink_lime",
+      "logicalPage": 4,
+      "sourcePage": 5,
+      "fields": [
+        {
+          "field": "P04_KICKER",
+          "elementId": "PBgQBw9mR7H60tCJ-LBb62zHVkMnYRZ5C"
+        },
+        {
+          "field": "P04_QUESTION",
+          "elementId": "PBgQBw9mR7H60tCJ-LBQqjG9HTC4D6Ckr"
+        },
+        {
+          "field": "P04_SCENARIO",
+          "elementId": "PBgQBw9mR7H60tCJ-LB7qgmWFm2bNLDCh"
+        },
+        {
+          "field": "P04_IMAGE_CREDIT",
+          "elementId": "PBgQBw9mR7H60tCJ-LBBKbDJklWjdxCsD"
+        },
+        {
+          "field": "P04_PAGE_NUMBER",
+          "elementId": "PBgQBw9mR7H60tCJ-LBbBs6LFTv5mD52f"
+        }
+      ]
+    },
+    {
+      "variant": "ink_lime",
+      "logicalPage": 5,
+      "sourcePage": 6,
+      "fields": [
+        {
+          "field": "P05_KICKER",
+          "elementId": "PBb2jSWBQ2Fpm4gM-LBVTxGyWvjtsGvyL"
+        },
+        {
+          "field": "P05_VIEW_A_LABEL",
+          "elementId": "PBb2jSWBQ2Fpm4gM-LBh958Wg5WmlF0h3"
+        },
+        {
+          "field": "P05_VIEW_A_BODY",
+          "elementId": "PBb2jSWBQ2Fpm4gM-LBPR6H2pwscstkzr"
+        },
+        {
+          "field": "P05_VIEW_B_LABEL",
+          "elementId": "PBb2jSWBQ2Fpm4gM-LBRNJ4fwmvWKs2Mx"
+        },
+        {
+          "field": "P05_VIEW_B_BODY",
+          "elementId": "PBb2jSWBQ2Fpm4gM-LBPWhP0Y4CFcRb3H"
+        },
+        {
+          "field": "P05_PAGE_NUMBER",
+          "elementId": "PBb2jSWBQ2Fpm4gM-LB0FNyR9dv5TQYhc"
+        }
+      ]
+    },
+    {
+      "variant": "ink_lime",
+      "logicalPage": 6,
+      "sourcePage": 7,
+      "fields": [
+        {
+          "field": "P06_KICKER",
+          "elementId": "PBVkyvRtWqwQtsfm-LBVFvY856p8Gx41L"
+        },
+        {
+          "field": "P06_CONCEPT",
+          "elementId": "PBVkyvRtWqwQtsfm-LB9jWsrkXQLYcH5z"
+        },
+        {
+          "field": "P06_DEFINITION_INDEX_A",
+          "elementId": "PBVkyvRtWqwQtsfm-LBvvcnnTNRmQKMBx"
+        },
+        {
+          "field": "P06_DEFINITION_A",
+          "elementId": "PBVkyvRtWqwQtsfm-LB1y4pNLrYsg4hyz"
+        },
+        {
+          "field": "P06_DEFINITION_INDEX_B",
+          "elementId": "PBVkyvRtWqwQtsfm-LBRrbCbqTdNpXMCd"
+        },
+        {
+          "field": "P06_DEFINITION_B",
+          "elementId": "PBVkyvRtWqwQtsfm-LBNWRdsGty2gWSPv"
+        },
+        {
+          "field": "P06_BOUNDARY_CASE",
+          "elementId": "PBVkyvRtWqwQtsfm-LBt45f97lZPrKz7g"
+        },
+        {
+          "field": "P06_FILL_IN",
+          "elementId": "PBVkyvRtWqwQtsfm-LB6Tb292j7gBjL3y"
+        },
+        {
+          "field": "P06_PAGE_NUMBER",
+          "elementId": "PBVkyvRtWqwQtsfm-LBKLTpJmXqtrJW1S"
+        }
+      ]
+    },
+    {
+      "variant": "ink_lime",
+      "logicalPage": 7,
+      "sourcePage": 2,
+      "fields": [
+        {
+          "field": "P07_KICKER",
+          "elementId": "PBTk2ZyH3LH8lYlF-LBGpKLcc1xFBgcyY"
+        },
+        {
+          "field": "P07_DURATION",
+          "elementId": "PBTk2ZyH3LH8lYlF-LBGNZ6zNl3NMJqZl"
+        },
+        {
+          "field": "P07_ACTIVITY_LABEL",
+          "elementId": "PBTk2ZyH3LH8lYlF-LBbzwr1YRtSz6thP"
+        },
+        {
+          "field": "P07_ACTIVITY_ACTIONS",
+          "elementId": "PBTk2ZyH3LH8lYlF-LB7J62PKcjDDHNzl"
+        },
+        {
+          "field": "P07_ACTIVITY_HELP",
+          "elementId": "PBTk2ZyH3LH8lYlF-LBgLsjyz91nDKMhX"
+        },
+        {
+          "field": "P07_IMAGE_CREDIT",
+          "elementId": "PBTk2ZyH3LH8lYlF-LBncYMPhlxqF6VNV"
+        },
+        {
+          "field": "P07_PAGE_NUMBER",
+          "elementId": "PBTk2ZyH3LH8lYlF-LBgLZFm7HN74qq2p"
+        }
+      ]
+    },
+    {
+      "variant": "cobalt_paper",
+      "logicalPage": 1,
+      "sourcePage": 8,
+      "fields": [
+        {
+          "field": "P01_TOPIC_TAG",
+          "elementId": "PBzfJW2h8Vylygqn-LB70s1vsRS0Ms1yY"
+        },
+        {
+          "field": "P01_HEADLINE",
+          "elementId": "PBzfJW2h8Vylygqn-LB4lc3BfV6jRS361"
+        },
+        {
+          "field": "P01_SUBTITLE",
+          "elementId": "PBzfJW2h8Vylygqn-LBMH503fRFw7RzNs"
+        },
+        {
+          "field": "P01_IMAGE_CREDIT",
+          "elementId": "PBzfJW2h8Vylygqn-LBsfhKYlqqCXL7b3"
+        },
+        {
+          "field": "P01_PAGE_NUMBER",
+          "elementId": "PBzfJW2h8Vylygqn-LBllm3Zyk5B65CH5"
+        }
+      ]
+    },
+    {
+      "variant": "cobalt_paper",
+      "logicalPage": 2,
+      "sourcePage": 2,
+      "fields": [
+        {
+          "field": "P02_KICKER",
+          "elementId": "PBQNlyYXpsXZGtT9-LBmGrbswpPMvP2Bt"
+        },
+        {
+          "field": "P02_TITLE",
+          "elementId": "PBQNlyYXpsXZGtT9-LB8wZMHWh4n2W4b1"
+        },
+        {
+          "field": "P02_READING_BODY",
+          "elementId": "PBQNlyYXpsXZGtT9-LB9KCzxrSRfcKCvW"
+        },
+        {
+          "field": "P02_SOURCE",
+          "elementId": "PBQNlyYXpsXZGtT9-LBqrr9GCyK3D8jQc"
+        },
+        {
+          "field": "P02_PAGE_NUMBER",
+          "elementId": "PBQNlyYXpsXZGtT9-LB1BQhzKwBYBNnfX"
+        }
+      ]
+    },
+    {
+      "variant": "cobalt_paper",
+      "logicalPage": 3,
+      "sourcePage": 3,
+      "fields": [
+        {
+          "field": "P03_KICKER",
+          "elementId": "PBjRVPmkP5RhZm3d-LBNTJzWgYS48f40c"
+        },
+        {
+          "field": "P03_READING_BODY",
+          "elementId": "PBjRVPmkP5RhZm3d-LB5P2ykMK4YZr0j4"
+        },
+        {
+          "field": "P03_SOURCE",
+          "elementId": "PBjRVPmkP5RhZm3d-LBTTBd2Jz02GRf1c"
+        },
+        {
+          "field": "P03_PAGE_NUMBER",
+          "elementId": "PBjRVPmkP5RhZm3d-LBMLsvljKgtb9tDP"
+        }
+      ]
+    },
+    {
+      "variant": "cobalt_paper",
+      "logicalPage": 4,
+      "sourcePage": 4,
+      "fields": [
+        {
+          "field": "P04_KICKER",
+          "elementId": "PBZmlyhW8mLssNr7-LB9mR1zMvY1xssBL"
+        },
+        {
+          "field": "P04_QUESTION",
+          "elementId": "PBZmlyhW8mLssNr7-LBHBz79nyHnG3bV5"
+        },
+        {
+          "field": "P04_SCENARIO",
+          "elementId": "PBZmlyhW8mLssNr7-LBHSwz4vp8b7vl8V"
+        },
+        {
+          "field": "P04_IMAGE_CREDIT",
+          "elementId": "PBZmlyhW8mLssNr7-LBpV6pt8NQBWGk9j"
+        },
+        {
+          "field": "P04_PAGE_NUMBER",
+          "elementId": "PBZmlyhW8mLssNr7-LBHFR3cf3XF9DPff"
+        }
+      ]
+    },
+    {
+      "variant": "cobalt_paper",
+      "logicalPage": 5,
+      "sourcePage": 5,
+      "fields": [
+        {
+          "field": "P05_KICKER",
+          "elementId": "PB6KdGBbcHbS83l3-LBqyGMfvV64xJtWD"
+        },
+        {
+          "field": "P05_VIEW_A_LABEL",
+          "elementId": "PB6KdGBbcHbS83l3-LBT438G1t9b7Sx6B"
+        },
+        {
+          "field": "P05_VIEW_A_BODY",
+          "elementId": "PB6KdGBbcHbS83l3-LB9FGhBwc3qmNTF5"
+        },
+        {
+          "field": "P05_VIEW_B_LABEL",
+          "elementId": "PB6KdGBbcHbS83l3-LBwtjCWCkl3w2rQN"
+        },
+        {
+          "field": "P05_VIEW_B_BODY",
+          "elementId": "PB6KdGBbcHbS83l3-LBlJC5ZSQzdKGDGc"
+        },
+        {
+          "field": "P05_PAGE_NUMBER",
+          "elementId": "PB6KdGBbcHbS83l3-LB1NdMmLY5TsWVSJ"
+        }
+      ]
+    },
+    {
+      "variant": "cobalt_paper",
+      "logicalPage": 6,
+      "sourcePage": 6,
+      "fields": [
+        {
+          "field": "P06_KICKER",
+          "elementId": "PBdCDtQ0rlw4Qz9q-LBr5jwD0S80PTFKS"
+        },
+        {
+          "field": "P06_CONCEPT",
+          "elementId": "PBdCDtQ0rlw4Qz9q-LB4qYl5RyTX888XM"
+        },
+        {
+          "field": "P06_DEFINITION_INDEX_A",
+          "elementId": "PBdCDtQ0rlw4Qz9q-LB03q2XCfCJFWtCC"
+        },
+        {
+          "field": "P06_DEFINITION_A",
+          "elementId": "PBdCDtQ0rlw4Qz9q-LBLlRsmtCsgdwgnn"
+        },
+        {
+          "field": "P06_DEFINITION_INDEX_B",
+          "elementId": "PBdCDtQ0rlw4Qz9q-LBwQxQCybxcV0h2Z"
+        },
+        {
+          "field": "P06_DEFINITION_B",
+          "elementId": "PBdCDtQ0rlw4Qz9q-LB5TvqCL43jq2R92"
+        },
+        {
+          "field": "P06_BOUNDARY_CASE",
+          "elementId": "PBdCDtQ0rlw4Qz9q-LB0npsk0BkGgdXfN"
+        },
+        {
+          "field": "P06_FILL_IN",
+          "elementId": "PBdCDtQ0rlw4Qz9q-LBBbFHfs99BTD3Z3"
+        },
+        {
+          "field": "P06_PAGE_NUMBER",
+          "elementId": "PBdCDtQ0rlw4Qz9q-LBkrzlx1J8MpL2FC"
+        }
+      ]
+    },
+    {
+      "variant": "cobalt_paper",
+      "logicalPage": 7,
+      "sourcePage": 7,
+      "fields": [
+        {
+          "field": "P07_KICKER",
+          "elementId": "PBGkyGGwnWjbgtY1-LBXNrGQWyg7kp1jw"
+        },
+        {
+          "field": "P07_DURATION",
+          "elementId": "PBGkyGGwnWjbgtY1-LBKxhJldYfq4zDKF"
+        },
+        {
+          "field": "P07_ACTIVITY_LABEL",
+          "elementId": "PBGkyGGwnWjbgtY1-LBgBwf3g4PLsv3js"
+        },
+        {
+          "field": "P07_ACTIVITY_ACTIONS",
+          "elementId": "PBGkyGGwnWjbgtY1-LB27TJhKx146twgR"
+        },
+        {
+          "field": "P07_ACTIVITY_HELP",
+          "elementId": "PBGkyGGwnWjbgtY1-LBj7K1542hXQbN5k"
+        },
+        {
+          "field": "P07_IMAGE_CREDIT",
+          "elementId": "PBGkyGGwnWjbgtY1-LBVQtfBfKlfYr1gJ"
+        },
+        {
+          "field": "P07_PAGE_NUMBER",
+          "elementId": "PBGkyGGwnWjbgtY1-LBDB1wqsLzvszg1N"
+        }
+      ]
+    }
+  ],
+  "pending": [
+    "Explicit approval of reviewed draft save and exact merge operations",
+    "Commit three drafts",
+    "Merge two ordered eight-page designs",
+    "Query dataset and register verified versioned masters",
+    "Run actual Studio autofill and eight-page PNG export"
+  ]
+}

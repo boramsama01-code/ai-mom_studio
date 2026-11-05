@@ -1,12 +1,14 @@
-import type { CardCopy } from "./cardCopy";
+import type { StoredCardCopy } from "./storedCardCopy";
 
 export type CardCarousel = {
   version: 1;
   pages: Array<{ id: number; sha256: string; title: string; altText?: string }>;
   altVersion?: number;
-  cover: { kind: "ai" | "typography"; credit: string; model?: string };
+  cover: { kind: "ai" | "upload" | "typography"; credit: string; model?: string };
   /** Immutable editorial snapshot of these exact rendered pages. Absent on legacy decks. */
-  copy?: CardCopy;
+  copy?: StoredCardCopy;
+  /** Final exports retain their actual renderer; a local preview is never a Canva export. */
+  rendererProvider?: "builtin" | "canva";
 };
 export type SourceOutput = {
   assetId: number;

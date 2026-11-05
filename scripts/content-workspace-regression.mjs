@@ -23,7 +23,8 @@ const itemPath = "/api/channels/3/items/9790";
 const copyPath = `${itemPath}/card-copy`;
 const stamp = "2026-11-03T00:00:00.000Z";
 const clone = value => structuredClone(value);
-const channels = [{ id: 3, slug: "current-dialogue", name: "Alligodang", active: true, version: 1, accentColor: "#32756b", contentType: "current_dialogue", budget: {} }];
+const roleAi = { summary: { provider: "gemini", model: "gemini-summary-fixture" }, copy: { provider: "openai", model: "gpt-copy-fixture" }, image: { provider: "openai", model: "gpt-image-fixture" } };
+const channels = [{ id: 3, slug: "current-dialogue", name: "Alligodang", active: true, version: 1, accentColor: "#32756b", contentType: "current_dialogue", budget: {}, aiSettings: roleAi, effectiveAiSettings: roleAi, aiDefaultModels: { gemini: "gemini-default-fixture", openai: "gpt-default-fixture", anthropic: "claude-default-fixture", image: "gpt-image-fixture" }, aiAvailability: { gemini: true, openai: false, anthropic: false } }];
 const ai = { defaultProvider: "gemini", text: { gemini: true, openai: false, anthropic: false }, image: false };
 const initialCopy = () => ({
   version: 1, templateKey: "set:n04",
@@ -51,7 +52,7 @@ async function cardImage(copy, pageIndex) {
 }
 
 function fixture() {
-  const state = { publicationDraft: { version: 1, captions: { instagram: "아이와 함께 오늘의 뉴스를 읽고 서로의 질문을 나눠 보세요.", telegram: "" }, options: { destinationIds: [20], timing: "now", scheduledAtKst: "" } }, saved: { version: 3, revisionId: 30, hasSavedCopy: true, copy: initialCopy() }, reviewStatus: "reviewed", cards: [], approvals: [], deliveries: [], writes: [], aiAttempts: 0, nextAssetId: 701 };
+  const state = { publicationDraft: { version: 1, captions: { instagram: "아이와 함께 오늘의 뉴스를 읽고 서로의 질문을 나눠 보세요.", telegram: "" }, options: { destinationIds: [20], timing: "now", scheduledAtKst: "" } }, saved: { version: 3, revisionId: 30, hasSavedCopy: true, copy: initialCopy(), recommendedStoryFormat: "discussion8", ai: clone(roleAi) }, reviewStatus: "reviewed", cards: [], approvals: [], deliveries: [], writes: [], aiAttempts: 0, nextAssetId: 701 };
   const assetCopies = new Map();
   const makeAsset = () => {
     const id = state.nextAssetId; state.nextAssetId += 10;
@@ -104,9 +105,11 @@ function fixture() {
     } else if (pathname === `${copyPath}/preview`) {
       return route.fulfill({ contentType: "image/jpeg", body: await cardImage(body.copy, body.page) });
     } else if (pathname === `${copyPath}/generate`) {
+      assert.equal(body.provider, "gemini", "the fixture only calls the explicitly selected summary-provider override for copy");
+      assert.match(body.requestId, /^[0-9a-f-]{36}$/i);
       state.aiAttempts++;
-      if (state.aiAttempts === 1) return route.fulfill({ status: 503, json: { error: "Gemini HTTP 503: Gemini 서버가 잠시 혼잡합니다. 잠시 후 다시 시도하거나 직접 편집을 이어가세요. 총 3회 시도했습니다.", jobId: 9901, jobStatus: "failed" } });
-      data = { ...clone(state.saved), model: "synthetic-gemini", copy: { ...clone(state.saved.copy), cover: { title: "검토할 AI 제안", subtitle: "기존 문구는 적용 전까지 유지합니다" } } };
+      if (state.aiAttempts === 1) return route.fulfill({ status: 422, json: { error: "Gemini HTTP 503: Gemini 서버가 잠시 혼잡합니다. 잠시 후 다시 시도하거나 직접 편집을 이어가세요. 총 3회 시도했습니다.", jobId: 9901, jobStatus: "failed" } });
+      data = { ...clone(state.saved), model: "synthetic-gemini", selectedPage: body.selectedPage ?? 0, scope: "page", jobId: 9902, copy: { ...clone(state.saved.copy), cover: { title: "검토할 AI 제안", subtitle: "기존 문구는 적용 전까지 유지합니다" } } };
     } else if (pathname === `${itemPath}/card`) {
       assert.equal(body.version, state.saved.version);
       assert.notEqual(body.coverMode, "ai", "the fixture must not choose paid image generation");
@@ -314,16 +317,30 @@ try {
       await page.getByRole("button", { name: /^2번째 본문 문구 편집/ }).click();
       await waitValue(page, "body", secondBody);
       await page.locator(".card-copy-ai-tools > summary").click();
-      await page.getByRole("button", { name: "AI로 템플릿 문구 제안받기", exact: true }).click();
-      await page.locator(".card-copy-ai-tools").getByText("Gemini HTTP 503:", { exact: false }).waitFor();
+      const copyProvider = page.locator(".card-copy-ai-tools").getByRole("combobox", { name: "문구 작성 AI", exact: true });
+      const proposeCopy = page.locator(".card-copy-ai-tools").getByRole("button", { name: "AI로 템플릿 문구 제안받기", exact: true });
+      assert.equal(await copyProvider.inputValue(), "openai", "copy must use its channel role, not the globally connected summary AI");
+      assert(await proposeCopy.isDisabled(), "an unavailable copy provider must not silently fall back to Gemini");
+      assert.equal(state.aiAttempts, 0);
+      await copyProvider.selectOption("gemini");
+      await proposeCopy.click();
+      const generationError = page.locator(".card-copy-editor").getByText("Gemini HTTP 503:", { exact: false });
+      await generationError.waitFor();
       await waitValue(page, "body", secondBody);
-      await page.locator(".card-copy-ai-tools").scrollIntoViewIfNeeded();
+      assert.equal(state.aiAttempts, 1, "known failed work must not automatically start another paid request");
+      await generationError.scrollIntoViewIfNeeded();
       await page.screenshot({ path: `${outputDir}/ai-recovery-${width}.png` });
-      await page.locator(".card-copy-ai-tools").getByRole("button", { name: "다시 시도", exact: true }).click();
+      // A known failure is a new explicit request; only unresolved outcomes use
+      // the result-lookup retry action and retain the previous request ID.
+      await proposeCopy.click();
       await page.getByText("AI 문구 제안 · 아직 카드에 반영하지 않았어요", { exact: true }).waitFor();
       await waitValue(page, "body", secondBody);
       await page.getByRole("button", { name: "제안 닫기", exact: true }).click();
       assert.equal(state.aiAttempts, 2);
+      const proposalWrites = mutations(state).filter(write => write.path === `${copyPath}/generate`);
+      assert.equal(proposalWrites.length, 2);
+      assert(proposalWrites.every(write => write.body.provider === "gemini"), "both requests must honor the explicit Gemini choice");
+      assert.notEqual(proposalWrites[0].body.requestId, proposalWrites[1].body.requestId, "a fresh explicit attempt after known failure needs a new request ID");
       await page.locator(".card-copy-ai-tools > summary").click();
 
       await clickMutation(page, page.locator(".card-copy-savebar").getByRole("button", { name: "이미지 생성·갱신", exact: true }), `${itemPath}/card`);

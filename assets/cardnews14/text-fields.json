@@ -1,0 +1,419 @@
+{
+  "count": 46,
+  "fields": [
+    {
+      "field": "P01_TOPIC_TAG",
+      "page": 1,
+      "label": "표지 주제 태그",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "AI · 생각의 기준"
+    },
+    {
+      "field": "P01_HEADLINE",
+      "page": 1,
+      "label": "표지 핵심 제목",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "시험 잘 보는 AI,\n진짜 실력은?"
+    },
+    {
+      "field": "P01_SUBTITLE",
+      "page": 1,
+      "label": "표지 짧은 설명",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "높은 점수와 깊은 이해,\n같은 뜻일까요?"
+    },
+    {
+      "field": "P01_IMAGE_CREDIT",
+      "page": 1,
+      "label": "표지 이미지 표기",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "AI 생성 이미지"
+    },
+    {
+      "field": "P01_PAGE_NUMBER",
+      "page": 1,
+      "label": "표지 페이지 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "01 / 08"
+    },
+    {
+      "field": "P02_KICKER",
+      "page": 2,
+      "label": "뉴스 읽기 작은 제목",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "뉴스 읽기"
+    },
+    {
+      "field": "P02_TITLE",
+      "page": 2,
+      "label": "뉴스 내용을 요약한 제목",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "점수 너머의 조건"
+    },
+    {
+      "field": "P02_READING_BODY",
+      "page": 2,
+      "label": "뉴스 사실·맥락·조건을 잇는 본문",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "AI를 비교할 때는 같은 시험이나 과제를 주고 결과를 살펴봅니다. 이런 평가 기준을 ‘벤치마크’라고 부릅니다.\n\n하지만 시험에서 얻은 점수 하나로 모든 상황에서의 능력을 설명할 수 있을까요?\n\n어떤 문제를 풀었는지, 얼마나 준비했는지, 처음 보는 문제에서도 잘하는지 함께 살펴볼 필요가 있습니다."
+    },
+    {
+      "field": "P02_SOURCE",
+      "page": 2,
+      "label": "기사 출처·발행일 등",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "템플릿 예시 · 게시 전 기사 출처 입력"
+    },
+    {
+      "field": "P02_PAGE_NUMBER",
+      "page": 2,
+      "label": "2장 페이지 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "02 / 08"
+    },
+    {
+      "field": "P03_KICKER",
+      "page": 3,
+      "label": "뉴스 읽기 작은 제목",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "뉴스 읽기"
+    },
+    {
+      "field": "P03_READING_BODY",
+      "page": 3,
+      "label": "핵심 의미·해석·남은 질문을 잇는 본문",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "같은 점수라도 그 점수를 얻은 과정은 다를 수 있습니다.\n\n익숙한 문제를 빠르게 푸는 능력과, 낯선 조건에서 방법을 찾는 능력은 서로 다른 질문을 던집니다.\n\n숫자를 읽는 데서 한 걸음 더 나아가, 그 숫자가 무엇을 보여 주고 무엇을 놓치는지 생각해 봅시다."
+    },
+    {
+      "field": "P03_SOURCE",
+      "page": 3,
+      "label": "기사 출처·발행일 등",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "템플릿 예시 · 게시 전 기사 출처 입력"
+    },
+    {
+      "field": "P03_PAGE_NUMBER",
+      "page": 3,
+      "label": "3장 페이지 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "03 / 08"
+    },
+    {
+      "field": "P04_KICKER",
+      "page": 4,
+      "label": "STEP 1 표시",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "STEP 1"
+    },
+    {
+      "field": "P04_QUESTION",
+      "page": 4,
+      "label": "가족이 논의할 실제 질문",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "이 AI의 실력,\n무엇으로\n판단할까요?"
+    },
+    {
+      "field": "P04_SCENARIO",
+      "page": 4,
+      "label": "생각의 출발점이 되는 짧은 상황",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "익숙한 문제는 잘 풀지만,\n조건이 바뀌면 어려워하는 AI가 있다면."
+    },
+    {
+      "field": "P04_IMAGE_CREDIT",
+      "page": 4,
+      "label": "상황 이미지 표기",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "AI 생성 이미지"
+    },
+    {
+      "field": "P04_PAGE_NUMBER",
+      "page": 4,
+      "label": "4장 페이지 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "04 / 08"
+    },
+    {
+      "field": "P05_KICKER",
+      "page": 5,
+      "label": "STEP 2 표시",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "STEP 2"
+    },
+    {
+      "field": "P05_VIEW_A_LABEL",
+      "page": 5,
+      "label": "첫 관점의 짧은 제목",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "같은 과제로\n비교하기"
+    },
+    {
+      "field": "P05_VIEW_A_BODY",
+      "page": 5,
+      "label": "첫 관점의 근거",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "공통 과제를 쓰면 여러 AI의 차이와 변화를 같은 기준으로 살펴볼 수 있어요."
+    },
+    {
+      "field": "P05_VIEW_B_LABEL",
+      "page": 5,
+      "label": "다른 관점의 짧은 제목",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "새로운 과제로\n확인하기"
+    },
+    {
+      "field": "P05_VIEW_B_BODY",
+      "page": 5,
+      "label": "다른 관점의 근거",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "낯선 조건의 문제도 살피면 정해진 시험 밖에서의 수행을 함께 확인할 수 있어요."
+    },
+    {
+      "field": "P05_PAGE_NUMBER",
+      "page": 5,
+      "label": "5장 페이지 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "05 / 08"
+    },
+    {
+      "field": "P06_KICKER",
+      "page": 6,
+      "label": "STEP 3 표시",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "STEP 3"
+    },
+    {
+      "field": "P06_CONCEPT",
+      "page": 6,
+      "label": "생각해 볼 핵심 개념",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "실력"
+    },
+    {
+      "field": "P06_DEFINITION_INDEX_A",
+      "page": 6,
+      "label": "첫 설명의 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "01"
+    },
+    {
+      "field": "P06_DEFINITION_A",
+      "page": 6,
+      "label": "정의 또는 설명 A",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "정해진 일을\n정확하게 해내는 능력."
+    },
+    {
+      "field": "P06_DEFINITION_INDEX_B",
+      "page": 6,
+      "label": "두 번째 설명의 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "02"
+    },
+    {
+      "field": "P06_DEFINITION_B",
+      "page": 6,
+      "label": "정의 또는 설명 B",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "처음 보는 문제에\n아는 것을 적용하는 능력."
+    },
+    {
+      "field": "P06_BOUNDARY_CASE",
+      "page": 6,
+      "label": "개념의 경계·반례를 묻는 문장",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "빠르게 푸는 것과 깊이 이해하는 것,\n둘 다 필요할까?"
+    },
+    {
+      "field": "P06_FILL_IN",
+      "page": 6,
+      "label": "자신의 기준과 이유를 채우는 문장",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "나에게 실력이란 ___이다.\n왜냐하면 ___이기 때문이다."
+    },
+    {
+      "field": "P06_PAGE_NUMBER",
+      "page": 6,
+      "label": "6장 페이지 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "06 / 08"
+    },
+    {
+      "field": "P07_KICKER",
+      "page": 7,
+      "label": "STEP 4 표시",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "STEP 4"
+    },
+    {
+      "field": "P07_DURATION",
+      "page": 7,
+      "label": "활동 예상 시간",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "약 3분"
+    },
+    {
+      "field": "P07_ACTIVITY_LABEL",
+      "page": 7,
+      "label": "활동 이름",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "조건 하나만\n바꿔 보세요."
+    },
+    {
+      "field": "P07_ACTIVITY_ACTIONS",
+      "page": 7,
+      "label": "구체적인 활동 순서",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "최근 풀었던 문제 하나를 고릅니다.\n숫자나 조건 하나만 바꿉니다.\n풀이에서 무엇이 달라졌는지 서로 설명합니다."
+    },
+    {
+      "field": "P07_ACTIVITY_HELP",
+      "page": 7,
+      "label": "활동을 시작하기 위한 도움말",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "어렵다면, 달라진 점만 말해도 좋아요."
+    },
+    {
+      "field": "P07_IMAGE_CREDIT",
+      "page": 7,
+      "label": "활동 이미지 표기",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "AI 생성 이미지"
+    },
+    {
+      "field": "P07_PAGE_NUMBER",
+      "page": 7,
+      "label": "7장 페이지 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "07 / 08"
+    },
+    {
+      "field": "P08_PARENT_BRAND",
+      "page": 8,
+      "label": "부모 브랜드명",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "우주펭귄상회"
+    },
+    {
+      "field": "P08_BRAND_LINE",
+      "page": 8,
+      "label": "공통 마무리 질문",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "오늘, 서로의\n어떤 생각을\n발견했나요?"
+    },
+    {
+      "field": "P08_CTA",
+      "page": 8,
+      "label": "저장·다음 대화 안내",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "다음 대화를 위해 저장해 두세요."
+    },
+    {
+      "field": "P08_HANDLE",
+      "page": 8,
+      "label": "채널 계정",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "@allligodang.official"
+    },
+    {
+      "field": "P08_PAGE_NUMBER",
+      "page": 8,
+      "label": "8장 페이지 번호",
+      "type": "string",
+      "manualEditable": true,
+      "emptyStringAllowed": true,
+      "example": "08 / 08"
+    }
+  ]
+}

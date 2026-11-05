@@ -35,8 +35,10 @@ it("keeps registered raw pose files private while authenticated studio downloads
   temporary = await fs.mkdtemp(path.join(os.tmpdir(), "studio-pose-auth-"));
   const publicPath = path.join(temporary, "dist/public");
   await fs.mkdir(path.join(publicPath, "studio-assets/poses-v2"), { recursive: true });
+  await fs.mkdir(path.join(publicPath, "studio-assets/character-variants"), { recursive: true });
   await fs.writeFile(path.join(publicPath, "index.html"), "<html>test fixture</html>");
   await fs.writeFile(path.join(publicPath, "studio-assets/poses-v2/pengpeng.png"), "private-pose-bytes");
+  await fs.writeFile(path.join(publicPath, "studio-assets/character-variants/family.png"), "private-character-variant-bytes");
   await fs.writeFile(path.join(publicPath, "studio-assets/legacy.png"), "legacy-public-asset");
   vi.spyOn(process, "cwd").mockReturnValue(temporary);
   const app = createApp();
@@ -51,6 +53,9 @@ it("keeps registered raw pose files private while authenticated studio downloads
   ];
   expect((await request(app).get(resource)).status).toBe(401);
   expect((await request(app).head(resource)).status).toBe(401);
+  const characterVariant = "/studio-assets/character-variants/family.png";
+  expect((await request(app).get(characterVariant)).status).toBe(401);
+  expect((await request(app).get("/studio-assets/%63haracter-variants/family.png")).status).toBe(401);
   for (const variant of encodedVariants) expect((await request(app).get(variant)).status, variant).toBe(401);
   expect((await request(app).get("/api/studio/characters/reference")).status).toBe(401);
   expect((await request(app).get("/api/studio/characters/pengpeng/poses/1")).status).toBe(401);
@@ -60,6 +65,10 @@ it("keeps registered raw pose files private while authenticated studio downloads
   expect(response.status).toBe(200);
   expect(response.headers["cache-control"]).toBe("private, no-store");
   expect(response.body.toString()).toBe("private-pose-bytes");
+  const variantResponse = await operator.get(characterVariant);
+  expect(variantResponse.status).toBe(200);
+  expect(variantResponse.body.toString()).toBe("private-character-variant-bytes");
+  expect(variantResponse.headers["cache-control"]).toBe("private, no-store");
   for (const variant of encodedVariants) {
     const decodedDownload = await operator.get(variant);
     expect(decodedDownload.status, variant).toBe(200);

@@ -11,6 +11,7 @@ import { sql } from "drizzle-orm";
 import type { DiscoveryInfo, DiscoverySettings } from "./domain";
 import type { StudioContent } from "./studio";
 import type { PublicationDraft, StudioPublicationDraft } from "./publicationDraft";
+import type { SavedChannelAiSettings } from "./channelAi";
 import {
   bigserial,
   boolean,
@@ -45,6 +46,7 @@ export const channels = pgTable("channels", {
   contentType: text("content_type").notNull(), // notice | science_dialogue | current_dialogue | manual
   // null keeps the historical built-in defaults; [] intentionally disables categories.
   categories: jsonb("categories").$type<string[] | null>(),
+  aiSettings: jsonb("ai_settings").$type<SavedChannelAiSettings | null>(),
   accentColor: text("accent_color").notNull(),
   active: boolean("active").notNull().default(true),
   editorialGuide: text("editorial_guide").notNull().default(""),
@@ -174,7 +176,7 @@ export const runs = pgTable(
     counts: jsonb("counts").$type<Record<string, number>>().notNull().default({}),
     unconnectedSources: jsonb("unconnected_sources").$type<string[]>().notNull().default([]),
     errors: jsonb("errors").$type<Array<{ scope: string; message: string }>>().notNull().default([]),
-    llmUsage: jsonb("llm_usage").$type<{ inputTokens: number; outputTokens: number; calls: number }>().notNull().default({ inputTokens: 0, outputTokens: 0, calls: 0 }),
+    llmUsage: jsonb("llm_usage").$type<{ inputTokens: number; outputTokens: number; calls: number; usageStatus?: "known" | "usage_unknown" }>().notNull().default({ inputTokens: 0, outputTokens: 0, calls: 0 }),
     startedAt: createdAt(),
     finishedAt: ts("finished_at"),
   },
@@ -380,10 +382,14 @@ export const deliveries = pgTable(
     errorKind: text("error_kind"), // auth | rate_limit | terminal | transient | timeout | unknown
     requestStartedAt: ts("request_started_at"),
     completedAt: ts("completed_at"),
+    // List organization is independent from immutable publication evidence/status.
+    listState: text("list_state").$type<"active" | "archived" | "trashed">().notNull().default("active"),
+    listVersion: integer("list_version").notNull().default(1),
+    listUpdatedAt: ts("list_updated_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex("deliveries_unique").on(t.approvalId, t.destinationId), index("deliveries_recovery").on(t.status, t.leaseExpiresAt)],
+  (t) => [uniqueIndex("deliveries_unique").on(t.approvalId, t.destinationId), index("deliveries_recovery").on(t.status, t.leaseExpiresAt), index("deliveries_list").on(t.channelId, t.listState)],
 );
 
 /** Append-only attempt headers; mutable progress lives on deliveries, never here. */
@@ -583,3 +589,67 @@ export const studioMedia = pgTable("studio_media", {
   createdAt: createdAt(),
 }, t => [index("studio_media_card").on(t.cardId)]);
 
+
+/* ───────────── Canva 8-page masters and durable render jobs ───────────── */
+export const canvaMasters = pgTable("canva_masters", {
+  id: serial("id").primaryKey(),
+  channelId: integer("channel_id").notNull().references(() => channels.id),
+  formatId: text("format_id").notNull().default("family_dialogue_8"),
+  conceptMode: text("concept_mode").notNull(),
+  hasExternalActivity: boolean("has_external_activity").notNull(),
+  templateVersion: text("template_version").notNull(),
+  sourceType: text("source_type").notNull(),
+  sourceId: text("source_id").notNull(),
+  sourceUpdatedAt: text("source_updated_at").notNull(),
+  principal: text("principal").notNull(),
+  dataset: jsonb("dataset").$type<Record<string, { type: string }>>().notNull(),
+  datasetHash: text("dataset_hash").notNull(),
+  pageIds: jsonb("page_ids").$type<string[]>().notNull(),
+  editUrl: text("edit_url"),
+  status: text("status").notNull().default("ready"),
+  validatedAt: ts("validated_at").notNull(),
+  createdAt: createdAt(),
+}, t => [uniqueIndex("canva_master_variant_version").on(t.channelId, t.formatId, t.conceptMode, t.hasExternalActivity, t.templateVersion)]);
+
+export const canvaRenderJobs = pgTable("canva_render_jobs", {
+  id: serial("id").primaryKey(),
+  channelId: integer("channel_id").notNull().references(() => channels.id),
+  contentItemId: integer("content_item_id").notNull().references(() => contentItems.id),
+  sourceRevisionId: integer("source_revision_id").notNull().references(() => contentRevisions.id),
+  sourceVersion: integer("source_version").notNull(),
+  masterId: integer("master_id").notNull().references(() => canvaMasters.id),
+  requestId: text("request_id").notNull(),
+  requestHash: text("request_hash").notNull(),
+  purpose: text("purpose").notNull().default("create"),
+  principal: text("principal").notNull(),
+  input: jsonb("input").$type<Record<string, unknown>>().notNull(),
+  status: text("status").notNull().default("queued"),
+  phase: text("phase").notNull().default("validate"),
+  autofillJobId: text("autofill_job_id"),
+  exportJobId: text("export_job_id"),
+  designId: text("design_id"),
+  designUpdatedAt: text("design_updated_at"),
+  editUrl: text("edit_url"),
+  outputAssetId: integer("output_asset_id").references(() => mediaAssets.id),
+  outputRevisionId: integer("output_revision_id").references(() => contentRevisions.id),
+  result: jsonb("result").$type<Record<string, unknown>>(),
+  leaseOwner: text("lease_owner"),
+  leaseUntil: ts("lease_until"),
+  nextRunAt: ts("next_run_at").notNull().defaultNow(),
+  startedAt: ts("started_at"),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, t => [uniqueIndex("canva_render_request").on(t.channelId, t.requestId), index("canva_render_queue").on(t.status, t.nextRunAt)]);
+
+export const canvaAssetUploads = pgTable("canva_asset_uploads", {
+  id: serial("id").primaryKey(),
+  principal: text("principal").notNull(),
+  sha256: text("sha256").notNull(),
+  status: text("status").notNull().default("queued"),
+  uploadJobId: text("upload_job_id"),
+  assetId: text("asset_id"),
+  errorCode: text("error_code"),
+  updatedAt: updatedAt(),
+}, t => [uniqueIndex("canva_asset_principal_hash").on(t.principal, t.sha256)]);

@@ -5,7 +5,7 @@ export function AiUsageGuide({ provider, setup = false }: { provider: AiProvider
   return <div className="small muted">
     <p>{aiUsageHelp[provider]}</p>
     {setup && provider === "gemini" && <>
-      <ol><li>Google AI Studio에서 프로젝트 등급이 <strong>Free</strong>인지 확인합니다. 무료로 사용하려면 결제를 연결하지 마세요.</li><li>그 프로젝트의 API 키를 아래에 저장하고 연결을 확인합니다.</li><li>작성 화면에서 Gemini를 선택하거나 기본 글쓰기 AI를 Gemini로 저장합니다.</li></ol>
+      <ol><li>Google AI Studio에서 프로젝트 등급이 <strong>Free</strong>인지 확인합니다. 무료로 사용하려면 결제를 연결하지 마세요.</li><li>그 프로젝트의 API 키를 아래에 저장하고 연결을 확인합니다.</li><li>채널 설정의 역할별 AI에서 기사 요약 또는 카드 문구를 Gemini로 정하거나, 작성 화면에서 이번 작업의 AI로 선택합니다.</li></ol>
       <p>무료 등급의 입력·응답은 Google 제품 개선에 사용될 수 있습니다. 개인정보·기밀 자료는 넣지 마세요.</p>
       <div className="row"><a href="https://aistudio.google.com/projects" target="_blank" rel="noopener noreferrer">프로젝트 등급 확인 ↗</a><a href="https://ai.google.dev/gemini-api/docs/rate-limits" target="_blank" rel="noopener noreferrer">현재 한도 안내 ↗</a></div>
     </>}

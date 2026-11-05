@@ -10,6 +10,7 @@ import { CategorySelect } from "../client/src/CategorySelect";
 import { DirtyModal } from "../client/src/ui";
 import { ApiError } from "../client/src/api";
 import type { Channel } from "../shared/schema";
+import { defaultChannelRoleSettings, normalizeChannelRoleSettings } from "../shared/channelAi";
 
 const mocks = vi.hoisted(() => ({ api: vi.fn(), navigate: vi.fn(), toast: vi.fn() }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
@@ -20,7 +21,7 @@ vi.mock("../client/src/pages/InstagramAccounts", () => ({ InstagramAccounts: () 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root, host: HTMLDivElement, client: QueryClient, channels: Channel[], createError: boolean;
 const makeChannel = (id: number, name: string, slug = `brand-${id}`): Channel => ({
-  id, name, slug, description: "채널 소개", audience: "일반 독자", contentType: "current_dialogue", categories: ["행사", "인터뷰"], accentColor: "#51635A", active: true,
+  id, name, slug, description: "채널 소개", audience: "일반 독자", contentType: "current_dialogue", categories: ["행사", "인터뷰"], aiSettings: null, accentColor: "#51635A", active: true,
   editorialGuide: "확인한 자료를 사용합니다.", cardTemplate: "builtin:classic", canvaBrandTemplateId: null,
   budget: { naverCallsPerRun: 3, resultsPerRun: 20, fetchTargetsPerRun: 3, fetchCallsPerRun: 3, llmCallsPerRun: 2, dailyPublishLimit: 0 },
   version: 1, createdAt: new Date("2026-11-04"), updatedAt: new Date("2026-11-04"),
@@ -53,7 +54,7 @@ async function settle() { for (let i = 0; i < 3; i++) await act(async () => { aw
 async function render(element: ReactNode = <><GlobalChannelSelect /><ChannelSettingsPage /><DirtyModal /></>) { await act(async () => root.render(<QueryClientProvider client={client}><DirtyGuardProvider><ChannelProvider>{element}</ChannelProvider></DirtyGuardProvider></QueryClientProvider>)); await settle(); }
 function button(text: string) { const value = [...host.querySelectorAll("button")].find(node => node.textContent === text); if (!value) throw new Error(`Missing button: ${text}`); return value; }
 async function click(text: string) { expect(button(text).disabled).toBe(false); await act(async () => button(text).click()); await settle(); }
-function field(text: string) { const label = [...host.querySelectorAll("label")].find(node => node.textContent?.trim().startsWith(text)); if (!label) throw new Error(`Missing field: ${text}`); return label.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")!; }
+function field(text: string) { const named = [...host.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")].find(node => node.getAttribute("aria-label") === text); if (named) return named; const label = [...host.querySelectorAll("label")].find(node => node.textContent?.trim().startsWith(text)); if (!label) throw new Error(`Missing field: ${text}`); return label.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")!; }
 async function fill(text: string, value: string) { const node = field(text); await act(async () => { const prototype = node instanceof HTMLSelectElement ? HTMLSelectElement.prototype : node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(node, value); node.dispatchEvent(new Event(node instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); await settle(); }
 const writes = () => mocks.api.mock.calls.filter(([, options]) => options?.method && options.method !== "GET");
 async function editFirst() { await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="첫 번째 채널 수정"]')!.click()); await settle(); }
@@ -97,6 +98,86 @@ describe("manual channel administration", () => {
     await click("현재 입력으로 다시 저장");
     expect(writes()[1][1].body.version).toBe(2); expect(channels[0].name).toBe("내가 수정한 채널명");
     expect(channels[0].categories).toEqual(["행사", "인터뷰", "새 분류"]); expect(host.textContent).toContain("채널 설정 저장됨");
+  });
+  it("offers independent role defaults, clears incompatible model overrides and saves only the edited channel", async () => {
+    await render(); await editFirst();
+    expect(field("원문·근거 분석 AI").value).toBe("gemini");
+    expect(field("카드뉴스 문구 AI").value).toBe("openai");
+    expect(field("이미지 제작 AI").value).toBe("openai");
+    expect(writes()).toHaveLength(0);
+    await fill("카드뉴스 문구 모델 ID", "gpt-my-editor");
+    await fill("카드뉴스 문구 AI", "anthropic");
+    expect(field("카드뉴스 문구 모델 ID").value).toBe("");
+    await fill("카드뉴스 문구 모델 ID", "claude-editor");
+    await fill("이미지 제작 모델 ID", "gpt-image-illustration");
+    await click("채널 설정 저장");
+    expect(writes()[0][1].body.aiSettings).toEqual({ version: 2, roleModels: { ...defaultChannelRoleSettings().roleModels, card_copy: { provider: "anthropic", model: "claude-editor" }, image_generation: { provider: "openai", model: "gpt-image-illustration" } } });
+    expect(channels[1].aiSettings).toBeNull();
+    expect(host.textContent).toContain("채널 설정 저장됨");
+  });
+  it("keeps an invalid model input without sending it and compares conflicting AI settings", async () => {
+    await render(); await editFirst();
+    await fill("원문·근거 분석 모델 ID", "gpt-wrong-provider");
+    await click("채널 설정 저장");
+    expect(writes()).toHaveLength(0); expect(field("원문·근거 분석 모델 ID").value).toBe("gpt-wrong-provider");
+    expect(host.textContent).toContain("선택한 AI의 텍스트 모델");
+    await fill("원문·근거 분석 모델 ID", "gemini-my-summary");
+    channels[0] = { ...channels[0], version: 2, aiSettings: { summary: { provider: "gemini", model: "gemini-other-window" }, copy: { provider: "openai", model: "" }, image: { provider: "openai", model: "" } } };
+    await click("채널 설정 저장");
+    expect(field("원문·근거 분석 모델 ID").value).toBe("gemini-my-summary");
+    expect(host.textContent).toContain("gemini-other-window");
+    expect(button("채널 설정 저장").disabled).toBe(true);
+    await click("현재 입력으로 다시 저장");
+    expect(normalizeChannelRoleSettings(channels[0].aiSettings).roleModels.article_analysis).toEqual({ provider: "gemini", model: "gemini-my-summary" });
+  });
+  it("resolves inherited roles live, lets a caption choose its own model, and never generates on settings edits", async () => {
+    await render(); await editFirst();
+    await fill("카드뉴스 문구 AI", "anthropic"); await fill("카드뉴스 문구 모델 ID", "claude-opus-5-5");
+    expect(host.querySelector(".channel-ai-additional")!.textContent).toContain("claude-opus-5-5");
+    await fill("게시물 캡션 모델 선택 방식", "direct");
+    await fill("게시물 캡션 AI", "gemini"); await fill("게시물 캡션 모델 ID", "gemini-4-argon");
+    await click("채널 설정 저장");
+    expect(writes()[0][1].body.aiSettings.roleModels).toMatchObject({ card_copy: { provider: "anthropic", model: "claude-opus-5-5" }, caption: { provider: "gemini", model: "gemini-4-argon" }, editorial_review: { inherit: "card_copy" } });
+    expect(mocks.api.mock.calls.some(([path]) => String(path).includes("generate"))).toBe(false);
+  });
+  it("rejects an inheritance cycle while retaining every typed setting", async () => {
+    await render(); await editFirst(); await fill("카드뉴스 문구 모델 ID", "gpt-my-editor");
+    await fill("게시물 캡션 모델 선택 방식", "inherit:editorial_review");
+    await fill("근거·편집 검수 모델 선택 방식", "inherit:caption");
+    await click("채널 설정 저장");
+    expect(writes()).toHaveLength(0); expect(host.textContent).toContain("상속이 순환");
+    expect(field("카드뉴스 문구 모델 ID").value).toBe("gpt-my-editor");
+    expect(field("게시물 캡션 모델 선택 방식").value).toBe("inherit:editorial_review");
+  });
+  it("does not advertise search capability for a research role inherited from an unsupported provider", async () => {
+    await render(); await editFirst(); await fill("추가자료 조사 모델 선택 방식", "inherit:card_copy");
+    expect(host.textContent).toContain("실제 자동 검색을 사용하려면 이 역할에 Gemini를 선택");
+    expect(writes()).toHaveLength(0);
+  });
+  it("preserves an explicit research opt-out when editing roles or restoring only AI defaults", async () => {
+    channels[0].aiSettings = { ...defaultChannelRoleSettings(), editorial: { additionalResourcesAutoSearch: false, visitScope: "national" } };
+    channels[0].aiSettings.roleModels.card_copy = { provider: "openai", model: "gpt-existing-writer" };
+    client.setQueryData(["channels"], structuredClone(channels));
+    await render(); await editFirst();
+    const checkbox = field("추가 활동 자료 자동 검색") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    await fill("카드뉴스 문구 모델 ID", "gpt-custom-editor"); await click("AI 기본값으로 되돌리기");
+    expect(checkbox.checked).toBe(false); expect(field("방문 활동 추천 범위").value).toBe("national");
+    await click("채널 설정 저장");
+    expect(writes()[0][1].body.aiSettings).toMatchObject({ roleModels: defaultChannelRoleSettings().roleModels, editorial: { additionalResourcesAutoSearch: false, visitScope: "national" } });
+    expect(mocks.api.mock.calls.some(([path]) => String(path).includes("generate"))).toBe(false);
+  });
+  it("requires an explicit region for nearby visits and removes the scope when the region is cleared", async () => {
+    await render(); await editFirst();
+    const scope = field("방문 활동 추천 범위") as HTMLSelectElement;
+    expect(scope.querySelector<HTMLOptionElement>('option[value="region"]')!.disabled).toBe(true);
+    expect((field("추가 활동 자료 자동 검색") as HTMLInputElement).checked).toBe(true);
+    await fill("방문 활동 지역", "서울 종로구");
+    expect(scope.querySelector<HTMLOptionElement>('option[value="region"]')!.disabled).toBe(false);
+    await fill("방문 활동 추천 범위", "region"); await fill("방문 활동 지역", "없음");
+    expect(scope.value).toBe("off"); expect(scope.querySelector<HTMLOptionElement>('option[value="region"]')!.disabled).toBe(true);
+    await click("채널 설정 저장");
+    expect(writes()[0][1].body.aiSettings.editorial).toEqual({ additionalResourcesAutoSearch: true, visitScope: "off" });
   });
   it("archives only after edits are resolved and allows restoring the same channel", async () => {
     await render(); await editFirst(); await fill("설명", "아직 저장하지 않은 소개");

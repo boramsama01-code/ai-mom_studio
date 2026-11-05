@@ -22,12 +22,18 @@ async function currentJob(itemId: number) {
 
 describe("durable source generation requests on PostgreSQL", () => {
   it("returns the same completed response when an HTTP response was lost, without invoking AI again", async () => {
-    const input = await fixture(), work = vi.fn(async () => ({ version: 7, copy: { title: "저장된 제안" } }));
+    const input = { ...await fixture(), configuration: { summary: { provider: "gemini", model: "gemini-summary-fixture" }, copy: { provider: "openai", model: "gpt-copy-fixture" } } };
+    const work = vi.fn(async () => ({ version: 7, copy: { title: "저장된 제안" }, generationWarnings: ["요약 저장 후 카드 문구 복구가 필요합니다."] }));
     const first = await runSourceGeneration(getDb(), input, work);
-    const second = await runSourceGeneration(getDb(), input, work);
+    // A settings change after admission must not turn response recovery into a
+    // new paid request, or rewrite the recorded provider/model provenance.
+    const second = await runSourceGeneration(getDb(), { ...input, configuration: { summary: { provider: "anthropic", model: "claude-new-setting" }, copy: { provider: "openai", model: "gpt-new-setting" } } }, work);
     expect(second).toEqual(first);
+    expect(second.generationWarnings).toEqual(["요약 저장 후 카드 문구 복구가 필요합니다."]);
     expect(work).toHaveBeenCalledTimes(1);
-    expect((await currentJob(input.itemId)).status).toBe("succeeded");
+    const job = await currentJob(input.itemId);
+    expect(job.status).toBe("succeeded");
+    expect(job.payload.configuration).toEqual(input.configuration);
     await expect(runSourceGeneration(getDb(), { ...input, intent: { provider: "openai" } }, work)).rejects.toMatchObject({ status: 409 });
     expect(work).toHaveBeenCalledTimes(1);
   });

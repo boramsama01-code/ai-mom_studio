@@ -1,0 +1,2348 @@
+{
+  "checkedAt": "2026-11-04T08:48:20.214Z",
+  "operation": "read-only get-design and get-design-dataset",
+  "autofillRun": false,
+  "exportRun": false,
+  "productionEnabled": false,
+  "designs": [
+    {
+      "sourceId": "DAHZ7x2nTrg",
+      "title": "01 시네마틱 · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779365,
+      "fields": {
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 8
+    },
+    {
+      "sourceId": "DAHZ77WyFFc",
+      "title": "02 흑백코랄 · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779365,
+      "fields": {
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 8
+    },
+    {
+      "sourceId": "DAHZ7w_VOXw",
+      "title": "03 앰버크림 · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779362,
+      "fields": {
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 8
+    },
+    {
+      "sourceId": "DAHZ77ioKBQ",
+      "title": "04 코발트페이퍼 · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779296,
+      "fields": {
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 4
+    },
+    {
+      "sourceId": "DAHZ75gK2o8",
+      "title": "05 검정라임 · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779363,
+      "fields": {
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 4
+    },
+    {
+      "sourceId": "DAHZ7_pJigM",
+      "title": "06 Swiss Modernism · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779226,
+      "fields": {
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 5
+    },
+    {
+      "sourceId": "DAHZ7xFMR2I",
+      "title": "07 Studio 2am · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779519,
+      "fields": {
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 6
+    },
+    {
+      "sourceId": "DAHZ713lepM",
+      "title": "08 Ichestyime · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779537,
+      "fields": {
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 5
+    },
+    {
+      "sourceId": "DAHZ75naDWI",
+      "title": "09 Sharp Serif · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793778970,
+      "fields": {
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 8
+    },
+    {
+      "sourceId": "DAHZ73hpbLs",
+      "title": "10 BANG BANG · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779588,
+      "fields": {
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 4
+    },
+    {
+      "sourceId": "DAHZ7w5jqIQ",
+      "title": "11 HELLO · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779614,
+      "fields": {
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 5
+    },
+    {
+      "sourceId": "DAHZ7zhq7OA",
+      "title": "12 EKIDEN Pack · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779594,
+      "fields": {
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 8
+    },
+    {
+      "sourceId": "DAHZ8I9YNnY",
+      "title": "13 YOU & ME · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779567,
+      "fields": {
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 8
+    },
+    {
+      "sourceId": "DAHZ8P4K3dw",
+      "title": "14 OTT 추천카드 · 우주펭귄상회 · 8장 템플릿",
+      "pageCount": 8,
+      "updatedAt": 1793779686,
+      "fields": {
+        "P06_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P04_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P08_PARENT_BRAND": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_A_LABEL": {
+          "type": "text"
+        },
+        "P08_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P05_KICKER": {
+          "type": "text"
+        },
+        "P03_SOURCE": {
+          "type": "text"
+        },
+        "P03_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_DURATION": {
+          "type": "text"
+        },
+        "P01_HEADLINE": {
+          "type": "text"
+        },
+        "P04_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_CONCEPT": {
+          "type": "text"
+        },
+        "P08_HANDLE": {
+          "type": "text"
+        },
+        "P05_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_KICKER": {
+          "type": "text"
+        },
+        "P02_KICKER": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_HELP": {
+          "type": "text"
+        },
+        "P03_READING_BODY": {
+          "type": "text"
+        },
+        "P06_BOUNDARY_CASE": {
+          "type": "text"
+        },
+        "P06_DEFINITION_B": {
+          "type": "text"
+        },
+        "P08_BRAND_LINE": {
+          "type": "text"
+        },
+        "P03_KICKER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_A": {
+          "type": "text"
+        },
+        "P04_QUESTION": {
+          "type": "text"
+        },
+        "P07_ACTIVITY_ACTIONS": {
+          "type": "text"
+        },
+        "P06_DEFINITION_INDEX_B": {
+          "type": "text"
+        },
+        "P05_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_TITLE": {
+          "type": "text"
+        },
+        "P02_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P01_TOPIC_TAG": {
+          "type": "text"
+        },
+        "P01_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P02_READING_BODY": {
+          "type": "text"
+        },
+        "P05_VIEW_B_LABEL": {
+          "type": "text"
+        },
+        "P07_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P06_DEFINITION_A": {
+          "type": "text"
+        },
+        "P06_FILL_IN": {
+          "type": "text"
+        },
+        "P04_SCENARIO": {
+          "type": "text"
+        },
+        "P03_PAGE_NUMBER": {
+          "type": "text"
+        },
+        "P04_CONTEXT_IMAGE": {
+          "type": "image"
+        },
+        "P01_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P06_KICKER": {
+          "type": "text"
+        },
+        "P08_PROFILE_IMAGE": {
+          "type": "image"
+        },
+        "P04_KICKER": {
+          "type": "text"
+        },
+        "P05_VIEW_A_BODY": {
+          "type": "text"
+        },
+        "P07_IMAGE_CREDIT": {
+          "type": "text"
+        },
+        "P01_COVER_IMAGE": {
+          "type": "image"
+        },
+        "P05_VIEW_B_BODY": {
+          "type": "text"
+        },
+        "P01_SUBTITLE": {
+          "type": "text"
+        },
+        "P08_CTA": {
+          "type": "text"
+        },
+        "P02_SOURCE": {
+          "type": "text"
+        },
+        "P02_BACKGROUND_IMAGE": {
+          "type": "image"
+        },
+        "P07_ACTIVITY_LABEL": {
+          "type": "text"
+        }
+      },
+      "liveTextCount": 46,
+      "liveImageCount": 8
+    }
+  ]
+}

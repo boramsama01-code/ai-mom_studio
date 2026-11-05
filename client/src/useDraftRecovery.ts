@@ -31,7 +31,11 @@ export type DraftRecovery<T> = State<T> & {
   discard: () => void;
   clear: () => void;
 };
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+// JSONB and schema parsing may return object keys in a different order. That is
+// not another editor's change; array/page order must still remain significant.
+const stable = (value: unknown): string | undefined => JSON.stringify(value, (_key, entry) => entry && typeof entry === "object" && !Array.isArray(entry)
+  ? Object.fromEntries(Object.keys(entry).sort().map(key => [key, entry[key]])) : entry);
+const same = (a: unknown, b: unknown) => stable(a) === stable(b);
 const newSlot = () => globalThis.crypto?.randomUUID?.() ?? Date.now() + "-" + Math.random().toString(36).slice(2);
 
 export function useDraftRecovery<T>(options: Options<T>): DraftRecovery<T> {

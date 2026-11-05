@@ -24,7 +24,9 @@ import { extractPdf } from "../services/extract";
 import { fetchPublisherArticle as fetchAndExtract } from "../services/publisherLookup";
 import { sourceFetchUrl } from "../services/sourceFetchUrl";
 import { safeFetch } from "../services/safeFetch";
-import { extractNotice, LlmBudget, PROMPT_VERSION, type LlmSource, type AiProvider } from "../services/llm";
+import { extractNotice, generateCardCopy, LlmBudget, PROMPT_VERSION, type LlmSource, type AiProvider } from "../services/llm";
+import { channelAiAvailability, channelAiSelection } from "../services/channelAi";
+import type { AiSelection } from "../../shared/channelAi";
 import { computeScheduleStatus } from "../services/dates";
 import { computeEvidenceStatus, materialChange } from "./evidence";
 import { createRevision } from "../content";
@@ -43,6 +45,9 @@ import type { NoticePayload } from "../../shared/payloads";
 import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { itemPrimarySource } from "../services/itemSources";
 import { preserveCardCopy } from "../../shared/cardCopy";
+import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
+import { generateFamilySourceDraft } from "../services/familySourceDraft";
+import type { AiExecutionPlan } from "../../shared/aiProvenance";
 
 export type CollectOptions = {
   trigger: "manual" | "worker" | "cli" | "schedule";
@@ -70,6 +75,11 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   if (!channel) throw new Error("채널 없음");
   if (!channel.active) throw new Error("보관된 채널 — 수집하지 않음");
   if (await getSetting(db, "global_stop", false)) throw new Error("전역 정지 상태 — 수집하지 않음");
+  // Pin both roles for this entire collection. Settings edited while fetching
+  // sources take effect on the next run, never halfway through this one.
+  const ai = env.autoGenerate && !opts.collectionOnly
+    ? { summary: channelAiSelection(channel, "summary"), copy: channelAiSelection(channel, "copy") } : null;
+  const summaryConfigured = !!ai && channelAiAvailability()[ai.summary.provider];
 
   if (!validSubcategory(channel.slug, opts.subcategory, channel.categories)) throw new Error("이 채널의 소분류를 선택해 주세요.");
   const rules = await db
@@ -89,7 +99,8 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   const snapshot = {
     subcategory: opts.subcategory ?? null,
-    channel: { id: channel.id, slug: channel.slug, budget },
+    channel: { id: channel.id, slug: channel.slug, budget, cardTemplate: channel.cardTemplate },
+    ai,
     rules: selected.map(r => ({ ...ruleSnapshot(r), searchQuery: channel.contentType === "notice" && r.endpoint === "news" ? noticeSearchQuery(r.query) : r.query })),
     skippedRules: skippedRules.map(ruleSnapshot),
     flags: { dryRun: env.dryRun, autoGenerate: env.autoGenerate },
@@ -256,15 +267,19 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   if (channel.contentType === "notice" && fetchedOk.length) {
     if (!env.autoGenerate || opts.collectionOnly) {
       counts.extractionSkippedAutoGenerateOff = fetchedOk.length;
-    } else if (!env.aiConfigured) {
-      errors.push({ scope: "llm", message: "AI API 미연결 — 구조화 추출 건너뜀(수집함에서 수동 편집 가능)" });
+    } else if (!ai || !summaryConfigured) {
+      errors.push({ scope: "llm", message: "채널의 기사 요약 AI 미연결 — 구조화 추출 건너뜀(수집함에서 수동 편집 가능)" });
     } else {
       for (const itemId of fetchedOk) {
         currentGenerationSignal()?.throwIfAborted();
-        const r = await extractForItem(db, itemId, llmBudget, now, officials);
+        const r = await extractForItem(db, itemId, llmBudget, now, officials, undefined, channel.cardTemplate, ai);
         if (r.ok) {
           counts.extracted++;
           if (r.scheduleStatus === "closed") counts.closed++;
+          if (r.warnings.length) {
+            counts.copyIncomplete = (counts.copyIncomplete ?? 0) + 1;
+            errors.push(...r.warnings.map(message => ({ scope: `item:${itemId}:copy`, message })));
+          }
         } else {
           counts.extractFailed++;
           errors.push({ scope: `item:${itemId}`, message: r.error });
@@ -280,9 +295,9 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   if (disc?.settings.autoDraft && disc.itemIds.length) {
     if (!env.autoGenerate || opts.collectionOnly) {
       counts.draftSkippedAutoGenerateOff = disc.itemIds.length;
-    } else if (!env.aiConfigured) {
+    } else if (!ai || !summaryConfigured) {
       // 오류가 아니라 안내 — 화제는 저장됐고 초안만 건너뜀
-      counts.draftSkippedNoClaude = disc.itemIds.length;
+      counts.draftSkippedNoAi = disc.itemIds.length;
     } else {
       counts.drafted = 0;
       for (const itemId of disc.itemIds) {
@@ -291,9 +306,13 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
           errors.push({ scope: "llm", message: "AI 호출 한도 도달 — 남은 화제는 초안 없이 저장" });
           break;
         }
-        const r = await generateDialogueDraft(db, itemId, now, undefined, undefined, { budget: llmBudget });
+        const r = await generateDialogueDraft(db, itemId, now, undefined, channel.cardTemplate, { budget: llmBudget, ...ai });
         if (r.ok) {
           counts.drafted++;
+          if (r.warnings.length) {
+            counts.copyIncomplete = (counts.copyIncomplete ?? 0) + 1;
+            errors.push(...r.warnings.map(message => ({ scope: `item:${itemId}:copy`, message })));
+          }
         } else {
           errors.push({ scope: `item:${itemId}`, message: `초안 생성 실패: ${r.error}` });
           if (/인증|모델|미연결/.test(r.error)) break;
@@ -323,7 +342,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       counts,
       errors,
       actualCalls: { naver: counter.naver, rss: publicSearch.counts.rssRequests, search: searchCalls(counter), fetch: fetchCalls, llm: llmBudget.used },
-      llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used },
+      llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used, usageStatus: llmBudget.usageUnknown ? "usage_unknown" : "known" },
       finishedAt: new Date(),
     })
     .where(eq(runs.id, run.id));
@@ -348,7 +367,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     Object.assign(counts, publicSearch.counts);
     await db.update(runs).set({ status: counts.newItems > 0 ? "partial" : "failed", counts, errors,
       actualCalls: { naver: counter.naver, rss: publicSearch.counts.rssRequests, search: searchCalls(counter), fetch: fetchCalls, llm: llmBudget.used },
-      llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used }, finishedAt: new Date(),
+      llmUsage: { inputTokens: llmBudget.inputTokens, outputTokens: llmBudget.outputTokens, calls: llmBudget.used, usageStatus: llmBudget.usageUnknown ? "usage_unknown" : "known" }, finishedAt: new Date(),
     }).where(eq(runs.id, run.id));
     throw error;
   }
@@ -428,6 +447,7 @@ export async function extractForItem(
   officials?: Awaited<ReturnType<typeof loadOfficials>>,
   provider?: AiProvider,
   templateKey?: string,
+  selections?: { summary: AiSelection; copy: AiSelection; familyPlan?: AiExecutionPlan; explicitRetry?: boolean; requestId?: string },
 ) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
   if (!item) return { ok: false as const, kind: "no_source", error: "항목 없음" };
@@ -437,14 +457,35 @@ export async function extractForItem(
   const sources: LlmSource[] = [
     { source_id: doc.id, kind: doc.kind, url: doc.originalUrl, title: doc.title, published: doc.publishedRaw, text: doc.fetchedText },
   ];
-  const [channel] = await db.select({ cardTemplate: channels.cardTemplate }).from(channels).where(eq(channels.id, item.channelId));
-  const r = await extractNotice({ sources, sourceHint: item.category, now, budget, provider, templateKey: templateKey ?? channel?.cardTemplate ?? "builtin:classic" });
+  const [channel] = await db.select().from(channels).where(eq(channels.id, item.channelId));
+  if (!channel) return { ok: false as const, kind: "no_source", error: "채널을 찾을 수 없습니다." };
+  const summaryAi = selections?.summary ?? channelAiSelection(channel, "summary", { provider });
+  const copyAi = selections?.copy ?? channelAiSelection(channel, "copy");
+  const r = await extractNotice({ sources, sourceHint: item.category, now, budget, ...summaryAi });
   currentGenerationSignal()?.throwIfAborted();
   if (!r.ok) {
     await db.update(contentItems).set({ updatedAt: now }).where(eq(contentItems.id, itemId));
     return r;
   }
-  const payload = r.data;
+  const { cardCopy: _summaryCopy, ...facts } = r.data;
+  const payload: NoticePayload = { ...facts };
+  const [priorRevision] = item.currentRevisionId ? await db.select().from(contentRevisions).where(eq(contentRevisions.id, item.currentRevisionId)) : [];
+  const selectedTemplate = templateKey ?? channel.cardTemplate;
+  if (!priorRevision?.payload.cardCopy && payload.relevance !== "irrelevant" && readingProfileForTemplateKey(selectedTemplate)) {
+    const scheduleStatus = computeScheduleStatus(payload.schedules, now);
+    const family = await generateFamilySourceDraft(db, item, channel, selectedTemplate!, { budget, plan: selections?.familyPlan, explicitRetry: selections?.explicitRetry, requestId: selections?.requestId, initialPayload: payload, noticeState: { scheduleStatus, evidenceStatus: computeEvidenceStatus(doc, payload, offs), relevance: payload.relevance } });
+    return family.ok ? { ...family, scheduleStatus } : { ok: false as const, kind: "api" as const, error: family.error };
+  }
+  const warnings: string[] = [];
+  let copyModel: string | null = null;
+  const totalUsage = { ...r.usage };
+  if (!priorRevision?.payload.cardCopy && payload.relevance !== "irrelevant") {
+    const copy = await generateCardCopy({ kind: item.kind, title: item.title, payload, templateKey: selectedTemplate, channelName: channel.name, channelSlug: channel.slug, sources, budget, ...copyAi });
+    if (copy.usage) { totalUsage.inputTokens += copy.usage.inputTokens; totalUsage.outputTokens += copy.usage.outputTokens; }
+    if (copy.ok) { payload.cardCopy = copy.data; copyModel = copy.model; }
+    else warnings.push(`기사 요약은 저장했습니다. 카드 문구는 완성하지 못했습니다: ${copy.error} 카드 편집에서 문구만 다시 제안받을 수 있습니다.`);
+  }
+  payload.aiWorkflow = { version: 1, summary: { provider: summaryAi.provider, model: r.model }, copy: copyModel ? { provider: copyAi.provider, model: copyModel } : null, warnings };
   const scheduleStatus = computeScheduleStatus(payload.schedules, now);
   const evidenceStatus = computeEvidenceStatus(doc, payload, offs);
   const previous = item.extracted as NoticePayload | null;
@@ -463,9 +504,9 @@ export async function extractForItem(
       payload: savedPayload,
       model: r.model,
       promptVersion: PROMPT_VERSION.notice,
-      usage: r.usage,
+      usage: totalUsage,
       note: [r.droppedEvidence ? `원문에서 찾을 수 없는 근거 구절 ${r.droppedEvidence}개 제거` : "",
-        cur?.payload.cardCopy ? "원문 요약을 새로 작성했습니다. 저장된 카드 문구는 유지했으니 바뀐 원문과 맞는지 검토해 주세요." : ""].filter(Boolean).join(" / "),
+        cur?.payload.cardCopy ? "원문 요약을 새로 작성했습니다. 저장된 카드 문구는 유지했으니 바뀐 원문과 맞는지 검토해 주세요." : "", ...warnings].filter(Boolean).join(" / "),
       makeCurrent: !operatorOwned,
     });
     const changed = materialChange(previous, payload);
@@ -485,11 +526,11 @@ export async function extractForItem(
       })
       .where(eq(contentItems.id, itemId));
     const [freshItem] = await tx.select().from(contentItems).where(eq(contentItems.id, itemId));
-    await completeGenerationResult(tx as unknown as DB, freshItem);
+    await completeGenerationResult(tx as unknown as DB, { ...freshItem, generationWarnings: warnings });
     return true;
   });
   if (!applied) return { ok: false as const, kind: "conflict", error: "생성 중 원고가 변경되었습니다. 새 편집본을 유지했습니다. 새로고침 후 다시 생성해 주세요." };
-  return { ok: true as const, scheduleStatus };
+  return { ok: true as const, scheduleStatus, warnings };
 }
 
 export async function loadOfficials(db: DB, channelId: number) {

@@ -1,0 +1,441 @@
+import { randomUUID } from "node:crypto";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import request from "supertest";
+import sharp from "sharp";
+import { eq } from "drizzle-orm";
+import { approvals, channels, contentItems, contentRevisions, deliveries, jobs, mediaAssets } from "../shared/schema";
+import { cardImagePrompts } from "../shared/cardImagePromptDb";
+import { studioImagePrompt } from "../shared/studioImagePrompt";
+import { emptyPayload } from "../shared/payloads";
+import type { CardCopy } from "../shared/cardCopy";
+import { discussionCardCopyFixture } from "./fixtures/discussionCardCopy";
+import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
+import { READING_CARD_PROFILES, READING_PROFILE_LOGO_ID, readingProfileDesigns } from "../shared/readingCardProfiles";
+import { login, resetDb, setTestEnv } from "./helpers";
+
+setTestEnv();
+const makeImage = vi.hoisted(() => vi.fn());
+vi.mock("../server/services/studioAi", async original => ({ ...await original<object>(), generateStudioImage: (...args: unknown[]) => makeImage(...args) }));
+const { getDb, closeDb } = await import("../server/db");
+const { createApp } = await import("../server/app");
+const { createRevision } = await import("../server/content");
+const { loadCardPageArtwork, loadCardPageArtworkForPage, assertCardPageArtworkOwnership } = await import("../server/services/cardPageArtwork");
+const { cancelSourceGenerationRequest } = await import("../server/services/sourceGeneration");
+const { AiServiceError } = await import("../server/services/llm");
+let app: ReturnType<typeof createApp>;
+let upload: string;
+let generatedPng: Buffer;
+const outbound = vi.fn(() => { throw new Error("Page background tests must not call real AI or publication APIs"); });
+
+beforeAll(async () => {
+  await resetDb(); app = createApp(); vi.stubGlobal("fetch", outbound);
+  const bytes = await sharp({ create: { width: 80, height: 100, channels: 3, background: "#385e4b" } }).withMetadata().png().toBuffer();
+  upload = `data:image/png;base64,${bytes.toString("base64")}`;
+  generatedPng = await sharp({ create: { width: 120, height: 120, channels: 3, background: "#d9b87a" } }).png().toBuffer();
+});
+afterAll(async () => { expect(outbound).not.toHaveBeenCalled(); vi.unstubAllGlobals(); await closeDb(); });
+
+async function fixture() {
+  const { agent, csrf } = await login(app), H = { "x-csrf-token": csrf };
+  const copy = discussionCardCopyFixture("set:n03");
+  const payload = { ...emptyPayload("science_dialogue", "원문에 근거한 카드"), cardCopy: copy };
+  const result = await getDb().transaction(async tx => {
+    const [created] = await tx.insert(contentItems).values({ channelId: 2, kind: "science_dialogue", title: "원문에 근거한 카드", relevance: "relevant" }).returning();
+    const revision = await createRevision(tx, { contentItemId: created.id, author: "operator", payload });
+    const [item] = await tx.select().from(contentItems).where(eq(contentItems.id, created.id));
+    return { item, revision };
+  });
+  const endpoint = `/api/channels/2/items/${result.item.id}`;
+  return { agent, H, copy, payload, endpoint, backgroundEndpoint: `${endpoint}/card-copy/background`, ...result };
+}
+function input(f: Awaited<ReturnType<typeof fixture>>, extra: Record<string, unknown> = {}) {
+  return { version: f.item.version, requestId: randomUUID(), pageId: "body-1", mode: "upload", imageData: upload, ...extra };
+}
+function promptEndpoint(f: Awaited<ReturnType<typeof fixture>>) { return `${f.endpoint}/card-copy/image-prompt`; }
+function promptInput(f: Awaited<ReturnType<typeof fixture>>, extra: Record<string, unknown> = {}) {
+  return { version: f.item.version, promptVersion: 0, pageId: "body-1", prompt: "노트 위의 작은 망원경. 글자 없이 차분한 파란빛.", instruction: "", ...extra };
+}
+async function assets(itemId: number) {
+  return getDb().select().from(mediaAssets).where(eq(mediaAssets.contentItemId, itemId));
+}
+function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
+async function enteredWithin(promise: Promise<void>) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { await Promise.race([promise, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Mock image provider was not entered")), 5000); })]); }
+  finally { if (timer) clearTimeout(timer); }
+}
+
+describe("page-specific backgrounds on PostgreSQL", () => {
+  it("loads only the inherited cover bytes for a selected 14-style inner page and preserves its saved reference state", async () => {
+    const f = await fixture(), uploaded = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f));
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(200);
+    const copy = familyDialogueCardFixture(), profile = READING_CARD_PROFILES.find(value => value.sourceStyleId === "cinematic")!;
+    copy.templateKey = profile.templateKey;
+    const designs = readingProfileDesigns(profile, familyDialogueMetadataFixture().pageDesigns);
+    designs.cover.background = { ...designs.cover.background, kind: "image", assetId: uploaded.body.assetId };
+    designs.news_summary.background.inheritCover = true;
+    const before = structuredClone(designs);
+    const selected = await loadCardPageArtworkForPage(getDb(), f.item.id, 2, copy, 1, designs);
+    expect([...selected.keys()]).toEqual([uploaded.body.assetId]);
+    expect(selected.credits.get(uploaded.body.assetId)).toBe("직접 등록 이미지");
+    expect(designs).toEqual(before); expect(designs.news_summary.background.assetId).toBeUndefined();
+    const other = await fixture();
+    await expect(loadCardPageArtworkForPage(getDb(), other.item.id, 2, copy, 1, designs)).rejects.toMatchObject({ status: 404 });
+    designs.news_summary.background.inheritCover = false;
+    expect((await loadCardPageArtworkForPage(getDb(), f.item.id, 2, copy, 1, designs)).size).toBe(0);
+  });
+  it("uses fixed reading-photo geometry and blocks artwork requests on text-only pages", async () => {
+    const f=await fixture(),copy=familyDialogueCardFixture(),metadata=familyDialogueMetadataFixture(),profile=READING_CARD_PROFILES[0];
+    copy.templateKey=profile.templateKey;const outro=copy.pages[7];if(outro.id==='outro')outro.fields.logoAssetId=READING_PROFILE_LOGO_ID;
+    metadata.pageDesigns=readingProfileDesigns(profile,metadata.pageDesigns);
+    await getDb().transaction(tx=>createRevision(tx,{contentItemId:f.item.id,author:'operator',payload:{...f.payload,...metadata,cardCopy:copy}}));
+    const [item]=await getDb().select().from(contentItems).where(eq(contentItems.id,f.item.id));
+    makeImage.mockReset();makeImage.mockResolvedValue({bytes:generatedPng,mimeType:'image/png',provider:'openai',model:'gpt-image-1'});
+    const rejected=await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f,{version:item.version,pageId:'news_summary',mode:'ai',imageData:undefined}));
+    expect(rejected.status).toBe(422);expect(makeImage).not.toHaveBeenCalled();
+    const created=await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f,{version:item.version,pageId:'discussion',mode:'ai',imageData:undefined}));
+    expect(created.status,JSON.stringify(created.body)).toBe(200);expect(makeImage).toHaveBeenCalledTimes(1);
+    const imagePrompt=JSON.parse(makeImage.mock.calls[0][0].prompt);
+    expect(imagePrompt.photoComposition).toMatchObject({pageId:'discussion',slot:{width:936,height:360},textPlacement:'outside_image',textSafeAreas:[]});
+    expect(imagePrompt.use).toContain('글자가 겹치지 않는다');
+    expect(created.body).toMatchObject({pageId:'discussion',source:'ai',credit:'AI 일러스트 · OpenAI'});
+  });
+  it("uses v2 semantic IDs and scopes both current and recoverable images to the owning item", async () => {
+    const f = await fixture(), copy = familyDialogueCardFixture(), metadata = familyDialogueMetadataFixture();
+    const revision = await getDb().transaction(tx => createRevision(tx, { contentItemId: f.item.id, author: "operator", payload: { ...f.payload, ...metadata, cardCopy: copy } }));
+    const [item] = await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id));
+    const body = input(f, { version: item.version, pageId: "news_summary" });
+    const created = await f.agent.post(f.backgroundEndpoint).set(f.H).send(body);
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    expect(created.body).toMatchObject({ version: item.version, pageId: "news_summary", source: "upload" });
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send({ ...body, pageId: "body-1", requestId: randomUUID() })).status).toBe(400);
+    const designs = structuredClone(metadata.pageDesigns);
+    designs.news_summary.background = { ...designs.news_summary.background, kind: "image", assetId: created.body.assetId };
+    designs.news_summary.previousAssetIds = [created.body.assetId];
+    await expect(assertCardPageArtworkOwnership(getDb(), item.id, 2, copy, designs)).resolves.toBeUndefined();
+    expect([...await loadCardPageArtworkForPage(getDb(), item.id, 2, copy, 1, designs)].map(([id]) => id)).toEqual([created.body.assetId]);
+    expect((await loadCardPageArtworkForPage(getDb(), item.id, 2, copy, 0, designs)).size).toBe(0);
+    const other = await fixture(), otherUpload = await other.agent.post(other.backgroundEndpoint).set(other.H).send(input(other));
+    expect(otherUpload.status).toBe(200);
+    designs.concept.previousAssetIds = [otherUpload.body.assetId];
+    await expect(assertCardPageArtworkOwnership(getDb(), item.id, 2, copy, designs)).rejects.toMatchObject({ status: 404 });
+    const [stillSaved] = await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, revision.id));
+    expect(stillSaved.payload.cardCopy).toEqual(copy);
+    expect((await assets(item.id)).map(asset => asset.id)).toEqual([created.body.assetId]);
+  });
+
+  it("requires authentication, CSRF, an owning channel, a version and a request UUID", async () => {
+    const f = await fixture(), body = input(f);
+    expect((await request(app).post(f.backgroundEndpoint).send(body)).status).toBe(401);
+    expect((await f.agent.post(f.backgroundEndpoint).send(body)).status).toBe(403);
+    expect((await f.agent.post(f.backgroundEndpoint.replace("/channels/2/", "/channels/1/")).set(f.H).send(body)).status).toBe(404);
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send({ ...body, version: undefined })).status).toBe(400);
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send({ ...body, requestId: undefined })).status).toBe(400);
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send({ ...body, pageId: "body-9" })).status).toBe(400);
+    expect(await assets(f.item.id)).toHaveLength(0);
+  });
+
+  it("stores a normalized proposal without editing copy, and returns the same result after a lost HTTP response", async () => {
+    const f = await fixture(), body = input(f);
+    const first = await f.agent.post(f.backgroundEndpoint).set(f.H).send(body);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body).toMatchObject({ version: f.item.version, pageId: "body-1", source: "upload", credit: "직접 등록 이미지" });
+    const again = await f.agent.post(f.backgroundEndpoint).set(f.H).send(body);
+    expect(again.body).toEqual(first.body);
+    const stored = await assets(f.item.id);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ kind: "card_page_art", mime: "image/jpeg", revisionId: f.revision.id });
+    expect((await sharp(stored[0].bytes).metadata()).exif).toBeUndefined();
+    const [item] = await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id));
+    const [revision] = await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id));
+    expect(item.version).toBe(f.item.version);
+    expect(item.currentRevisionId).toBe(f.revision.id);
+    expect(revision.payload).toEqual(f.payload);
+    const job = (await getDb().select().from(jobs).where(eq(jobs.id, first.body.jobId)))[0];
+    expect(job).toMatchObject({ status: "succeeded", maxAttempts: 1, payload: { pageBackground: true, pageId: "body-1" } });
+    expect(JSON.stringify(job)).not.toContain("data:image/");
+    const image = await f.agent.get(`${f.backgroundEndpoint}/${first.body.assetId}`);
+    expect(image.status).toBe(200); expect(image.headers["content-type"]).toMatch(/image\/jpeg/);
+    expect(image.headers["cache-control"]).toContain("private");
+    expect((await request(app).get(`${f.backgroundEndpoint}/${first.body.assetId}`)).status).toBe(401);
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send({ ...body, pageId: "body-2" })).status).toBe(409);
+  });
+
+  it("rejects malformed uploads and enforces the raw 8MB limit without adding assets", async () => {
+    const f = await fixture();
+    for (const imageData of ["https://example.invalid/image.png", "data:image/svg+xml;base64,PHN2Zy8+", "data:image/png;base64,SGVsbG8="]) {
+      const response = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f, { imageData }));
+      expect(response.status).toBe(400);
+      expect(response.body.error).not.toContain("<svg");
+    }
+    const oversized = `data:image/png;base64,${Buffer.alloc(8 * 1024 * 1024 + 1).toString("base64")}`;
+    const response = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f, { imageData: oversized }));
+    expect(response.status).toBe(413);
+    expect(await assets(f.item.id)).toHaveLength(0);
+  });
+
+  it("recovers an uploaded response with only a scoped request UUID and hides unrelated job records", async () => {
+    const f = await fixture(), other = await fixture(), body = input(f);
+    const first = await f.agent.post(f.backgroundEndpoint).set(f.H).send(body);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const lookup = `${f.endpoint}/card-copy/background-requests/${body.requestId}`;
+    const recovered = await f.agent.get(lookup);
+    expect(recovered.status).toBe(200);
+    expect(recovered.body).toEqual({ status: "succeeded", response: first.body });
+    expect(recovered.headers["cache-control"]).toContain("private");
+    expect((await request(app).get(lookup)).status).toBe(401);
+    expect((await f.agent.get(lookup.replace("/channels/2/", "/channels/1/"))).status).toBe(404);
+    expect((await other.agent.get(`${other.endpoint}/card-copy/background-requests/${body.requestId}`)).status).toBe(404);
+    expect((await f.agent.get(`${f.endpoint}/card-copy/background-requests/${randomUUID()}`)).status).toBe(404);
+    expect((await f.agent.get(`${f.endpoint}/card-copy/background-requests/not-a-uuid`)).status).toBe(400);
+    for (const [type, pageBackground] of [["source_generate", true], ["card_render", false]] as const) {
+      const unrelated = randomUUID();
+      await getDb().insert(jobs).values({ type, channelId: 2, status: "succeeded", dedupeKey: `source-ai:${f.item.id}:${unrelated}`,
+        payload: { itemId: f.item.id, pageBackground }, result: { response: { ...first.body, privateField: "must-not-return" } } });
+      const response = await f.agent.get(`${f.endpoint}/card-copy/background-requests/${unrelated}`);
+      expect(response.status).toBe(404);
+      expect(JSON.stringify(response.body)).not.toContain("must-not-return");
+    }
+    expect(await assets(f.item.id)).toHaveLength(1);
+  });
+
+  it("restricts backgrounds to their item, channel and asset kind while retaining reuse across revisions", async () => {
+    const f = await fixture(), other = await fixture();
+    const created = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f));
+    const id = created.body.assetId;
+    expect((await other.agent.get(`${other.backgroundEndpoint}/${id}`)).status).toBe(404);
+    expect((await f.agent.get(`${f.backgroundEndpoint.replace("/channels/2/", "/channels/1/")}/${id}`)).status).toBe(404);
+    const copy = { ...f.copy, cover: { ...f.copy.cover, background: { assetId: id } } } as CardCopy;
+    const loaded = await loadCardPageArtwork(getDb(), f.item.id, 2, copy);
+    expect(loaded.has(id)).toBe(true);
+    expect(loaded.credits.get(id)).toBe("직접 등록 이미지");
+    await expect(loadCardPageArtwork(getDb(), other.item.id, 2, copy)).rejects.toMatchObject({ status: 404 });
+    await getDb().transaction(async tx => { await createRevision(tx, { contentItemId: f.item.id, author: "operator", payload: { ...f.payload, cardCopy: copy } }); });
+    expect((await loadCardPageArtwork(getDb(), f.item.id, 2, copy)).has(id)).toBe(true);
+    await getDb().update(mediaAssets).set({ kind: "cover_art" }).where(eq(mediaAssets.id, id));
+    await expect(loadCardPageArtwork(getDb(), f.item.id, 2, copy)).rejects.toMatchObject({ status: 404 });
+    await getDb().update(mediaAssets).set({ kind: "card_page_art", bytes: Buffer.from("tampered") }).where(eq(mediaAssets.id, id));
+    await expect(loadCardPageArtwork(getDb(), f.item.id, 2, copy)).rejects.toMatchObject({ status: 409 });
+    expect((await f.agent.get(`${f.backgroundEndpoint}/${id}`)).status).toBe(409);
+  });
+
+  it("uses the channel image model, passes the saved page and explicit instruction, and does not rerun a completed request", async () => {
+    const f = await fixture();
+    const [originalChannel] = await getDb().select().from(channels).where(eq(channels.id, 2));
+    await getDb().update(channels).set({ aiSettings: { summary: { provider: "gemini", model: "" }, copy: { provider: "openai", model: "" }, image: { provider: "openai", model: "gpt-image-1.5" } } }).where(eq(channels.id, 2));
+    makeImage.mockReset(); makeImage.mockResolvedValue({ bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "gpt-image-1.5" });
+    const body = input(f, { mode: "ai", imageData: undefined, instruction: "중앙을 비우고 사물은 가장자리에 배치" });
+    try {
+      const first = await f.agent.post(f.backgroundEndpoint).set(f.H).send(body);
+      expect(first.status, JSON.stringify(first.body)).toBe(200);
+      expect(first.body.source).toBe("ai");
+      expect(makeImage).toHaveBeenCalledTimes(1);
+      expect(makeImage.mock.calls[0][0]).toMatchObject({ model: "gpt-image-1.5", purpose: "cover", instruction: "중앙을 비우고 사물은 가장자리에 배치", signal: expect.any(AbortSignal) });
+      expect(makeImage.mock.calls[0][0].prompt).toContain(f.copy.pages[0].body);
+      expect(makeImage.mock.calls[0][0].prompt).not.toContain(f.copy.pages[1].title);
+      await getDb().update(channels).set({ aiSettings: { ...originalChannel.aiSettings!, summary: { provider: "gemini", model: "" }, copy: { provider: "openai", model: "" }, image: { provider: "openai", model: "gpt-image-1" } } }).where(eq(channels.id, 2));
+      await getDb().update(contentItems).set({ version: f.item.version + 1 }).where(eq(contentItems.id, f.item.id));
+      const replay = await f.agent.post(f.backgroundEndpoint).set(f.H).send(body);
+      expect(replay.body).toEqual(first.body);
+      expect(makeImage).toHaveBeenCalledTimes(1);
+    } finally { await getDb().update(channels).set({ aiSettings: originalChannel.aiSettings }).where(eq(channels.id, 2)); }
+  });
+
+  it("allows only one simultaneous paid attempt for an item", async () => {
+    const f = await fixture(), entered = deferred(), release = deferred();
+    makeImage.mockReset(); makeImage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "gpt-image-1" }; });
+    const body = input(f, { mode: "ai", imageData: undefined });
+    const first = f.agent.post(f.backgroundEndpoint).set(f.H).send(body).then(response => response);
+    try {
+      await enteredWithin(entered.promise);
+      const duplicate = await f.agent.post(f.backgroundEndpoint).set(f.H).send(body);
+      expect(duplicate.status).toBe(409); expect(duplicate.body.jobStatus).toBe("running");
+      expect((await f.agent.get(`${f.endpoint}/card-copy/background-requests/${body.requestId}`)).body).toEqual({ status: "running" });
+      const differentId = await f.agent.post(f.backgroundEndpoint).set(f.H).send({ ...body, requestId: randomUUID() });
+      expect(differentId.status).toBe(409); expect(differentId.body.requestRejected).toBe(true);
+      expect(makeImage).toHaveBeenCalledTimes(1);
+    } finally { release.resolve(); expect((await first).status).toBe(200); }
+    expect(await assets(f.item.id)).toHaveLength(1);
+  });
+
+  it("rejects a late generated result after another editor saves and preserves the previous artwork", async () => {
+    const f = await fixture(), entered = deferred(), release = deferred();
+    const old = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f));
+    makeImage.mockReset(); makeImage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "gpt-image-1" }; });
+    const body = input(f, { mode: "ai", imageData: undefined });
+    const pending = f.agent.post(f.backgroundEndpoint).set(f.H).send(body).then(response => response);
+    try {
+      await enteredWithin(entered.promise);
+      await getDb().update(contentItems).set({ version: f.item.version + 1, title: "다른 편집기의 최신 제목" }).where(eq(contentItems.id, f.item.id));
+    } finally { release.resolve(); }
+    const result = await pending;
+    expect(result.status).toBe(409);
+    expect((await assets(f.item.id)).map(asset => asset.id)).toEqual([old.body.assetId]);
+    expect((await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id)))[0].title).toBe("다른 편집기의 최신 제목");
+    const replay = await f.agent.post(f.backgroundEndpoint).set(f.H).send(body);
+    expect(replay.body.jobStatus).toBe("failed"); expect(makeImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("fences cancellation and a provider failure without replaying a paid call or losing stored input", async () => {
+    const f = await fixture(), entered = deferred(), release = deferred();
+    makeImage.mockReset(); makeImage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "gpt-image-1" }; });
+    const body = input(f, { mode: "ai", imageData: undefined });
+    const pending = f.agent.post(f.backgroundEndpoint).set(f.H).send(body).then(response => response);
+    try {
+      await enteredWithin(entered.promise);
+      expect((await cancelSourceGenerationRequest(getDb(), f.item.id, body.requestId, "isolated-test")).cancelled).toBe(true);
+    } finally { release.resolve(); }
+    expect((await pending).body.jobStatus).toBe("cancelled");
+    expect((await f.agent.get(`${f.endpoint}/card-copy/background-requests/${body.requestId}`)).body).toMatchObject({ status: "cancelled", error: expect.any(String) });
+    expect(await assets(f.item.id)).toHaveLength(0);
+    makeImage.mockReset(); makeImage.mockRejectedValue(new Error("private-upstream-error-with-secret"));
+    const failedBody = input(f, { mode: "ai", imageData: undefined });
+    const failed = await f.agent.post(f.backgroundEndpoint).set(f.H).send(failedBody);
+    expect(failed.status).toBe(422); expect(failed.body.error).not.toContain("private-upstream");
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send(failedBody)).body.jobStatus).toBe("failed");
+    const failedLookup = await f.agent.get(`${f.endpoint}/card-copy/background-requests/${failedBody.requestId}`);
+    expect(failedLookup.body).toMatchObject({ status: "failed", error: expect.any(String) });
+    expect(JSON.stringify(failedLookup.body)).not.toContain("private-upstream");
+    expect(makeImage).toHaveBeenCalledTimes(1);
+    expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)))[0].payload).toEqual(f.payload);
+    makeImage.mockReset(); makeImage.mockRejectedValue(new AiServiceError("설정에서 OpenAI API 키를 먼저 입력하세요.", "not_configured"));
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f, { mode: "ai", imageData: undefined }))).status).toBe(503);
+  });
+});
+
+describe("editable image instructions before publication approval", () => {
+  it("reads the saved page's prompt without a provider call, asset, approval or prompt write", async () => {
+    const f = await fixture(); makeImage.mockReset();
+    const beforeJobs = await getDb().select().from(jobs), beforeDeliveries = await getDb().select().from(deliveries);
+    const result = await f.agent.get(promptEndpoint(f)).query({ pageId: "body-1" });
+    expect(result.status, JSON.stringify(result.body)).toBe(200);
+    expect(result.headers["cache-control"]).toContain("private"); expect(result.headers["cache-control"]).toContain("no-store");
+    expect(result.body).toMatchObject({ itemVersion: f.item.version, revisionId: f.revision.id, pageId: "body-1", promptVersion: 0,
+      custom: false, instruction: "", basedOnRevisionId: null, stale: false, referenceAssetId: null, lastGeneration: null });
+    expect(result.body.prompt).toBe(result.body.defaultPrompt);
+    expect(result.body.prompt).toContain(f.copy.pages[0].body);
+    expect(result.body.prompt).not.toContain(f.copy.pages[1].body);
+    expect(makeImage).not.toHaveBeenCalled(); expect(await assets(f.item.id)).toHaveLength(0);
+    expect(await getDb().select().from(cardImagePrompts).where(eq(cardImagePrompts.contentItemId, f.item.id))).toHaveLength(0);
+    expect(await getDb().select().from(approvals).where(eq(approvals.contentItemId, f.item.id))).toHaveLength(0);
+    expect(await getDb().select().from(jobs)).toEqual(beforeJobs); expect(await getDb().select().from(deliveries)).toEqual(beforeDeliveries);
+    expect((await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id)))[0]).toEqual(f.item);
+    expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)))[0].payload).toEqual(f.payload);
+  });
+
+  it("saves and reopens prompt edits independently, rejects stale edits, and explicitly restores the current default", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f, { instruction: "  피사체는 오른쪽에 놓아 주세요.  " });
+    makeImage.mockReset();
+    const first = await f.agent.put(endpoint).set(f.H).send(body);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body).toMatchObject({ promptVersion: 1, prompt: body.prompt, instruction: body.instruction.trim(), custom: true,
+      itemVersion: f.item.version, revisionId: f.revision.id, basedOnRevisionId: f.revision.id, stale: false });
+    expect((await f.agent.get(endpoint).query({ pageId: "body-1" })).body).toEqual(first.body);
+    const conflict = await f.agent.put(endpoint).set(f.H).send({ ...body, prompt: "다른 화면의 오래된 입력" });
+    expect(conflict.status).toBe(409);
+    expect((await f.agent.get(endpoint).query({ pageId: "body-1" })).body.prompt).toBe(body.prompt);
+    const reset = await f.agent.put(endpoint).set(f.H).send({ ...body, promptVersion: 1, prompt: null, instruction: "" });
+    expect(reset.status, JSON.stringify(reset.body)).toBe(200);
+    expect(reset.body).toMatchObject({ promptVersion: 2, custom: false, instruction: "", stale: false });
+    expect(reset.body.prompt).toBe(reset.body.defaultPrompt);
+    expect((await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id)))[0]).toEqual(f.item);
+    expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)))[0].payload).toEqual(f.payload);
+    expect(makeImage).not.toHaveBeenCalled(); expect(await assets(f.item.id)).toHaveLength(0);
+  });
+
+  it("keeps prior directions after a source edit and reports instruction-only staleness without replacing the new copy", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f, { prompt: null, instruction: "원래 그림의 노란빛을 유지해 주세요." });
+    expect((await f.agent.put(endpoint).set(f.H).send(body)).status).toBe(200);
+    const copy = structuredClone(f.copy); copy.pages[0].body = "운영자가 직접 새로 확인한 본문입니다.";
+    const next = await getDb().transaction(async tx => {
+      const revision = await createRevision(tx, { contentItemId: f.item.id, author: "operator", payload: { ...f.payload, cardCopy: copy } });
+      await tx.update(contentItems).set({ version: f.item.version + 1 }).where(eq(contentItems.id, f.item.id));
+      return revision;
+    });
+    const reopened = await f.agent.get(endpoint).query({ pageId: "body-1" });
+    expect(reopened.body).toMatchObject({ itemVersion: f.item.version + 1, revisionId: next.id, promptVersion: 1, custom: false,
+      instruction: body.instruction, basedOnRevisionId: f.revision.id, stale: true });
+    expect(reopened.body.defaultPrompt).toContain(copy.pages[0].body);
+    expect((await f.agent.put(endpoint).set(f.H).send({ ...body, promptVersion: 1, instruction: "오래된 화면의 지시" })).status).toBe(409);
+    expect((await f.agent.get(endpoint).query({ pageId: "body-1" })).body).toEqual(reopened.body);
+    expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, next.id)))[0].payload.cardCopy).toEqual(copy);
+  });
+
+  it("uses the exact saved preview instructions for an unapproved image and records the actual submitted prompt", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f, { instruction: "왼쪽은 글자를 놓을 여백으로 비워 주세요." });
+    makeImage.mockReset(); makeImage.mockResolvedValue({ bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "recorded-image-model" });
+    const saved = await f.agent.put(endpoint).set(f.H).send(body); expect(saved.status).toBe(200);
+    const preview = (await f.agent.get(endpoint).query({ pageId: "body-1" })).body;
+    const expected = studioImagePrompt({ purpose: "cover", prompt: preview.prompt, instruction: preview.instruction });
+    expect(f.item.reviewStatus).toBe("pending"); expect(f.item.publishStatus).toBe("waiting");
+    const created = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f, { mode: "ai", imageData: undefined }));
+    expect(created.status, JSON.stringify(created.body)).toBe(200); expect(makeImage).toHaveBeenCalledTimes(1);
+    const sent = makeImage.mock.calls[0][0];
+    expect(sent).toMatchObject({ purpose: "cover", prompt: preview.prompt, instruction: preview.instruction, model: preview.model });
+    expect(studioImagePrompt(sent)).toBe(expected);
+    const reopened = (await f.agent.get(endpoint).query({ pageId: "body-1" })).body;
+    expect(reopened.lastGeneration).toMatchObject({ assetId: created.body.assetId, prompt: expected, model: "recorded-image-model", generatedAt: expect.any(String) });
+    expect(reopened.prompt).toBe(preview.prompt); expect(reopened.promptVersion).toBe(1);
+    const [item] = await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id));
+    expect(item).toMatchObject({ version: f.item.version, currentRevisionId: f.revision.id, reviewStatus: "pending", publishStatus: "waiting" });
+    expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)))[0].payload).toEqual(f.payload);
+    expect(await getDb().select().from(approvals).where(eq(approvals.contentItemId, f.item.id))).toHaveLength(0);
+  });
+
+  it("replays a completed implicit-prompt request after another screen edits the saved prompt", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f), requestBody = input(f, { mode: "ai", imageData: undefined });
+    expect((await f.agent.put(endpoint).set(f.H).send(body)).status).toBe(200);
+    makeImage.mockReset(); makeImage.mockResolvedValue({ bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "recorded-image-model" });
+    const first = await f.agent.post(f.backgroundEndpoint).set(f.H).send(requestBody);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const changed = await f.agent.put(endpoint).set(f.H).send({ ...body, promptVersion: 1, prompt: "다음 그림은 초록 식물과 붉은 돋보기로 수정." });
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    const replay = await f.agent.post(f.backgroundEndpoint).set(f.H).send(requestBody);
+    expect(replay.status, JSON.stringify(replay.body)).toBe(200); expect(replay.body).toEqual(first.body);
+    expect(makeImage).toHaveBeenCalledTimes(1); expect(await assets(f.item.id)).toHaveLength(1);
+    const reopened = (await f.agent.get(endpoint).query({ pageId: "body-1" })).body;
+    expect(reopened.prompt).toBe(changed.body.prompt);
+    expect(reopened.lastGeneration.prompt).toBe(studioImagePrompt({ purpose: "cover", prompt: body.prompt, instruction: body.instruction }));
+  });
+
+  it("rejects output from an older prompt when a different screen saves new directions during generation", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f), entered = deferred(), release = deferred();
+    expect((await f.agent.put(endpoint).set(f.H).send(body)).status).toBe(200);
+    const old = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f)); expect(old.status).toBe(200);
+    makeImage.mockReset(); makeImage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "recorded-image-model" }; });
+    const requestBody = input(f, { mode: "ai", imageData: undefined });
+    const pending = f.agent.post(f.backgroundEndpoint).set(f.H).send(requestBody).then(response => response);
+    try {
+      await enteredWithin(entered.promise);
+      const changed = await f.agent.put(endpoint).set(f.H).send({ ...body, promptVersion: 1, prompt: "최신 편집: 바다 대신 우주 배경" });
+      expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    } finally { release.resolve(); }
+    const stale = await pending;
+    expect(stale.status, JSON.stringify(stale.body)).toBe(409); expect(stale.body.code).toBe("image_prompt_changed");
+    expect((await assets(f.item.id)).map(asset => asset.id)).toEqual([old.body.assetId]);
+    const reopened = (await f.agent.get(endpoint).query({ pageId: "body-1" })).body;
+    expect(reopened).toMatchObject({ promptVersion: 2, prompt: "최신 편집: 바다 대신 우주 배경", lastGeneration: null });
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send(requestBody)).body.jobStatus).toBe("failed");
+    expect(makeImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps prompt access scoped to authentication, CSRF, channel, item and valid page", async () => {
+    const f = await fixture(), other = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f);
+    expect((await request(app).get(endpoint).query({ pageId: "body-1" })).status).toBe(401);
+    expect((await request(app).put(endpoint).send(body)).status).toBe(401);
+    expect((await f.agent.put(endpoint).send(body)).status).toBe(403);
+    const wrongChannel = endpoint.replace("/channels/2/", "/channels/1/");
+    expect((await f.agent.get(wrongChannel).query({ pageId: "body-1" })).status).toBe(404);
+    expect((await f.agent.put(wrongChannel).set(f.H).send(body)).status).toBe(404);
+    for (const pageId of ["body-9", "not-a-page"]) {
+      expect((await f.agent.get(endpoint).query({ pageId })).status).toBe(400);
+      expect((await f.agent.put(endpoint).set(f.H).send({ ...body, pageId })).status).toBe(400);
+    }
+    expect((await f.agent.put(endpoint).set(f.H).send({ ...body, prompt: " " })).status).toBe(400);
+    expect((await f.agent.put(endpoint).set(f.H).send(body)).status).toBe(200);
+    const separate = await other.agent.get(promptEndpoint(other)).query({ pageId: "body-1" });
+    expect(separate.status).toBe(200); expect(separate.body).toMatchObject({ custom: false, promptVersion: 0, lastGeneration: null });
+    expect(separate.body.prompt).not.toContain(body.prompt);
+    expect((await f.agent.get(endpoint).query({ pageId: "body-2" })).body).toMatchObject({ custom: false, promptVersion: 0, lastGeneration: null });
+  });
+});

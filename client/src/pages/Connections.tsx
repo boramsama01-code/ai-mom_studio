@@ -25,7 +25,7 @@ export function SourceBadge({ s }: { s: Status | undefined }) {
 /** 하나의 키 입력칸 — 비밀값은 저장 후 다시 보여주지 않음 */
 export function SecretInput({ k, label, hint, placeholder, options, secret, status, value, onChange }: { k: string; label: string; hint?: string; placeholder?: string; options?: SecretField["options"]; secret?: boolean; status: Status | undefined; value: string; onChange: (v: string) => void }) {
   const qc = useQueryClient();
-  const del = useMutation({ mutationFn: () => api(`/secrets/${k}`, { method: "DELETE" }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["secrets"] }); qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] }); } });
+  const del = useMutation({ mutationFn: () => api(`/secrets/${k}`, { method: "DELETE" }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["secrets"] }); qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] }); qc.invalidateQueries({ queryKey: ["channels"] }); } });
   const envOwned = status?.source === "environment";
   const has = status && status.source !== "none";
   return (
@@ -84,7 +84,7 @@ function AiProviderPanel({ data }: { data: Resp }) {
     mutationFn: () => api("/secrets/AI_PROVIDER", { method: "PUT", body: { value: selected } }),
     onSuccess: async () => {
       guard.setDirty("ai-provider", false);
-      await Promise.all([qc.invalidateQueries({ queryKey: ["secrets"] }), qc.invalidateQueries({ queryKey: ["status"] }), qc.invalidateQueries({ queryKey: ["studio"] })]);
+      await Promise.all([qc.invalidateQueries({ queryKey: ["secrets"] }), qc.invalidateQueries({ queryKey: ["status"] }), qc.invalidateQueries({ queryKey: ["studio"] }), qc.invalidateQueries({ queryKey: ["channels"] })]);
       setChoice(null);
     },
   });
@@ -93,20 +93,20 @@ function AiProviderPanel({ data }: { data: Resp }) {
     return () => guard.setDirty("ai-provider", false);
   }, [changed, selected]);
   return <form className="panel stack" onSubmit={e => { e.preventDefault(); if (changed) save.mutate(); }}>
-    <div className="row between"><h3 style={{ margin: 0 }}>글쓰기 AI 선택</h3><Badge kind={status?.source === "unreadable" ? "warn" : ""}>{envOwned ? "서버에서 설정" : status?.source === "unreadable" ? "다시 선택 필요" : status?.source === "screen" ? "저장됨" : "기본값 사용"}</Badge></div>
-    <p className="small muted" style={{ margin: 0 }}>글을 만들 때 사용할 AI를 선택하고 아래에서 키를 등록하세요.</p>
-    <label className="field" htmlFor="ai-provider-choice">기본 글쓰기 AI
+    <div className="row between"><h3 style={{ margin: 0 }}>공통 AI 연결과 기본값</h3><Badge kind={status?.source === "unreadable" ? "warn" : ""}>{envOwned ? "서버에서 설정" : status?.source === "unreadable" ? "다시 선택 필요" : status?.source === "screen" ? "저장됨" : "기본값 사용"}</Badge></div>
+    <p className="small muted" style={{ margin: 0 }}>API 키는 이 화면에서 연결합니다. 기사 요약·카드 문구·그림에 쓸 AI와 모델은 <GuardedLink href="/settings">설정 → 내 채널 → 역할별 AI</GuardedLink>에서 채널마다 정하세요.</p>
+    <label className="field" htmlFor="ai-provider-choice">기타 도구의 기본 AI
       <select id="ai-provider-choice" value={selected} disabled={envOwned || save.isPending} onChange={e => setChoice(e.target.value)} aria-describedby="ai-provider-help">
         <option value="auto">자동 선택 · Gemini 우선</option><option value="gemini">Gemini · Google</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude · Anthropic</option>
       </select>
     </label>
-    <p id="ai-provider-help" className="small muted" style={{ margin: 0 }}>자동 선택은 등록된 키 중 Gemini → GPT → Claude 순서입니다. 한도·오류 발생 시 다른 AI로 전환하지 않습니다. 그림 생성은 별도 OpenAI 요금입니다.</p>
+    <p id="ai-provider-help" className="small muted" style={{ margin: 0 }}>별도 역할 설정이 없는 도구의 기본값입니다. 채널별 요약·문구·이미지 설정은 바뀌지 않습니다. 자동 선택은 등록된 키 중 Gemini → GPT → Claude 순서이며, 한도·오류가 나면 다른 AI로 전환하지 않습니다.</p>
     {actual.data && <div className="ai-readiness" aria-live="polite"><div><strong>글쓰기 · {aiProviderLabels[actual.data.integrations.aiProvider]}</strong><Badge kind={actual.data.integrations.aiConfigured ? "ok" : ""}>{actual.data.integrations.aiConfigured ? "키 등록됨" : "키 등록 필요"}</Badge></div><div><strong>그림 · OpenAI</strong><Badge kind={actual.data.integrations.openai ? "ok" : ""}>{actual.data.integrations.openai ? "키 등록됨" : "키 등록 필요"}</Badge></div><small className="muted">키 등록 상태입니다. 실제 연결은 각 서비스에서 확인하세요.</small></div>}
     {actual.error && <ErrorBox error={actual.error} retry={() => actual.refetch()} />}
     <div className="row"><GuardedLink className="btn sm" href="/connections?service=gemini">Gemini 키 입력</GuardedLink><GuardedLink className="btn sm" href="/connections?service=openai">OpenAI 키 입력</GuardedLink><GuardedLink className="btn sm" href="/connections?service=anthropic">Claude 키 입력</GuardedLink></div>
     {envOwned ? <p className="small muted" style={{ margin: 0 }}>서버의 AI_PROVIDER 설정이 우선 적용되어 선택이 잠겨 있습니다. 화면에서 변경하려면 Render의 Environment에서 해당 항목을 제거한 뒤 재배포하세요.</p> : <div className="row"><button className="btn primary" disabled={!changed || save.isPending}>{save.isPending ? "저장 중…" : "선택 저장"}</button>{changed && <span className="small muted">저장하면 적용됩니다.</span>}</div>}
     {save.error && <ErrorBox error={save.error} />}
-    {save.isSuccess && !changed && <div className="notice ok small" role="status">글쓰기 AI 선택을 저장했습니다.</div>}
+    {save.isSuccess && !changed && <div className="notice ok small" role="status">공통 AI 기본값을 저장했습니다.</div>}
   </form>;
 }
 
@@ -123,7 +123,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
       setVals({});
       guard.setDirty(`connection-${g.id}`, false);
       qc.invalidateQueries({ queryKey: ["secrets"] });
-      qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] });
+      qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] }); qc.invalidateQueries({ queryKey: ["channels"] });
     },
   });
   const test = useMutation({
@@ -188,7 +188,7 @@ const SERVICE_INFO: Record<string, { title: string; use: string; mark: string; k
   telegram: { title: "텔레그램", use: "검토 알림 · 채널 전송", mark: "T", keys: ["TELEGRAM_BOT_TOKEN"] },
   cloudinary: { title: "Cloudinary", use: "게시용 이미지 주소", mark: "C", keys: ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"] },
   instagram: { title: "Instagram", use: "게시 API 버전", mark: "I", keys: ["INSTAGRAM_API_VERSION"] },
-  ai: { title: "글쓰기 AI 선택", use: "기본 AI 변경", mark: "✎", keys: [] },
+  ai: { title: "공통 AI 기본값", use: "기타 도구의 AI 변경", mark: "✎", keys: [] },
 };
 
 // A saved key is not proof of a working connection; old tests don't validate replacement keys.

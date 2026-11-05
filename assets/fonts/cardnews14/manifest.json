@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "retrievedAt": "2026-11-04",
+  "license": "SIL Open Font License 1.1",
+  "fontsUnmodified": true,
+  "files": [
+    {
+      "file": "NotoSansKR-Variable.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf",
+      "gitBlobSha": "b386890ba945e1f39448a6b59f20c5d194f58808",
+      "sha256": "194018e6b2b293a7964f037b25c0249ce1418bc9ab3c971060a03aa57861e252",
+      "bytes": 10414588
+    },
+    {
+      "file": "NotoSerifKR-Variable.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/notoserifkr/NotoSerifKR%5Bwght%5D.ttf",
+      "gitBlobSha": "cc85b383766708c9291f72baeeab05760774f492",
+      "sha256": "11f8d5de6f1b79195efba3828aaa2ec95c1178f5ae976fb23c8d53250a9938f3",
+      "bytes": 23795420
+    },
+    {
+      "file": "NotoSansKR-OFL.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt",
+      "gitBlobSha": "1c9f43281b8f216c5461fe9ac729afbade7724e4",
+      "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9",
+      "bytes": 4388
+    },
+    {
+      "file": "NotoSerifKR-OFL.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/main/ofl/notoserifkr/OFL.txt",
+      "gitBlobSha": "94d1bf7b52481343e2983fb7751e8b7abe1ea07b",
+      "sha256": "5e0da210fb04058a8c0087985d2d456b931c2579811a49655721d3cf0c36b6d6",
+      "bytes": 4350
+    }
+  ]
+}

@@ -7,7 +7,9 @@ import { CardCopyEditor, type CardCopyResponse } from "../client/src/CardCopyEdi
 import { SourceStudioCard } from "../client/src/pages/SourceStudioCard";
 import { ApiError } from "../client/src/api";
 import { studioContentSchema, type StudioCard } from "../shared/studio";
+import { discussionCardCopyFixture } from "./fixtures/discussionCardCopy";
 import { activateDraftRecoveryScope, readDraftRecovery } from "../client/src/draftRecovery";
+import { studioImagePrompt, type CardImagePromptView } from "../shared/studioImagePrompt";
 
 const mocks = vi.hoisted(() => ({ api: vi.fn(), blob: vi.fn(), guard: { setDirty: vi.fn(), confirmLeave: (fn: () => void) => fn() }, navigate: vi.fn() }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api, apiBlob: mocks.blob }));
@@ -20,7 +22,7 @@ let patch: ((body: { version: number; copy: CardCopyResponse["copy"] }) => Promi
 let renderedCards: Array<Record<string, any>>;
 const path = "/channels/1/items/9/card-copy";
 function fresh(): CardCopyResponse {
-  return { version: 3, revisionId: 30, hasSavedCopy: true, copy: { version: 1, templateKey: "set:n04", cover: { title: "원고에서 가져온 제목", subtitle: "사실을 확인하는 부제" }, pages: Array.from({ length: 4 }, (_, i) => ({ id: `body-${i + 1}`, title: `본문 제목 ${i + 1}`, subtitle: `본문 부제 ${i + 1}`, body: `원문에 근거한 카드 본문 ${i + 1}` })) } };
+  return { version: 3, revisionId: 30, hasSavedCopy: true, ai: { summary: { provider: "gemini", model: "gemini-test" }, copy: { provider: "openai", model: "gpt-test" }, image: { provider: "openai", model: "gpt-image-test" } }, copy: { version: 1, templateKey: "set:n04", cover: { title: "원고에서 가져온 제목", subtitle: "사실을 확인하는 부제" }, pages: Array.from({ length: 4 }, (_, i) => ({ id: `body-${i + 1}`, title: `본문 제목 ${i + 1}`, subtitle: `본문 부제 ${i + 1}`, body: `원문에 근거한 카드 본문 ${i + 1}` })) } };
 }
 function itemFixture() {
   return {
@@ -41,7 +43,7 @@ beforeEach(() => {
     if (request === "/status") return { integrations: { aiProvider: "gemini", gemini: true, flags: { dryRun: false, autoPublish: true } }, workerConnected: true };
     if (request === "/canva/status") return { connected: false };
     if (request === "/channels/1/items/9") return structuredClone(itemFixture());
-    if (request === "/studio/ai-status") return { defaultProvider: "gemini", text: { gemini: true, openai: false, anthropic: false } };
+    if (request === "/studio/ai-status") return { defaultProvider: "gemini", text: { gemini: true, openai: true, anthropic: false }, image: true };
     if (request === path && options?.method === "PATCH") {
       if (patch) return patch(options.body);
       saved = { ...saved, copy: structuredClone(options.body.copy), version: saved.version + 1, revisionId: saved.revisionId + 1, hasSavedCopy: true };
@@ -76,8 +78,218 @@ async function input(suffix: string, value: string) {
   const node = field(suffix);
   await act(async () => { const prototype = node instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype; Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(node, value); node.dispatchEvent(new Event("input", { bubbles: true })); });
 }
+async function imagePromptInput(value: string) {
+  const node = host.querySelector<HTMLTextAreaElement>('[aria-label="이미지 프롬프트"]');
+  if (!node) throw new Error("Image prompt field missing");
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(node, value); node.dispatchEvent(new Event("input", { bubbles: true })); });
+}
+function promptFixture(): CardImagePromptView {
+  const prompt = `현재 제목: ${saved.copy.cover.title} · 위쪽에는 글자를 넣을 여백`;
+  return { itemVersion: saved.version, revisionId: saved.revisionId, pageId: "cover", promptVersion: 0,
+    defaultPrompt: prompt, prompt, instruction: "", custom: false, basedOnRevisionId: null, stale: false,
+    model: "gpt-image-test", referenceAssetId: null, lastGeneration: null };
+}
 
 describe("card copy editor", () => {
+  it("opens and saves editable image prompts before approval, reopens them, and sends the edited prompt only on generate", async () => {
+    saved.copy.templateKey = "builtin:classic";
+    let prompt: CardImagePromptView = { itemVersion: 3, revisionId: 30, pageId: "cover", promptVersion: 0,
+      defaultPrompt: "원문에 맞는 로봇과 교실, 위쪽은 글자 여백", prompt: "원문에 맞는 로봇과 교실, 위쪽은 글자 여백", instruction: "", custom: false,
+      basedOnRevisionId: null, stale: false, model: "gpt-image-test", referenceAssetId: null, lastGeneration: null };
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (request, options) => {
+      if (request === `${path}/image-prompt?pageId=cover`) return structuredClone(prompt);
+      if (request === `${path}/image-prompt` && options?.method === "PUT") {
+        expect(options.body.promptVersion).toBe(prompt.promptVersion);
+        prompt = { ...prompt, prompt: options.body.prompt ?? prompt.defaultPrompt, custom: options.body.prompt !== null, instruction: options.body.instruction, promptVersion: prompt.promptVersion + 1, basedOnRevisionId: saved.revisionId };
+        return structuredClone(prompt);
+      }
+      if (request === `${path}/background`) {
+        prompt.lastGeneration = { assetId: 401, prompt: studioImagePrompt({ purpose: "cover", prompt: options.body.prompt, instruction: options.body.instruction }), model: "gpt-image-test", generatedAt: "2026-11-05T09:00:00.000Z" };
+        return { assetId: 401, version: saved.version, pageId: "cover", source: "ai", credit: "AI 일러스트 · OpenAI", jobId: 141 };
+      }
+      return fallback(request, options);
+    });
+    await render(); await openDetails("AI 이미지·프롬프트"); await click("프롬프트 확인·수정");
+    const textarea = host.querySelector<HTMLTextAreaElement>('[aria-label="이미지 프롬프트"]')!;
+    const edited = "파란 배경의 과학 실험실과 망원경. 오른쪽은 비워 주세요.";
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(textarea, edited); textarea.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="실제 AI 요청 전체"]')!.value).toBe(studioImagePrompt({ purpose: "cover", prompt: edited, instruction: "" }));
+    await click("프롬프트만 저장");
+    expect(prompt.prompt).toBe(edited);
+    expect(mocks.api.mock.calls.some(([url]) => url === `${path}/background` || url.endsWith("/approve"))).toBe(false);
+    await render(null); await render(); await openDetails("AI 이미지·프롬프트"); await click("프롬프트 확인·수정");
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="이미지 프롬프트"]')!.value).toBe(edited);
+    await click("이 페이지 배경 자동 만들기");
+    expect(mocks.api).toHaveBeenCalledWith(`${path}/background`, expect.objectContaining({ body: expect.objectContaining({ prompt: edited, pageId: "cover", mode: "ai" }) }));
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="최근 생성 프롬프트"]')!.value).toBe(prompt.lastGeneration!.prompt);
+    expect(host.textContent).toContain("이미지 #401 · gpt-image-test");
+    expect(mocks.api.mock.calls.some(([url]) => url.endsWith("/approve"))).toBe(false);
+  });
+  it("protects unsaved image prompt edits across a page without artwork and saves them through the leave guard without generating", async () => {
+    saved.copy.templateKey = "builtin:classic";
+    const scope = "image-prompt-recovery"; activateDraftRecoveryScope(scope); client.setQueryData(["me"], { user: "operator", recoveryScope: scope });
+    let prompt = promptFixture();
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (request, options) => {
+      if (request === `${path}/image-prompt?pageId=cover`) return structuredClone(prompt);
+      if (request === `${path}/image-prompt` && options?.method === "PUT") {
+        prompt = { ...prompt, prompt: options.body.prompt ?? prompt.defaultPrompt, custom: options.body.prompt !== null, instruction: options.body.instruction, promptVersion: prompt.promptVersion + 1 };
+        return structuredClone(prompt);
+      }
+      return fallback(request, options);
+    });
+    await render(); await openDetails("AI 이미지·프롬프트"); await click("프롬프트 확인·수정");
+    const edited = "화면을 옮겨도 보존할 프롬프트\n부드러운 붉은빛의 망원경, 위쪽은 여백.";
+    await imagePromptInput(edited);
+    expect(mocks.guard.setDirty.mock.calls.filter(([key]) => key === "card-image-prompts-1-9").at(-1)?.[1]).toBe(true);
+    const checkpoint = readDraftRecovery<Record<string, { prompt: string; custom: boolean }>>(scope, "item:1:9:page-image-prompts", value => value as Record<string, { prompt: string; custom: boolean }>);
+    expect(checkpoint.ok && checkpoint.value?.value.cover).toEqual({ prompt: edited, custom: true });
+    await click("다음 →"); expect(host.querySelector(".page-background-editor")).toBeNull();
+    await click("← 이전"); await openDetails("AI 이미지·프롬프트"); await click("프롬프트 확인·수정");
+    expect(host.querySelector('[aria-label="페이지별 이미지 프롬프트 기기 복구본"]')).not.toBeNull();
+    await click("복구본을 편집기에 불러오기");
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="이미지 프롬프트"]')!.value).toBe(edited);
+    const guardedSave = mocks.guard.setDirty.mock.calls.filter(([key, dirty]) => key === "card-image-prompts-1-9" && dirty).at(-1)![2];
+    await act(async () => { expect(await guardedSave()).toBe(true); }); await settle();
+    expect(prompt.prompt).toBe(edited);
+    expect(mocks.guard.setDirty.mock.calls.filter(([key]) => key === "card-image-prompts-1-9").at(-1)?.[1]).toBe(false);
+    expect(mocks.api.mock.calls.some(([url]) => url.endsWith("/background") || url.endsWith("/approve"))).toBe(false);
+    const afterSave = readDraftRecovery(scope, "item:1:9:page-image-prompts", value => value);
+    expect(afterSave.ok && afterSave.value).toBeNull();
+  });
+  it("refreshes the default image prompt after a manuscript save while retaining directly edited prompts", async () => {
+    saved.copy.templateKey = "builtin:classic";
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (request, options) => request === `${path}/image-prompt?pageId=cover` ? promptFixture() : fallback(request, options));
+    await render(); await openDetails("AI 이미지·프롬프트"); await click("프롬프트 확인·수정");
+    await input("title", "새로 저장한 과학 캠프 제목"); await click("문구 저장");
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="이미지 프롬프트"]')!.value).toContain("새로 저장한 과학 캠프 제목");
+    const custom = "내가 직접 고친 구도는 원고 갱신 뒤에도 유지";
+    await imagePromptInput(custom); await input("title", "다음 버전의 관찰 기록"); await click("문구 저장");
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="이미지 프롬프트"]')!.value).toBe(custom);
+    await click("기본 구성으로 되돌리기");
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="이미지 프롬프트"]')!.value).toContain("다음 버전의 관찰 기록");
+    expect(mocks.api.mock.calls.some(([url, options]) => url.endsWith("/background") || url.endsWith("/approve") || options?.method === "PUT")).toBe(false);
+  });
+  it("does not silently rebase a local prompt edit when refreshing another screen's saved instructions", async () => {
+    saved.copy.templateKey = "builtin:classic";
+    let prompt = promptFixture();
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (request, options) => {
+      if (request === `${path}/image-prompt?pageId=cover`) return structuredClone(prompt);
+      if (request === `${path}/image-prompt` && options?.method === "PUT") {
+        expect(options.body.promptVersion).toBe(0);
+        throw new ApiError(409, "다른 화면에서 이미지 프롬프트를 먼저 수정했습니다.");
+      }
+      return fallback(request, options);
+    });
+    await render(); await openDetails("AI 이미지·프롬프트"); await click("프롬프트 확인·수정");
+    await imagePromptInput("현재 화면에서 아직 저장하지 않은 우주 배경");
+    prompt = { ...prompt, promptVersion: 1, prompt: "다른 화면에서 저장한 바다 배경", custom: true };
+    await click("최신 원고·생성 기록 불러오기");
+    expect(host.textContent).toContain("새 저장본을 덮어쓰지 않습니다");
+    await click("프롬프트만 저장");
+    expect(prompt.prompt).toBe("다른 화면에서 저장한 바다 배경");
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="이미지 프롬프트"]')!.value).toBe("현재 화면에서 아직 저장하지 않은 우주 배경");
+    expect(mocks.api.mock.calls.some(([url]) => url.endsWith("/background") || url.endsWith("/approve"))).toBe(false);
+  });
+  it("rebuilds into eight roles with the channel copy AI, reviews before apply, and persists independent comparison columns", async () => {
+    saved.recommendedStoryFormat = "discussion8";
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (request, options) => {
+      if (request === `${path}/generate`) return { version: saved.version, revisionId: saved.revisionId, copy: discussionCardCopyFixture("set:n04"), scope: "all", jobId: 105 };
+      return fallback(request, options);
+    });
+    await render();
+    expect(host.querySelector<HTMLSelectElement>(".card-copy-ai select")?.value).toBe("openai"); // Global default is Gemini.
+    await click("8장 뉴스 대화로 다시 구성");
+    expect(mocks.api).toHaveBeenCalledWith(`${path}/generate`, expect.objectContaining({ body: { version: 3, templateKey: "set:n04", storyFormat: "discussion8", refreshAnalysis: true, requestId: expect.any(String) } }));
+    expect(saved.copy.pages).toHaveLength(4); expect(host.querySelectorAll(".card-copy-dots button")).toHaveLength(5);
+    expect([...host.querySelectorAll("button")].some(b => b.textContent === "표지에만 제안 적용")).toBe(false);
+    await click("8장 제안을 편집기에 적용"); expect(host.querySelectorAll(".card-copy-dots button")).toHaveLength(8);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="5페이지 두 가지 시선 문구 편집"]')!.click());
+    await input("column-0-body", "내가 중요하게 여기는 첫 번째 기준입니다.");
+    await input("column-1-title", "내가 보탠 다른 시선");
+    await click("문구 저장");
+    expect(saved.copy.storyFormat).toBe("discussion8");
+    expect(saved.copy.pages[3].columns).toMatchObject([{ body: "내가 중요하게 여기는 첫 번째 기준입니다." }, { title: "내가 보탠 다른 시선" }]);
+    expect(mocks.api.mock.calls.filter(([, o]) => o?.method === "PATCH").at(-1)?.[1].body.proposalJobId).toBe(105);
+    await render(null); client.clear(); await render();
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="5페이지 두 가지 시선 문구 편집"]')!.click());
+    expect(field("column-0-body").value).toBe("내가 중요하게 여기는 첫 번째 기준입니다.");
+    expect(field("column-1-title").value).toBe("내가 보탠 다른 시선");
+    expect(saved.ai?.copy.provider).toBe("openai");
+  });
+  it("recovers incomplete eight-page copy with columns, roles, sources and background IDs intact", async () => {
+    saved.copy = discussionCardCopyFixture(); saved.copy.pages[3].background = { assetId: 301, opacity: 65 };
+    const scope = "eight-page-recovery"; activateDraftRecoveryScope(scope); client.setQueryData(["me"], { user: "operator", recoveryScope: scope });
+    await render(); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="5페이지 두 가지 시선 문구 편집"]')!.click());
+    await input("column-0-body", ""); await input("column-1-title", "창을 닫아도 남을 시선");
+    await render(null); await render(); await click("복구본을 편집기에 불러오기");
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="5페이지 두 가지 시선 문구 편집"]')!.click());
+    expect(field("column-0-body").value).toBe(""); expect(field("column-1-title").value).toBe("창을 닫아도 남을 시선");
+    expect(button("문구 저장").disabled).toBe(true);
+    await input("column-0-body", "복구 뒤 완성한 비교 문장"); await click("문구 저장");
+    expect(saved.copy.pages[3].background).toEqual({ assetId: 301, opacity: 65 });
+    expect(saved.copy.pages[0].sourceIds).toEqual([1]); expect(saved.copy.pages[3].role).toBe("perspectives");
+  });
+  it("generates only the requested page background once and preserves text typed while it runs", async () => {
+    saved.copy = discussionCardCopyFixture();
+    let finish!: (value: any) => void; let submitted: any;
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (request, options) => {
+      if (request === `${path}/background`) { submitted = options.body; return new Promise(resolve => { finish = resolve; }); }
+      return fallback(request, options);
+    });
+    await render(); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="5페이지 두 가지 시선 문구 편집"]')!.click());
+    await openDetails("이 페이지 배경");
+    await act(async () => { const node = button("이 페이지 배경 자동 만들기"); node.click(); node.click(); }); await settle();
+    expect(submitted).toMatchObject({ version: 3, pageId: "body-4", mode: "ai", requestId: expect.any(String) });
+    expect(mocks.api.mock.calls.filter(([p]) => p === `${path}/background`)).toHaveLength(1);
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="2페이지 뉴스 요약 문구 편집"]')!.click());
+    await input("body", "이미지를 기다리는 동안 직접 고친 뉴스 요약");
+    await act(async () => finish({ assetId: 302, version: 3, pageId: "body-4", source: "ai", credit: "AI 일러스트 · OpenAI", jobId: 106 })); await settle();
+    expect(field("body").value).toBe("이미지를 기다리는 동안 직접 고친 뉴스 요약");
+    expect(saved.copy.pages[3].background).toBeUndefined();
+    await click("문구 저장");
+    expect(saved.copy.pages[3].background).toEqual({ assetId: 302, opacity: 100 });
+    expect(saved.copy.pages[0].background).toBeUndefined(); expect(saved.copy.pages[0].body).toBe("이미지를 기다리는 동안 직접 고친 뉴스 요약");
+    expect(saved.copy.cover.background).toBeUndefined();
+  });
+  it("recovers an uploaded image through GET without retaining or resending its bytes, then asks before using a stale result", async () => {
+    saved.copy = discussionCardCopyFixture();
+    let submitted: any; const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (request, options) => {
+      if (request === `${path}/background`) { submitted = options.body; throw new ApiError(0, "응답 유실"); }
+      if (request.startsWith(`${path}/background-requests/`)) return { status: "succeeded", response: { assetId: 303, version: 3, pageId: "cover", source: "upload", credit: "직접 등록 이미지", jobId: 107 } };
+      return fallback(request, options);
+    });
+    await render(); await openDetails("이 페이지 배경");
+    const file = new File(["isolated-image-bytes"], "background.png", { type: "image/png" });
+    const upload = host.querySelector<HTMLInputElement>('input[type="file"]')!;
+    await act(async () => { Object.defineProperty(upload, "files", { configurable: true, value: [file] }); upload.dispatchEvent(new Event("change", { bubbles: true })); }); await settle(60);
+    expect(submitted.imageData).toMatch(/^data:image\/png;base64,/);
+    const record = JSON.parse(sessionStorage.getItem("spacepenguin.generation:1:9:page-background")!);
+    expect(record.requestId).toBe(submitted.requestId); expect(JSON.stringify(record)).not.toContain("data:image"); expect(record).not.toHaveProperty("imageData");
+    await input("title", "응답을 잃은 뒤 먼저 저장한 최신 표지"); await click("문구 저장");
+    await click("기존 배경 작업 결과 확인");
+    expect(mocks.api).toHaveBeenCalledWith(`${path}/background-requests/${submitted.requestId}`);
+    expect(mocks.api.mock.calls.filter(([p]) => p === `${path}/background`)).toHaveLength(1);
+    expect(saved.copy.cover.background).toBeUndefined(); expect(host.textContent).toContain("확인 후 사용할 수 있는 배경");
+    await click("현재 표지에 이 배경 사용"); await click("문구 저장");
+    expect(saved.copy.cover).toMatchObject({ title: "응답을 잃은 뒤 먼저 저장한 최신 표지", background: { assetId: 303, opacity: 100 } });
+    expect(sessionStorage.getItem("spacepenguin.generation:1:9:page-background")).toBeNull();
+  });
+  it("keeps the selected background and manual saving available after a confirmed image failure", async () => {
+    saved.copy = discussionCardCopyFixture(); saved.copy.cover.background = { assetId: 304, opacity: 70 };
+    const fallback = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (request, options) => request === `${path}/background` ? Promise.reject(new ApiError(503, "이미지 한도에 도달했습니다.", { jobStatus: "failed" })) : fallback(request, options));
+    await render(); await openDetails("이 페이지 배경"); await click("이 페이지 배경 다시 만들기");
+    await input("title", "그림 오류 후에도 저장한 문구"); await click("문구 저장");
+    expect(saved.copy.cover).toMatchObject({ title: "그림 오류 후에도 저장한 문구", background: { assetId: 304, opacity: 70 } });
+    expect(sessionStorage.getItem("spacepenguin.generation:1:9:page-background")).toBeNull();
+  });
   it("recovers unsaved incomplete copy after a tab closes without auto-saving or invoking AI", async () => {
     const scope = "card-copy-recovery-session"; activateDraftRecoveryScope(scope); client.setQueryData(["me"], { user: "operator", recoveryScope: scope });
     await render(); await input("title", ""); await input("subtitle", "미저장 부제\n마지막 입력🐧");
@@ -169,7 +381,7 @@ describe("card copy editor", () => {
     expect(host.querySelector<HTMLDetailsElement>(".card-copy-ai-tools")?.open).toBe(false); await openDetails("AI로 문구 다듬기");
     await click("AI로 템플릿 문구 제안받기");
     expect(field("title").value).toBe("원고에서 가져온 제목"); expect(host.textContent).toContain("아직 카드에 반영하지 않았어요");
-    expect(mocks.api).toHaveBeenCalledWith(`${path}/generate`, { method: "POST", body: { version: 3, templateKey: "set:n04", provider: "gemini", selectedPage: 0, requestId: expect.any(String) } });
+    expect(mocks.api).toHaveBeenCalledWith(`${path}/generate`, { method: "POST", body: { version: 3, templateKey: "set:n04", selectedPage: 0, requestId: expect.any(String) } });
     await click("제안 문구로 바꾸기"); expect(field("title").value).toBe("AI가 제안한 제목"); expect(field("subtitle").value).toBe("AI가 제안한 부제");
     expect(saved.copy.cover.title).toBe("원고에서 가져온 제목"); await click("문구 저장"); expect(saved.copy.cover.title).toBe("AI가 제안한 제목");
   });

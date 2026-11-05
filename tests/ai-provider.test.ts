@@ -7,6 +7,7 @@ import { callTool, LlmBudget, verifyEvidence } from "../server/services/llm";
 import { generateStudioCaption, generateStudioImage, generateStudioText, studioAiStatus } from "../server/services/studioAi";
 import { openaiFailureMessage } from "../server/services/openaiError";
 import { testOpenai } from "../server/services/connectionTest";
+import { studioImagePrompt } from "../shared/studioImagePrompt";
 
 const draft = { title: "새 이야기", script: "본문", caption: "캡션", panels: Array.from({ length: 4 }, () => ({ scene: "우주복 펭귄", dialogue: "안녕" })) };
 const input = { directive: "마지막 대사를 짧게", content: { title: "기존 제목", channel: "penguin", format: "웹툰", script: "기존 본문" } };
@@ -111,6 +112,7 @@ describe("Studio images", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.openai.com/v1/images/edits");
     const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.prompt).toBe(studioImagePrompt({ purpose: "cover", prompt: topic, instruction: "배경을 밝게 하고 대상을 가운데로 옮겨 주세요." }));
     expect(sent.prompt).toContain("<operator_revision>배경을 밝게 하고 대상을 가운데로 옮겨 주세요.</operator_revision>");
     expect(sent.prompt).toContain(`<topic>${topic}</topic>`);
     expect(sent.prompt.indexOf("</operator_revision>")).toBeLessThan(sent.prompt.indexOf("<topic>"));
