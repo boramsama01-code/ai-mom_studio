@@ -41,10 +41,14 @@ it("인증 실패로 0건인 경우 원인과 키 수정 링크를 숨기지 않
   await act(async () => { client.setQueryData(["collection", "all", kstDay()], failed); });
   await act(async () => { await new Promise(r => setTimeout(r, 30)); });
   const alert = host.querySelector('[role="alert"]')!;
-  expect(alert.textContent).toContain("최근 수집이 네이버 인증 단계에서 멈췄습니다");
+  expect(alert.textContent).toContain("최근 수집에서 네이버 검색 인증에 실패했습니다");
   expect(alert.querySelector("a")?.getAttribute("href")).toBe("/connections?service=naver");
   await act(async () => alert.querySelector("a")!.click());
   expect(mocks.navigate).toHaveBeenCalledWith("/connections?service=naver");
+  await act(async () => { client.setQueryData(["collection", "all", kstDay()], { ...failed, channels: [{ ...failed.channels[0], lastRun: { ...failed.channels[0].lastRun, status: "partial", errors: [{ scope: "naver", message: "네이버 검색: 인증/권한 오류 (HTTP 401). 뉴스는 공개 RSS로 보완합니다." }] } }] }); });
+  await act(async () => { await new Promise(r => setTimeout(r, 30)); });
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("네이버 검색 인증에 실패");
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain("학교·기관 공지는 계속 확인");
   await act(async () => { client.setQueryData(["collection", "all", kstDay()], { ...failed, channels: [{ ...failed.channels[0], lastRun: { ...failed.channels[0].lastRun, status: "ok", errors: [] } }] }); });
   await act(async () => { await new Promise(r => setTimeout(r, 30)); });
   expect(host.querySelector('[role="alert"]')).toBeNull();
