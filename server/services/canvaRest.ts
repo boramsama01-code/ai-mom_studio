@@ -131,6 +131,52 @@ export type CanvaAutofillResult = { designId: string; editUrl: string | null; vi
 export type CanvaExportResult = { urls: string[] };
 export type CanvaAssetResult = { assetId: string };
 
+export type CanvaFolderDesign = { type: 'design' | 'brand_template'; id: string; title: string; updatedAt: number | null; pageCount: number | null; editUrl: string | null };
+export async function getCanvaFolder(db: DB, id: string, options: CanvaRestOptions = {}) {
+  const value = validate(z.object({ folder: z.object({ id: idSchema, name: z.string().max(1000) }) }), await rest(db, `/folders/${validId(id)}`, options));
+  if (value.folder.id !== id) throw new CanvaRestError('요청한 Canva 폴더와 응답 ID가 다릅니다.', 502, 'invalid_response');
+  return { id: value.folder.id, name: value.folder.name };
+}
+export async function listCanvaFolderDesigns(db: DB, id: string, continuation?: string, options: CanvaRestOptions = {}): Promise<{ items: CanvaFolderDesign[]; continuation: string | null }> {
+  validId(id);
+  const query = new URLSearchParams({ limit: '100', item_types: 'design,brand_template', sort_by: 'modified_descending' });
+  if (continuation !== undefined) query.set('continuation', validate(z.string().min(1).max(4096), continuation, true));
+  const summary = z.object({ id: idSchema, title: z.string().max(1000).optional(), updated_at: z.number().int().nonnegative().optional(), page_count: z.number().int().nonnegative().max(500).optional(), urls: linksSchema.optional(), view_url: canvaUrl.optional() });
+  const item = z.discriminatedUnion('type', [z.object({ type: z.literal('design'), design: summary }), z.object({ type: z.literal('brand_template'), brand_template: summary })]);
+  const value = validate(z.object({ items: z.array(item).max(100), continuation: z.string().min(1).max(4096).nullish() }), await rest(db, `/folders/${id}/items?${query}`, options));
+  return { items: value.items.map(item => {
+    const design = item.type === 'design' ? item.design : item.brand_template;
+    return { type: item.type, id: design.id, title: design.title ?? '제목 없는 Canva 디자인', updatedAt: design.updated_at ?? null, pageCount: design.page_count ?? null, editUrl: design.urls?.edit_url ?? design.urls?.view_url ?? design.view_url ?? null };
+  }), continuation: value.continuation ?? null };
+}
+
+/** A catalog preview must not force every design into the local 4:5 renderer. */
+export async function getCanvaLibraryPages(db: DB, id: string, options: CanvaRestOptions = {}): Promise<CanvaPageMetadata[]> {
+  const page = z.object({ id: idSchema.optional(), page_number: z.number().int().min(1).max(500), dimensions: z.object({ width: sizeSchema, height: sizeSchema }).optional() });
+  const value = validate(z.object({ items: z.array(page).max(20) }), await rest(db, `/designs/${validId(id)}/pages?offset=1&limit=20`, options));
+  if (value.items.some((item, index) => item.page_number !== index + 1)) throw new CanvaRestError('Canva 미리보기의 페이지 순서를 확인할 수 없습니다.', 502, 'invalid_response');
+  return value.items.map(item => ({ id: item.id ?? null, pageNumber: item.page_number, width: item.dimensions?.width ?? null, height: item.dimensions?.height ?? null, thumbnailUrl: null }));
+}
+
+function libraryExportJob(response: unknown, submitted: boolean, expectedId?: string): CanvaRestJob<CanvaExportResult> {
+  const raw = object(response) && object(response.job) ? response.job : null;
+  const possibleId = idSchema.safeParse(raw?.id);
+  const header = validate(jobHeaderSchema, raw, false, possibleId.success ? possibleId.data : null, submitted);
+  if (expectedId && header.id !== expectedId) throw new CanvaRestError('요청한 Canva 미리보기 작업과 응답 ID가 다릅니다.', 502, 'invalid_response', false, expectedId);
+  if (header.status === 'failed') return { ...header, errorCode: 'job_failed' };
+  if (header.status === 'in_progress') return header;
+  return { ...header, result: { urls: validate(z.array(canvaUrl).min(1).max(20), raw!.urls, false, header.id, submitted) } };
+}
+export async function submitCanvaLibraryExport(db: DB, id: string, pages: number[], options: CanvaRestOptions = {}): Promise<CanvaRestJob<CanvaExportResult>> {
+  validate(z.array(z.number().int().min(1).max(500)).min(1).max(20).refine(value => new Set(value).size === value.length), pages, true);
+  // No width/height override: retain the actual Canva page ratio and reduce the
+  // downloaded bytes locally only after validating each page's dimensions.
+  return libraryExportJob(await rest(db, '/exports', options, { method: 'POST', json: { design_id: validId(id), format: { type: 'png', as_single_image: false, pages } } }), true);
+}
+export async function getCanvaLibraryExportJob(db: DB, id: string, options: CanvaRestOptions = {}): Promise<CanvaRestJob<CanvaExportResult>> {
+  return libraryExportJob(await rest(db, `/exports/${validId(id)}`, options), false, id);
+}
+
 export async function getCanvaCapabilities(db: DB, options: CanvaRestOptions = {}): Promise<{ capabilities: string[] }> {
   const parsed = z.object({ capabilities: z.array(z.string().max(80).regex(/^[a-z_]+$/)).max(50) }).safeParse(await rest(db, "/users/me/capabilities", options));
   if (!parsed.success) throw new CanvaRestError("Canva 기능 확인 응답이 불완전합니다. 계정의 사용 가능 여부를 단정하지 않았으니 연결 상태를 다시 확인해 주세요.", 502, "invalid_response");

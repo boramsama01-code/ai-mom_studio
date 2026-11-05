@@ -10,6 +10,9 @@ import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
 import { READING_CARD_PROFILES, READING_PROFILE_LOGO_ID } from "../shared/readingCardProfiles";
 import { defaultPageDesigns } from "../shared/familyDialogue";
 import { FAMILY_ENDING_ASSET_IDS, FAMILY_PROFILE_ASSET_ID } from "../shared/characterVariantAssets";
+import type { CanvaTemplateLibraryState } from "../shared/canvaTemplateLibrary";
+import { CANVA_LIBRARY_QUERY_KEY } from "../client/src/CanvaTemplateLibrary";
+import { canvaLibraryItemFixture, canvaLibraryStateFixture } from "./fixtures/canvaTemplateLibrary";
 const mocks = vi.hoisted(() => ({ api: vi.fn(), local: vi.fn(), sourceApproved:vi.fn() }));
 vi.mock("../shared/readingCanvaMasters", () => ({ readingMasterSourceApproved:mocks.sourceApproved }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
@@ -23,6 +26,7 @@ const uuid = (index: number): ReturnType<Crypto["randomUUID"]> => `10000000-0000
 type Props = ComponentProps<typeof CanvaEditorial>;
 let root: Root, host: HTMLDivElement, client: QueryClient, props: Props;
 let jobs: CanvaJobDto[], masters: CanvaMasterDto[], connection: import('../shared/canvaCapabilities').CanvaConnectionStatus;
+let library: CanvaTemplateLibraryState;
 let enqueue: ((body: any) => Promise<unknown>) | null, action: ((path: string, body: any) => Promise<unknown>) | null, listJobs: (() => Promise<unknown>) | null;
 function job(id = 11, status: CanvaJobDto["status"] = "queued", override: Partial<CanvaJobDto> = {}): CanvaJobDto {
   const completed = ["ready", "needs_review", "superseded"].includes(status);
@@ -35,9 +39,11 @@ beforeEach(() => {
   jobs = []; enqueue = null; action = null; listJobs = null;
   masters = [{ id: 7, conceptMode: "value_definition", hasExternalActivity: false, templateVersion: "v1.1", sourceType: "design", sourceId: "Dmaster_test", status: "ready", editUrl: "https://www.canva.com/design/Dmaster_test/edit", validatedAt: "2026-11-04T00:00:00.000Z" }];
   connection = { configured: true, connected: true, autofill: true, capabilities: ["autofill"] };
+  library = canvaLibraryStateFixture();
   props = { channelId: 3, itemId: 28, version: 3, revisionId: 30, copy: familyDialogueCardFixture(), disabled: false, onLocalRender: mocks.local };
   mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: any }) => {
     if (path === "/canva/editorial/status") return structuredClone(connection);
+    if (path === "/canva/template-library") return structuredClone(library);
     if (path === "/channels/3/canva/masters") return { items: structuredClone(masters) };
     if (path === base && options?.method === "POST") {
       if (enqueue) return enqueue(options.body);
@@ -73,6 +79,68 @@ function reconciled(source: CanvaJobDto, body: any, status: string = 'needs_revi
 }
 
 describe("Canva editorial request and import UI", () => {
+  it("creates from a synchronized folder design while preserving the local authoring template and saved copy", async () => {
+    masters = []; library.items = [canvaLibraryItemFixture()];
+    const savedCopy = structuredClone(props.copy);
+    await render(); expect(button("Canva 8장 만들기").disabled).toBe(true);
+    await click("이 Canva 템플릿 선택"); expect(button("Canva 8장 만들기").disabled).toBe(false);
+    expect(host.textContent).toContain("Canva의 배치·이미지와 기본 사진 출처를 유지");
+    await click("Canva 8장 만들기");
+    expect(writes()[0][1].body).toEqual({ version: 3, requestId: expect.any(String), libraryDesignId: "Dlibrary_first", expectedLibraryUpdatedAt: 1793836800 });
+    expect(writes()[0][1].body).not.toHaveProperty("masterId"); expect(props.copy).toEqual(savedCopy); expect(mocks.local).not.toHaveBeenCalled();
+  });
+  it("blocks native creation while the selected design's changed preview is pending and uses the refreshed version after it is ready", async () => {
+    library.items = [canvaLibraryItemFixture()]; await render(); await click("이 Canva 템플릿 선택");
+    library.items = [canvaLibraryItemFixture({ updatedAt: 1793837000, previewStatus: "stale" }), canvaLibraryItemFixture({ designId: "Dother_design" })];
+    await act(async () => { await client.invalidateQueries({ queryKey: CANVA_LIBRARY_QUERY_KEY }); }); await settle();
+    expect(button("Canva 8장 만들기").disabled).toBe(true); expect(host.textContent).toContain("이전 미리보기");
+    expect(host.querySelector('[data-testid="canva-library-selection"]')?.textContent).toContain("Canva 기본 8장");
+    library.items[0] = canvaLibraryItemFixture({ updatedAt: 1793837000 });
+    await act(async () => { await client.invalidateQueries({ queryKey: CANVA_LIBRARY_QUERY_KEY }); }); await settle();
+    await click("Canva 8장 만들기"); expect(writes()[0][1].body).toMatchObject({ libraryDesignId: "Dlibrary_first", expectedLibraryUpdatedAt: 1793837000 });
+  });
+  it("preserves the chosen native source across remounts and replays a lost response using its original source version", async () => {
+    library.items = [canvaLibraryItemFixture()]; enqueue = async () => { throw new ApiError(0, "서버 응답을 받지 못했습니다."); };
+    await render(); await click("이 Canva 템플릿 선택"); await click("Canva 8장 만들기");
+    const original = structuredClone(writes()[0][1].body);
+    await act(async () => root.render(null)); client.clear();
+    library.items = [canvaLibraryItemFixture({ updatedAt: 1793837200 })]; enqueue = null;
+    await render({ version: 4, revisionId: 31 });
+    expect(host.querySelector('[data-testid="canva-library-selection"]')).not.toBeNull();
+    await click("요청 결과 확인");
+    expect(writes()[1][1].body).toEqual(original); expect(original.version).toBe(3); expect(original.expectedLibraryUpdatedAt).toBe(1793836800);
+    expect(sessionStorage.getItem(storageKey)).toBeNull();
+  });
+  it("restores the native source from a saved job and respects explicitly returning to registered masters", async () => {
+    library.items = [canvaLibraryItemFixture()]; const saved = job(61, "ready"); saved.result = { ...saved.result, libraryDesignId: "Dlibrary_first", librarySourceUpdatedAt: 1793836800 }; jobs = [saved];
+    await render(); expect(host.querySelector('[data-testid="canva-library-selection"]')).not.toBeNull();
+    await click("등록된 마스터로 돌아가기"); expect(host.querySelector('[data-testid="canva-library-selection"]')).toBeNull();
+    await act(async () => root.render(null)); client.clear(); await render();
+    expect(host.querySelector('[data-testid="canva-library-selection"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Canva 템플릿 선택"]')).not.toBeNull(); expect(writes()).toHaveLength(0);
+  });
+  it("keeps the missing native selection and disables creation instead of silently using a registered master", async () => {
+    sessionStorage.setItem("canva-library-choice:3:28", JSON.stringify({ designId: "Dlibrary_missing" }));
+    library.items = [canvaLibraryItemFixture()]; await render();
+    expect(host.querySelector('[data-testid="canva-library-selection"]')).not.toBeNull(); expect(button("Canva 8장 만들기").disabled).toBe(true);
+    expect(host.textContent).toContain("선택했던 디자인이 연결된 폴더에서 확인되지 않습니다"); expect(writes()).toHaveLength(0);
+  });
+  it("keeps generated folder snapshots out of the registered-master selector", async () => {
+    masters = [{ ...masters[0], id: 62, templateVersion: "canva-folder:a1b2c3", sourceId: "Dlibrary_first" }];
+    await render();
+    expect(button("Canva 8장 만들기").disabled).toBe(true);
+    expect(host.querySelector('select[aria-label="Canva 템플릿 선택"] option[value="62"]')).toBeNull();
+    expect(writes()).toHaveLength(0);
+  });
+  it("shows the native source-change check and allows importing its retained copy after a change is detected", async () => {
+    jobs = [job(63, "running", { phase: "folder_source_check", designId: "Dretained_copy", editUrl: "https://www.canva.com/design/Dretained_copy/edit" })];
+    await render(); expect(host.textContent).toContain("Canva 원본 변경 확인 중");
+    jobs = [{ ...jobs[0], status: "failed", errorCode: "library_source_changed", errorMessage: "제작 중 Canva 원본이 바뀌었습니다. 생성된 사본을 검토해 주세요." }];
+    await act(async () => { await client.invalidateQueries({ queryKey: ["canva-jobs", 3, 28] }); }); await settle();
+    expect(host.querySelector('a[href="https://www.canva.com/design/Dretained_copy/edit"]')).not.toBeNull();
+    await click("최신 디자인 가져오기"); expect(writes()[0][1].body).toMatchObject({ importFromJobId: 63, version: 3 });
+    expect(writes()[0][1].body).not.toHaveProperty("libraryDesignId"); expect(writes()[0][1].body).not.toHaveProperty("masterId");
+  });
   it("shows all 14 saved source links and sample previews without enabling Autofill bindings", async()=>{
     await act(async()=>root.render(<QueryClientProvider client={client}><CanvaMasterSettings channelId={3}/></QueryClientProvider>));await settle();
     expect(host.querySelectorAll('.canva-style-card')).toHaveLength(14);

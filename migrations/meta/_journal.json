@@ -148,6 +148,13 @@
       "when": 1793836800001,
       "tag": "0020_card_image_prompts",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793856000000,
+      "tag": "0021_canva_template_library",
+      "breakpoints": true
     }
   ]
 }

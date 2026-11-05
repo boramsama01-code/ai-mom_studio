@@ -19,6 +19,8 @@ import { sourceOrgFor } from "../worker/publish";
 import { kstToday } from "../services/dates";
 import { safeFetch } from "../services/safeFetch";
 import { sha256 } from "../services/text";
+import { invalidateCanvaLibraryConnection } from "../services/canvaTemplateLibrary";
+import { kickCanvaLibrary } from "../worker/canvaLibrary";
 import {
   autofillFromBrandTemplate,
   brandTemplateDataset,
@@ -249,6 +251,7 @@ templateRoutes.get(
       return back(`error&reason=${encodeURIComponent((e as Error).message.slice(0, 120))}`);
     }
     await audit(getDb(), { actor: actorOf(req), action: "canva_connect", entity: "canva" });
+    await invalidateCanvaLibraryConnection(getDb());kickCanvaLibrary(getDb());
     back("connected");
   }),
 );
@@ -257,6 +260,7 @@ templateRoutes.post(
   "/canva/disconnect",
   ah(async (req, res) => {
     await disconnectCanva(getDb());
+    await invalidateCanvaLibraryConnection(getDb());
     await audit(getDb(), { actor: actorOf(req), action: "canva_disconnect", entity: "canva" });
     res.json({ ok: true });
   }),

@@ -4,6 +4,7 @@ import type { DB } from "../server/db";
 import type { mediaAssets, contentItems } from "../shared/schema";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
 import { snapshotCanvaProfile } from "../shared/canvaEditorial";
+import { CANVA_LIBRARY_MAPPING_VERSION } from '../shared/canvaTemplateLibrary';
 import { LEGACY_READING_PROFILE_IDS, readingProfileForTemplateKey } from "../shared/readingCardProfiles";
 import { sha256 } from "../server/services/text";
 const calls = vi.hoisted(() => ({ evidence: vi.fn(), pages: vi.fn() }));
@@ -47,6 +48,21 @@ function bindProfile(key = 'cardnews14-cinematic-v1') {
 }
 
 describe("Canva approval artifact binding", () => {
+  it('accepts the immutable folder design snapshot and rejects its loss in any publication record',async()=>{
+    const snapshot={designId:'Dsource',sourceUpdatedAt:'123',datasetHash:state.job!.input.datasetHash,pageIds:Array.from({length:8},(_,index)=>`page_${index+1}`),title:'직접 편집한 원본',imagePolicy:'preserve_canva'};
+    const source=state.job!.input as Record<string,unknown>,result=state.job!.result as Record<string,unknown>,trace=state.input.revision.payload.canvaExport;
+    Object.assign(source,{mappingVersion:CANVA_LIBRARY_MAPPING_VERSION,folderTemplate:snapshot});
+    Object.assign(result,{mappingVersion:CANVA_LIBRARY_MAPPING_VERSION,folderTemplate:snapshot});
+    Object.assign(trace,{sourceDesignId:'Dsource',dataFieldMappingVersion:CANVA_LIBRARY_MAPPING_VERSION,folderTemplate:snapshot});
+    expect((await assertCanvaPublication(db,state.input))?.jobId).toBe(10);
+    for(const record of [source,result,trace]){
+      delete record.folderTemplate;
+      await expect(assertCanvaPublication(db,state.input)).rejects.toMatchObject({extra:{code:'canva_publication_mismatch'}});
+      record.folderTemplate=snapshot;
+    }
+    trace.folderTemplate={...snapshot,sourceUpdatedAt:'124'};
+    await expect(assertCanvaPublication(db,state.input)).rejects.toMatchObject({extra:{code:'canva_publication_mismatch'}});
+  });
   it("accepts one frozen output with the same current caption, evidence, order and original hashes", async () => {
     const proof = await assertCanvaPublication(db, state.input);
     expect(proof?.jobId).toBe(10); expect(proof?.pages).toHaveLength(8);

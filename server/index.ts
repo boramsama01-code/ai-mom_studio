@@ -1,4 +1,5 @@
 import { startCanvaJobs, stopCanvaJobs } from "./worker/canva";
+import { startCanvaLibrary, stopCanvaLibrary } from "./worker/canvaLibrary";
 import { startInlinePublish, stopInlinePublish } from "./worker/inlinePublish";
 import { createApp } from "./app";
 import { env } from "./env";
@@ -34,6 +35,7 @@ async function main() {
       kickInlineStudio(getDb());
       startInlinePublish(getDb());
       startCanvaJobs(getDb());
+      startCanvaLibrary(getDb());
     } catch (e) {
       console.error("DB 준비 실패:", describeDbError(e));
       if (env.isProduction) process.exit(1);
@@ -60,7 +62,7 @@ async function main() {
     try {
       const connectionsClosed = new Promise<void>(resolve => server.close(() => resolve()));
       server.closeIdleConnections();
-      await Promise.allSettled([stopInlinePublish(), stopInlineStudio(), stopInlineCollect(), stopCanvaJobs()]);
+      await Promise.allSettled([stopInlinePublish(), stopInlineStudio(), stopInlineCollect(), stopCanvaJobs(), stopCanvaLibrary()]);
       await connectionsClosed;
       await closeDb();
       clearTimeout(deadline);

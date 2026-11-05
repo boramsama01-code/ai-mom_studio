@@ -52,7 +52,7 @@ canvaEditorialRoutes.get('/channels/:cid/items/:id/canva/jobs',route(async(req,r
 }));
 canvaEditorialRoutes.post('/channels/:cid/items/:id/canva/jobs',route(async(req,res)=>{
   const {channel,itemId}=await itemScope(req.params.cid,req.params.id);
-  const body=parse(z.object({version:z.number().int().positive(),requestId:z.string().uuid(),masterId:z.number().int().positive().optional(),importFromJobId:z.number().int().positive().optional()}).strict(),req.body);
+  const body=parse(z.object({version:z.number().int().positive(),requestId:z.string().uuid(),masterId:z.number().int().positive().optional(),importFromJobId:z.number().int().positive().optional(),libraryDesignId:z.string().regex(/^D[A-Za-z0-9_-]{3,199}$/).optional(),expectedLibraryUpdatedAt:z.number().int().nonnegative().optional()}).strict().refine(value=>!(value.libraryDesignId&&(value.masterId||value.importFromJobId))&&!(value.expectedLibraryUpdatedAt!==undefined&&!value.libraryDesignId),{message:'Canva 폴더 원본 선택은 기존 마스터 선택·가져오기와 함께 요청할 수 없습니다.'}),req.body);
   const job=await enqueueCanvaRender(getDb(),{channelId:channel.id,itemId,actor:actorOf(req),...body});
   kickCanvaJobs(getDb());res.status(202).json(canvaJobDto(job));
 }));

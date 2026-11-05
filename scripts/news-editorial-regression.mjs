@@ -16,6 +16,7 @@ import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "../tes
 import { familyPageTitle } from "../server/services/familyDialogueCard.ts";
 import { familyEvidenceFixture } from "../tests/fixtures/familyEvidence.ts";
 import { familyEvidenceView, validateFamilyEvidenceReferences } from "../server/services/familyEvidence.ts";
+import { canvaLibraryItemFixture, canvaLibraryStateFixture } from "../tests/fixtures/canvaTemplateLibrary.ts";
 
 const require = createRequire(import.meta.url);
 let playwright;
@@ -44,7 +45,7 @@ const pasteImage = await sharp({ create: { width: 360, height: 450, channels: 3,
 
 function fixture() {
   const evidenceBundle = familyEvidenceFixture(9828, 3), evidence = familyEvidenceView(evidenceBundle);
-  const state = { saved: { version: 3, revisionId: 30, hasSavedCopy: true, recommendedStoryFormat: "discussion8", ai: roles, copy: legacyCopy() }, writes: [], aiAttempts: 0, familyAttempts: 0, cards: [], nextAssetId: 800, nextBackgroundId: 9000 };
+  const state = { saved: { version: 3, revisionId: 30, hasSavedCopy: true, recommendedStoryFormat: "discussion8", ai: roles, copy: legacyCopy() }, writes: [], aiAttempts: 0, familyAttempts: 0, cards: [], nextAssetId: 800, nextBackgroundId: 9000, canvaLibrary: null, canvaJobs: [] };
   const backgrounds = Object.assign(new Map(), { credits: new Map() }), assets = new Map();
   const makeAsset = () => {
     const id = state.nextAssetId; state.nextAssetId += 10;
@@ -79,7 +80,16 @@ function fixture() {
     else if (pathname === "/api/studio/ai-status") data = ai;
     else if (pathname === "/api/canva/status") data = { connected: false };
     else if (pathname === "/api/canva/editorial/status") data = { configured: false, connected: false, autofill: false, capabilities: [] };
-    else if (pathname === "/api/channels/3/canva/masters" || pathname === `${itemPath}/canva/jobs`) data = { items: [] };
+    else if (pathname === "/api/canva/template-library") data = state.canvaLibrary ?? canvaLibraryStateFixture({ configured: false, connected: false, autofill: false, lastSyncedAt: null, syncStatus: "not_configured" });
+    else if (/^\/api\/canva\/template-library\/designs\/[^/]+\/preview$/.test(pathname)) return route.fulfill({ contentType: "image/png", body: uploadImage });
+    else if (pathname === "/api/channels/3/canva/masters") data = { items: [] };
+    else if (pathname === `${itemPath}/canva/jobs`) {
+      if (method === "POST") {
+        assert.equal(body.libraryDesignId, "Dlibrary_template_1"); assert.equal(body.expectedLibraryUpdatedAt, 1793836800); assert.equal(body.masterId, undefined); assert.equal(body.version, state.saved.version);
+        data = { id: 901, requestId: body.requestId, purpose: "create", status: "queued", phase: "validate", sourceRevisionId: state.saved.revisionId, sourceVersion: body.version, designId: null, editUrl: null, exportJobId: null, outputAssetId: null, outputRevisionId: null, errorCode: null, errorMessage: null, createdAt: stamp, result: { libraryDesignId: body.libraryDesignId, librarySourceUpdatedAt: 1793836800 } };
+        state.canvaJobs = [data];
+      } else data = { items: state.canvaJobs };
+    }
     else if (pathname === "/api/studio/cards/2828") data = studio();
     else if (pathname === "/api/studio/cards") data = { cards: [studio().card], ai, notes: "", notesVersion: 1 };
     else if (pathname === "/api/channels/3/templates") data = { current: "set:n03", items: [{ key: "set:n03", name: "뉴스 대화", description: "하나의 기사, 여러 관점", kind: "builtin", family: "news", pageCount: 5 }] };
@@ -401,8 +411,35 @@ try {
       assert.equal(state.familyAttempts,familyAttemptsBeforeManual,'style changes and shared photos never call paid AI');
       assert.equal(state.writes.filter(write => write.path.endsWith('/background')).length,5);
       assert.equal(state.writes.filter(write => /\/(approve|publish|deliveries)(\/|$)/.test(write.path)).length, 0);
+      // A connected Canva folder uses its own native preview and source selection.
+      // The same small scenario runs in CI WebKit at 320, 393 and 1280 pixels.
+      state.canvaLibrary = canvaLibraryStateFixture({ items: Array.from({ length: 14 }, (_, index) => canvaLibraryItemFixture({ designId: `Dlibrary_template_${index + 1}`, title: `${index + 1} · Canva 표지와 내지${index === 0 ? ' — 긴 디자인 이름도 전체 확인' : ''}`, ...(index === 13 ? { status: 'needs_fields', canCreate: false, reason: '새 디자인의 원고 필드를 연결해 주세요.' } : {}) })) });
+      const savedBeforeCanva = clone(state.saved.copy);
+      await page.reload();
+      const canvaEditorial = page.locator('.canva-editorial'); await canvaEditorial.waitFor();
+      await canvaEditorial.locator('.canva-library-entry > summary').click();
+      await canvaEditorial.locator('.canva-library-card').first().waitFor();
+      assert.equal(await canvaEditorial.locator('.canva-library-card').count(), 14);
+      await canvaEditorial.getByRole('button', { name: '4페이지', exact: true }).click();
+      await canvaEditorial.locator('.canva-library-large img').evaluate(image => image.decode());
+      assert.match(await canvaEditorial.locator('.canva-library-large img').getAttribute('src'), /page=3/);
+      const nativeSelect = canvaEditorial.getByRole('button', { name: '이 Canva 템플릿 선택', exact: true });
+      await nativeSelect.scrollIntoViewIfNeeded(); assert.equal(await nativeSelect.isEnabled(), true);
+      assert(await nativeSelect.evaluate(node => { const r = node.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!hit && (hit === node || node.contains(hit)); }), 'Canva template selection must be reachable');
+      await nativeSelect.click();
+      await canvaEditorial.getByRole('button', { name: '4페이지', exact: true }).click();
+      const nativeCreate = canvaEditorial.getByRole('button', { name: 'Canva 8장 만들기', exact: true });
+      await nativeCreate.scrollIntoViewIfNeeded(); assert.equal(await nativeCreate.isEnabled(), true);
+      assert(await nativeCreate.evaluate(node => { const r = node.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!hit && (hit === node || node.contains(hit)); }), 'Canva creation must be reachable');
+      await layoutFits(page, `Canva folder library ${width}`);
+      const libraryBox = await canvaEditorial.locator('.canva-library-detail').boundingBox();
+      assert(libraryBox && libraryBox.x >= 0 && libraryBox.x + libraryBox.width <= width + 1, 'Canva inner-page detail must fit the viewport');
+      await canvaEditorial.screenshot({ path: `${outputDir}/canva-library-${width}.png` });
+      await nativeCreate.click(); await canvaEditorial.getByText('템플릿 확인 중', { exact: true }).waitFor();
+      assert.equal(state.writes.filter(write => write.path === `${itemPath}/canva/jobs`).length, 1);
+      assert.deepEqual(state.saved.copy, savedBeforeCanva, 'native selection and creation must preserve the authoring layout and copy');
       assert.deepEqual(errors, []); assert.deepEqual(external, []);
-      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', '14 style identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, actualPaidCalls: 0, publicationRequests: 0 });
+      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', '14 style identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists', 'Canva folder inner-page preview and reachable native creation preserve saved copy'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, mockNativeCreates: state.canvaJobs.length, actualPaidCalls: 0, publicationRequests: 0 });
       await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2)); console.log(`News editorial regression passed at ${width}px (${engine}).`);
     } catch (error) {
       results.push({ width, engine, passed: false, error: error.message, apiErrors: errors }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
