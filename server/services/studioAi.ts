@@ -35,6 +35,7 @@ export type StudioTextInput = {
     title: string;
     channel: string;
     channelName?: string;
+    brandGuide?: string;
     format: string;
     brief?: string;
     script?: string;
@@ -54,6 +55,7 @@ export async function generateStudioText(opts: StudioTextInput) {
     provider,
     model: opts.model,
     system: `당신은 선택한 채널의 콘텐츠 작가입니다. 사용자의 수정 지시를 반영해 완성본을 작성하세요.
+채널 브랜드 가이드: ${opts.content.brandGuide ?? "별도 지정 없음"}
 채널 표시 이름: ${opts.content.channelName ?? opts.content.channel}. 채널과 등장인물은 제공된 내용만 사용하며 다른 브랜드나 가족 캐릭터를 임의로 추가하지 마세요.
 선택된 캐릭터 참조가 제공된 경우에만 그 설정을 따르세요: ${opts.referenceText ? STUDIO_CHARACTER_GUIDE : "별도 캐릭터 지정 없음"}
 기존 설정과 바꾸라고 하지 않은 부분은 유지하세요. 한국어로 쓰고 불필요한 홍보 문구는 넣지 마세요.

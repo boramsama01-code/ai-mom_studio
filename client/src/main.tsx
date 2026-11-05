@@ -214,7 +214,7 @@ function Shell() {
           <Route path="/drafts"><Redirect to="/" replace /></Route>
           <Route path="/rules" component={RulesPage} />
           <Route path="/assets" component={AssetsPage} />
-          <Route path="/design" component={DesignPage} />
+          <Route path="/design"><DesignPage /></Route>
           <Route path="/publish" component={PublishPage} />
           <Route path="/settings" component={ChannelSettingsPage} />
           <Route path="/connections" component={ConnectionsPage} />

@@ -1,3 +1,4 @@
+import { ExternalDesignLink } from "./ExternalDesignLink";
 import { useEffect,useRef,useState } from 'react';
 import { useMutation,useQuery,useQueryClient } from '@tanstack/react-query';
 import { api,ApiError } from './api';
@@ -122,7 +123,7 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
     <div className="row wrap">
       {preferLocal&&<button className="btn primary" disabled={disabled||!!drawing||!jobs.isSuccess||!!lostRequest} onClick={onLocalRender}>스튜디오에서 8장 만들기</button>}
       <button className={`btn ${preferLocal?'':'primary'}`} disabled={!canStart} onClick={()=>start.mutate(undefined)}>{start.isPending?'요청 중…':'Canva 8장 만들기'}</button>
-      {current?.editUrl&&<a className="btn" href={current.editUrl} target="_blank" rel="noopener noreferrer">Canva에서 열기 ↗</a>}
+      {current?.editUrl&&<ExternalDesignLink url={current.editUrl} designId={current.designId ?? String(current.id)} disabled={disabled}/>}
       {current?.designId&&<button className="btn" disabled={disabled||!!drawing||!!lostRequest||!!unresolved||!jobs.isSuccess||!connection.data?.connected} onClick={()=>start.mutate(current.id)}>최신 디자인 가져오기</button>}
     </div>
     {preferLocal&&<p className="small muted">선택한 스타일로 8장을 완성합니다. 스튜디오 자체 출력이며, Canva 자동 제작은 원본 연결·출력 검증이 끝나면 사용할 수 있습니다.</p>}

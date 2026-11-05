@@ -1,3 +1,4 @@
+import { creativeProfileFor } from "../../shared/creativeProfile";
 import { generateExperience } from "../services/experienceAi";
 import crypto from "node:crypto";
 import sharp from "sharp";
@@ -159,7 +160,7 @@ async function runStudioJob(db: DB, job: Job, workerId: string, signal: AbortSig
     {
       const options = {
         provider: ai.provider, model: ai.model, directive: instruction,
-        content: { title: content.title, channel: content.channel, channelName: channel ? channelBrandName(channel) : content.channel, format: content.format, brief: content.memo, script: content.script, caption: content.caption, panels: content.panels.map(p => ({ scene: p.scene, dialogue: p.dialogue })) },
+        content: { title: content.title, channel: content.channel, channelName: channel ? channelBrandName(channel) : content.channel, brandGuide: channel ? [channel.editorialGuide, creativeProfileFor(channel).tone, creativeProfileFor(channel).assetGuide, `콘텐츠 서체 가이드: ${creativeProfileFor(channel).font}`].filter(Boolean).join("\n") : "", format: content.format, brief: content.memo, script: content.script, caption: content.caption, panels: content.panels.map(p => ({ scene: p.scene, dialogue: p.dialogue })) },
         referenceText: content.characters.length ? STUDIO_CHARACTER_GUIDE : "",
         signal,
       };

@@ -21,7 +21,7 @@ vi.mock("../client/src/pages/InstagramAccounts", () => ({ InstagramAccounts: () 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root, host: HTMLDivElement, client: QueryClient, channels: Channel[], createError: boolean;
 const makeChannel = (id: number, name: string, slug = `brand-${id}`): Channel => ({
-  id, name, slug, description: "채널 소개", audience: "일반 독자", contentType: "current_dialogue", categories: ["행사", "인터뷰"], aiSettings: null, accentColor: "#51635A", active: true,
+  id, name, slug, description: "채널 소개", audience: "일반 독자", contentType: "current_dialogue", categories: ["행사", "인터뷰"], aiSettings: null, creativeProfile: null, accentColor: "#51635A", active: true,
   editorialGuide: "확인한 자료를 사용합니다.", cardTemplate: "builtin:classic", canvaBrandTemplateId: null,
   budget: { naverCallsPerRun: 3, resultsPerRun: 20, fetchTargetsPerRun: 3, fetchCallsPerRun: 3, llmCallsPerRun: 2, dailyPublishLimit: 0 },
   version: 1, createdAt: new Date("2026-11-04"), updatedAt: new Date("2026-11-04"),

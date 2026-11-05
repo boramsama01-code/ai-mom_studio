@@ -1,3 +1,5 @@
+import { emptyVideoProject } from "@shared/videoProject";
+import { VideoEditor } from "./VideoEditor";
 import { creativeProfileFor } from "@shared/creativeProfile";
 import { useWorkspaceView } from "../useWorkspaceView";
 import { QuickCapture } from "../QuickCapture";
@@ -29,7 +31,7 @@ import { studioGenerationFeedback, studioImageProgress } from "@shared/studioGen
 import "../studioAutomation.css";
 
 import { studioKey } from "@shared/channelKeys";
-import { studioContentSchema, studioPanelSchema, studioOutputFormats, studioOutputDescription } from "@shared/studio";
+import { studioContentSchema, studioPanelSchema, studioOutputFormats, studioFormats, studioOutputDescription } from "@shared/studio";
 import { studioCaptionDraft } from "@shared/studioWorkflow";
 import type { StudioGeneration } from "@shared/studio";
 import { StudioExport, StudioQuickExport } from "./StudioExport";
@@ -40,7 +42,7 @@ import { StudioPromptCopy, StudioTextImport } from "./StudioTextImport";
 import { studioChatGptCaptionPrompt } from "@shared/studioTextImport";
 import type { StudioChannel as Channel, StudioStage as Stage, StudioCharacter as Character, StudioFormat as Format, StudioPanel as Panel, StudioContent as CardInput, StudioCard as Card, StudioRevision as Revision, StudioJob as Job, StudioBoard as Board, StudioCardDetail as Detail } from "@shared/studio";
 const stages: Array<{ id: Stage; label: string }> = [{ id: "idea", label: "아이디어" }, { id: "writing", label: "원고" }, { id: "making", label: "제작" }, { id: "review", label: "검토" }, { id: "done", label: "완료" }];
-const formats: readonly Format[] = studioOutputFormats;
+const formats: readonly Format[] = studioFormats;
 function useStudioChannels(includeArchived = false) {
   const { allChannels } = useChannel();
   return allChannels.filter(c => (includeArchived || c.active) && !(c.slug === "science-dialogue" && allChannels.some(other => other.slug === "current-dialogue"))).map(c => ({ id: studioKey(c.slug), name: c.name, role: c.description, profile: creativeProfileFor(c), active: c.active, accent: c.accentColor, categories: c.categories, aiSettings: legacyChannelAiSettings(c.aiSettings), effectiveAiSettings: (c as typeof c & Partial<ChannelAiRuntime>).effectiveAiSettings,
@@ -177,7 +179,7 @@ function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = ""
   const channels = useStudioChannels();
   const [workMode, setWorkMode] = useState<WorkMode>(() => initialMode === "finished" || new URLSearchParams(window.location.search).get("mode") === "manual" ? "manual" : "auto");
   const { channels: sourceChannels, select } = useChannel();
-  const [mode, setMode] = useState<"experience" | "finished" | "free">(initialMode);
+  const [mode, setMode] = useState<"experience" | "finished" | "free">(() => initialMode !== "free" ? initialMode : channels.find(c => c.id === channel)?.profile.defaultRoute === "media" ? "experience" : channels.find(c => c.id === channel)?.profile.defaultRoute === "upload" ? "finished" : "free");
   const [title, setTitle] = useState("");
   const [ch, setCh] = useState(channel);
   const [subcategory, setSubcategory] = useState(validSubcategory(channel, initialSubcategory, channels.find(c => c.id === channel)?.categories) ? initialSubcategory : "");
@@ -188,13 +190,14 @@ function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = ""
   const create = useMutation({
     mutationFn: () => {
       if (!ch || !channels.some(c => c.id === ch)) throw new Error("이 콘텐츠를 만들 채널을 선택해 주세요.");
-      const outputFormat = mode === "experience" || mode === "finished" ? "카드뉴스" : format;
+      const outputFormat = mode === "finished" ? "카드뉴스" : mode === "experience" && format !== "릴스" ? "카드뉴스" : format;
       return api<Card>("/studio/cards", { method: "POST", body: {
         requestId: creationRequest.current,
         title: title.trim() || (mode === "experience" ? "새 방문 후기" : "새 콘텐츠"), channel: ch, subcategory,
         format: outputFormat, stage, finishedDeck: mode === "finished" ? { pages: [] } : null,
         exportDesign: outputFormat === "카드뉴스" ? channels.find(c => c.id === ch)?.profile.defaultTemplate ?? "editorial" : "editorial",
-        experience: mode === "experience" ? emptyExperience() : null,
+        experience: mode === "experience" || outputFormat === "릴스" ? emptyExperience() : null,
+        videoProject: outputFormat === "릴스" ? emptyVideoProject() : null,
         characters: mode === "experience" ? [] : channels.find(c => c.id === ch)?.profile.characters ?? [],
       } });
     },
@@ -204,6 +207,7 @@ function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = ""
     setCh(next);
     setSubcategory("");
     setFormat(channels.find(c => c.id === next)?.profile.defaultFormat ?? "카드뉴스");
+    if (initialMode === "free") { const nextRoute = channels.find(c => c.id === next)?.profile.defaultRoute ?? "writing"; setRoute(nextRoute); setMode(nextRoute === "media" ? "experience" : nextRoute === "upload" ? "finished" : "free"); if(nextRoute === "upload") setWorkMode("manual"); }
     creationRequest.current = crypto.randomUUID();
   };
   const startFromInbox = () => guard.confirmLeave(() => {
@@ -214,7 +218,7 @@ function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = ""
   });
   const changeWorkMode = (next: WorkMode) => {
     setWorkMode(next);
-    if (next === "auto" && mode === "finished") setMode("free");
+    if (next === "auto" && mode === "finished") { setMode("free"); setRoute("writing"); }
   };
   const createLabel = mode === "experience" ? "사진·영상 올리러 가기 →" : mode === "finished" ? "이미지 가져오기 편집기 열기" : workMode === "auto" ? "자동 제작 편집기 열기" : "직접 작성 편집기 열기";
   return <Dialog title={mode === "finished" ? "완성 이미지 가져오기" : mode === "experience" ? "사진·영상으로 후기 만들기" : workMode === "auto" ? "새 콘텐츠 자동 제작" : "새 콘텐츠 직접 작성"} onClose={() => !create.isPending && onClose()}>
@@ -235,7 +239,7 @@ function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = ""
       <p className="small muted">{mode === "experience" ? "먼저 사진을 모으세요. 제목과 글은 나중에 다듬을 수 있습니다." : mode === "finished" ? "이미지 한 묶음이 게시물 한 건입니다. 1~10장을 가져와 순서를 정하세요." : workMode === "auto" ? "제목을 정하고 편집기를 여세요. 원고·컷 구성 자동 작성 버튼을 눌렀을 때 AI가 시작됩니다." : "직접 원고를 쓰거나 외부에서 만든 초안과 그림을 가져오세요. 입력을 유지한 채 자동으로 돌아갈 수 있습니다."}</p>
       <CategorySelect channel={ch} categories={channels.find(c => c.id === ch)?.categories} value={subcategory} onChange={setSubcategory} disabled={create.isPending || !ch} />
       <label className="field">{mode === "experience" ? "작업 제목 (나중에 입력 가능)" : "제목"}<input autoFocus required={mode !== "experience" && route !== "source"} disabled={create.isPending} value={title} maxLength={160} onChange={event => setTitle(event.target.value)} placeholder={mode === "experience" ? "예: 과학관에 다녀온 날" : "어떤 이야기를 만들까요?"} /></label>
-      {mode === "free" && <label className="field">형식<select aria-label="제작 형식" value={format} disabled={create.isPending} onChange={event => setFormat(event.target.value as Format)}>{formats.filter(value => !ch || (channels.find(c => c.id === ch)?.profile.formats ?? formats).includes(value)).map(f => <option key={f}>{f}</option>)}</select></label>}
+      {mode !== "finished" && route !== "source" && <label className="field">형식<select aria-label="제작 형식" value={format} disabled={create.isPending} onChange={event => setFormat(event.target.value as Format)}>{formats.filter(value => !ch || (channels.find(c => c.id === ch)?.profile.formats ?? formats).includes(value)).map(f => <option key={f}>{f}</option>)}</select></label>}
       {create.error && <ErrorBox error={create.error} />}
       <button className="btn primary" disabled={create.isPending || !ch || (mode !== "experience" && route !== "source" && !title.trim())}>{create.isPending ? "작업을 여는 중…" : route === "source" ? "자료 수집함 열기" : createLabel}</button>
       <p className="small muted">편집기를 여는 것만으로는 AI를 호출하지 않습니다. 원고와 그림 생성은 다음 화면의 생성 버튼에서 시작합니다.</p>
@@ -280,6 +284,7 @@ function StudioDetail({ id }: { id: number }) {
   if (q.isLoading) return <Loading lines={5} />;
   if (!q.data) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   if (q.data.card.trashedAt) return <TrashedStudioDetail card={q.data.card} />;
+  if (q.data.card.format === "릴스") return <VideoEditor key={q.data.card.id} data={q.data} />;
   if (q.data.card.finishedDeck) return <FinishedDeckEditor key={q.data.card.id} data={q.data} />;
   if (q.data.card.experience) return <ExperienceEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} />;
   if ((q.data.card.sourceReference || q.data.card.sourceOutput) && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard key={q.data.card.id} card={q.data.card} /><SourceBoardNotes card={q.data.card} /></>;

@@ -1,3 +1,4 @@
+import { creativeProfileFor } from "../../shared/creativeProfile";
 import { validSubcategory } from "../../shared/channelCategories";
 import { lockStudioPublication, invalidateStudioPublication } from "./studioPublicationState";
 import { validateExperienceMedia } from "./experienceMedia";
@@ -99,6 +100,7 @@ export async function saveStudioNotes(db: DB, version: number, notes: string) {
   });
 }
 function validateStudioMode(content: StudioContent) {
+  if (content.videoProject && (content.format !== "릴스" || !content.experience)) throw new HttpError(400, "영상 작업의 형식과 촬영 자료 구성을 확인해 주세요.");
   if (content.finishedDeck && (content.experience || content.format !== "카드뉴스")) throw new HttpError(400, "완성 이미지는 카드뉴스 형식으로 사용해 주세요.");
 }
 export async function validateStudioImages(db: DB, cardId: number, content: StudioContent) {
@@ -140,6 +142,7 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
       return studioCardDto(card);
     };
     const ch = await validateStudioChannel(tx as unknown as DB, content.channel);
+    if (!creativeProfileFor(ch).formats.includes(content.format)) throw new HttpError(400, "이 채널에서 허용하지 않은 콘텐츠 형식입니다. 채널 제작 설정을 확인해 주세요.");
     if (!validSubcategory(content.channel, content.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     if (sourceItemId) {
       const [source] = await tx.select().from(contentItems).where(eq(contentItems.id, sourceItemId));
@@ -174,7 +177,7 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
     if (!card) throw new HttpError(409, "이미 생성된 콘텐츠입니다. 보드를 새로고침하세요.");
     await tx.insert(studioRevisions).values({ cardId: card.id, version: 1, snapshot: content, instruction: sourceItemId ? "수집 콘텐츠에서 가져오기" : "새 콘텐츠" });
     await audit(tx, { actor, action: "create", entity: "studio_card", entityId: card.id });
-    return studioCardDto(card);
+    return remember(card);
   });
 }
 export async function saveStudioCard(db: DB, cardId: number, version: number, patch: Partial<StudioContent>, actor: string, instruction = "직접 수정") {
@@ -188,6 +191,11 @@ export async function saveStudioCard(db: DB, cardId: number, version: number, pa
     if (patch.channel && patch.channel !== current.content.channel) await validateStudioChannel(tx as unknown as DB, content.channel);
     await validateStudioImages(tx as unknown as DB, cardId, content);
     await validateExperienceMedia(tx as unknown as DB, cardId, content.experience);
+    if (content.videoProject) {
+      const allowed = new Set(content.experience?.media.map(media => media.id) ?? []);
+      const selected = [content.videoProject.coverMediaId, content.videoProject.outputMediaId, ...content.videoProject.scenes.map(scene => scene.mediaId)].filter((id): id is number => id !== null);
+      if (selected.some(id => !allowed.has(id))) throw new HttpError(400, "이 콘텐츠에 업로드한 촬영 자료만 선택해 주세요.");
+    }
     const [row] = await tx.update(studioCards).set({ content, version: version + 1, updatedAt: new Date() }).where(and(eq(studioCards.id, cardId), eq(studioCards.version, version))).returning();
     if (!row) conflict(studioCardDto(current));
     await tx.insert(studioRevisions).values({ cardId, version: row.version, snapshot: content, instruction });

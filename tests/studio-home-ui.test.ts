@@ -133,13 +133,13 @@ describe("홈과 단계별 제작 화면", () => {
     await render(boardWithScope());
     expect(host.querySelectorAll(".studio-content-card")).toHaveLength(1); expect(host.querySelector(".studio-content-grid")?.textContent).toContain("감자 작업");
     await click("보관 채널"); expect(host.querySelector(".studio-content-grid")?.textContent).toContain("보관 작업");
-    expect(button("새 콘텐츠 자동 제작").disabled).toBe(true);
+    expect(button("새 콘텐츠").disabled).toBe(true);
   });
   it("전체 조회의 새 콘텐츠는 작성폼에서 채널을 고른 뒤 그 채널에만 저장한다", async () => {
     await render(createElement(StudioPage));
     expect(host.querySelector<HTMLDetailsElement>(".studio-tools-menu")?.open).toBe(false);
-    expect([...host.querySelectorAll<HTMLButtonElement>(".studio-home-actions > button")].map(node => node.textContent)).toEqual(["새 콘텐츠 자동 제작"]);
-    await click("새 콘텐츠 자동 제작");
+    expect([...host.querySelectorAll<HTMLButtonElement>(".studio-home-actions > button")].map(node => node.textContent)).toEqual(["링크 저장", "새 콘텐츠"]);
+    await click("새 콘텐츠");
     const channel = host.querySelector('select[aria-label="제작 채널"]') as HTMLSelectElement;
     expect(channel.value).toBe("");
     expect(channel.required).toBe(true);
@@ -159,7 +159,7 @@ describe("홈과 단계별 제작 화면", () => {
   });
   it("자동 기본에서 수동 선택을 펼쳤다가 돌아와도 제목·채널·형식을 유지한다", async () => {
     mocks.selected = 2;
-    await render(createElement(StudioPage)); await click("새 콘텐츠 자동 제작");
+    await render(createElement(StudioPage)); await click("새 콘텐츠");
     const title = host.querySelector<HTMLInputElement>(".studio-create-form input")!;
     await input(title, "자동과 수동을 오가며 다듬은 제목");
     const format = host.querySelector<HTMLSelectElement>('select[aria-label="제작 형식"]')!;
@@ -211,7 +211,7 @@ describe("홈과 단계별 제작 화면", () => {
   });
   it("선택한 채널은 새 작업의 기본값이며 기존 카드를 다른 채널로 바꾸지 않는다", async () => {
     mocks.selected = 2;
-    await render(createElement(StudioPage)); await click("새 콘텐츠 자동 제작");
+    await render(createElement(StudioPage)); await click("새 콘텐츠");
     expect((host.querySelector('select[aria-label="제작 채널"]') as HTMLSelectElement).value).toBe("fryday");
     await act(async () => host.querySelector<HTMLButtonElement>('dialog button[aria-label="닫기"]')!.click());
     await render(createElement(StudioPage, { cardId: 1 }));
@@ -225,7 +225,7 @@ describe("홈과 단계별 제작 화면", () => {
     expect((host.querySelector('select[aria-label="제작 채널"]') as HTMLSelectElement).value).toBe("penguin");
     await act(async () => host.querySelector<HTMLButtonElement>('dialog button[aria-label="닫기"]')!.click());
     mocks.selected = 2;
-    await render(createElement(StudioPage)); await click("새 콘텐츠 자동 제작");
+    await render(createElement(StudioPage)); await click("새 콘텐츠");
     expect((host.querySelector('select[aria-label="제작 채널"]') as HTMLSelectElement).value).toBe("fryday");
   });
   it("단계를 옮겨도 원고 입력을 유지하고 오류 필드를 올바른 컷에서 연다", async () => {
