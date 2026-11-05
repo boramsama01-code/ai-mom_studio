@@ -125,6 +125,15 @@ describe("Canva folder library UI", () => {
     expect(button("지금 동기화").disabled).toBe(true); expect(button("이 Canva 템플릿 선택").disabled).toBe(true);
     expect(host.querySelector(".canva-library-large img")).not.toBeNull(); expect(writes()).toHaveLength(0);
   });
+  it("shows a configuration problem without offering the same failing OAuth redirect", async () => {
+    library = { ...library, configured: false, connected: false, syncStatus: "not_configured", message: "실제 Client ID를 연결 설정에 등록해 주세요." };
+    await render();
+    expect(host.textContent).toContain("실제 Client ID를 연결 설정에 등록해 주세요.");
+    expect(host.querySelector('a[href="/connections?service=canva"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/api/canva/connect"]')).toBeNull();
+    expect(button("지금 동기화").disabled).toBe(true);
+    expect(writes()).toHaveLength(0);
+  });
   it("refreshes the library on demand without starting design creation", async () => {
     await render();
     syncResult = canvaLibraryStateFixture({ items: [canvaLibraryItemFixture(), canvaLibraryItemFixture({ designId: "Dsecond_design", title: "새 내지" })] });

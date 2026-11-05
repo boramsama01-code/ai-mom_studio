@@ -167,7 +167,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
           </button>
         )}
       </div>
-      {g.id === "canva" && <GuardedLink className="btn" href="/design">Canva 계정 연결·디자인 관리 →</GuardedLink>}
+      {g.id === "canva" && <div className="notice stack small"><p>Client ID는 Canva 개발자 앱에서 발급한 값입니다. 앱 이름이나 Canva 계정 이름을 넣으면 연결되지 않습니다. 앱의 인증 리디렉션 주소는 <code>{window.location.origin}/api/canva/callback</code>로 설정해 주세요.</p><div className="row"><a className="btn sm" href="https://www.canva.dev/docs/apps/rest-apis/authentication/" target="_blank" rel="noopener noreferrer">Canva 앱 연결 안내 ↗</a><GuardedLink className="btn" href="/design">Canva 계정 연결·디자인 관리 →</GuardedLink></div></div>}
       {g.id === "instagram" && <GuardedLink href="/settings">채널별 게시 계정·토큰 관리 →</GuardedLink>}
       {sendsMessage && <p className="small muted">검토 알림 채팅방에 메시지 1건을 보냅니다.</p>}
       {paidTest && <p className="small muted">짧은 글 생성 요청 1회를 보내며 API 사용료가 발생합니다.</p>}
