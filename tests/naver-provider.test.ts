@@ -33,6 +33,14 @@ describe("네이버 검색 — API HUB / 기존 개발자센터 키 자동 판�
     expect(naverProviderInUse()).toBe("apihub");
   });
 
+  it("web documents omit unsupported sort and never invent a publication date", async () => {
+    const { f, calls } = fake("apihub");
+    const items = await naverSearch("교육청 중학생 모집", "webkr", 20, { naver: 0, limit: 2 }, f);
+    expect(new URL(calls[0].url).pathname).toBe("/search/v1/webkr");
+    expect(new URL(calls[0].url).searchParams.has("sort")).toBe(false);
+    expect(items[0].published).toEqual({ raw: null, iso: null, precision: "unknown" });
+  });
+
   it("기존 키: API HUB 인증 거부 후 기존 주소로 성공, 다음부터는 기존 주소부터", async () => {
     const { f, calls } = fake("developers");
     await naverSearch("과학고", "blog", 5, { naver: 0, limit: 5 }, f);

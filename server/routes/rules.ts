@@ -59,7 +59,7 @@ const ruleBase = {
 
 const ruleCreate = z.object({
   query: z.string().trim().min(1, "수집 키워드를 입력해 주세요.").max(100),
-  endpoints: z.array(z.enum(["news", "blog"])).min(1).max(2),
+  endpoints: z.array(z.enum(["news", "blog", "webkr"])).min(1).max(3),
   ...ruleBase,
 });
 
@@ -118,7 +118,7 @@ ruleRoutes.post(
 
 const bulkSchema = z.object({
   text: z.string().max(20_000),
-  endpoints: z.array(z.enum(["news", "blog"])).min(1).max(2),
+  endpoints: z.array(z.enum(["news", "blog", "webkr"])).min(1).max(3),
   categoryHint: z.string().max(40).nullable().optional(),
   enabled: z.boolean().optional(),
 });
@@ -174,7 +174,7 @@ ruleRoutes.post(
   }),
 );
 
-const rulePatch = z.object({ version: zVersion, query: z.string().trim().min(1, "수집 키워드를 입력해 주세요.").max(100).optional(), endpoint: z.enum(["news", "blog"]).optional(), ...ruleBase });
+const rulePatch = z.object({ version: zVersion, query: z.string().trim().min(1, "수집 키워드를 입력해 주세요.").max(100).optional(), endpoint: z.enum(["news", "blog", "webkr"]).optional(), ...ruleBase });
 
 ruleRoutes.patch(
   "/channels/:cid/rules/:id",
@@ -266,7 +266,7 @@ ruleRoutes.post(
   ah(async (req, res) => {
     const ch = await loadChannel(req.params.cid);
     const body = parse(
-      z.object({ query: z.string().min(1).max(100), endpoint: z.enum(["news", "blog"]), excludeTerms: z.array(z.string()).max(30).optional(), excludeScope: z.enum(["title", "title_and_snippet"]).optional() }),
+      z.object({ query: z.string().min(1).max(100), endpoint: z.enum(["news", "blog", "webkr"]), excludeTerms: z.array(z.string()).max(30).optional(), excludeScope: z.enum(["title", "title_and_snippet"]).optional() }),
       req.body,
     );
     try {
@@ -300,7 +300,7 @@ ruleRoutes.post(
         items: z
           .array(
             z.object({
-              endpoint: z.enum(["news", "blog"]),
+              endpoint: z.enum(["news", "blog", "webkr"]),
               title: z.string().max(500),
               description: z.string().max(2000),
               link: z.string().url(),
@@ -327,7 +327,7 @@ ruleRoutes.post(
         .values({
           normalizedUrl: normalized,
           originalUrl: identity,
-          kind: it.provider ?? (it.endpoint === "news" ? "naver_news" : "naver_blog"),
+          kind: it.provider ?? (it.endpoint === "news" ? "naver_news" : it.endpoint === "webkr" ? "naver_web" : "naver_blog"),
           title: it.title,
           snippet: it.description,
           meta: { naverLink: it.provider ? null : it.link, publisher: it.publisher ?? null, publisherUrl: it.publisherUrl ?? null, feedUrl: it.feedUrl ?? null, originallink: it.originallink ?? null, fetchUrl: it.endpoint === "news" && /n\.news\.naver\.com/.test(it.link) ? it.link : identity, via: "trial_search" },

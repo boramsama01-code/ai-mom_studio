@@ -71,7 +71,7 @@ function incompleteCardCopy(d: Detail) {
   return !d.current?.payload.cardCopy && !!sourceWorkflow(d)?.warnings.length;
 }
 
-const SRC_KIND: Record<string, string> = { naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 직접 RSS", official: "공식 게시물", manual: "직접 추가 자료", manual_text: "직접 붙여넣은 본문 · 내용 확인 필요" };
+const SRC_KIND: Record<string, string> = { naver_web: "네이버 웹문서", opportunity_listing: "공모전·활동 사이트", naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 직접 RSS", official: "공식 게시물", manual: "직접 추가 자료", manual_text: "직접 붙여넣은 본문 · 내용 확인 필요" };
 type ItemTab = "source" | "edit" | "publish" | "delivery" | "history";
 const entryTab = (search: string): ItemTab => {
   const value = new URLSearchParams(search).get("tab");

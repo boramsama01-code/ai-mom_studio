@@ -6,6 +6,7 @@
 import { eq } from "drizzle-orm";
 import type { DB } from "./db";
 import { channels, officialSources, searchRules, appSettings } from "../shared/schema";
+import { seedOfficialCatalog } from "./services/officialCatalog";
 import {
   CANDIDATE_RULES,
   CHANNEL_SEEDS,
@@ -15,7 +16,7 @@ import {
   normalizeQuery,
 } from "../shared/domain";
 
-export async function seedIfNeeded(db: DB): Promise<{ createdChannels: string[] }> {
+export async function seedIfNeeded(db: DB, options: { officialCatalog?: boolean } = {}): Promise<{ createdChannels: string[] }> {
   const createdChannels: string[] = [];
   await db.transaction(async (tx) => {
     for (const c of CHANNEL_SEEDS) {
@@ -83,6 +84,7 @@ export async function seedIfNeeded(db: DB): Promise<{ createdChannels: string[] 
       .values({ key: "global_stop", value: false })
       .onConflictDoNothing({ target: appSettings.key });
   });
+  if (options.officialCatalog !== false) await seedOfficialCatalog(db);
   return { createdChannels };
 }
 

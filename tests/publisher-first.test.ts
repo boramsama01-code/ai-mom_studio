@@ -111,7 +111,7 @@ describe("publisher-first article navigation",()=>{
  it("prefers an independent direct article over a newer Google wrapper within the same relevance tier",async()=>{
    const now=new Date('2026-10-31T12:00:00Z');
    const xml=(name:string,url:string,date:string)=>`<rss><channel><item><title>${name}</title><link>${url}</link><pubDate>${date}</pubDate></item></channel></rss>`;
-   const search=createNewsSearch({now,feeds:[{name:'신문',site:home,url:home+'rss'}],loadXml:async url=>url.includes('news.google.com')?xml('과학 최신 소식',wrapper,'2026-10-31T11:00:00Z'):xml('과학 탐구 모집',article,'2026-10-30T10:00:00Z')});
+   const search=createNewsSearch({ preferNaver: false,now,feeds:[{name:'신문',site:home,url:home+'rss'}],loadXml:async url=>url.includes('news.google.com')?xml('과학 최신 소식',wrapper,'2026-10-31T11:00:00Z'):xml('과학 탐구 모집',article,'2026-10-30T10:00:00Z')});
    const items=await search.search('과학','news',1,{naver:0,limit:3});expect(items[0].provider).toBe('rss_direct');
  });
 });
