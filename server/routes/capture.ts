@@ -2,7 +2,7 @@ import { Router } from "express";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
-import { contentItems, sourceDocuments, studioCards } from "../../shared/schema";
+import { channels, contentItems, sourceDocuments, studioCards } from "../../shared/schema";
 import { ah, HttpError, loadChannel, parse } from "./util";
 import { actorOf } from "../auth";
 import { normalizeUrl } from "../services/url";
@@ -15,11 +15,13 @@ captureRoutes.post("/channels/:cid/capture", ah(async (req, res) => {
   const ch = await loadChannel(req.params.cid);
   if (!ch.active) throw new HttpError(409, "보관된 채널은 복원한 뒤 자료를 저장해 주세요.");
   const input = parse(z.object({
-    url: z.string().trim().url().max(2000).refine(value => { const u = new URL(value); return ["http:","https:"].includes(u.protocol) && !u.username && !u.password; }, "http 또는 https 링크를 입력해 주세요."),
+    url: z.string().trim().url().max(2000).refine(value => { try { const u = new URL(value); return ["http:","https:"].includes(u.protocol) && !u.username && !u.password; } catch { return false; } }, "http 또는 https 링크를 입력해 주세요."),
     title: z.string().trim().max(160).optional(),
   }).strict(), req.body);
   const normalized = normalizeUrl(input.url);
   const result = await getDb().transaction(async tx => {
+    const [currentChannel] = await tx.select().from(channels).where(eq(channels.id,ch.id)).for("share");
+    if (!currentChannel?.active) throw new HttpError(409, "보관된 채널은 복원한 뒤 자료를 저장해 주세요.");
     // No provider call: capture must be fast, cheap and safe to repeat.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${"capture:" + ch.id + ":" + normalized}, 0))`);
     let [source] = await tx.select().from(sourceDocuments).where(and(eq(sourceDocuments.normalizedUrl, normalized), eq(sourceDocuments.isSample, false)));
@@ -33,10 +35,10 @@ captureRoutes.post("/channels/:cid/capture", ah(async (req, res) => {
     const duplicate = !!item;
     if (item?.excluded) throw new HttpError(409, "이미 제외 목록에 저장한 링크입니다. 수집함의 제외 목록에서 복원해 주세요.", { itemId: item.id });
     if (!item) [item] = await tx.insert(contentItems).values({
-      channelId: ch.id, primarySourceId: source.id, kind: ch.contentType, origin: "manual",
+      channelId: ch.id, primarySourceId: source.id, kind: currentChannel.contentType, origin: "manual",
       title: input.title || source.title || new URL(input.url).hostname,
       relevance: "uncertain", evidenceStatus: "needs_review",
-      scheduleStatus: ch.contentType === "notice" ? "unknown" : "not_applicable",
+      scheduleStatus: currentChannel.contentType === "notice" ? "unknown" : "not_applicable",
     }).returning();
     const [workspace] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
     if (workspace?.trashedAt) throw new HttpError(409, "이 링크의 콘텐츠가 휴지통에 있습니다. 복원한 뒤 이어서 편집해 주세요.", { cardId: workspace.id });

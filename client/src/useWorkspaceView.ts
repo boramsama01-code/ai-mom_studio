@@ -12,17 +12,20 @@ function read(key: string): WorkspaceView {
 /** UI preferences only. The server remains authoritative for every content field. */
 export function useWorkspaceView(channel: number | "all", ready: boolean) {
   const me = useQueryClient().getQueryData<{ user?: string; recoveryScope?: string }>(["me"]);
-  const key = `spacepenguin.view:${me?.recoveryScope ?? me?.user ?? "anonymous"}:${channel}`;
+  const prefix = `spacepenguin.view:${me?.recoveryScope ?? me?.user ?? "anonymous"}:`;
+  const key = prefix + channel;
   const persistent = !!me?.user;
   const [state, setState] = useState(() => ({ key, value: persistent ? read(key) : initial }));
   const value = state.key === key ? state.value : persistent ? read(key) : initial;
   const current = useRef({ key, value }); current.current = { key, value };
-  const update = useCallback((patch: Partial<WorkspaceView>) => {
-    const next = { ...current.current.value, ...patch };
-    current.current = { key, value: next };
-    setState({ key, value: next });
-    try { if (persistent) sessionStorage.setItem(key, JSON.stringify(next)); } catch { /* Keep in-memory view. */ }
-  }, [key]);
+  const update = useCallback((patch: Partial<WorkspaceView>, target: number | "all" = channel) => {
+    const targetKey = prefix + target;
+    const previous = targetKey === current.current.key ? current.current.value : persistent ? read(targetKey) : initial;
+    const next = { ...previous, ...patch };
+    current.current = { key: targetKey, value: next };
+    setState({ key: targetKey, value: next });
+    try { if (persistent) sessionStorage.setItem(targetKey, JSON.stringify(next)); } catch { /* Keep in-memory view. */ }
+  }, [key, prefix, channel, persistent]);
   const restored = useRef("");
   useEffect(() => {
     if (!ready || !persistent || restored.current === key || typeof requestAnimationFrame !== "function") return;

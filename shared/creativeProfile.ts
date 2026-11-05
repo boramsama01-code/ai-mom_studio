@@ -36,7 +36,7 @@ export function creativeProfileFor(channel: { slug: string; creativeProfile?: Cr
   };
   const defaults = legacy[key] ?? { format: "카드뉴스" as const, template: "editorial" as const, characters: [] };
   return creativeProfileSchema.parse({
-    formats: ["카드뉴스", "웹툰", "릴스", "기타"], defaultFormat: defaults.format,
+    formats: [...studioFormats], defaultFormat: defaults.format,
     defaultRoute: "writing", defaultTemplate: defaults.template, characters: defaults.characters,
   });
 }

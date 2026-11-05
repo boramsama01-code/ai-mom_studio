@@ -37,7 +37,9 @@ beforeEach(() => {
   ].map((c, i) => ({ ...studioContentSchema.parse(c), id: i + 1, version: 1, sourceItemId: null, createdAt: "2026-10-26T00:00:00Z", updatedAt: `2026-10-26T0${i}:00:00Z` }));
   mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: object }) => {
     if (path === "/studio/cards" && options?.method === "POST") {
-      const card = { ...studioContentSchema.parse(options.body), id: cards.length + 1, version: 1, sourceItemId: null, createdAt: "2026-11-02T00:00:00Z", updatedAt: "2026-11-02T00:00:00Z" };
+      const { requestId, ...content } = options.body as Record<string, unknown>;
+      expect(requestId).toMatch(/^[0-9a-f-]{36}$/i);
+      const card = { ...studioContentSchema.parse(content), id: cards.length + 1, version: 1, sourceItemId: null, createdAt: "2026-11-02T00:00:00Z", updatedAt: "2026-11-02T00:00:00Z" };
       cards.push(card); return card;
     }
     if (path === "/studio/cards" || path === "/studio/cards?trash=1") return { cards: cards.filter(c => !!c.trashedAt === path.includes("trash=1")), trashCount: cards.filter(c => c.trashedAt).length, notes: "", notesVersion: 1, ai: { defaultProvider: "openai", text: { openai: false, anthropic: false }, image: false } };
@@ -202,7 +204,7 @@ describe("홈과 단계별 제작 화면", () => {
     await act(async () => host.querySelector<HTMLButtonElement>('dialog button[aria-label="닫기"]')!.click());
     mocks.selected = 2; await render(createElement(StudioPage));
     await openDetails("가져오기·관리"); await click("완성 이미지 가져오기");
-    expect(host.querySelectorAll('dialog .work-mode-options button')[1].getAttribute("aria-pressed")).toBe("true");
+    expect(host.querySelector('dialog .creative-start-routes button[aria-pressed="true"]')?.textContent).toContain("완성 이미지");
     await input(host.querySelector<HTMLInputElement>(".studio-create-form input")!, "외부에서 만든 카드 묶음");
     await click("이미지 가져오기 편집기 열기");
     expect(cards.at(-1)).toMatchObject({ title: "외부에서 만든 카드 묶음", finishedDeck: { pages: [] } });

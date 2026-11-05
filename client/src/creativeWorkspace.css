@@ -226,3 +226,10 @@ html,body { letter-spacing:-.015em; }
 .video-output-fields { display:grid; gap:20px; margin:24px 0; }.video-savebar { position:sticky; bottom:0; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; background:#fafbf7f5; border-top:1px solid var(--border); padding:14px 0 max(14px,env(safe-area-inset-bottom)); z-index:10; }.video-savebar > span { font-size:12px; color:var(--muted); }
 @media(max-width:1200px) { .video-production-layout { grid-template-columns:150px minmax(0,1fr); }.video-stage { position:static; grid-column:2; }.video-preview { max-width:280px; max-height:380px; } }
 @media(max-width:640px) { .video-project-header { grid-template-columns:minmax(0,1fr) 90px; gap:16px; }.video-project-header > .field:first-child { grid-column:1/-1; }.video-production-layout { grid-template-columns:minmax(0,1fr); gap:16px; }.video-scenes ol { display:flex; gap:8px; overflow-x:auto; }.video-scenes li { min-width:150px; flex-shrink:0; }.video-scenes li + li { margin:0; }.video-stage { grid-column:auto; }.video-preview { margin:auto; }.video-savebar { padding-bottom:max(14px,env(safe-area-inset-bottom)); }.keyboard-open .video-savebar { position:static; } }
+
+.creative-skeleton-card { border:1px solid var(--border); border-radius:10px; background:#fff; overflow:hidden; }
+.creative-skeleton-art { aspect-ratio:4/3; background:#e9ece4; }
+.creative-skeleton-copy { display:grid; gap:10px; padding:16px; }.creative-skeleton-copy > * { display:block; height:12px; border-radius:3px; background:#edf0e9; margin:0; }.creative-skeleton-copy i { width:36%; height:9px; }.creative-skeleton-copy strong:nth-of-type(2) { width:72%; }.creative-skeleton-copy small { width:48%; margin-top:8px; }
+@media(max-width:640px) { .creative-skeleton-card { display:grid; grid-template-columns:112px minmax(0,1fr); min-height:180px; }.creative-skeleton-art { height:100%; aspect-ratio:auto; }.creative-skeleton-copy { align-content:start; gap:14px; padding:24px 14px; } }
+
+.shell h1,.shell h2,.shell .studio-content-copy h2 { word-break:keep-all; overflow-wrap:anywhere; }

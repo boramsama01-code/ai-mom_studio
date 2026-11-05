@@ -30,3 +30,13 @@ Public primary references: [Buffer Create](https://buffer.com/create), [Buffer I
 ## Resume point
 
 Implement through `feat/creative-workspace-20261106`; retain each actual check and failure below. Do not call external AI, publish to SNS, delete data, change public access or add paid services. Produce a reviewable PR; merging to main would auto-deploy and requires its own explicit outcome record.
+
+
+## Implementation checkpoint
+
+PR #73 has persisted commits through `04d63db3b74286479e3a87e535da5feca8135312`; modified code typecheck passed on GitHub CI run 42127611517. The complete PostgreSQL suite is running; no passing database or browser result is claimed yet. Pending local-in-session changes add read-only cache retention, matched skeletons and stricter capture validation/channel locking. Keep the PR draft until these changes and WebKit visual evidence pass.
+
+The user repeated authorization to delete only ai-mom-studio. Read-only Render listing confirms both services still exist. Plugin discovery found an optional browser automation connection (TinyFish); it is not connected, so no browser deletion was executed. Shared DB/environment groups remain untouched.
+
+
+Baseline CI run 42122117526 passed 208 files / 2131 tests in 447.61 seconds, then passed the production build and renderer memory checks. It was cancelled at the 30-minute job limit while Playwright's system dependencies downloaded from azure.archive.ubuntu.com. This was a browser dependency installation failure, not an application test failure. The PR changes that mirror to the official Ubuntu archive and retains WebKit as the required engine; it does not silently downgrade the browser gate.

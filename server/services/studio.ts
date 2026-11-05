@@ -141,7 +141,9 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
       if (receiptKey) await tx.insert(creationReceipts).values({ key: receiptKey, payloadHash, resourceId: card.id });
       return studioCardDto(card);
     };
-    const ch = await validateStudioChannel(tx as unknown as DB, content.channel);
+    const resolvedChannel = await validateStudioChannel(tx as unknown as DB, content.channel);
+    const [ch] = await tx.select().from(channels).where(eq(channels.id,resolvedChannel.id)).for("share");
+    if (!ch?.active) throw new HttpError(409, "보관된 채널입니다. 복원한 뒤 새 작업을 시작하세요.");
     if (!creativeProfileFor(ch).formats.includes(content.format)) throw new HttpError(400, "이 채널에서 허용하지 않은 콘텐츠 형식입니다. 채널 제작 설정을 확인해 주세요.");
     if (!validSubcategory(content.channel, content.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     if (sourceItemId) {

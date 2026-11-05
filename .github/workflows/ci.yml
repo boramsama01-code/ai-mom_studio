@@ -33,10 +33,25 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - name: Verify changed workspace contracts first
+        run: npx vitest run tests/creative-workspace-postgres.test.ts tests/video-project.test.ts tests/studio-home-ui.test.ts tests/app-navigation-ui.test.tsx --bail=1
+      - run: npm test -- --bail=1
       - run: npm run build
       - name: Measure production-bundle card rendering on Node 22
         run: node scripts/cardnews14-memory-qa.mjs --concurrent=2 --output=test-results/cardnews14-memory/ci-production.json
+      - name: Use the official Ubuntu mirror for browser dependencies
+        run: |
+          sudo python3 - <<'PY'
+          from pathlib import Path
+          candidates = [Path("/etc/apt/sources.list"), *Path("/etc/apt/sources.list.d").glob("*.sources"), *Path("/etc/apt/sources.list.d").glob("*.list")]
+          for source in candidates:
+              if not source.exists():
+                  continue
+              content = source.read_text()
+              updated = content.replace("http://azure.archive.ubuntu.com/ubuntu", "https://archive.ubuntu.com/ubuntu").replace("https://azure.archive.ubuntu.com/ubuntu", "https://archive.ubuntu.com/ubuntu")
+              if updated != content:
+                  source.write_text(updated)
+          PY
       - name: Install mobile browser regression tools
         id: browser_tools
         run: npm install --no-save --package-lock=false playwright@1.62.1 && npx playwright install --with-deps webkit

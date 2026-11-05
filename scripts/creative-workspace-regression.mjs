@@ -5,6 +5,7 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { preview } from "vite";
+import sharp from "sharp";
 const require=createRequire(import.meta.url);
 let pw; try{pw=require("playwright");}catch{pw=require(require.resolve("playwright",{paths:[process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES??"/nonexistent"]}));}
 const output="test-results/creative-workspace";await mkdir(output,{recursive:true});
@@ -28,6 +29,7 @@ const initial=[
  card(5,"완성해서 보관한 카드뉴스","highscoop","done"),
 ];
 const video={...card(20,"과학관에서 발견한 장면들","penguin","writing","릴스"),panels:panels().map(p=>({...p,imageId:null})),experience:{event:"",place:"",date:"",notes:"",takeaway:"",tips:"",tone:"담백한 기록",pageCount:5,layout:"photo",media:[],coverId:null,coverAltText:"",pages:[],questions:[]},videoProject:{version:1,ratio:"9:16",audioGuide:"현장의 소리를 살린다",coverMediaId:null,outputMediaId:null,scenes:[{id:"00000000-0000-4000-8000-000000000001",title:"과학관 입구",duration:3,subtitle:"오늘의 발견을 시작해요",narration:"첫 장면의 대본",audio:"현장음",mediaId:null}]}};
+video.updatedAt="2026-11-05T00:00:00Z";
 initial.push(video);
 const browsers=await pw.webkit.launch();const results=[];
 let mode="normal"; const cards=new Map(initial.map(value=>[value.id,clone(value)]));
@@ -143,4 +145,9 @@ try{
  if(process.env.CREATIVE_BASELINE_DIR)await run(process.env.CREATIVE_BASELINE_DIR,"before",4188);
  await run(process.cwd(),"after",4189);
  await writeFile(output+"/README.txt","Screens are real built React UI with synthetic API data and existing template artwork. before = verified main 42c643d; after = PR build; direction-b = same components with graphite/density alternative. External requests, generation and social publishing were blocked. No claim about production cold-start improvements is made.\n");
-}finally{await browsers.close();}
+}finally{
+ await browsers.close();
+ for(const name of ["before-home-1440","after-home-1440","direction-b-graphite-1440","after-editor-1440","after-home-393","after-capture-393","after-video-393","after-assets-1440"]){
+  try{const bytes=await sharp(await readFile(output+"/"+name+".png")).resize({width:name.endsWith("393")?393:1080,withoutEnlargement:true}).webp({quality:72}).toBuffer();console.log("VISUAL_REVIEW_IMAGE "+name+" "+bytes.toString("base64"));}catch{ /* Earlier layout failures can prevent a later screenshot. Artifacts retain the original failure. */ }
+ }
+}
