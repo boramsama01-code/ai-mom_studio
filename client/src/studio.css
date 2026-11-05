@@ -1,4 +1,4 @@
-.studio { --accent: #2563eb; --accent-weak: #edf4ff; }
+/* Studio inherits the shared workspace colour tokens. */
 
 /* Character references retain the accepted family art; pose numbers use the UI font. */
 .studio-character-portrait { display:block; position:relative; width:60px; height:100px; flex:0 0 auto; overflow:hidden; background-color:#fff; border-radius:8px; }

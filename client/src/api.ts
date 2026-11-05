@@ -60,7 +60,7 @@ export async function apiUpload<T = unknown>(path: string, file: File): Promise<
   if (csrf) headers["x-csrf-token"] = csrf;
   let res: Response;
   try { res = await fetch(`/api${path}`, { method: "POST", headers, body: file, credentials: "same-origin" }); }
-  catch { throw new ApiError(0, "파일을 저장하지 못했습니다. 네트워크를 확인한 뒤 다시 저장해 주세요."); }
+  catch { throw new ApiError(0, "업로드 결과를 확인하지 못했습니다. 저장된 자료 목록을 확인한 뒤 재시도해 주세요.", { code: "upload_result_unknown" }); }
   const body = (res.headers.get("content-type") || "").includes("json") ? await res.json().catch(() => ({})) : {};
   if (!res.ok) throw new ApiError(res.status, (body as { error?: string }).error || `업로드 실패 (HTTP ${res.status})`, body as Record<string, unknown>);
   return body as T;

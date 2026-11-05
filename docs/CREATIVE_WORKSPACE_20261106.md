@@ -6,7 +6,7 @@
 - Main Render service: `spacepenguin`, `srv-dbjep0ou01pc73f8rf80`; both Render deploy metadata and public /api/health confirm this SHA, connected PostgreSQL and configured authentication.
 - React 19, Vite, TypeScript, TanStack Query, Wouter; Express 5, Drizzle, external Neon PostgreSQL. Revisions, media, jobs and publication evidence are already persistent.
 - Free Render web instance; inline publication while awake; process.yml recovers pending work at minute 17 hourly. Exact-minute scheduling is not guaranteed. No new paid infrastructure is proposed.
-- User authorized deletion of the old `ai-mom-studio` Render service, not its database or shared environment group. The connected Render tool has no delete operation, no Render REST credential is available, and the connected desktop is offline. Deletion is UNEXECUTED. Verify legacy OAuth callbacks before removal.
+- The user authorized deletion of only the old `ai-mom-studio` web service. It was deleted on 2026-11-06 KST using the authenticated Render dashboard: `srv-dat0vbg473hc73e9l5r0`. Independent Render service listing confirms it is absent; `spacepenguin`, `woori-ledger-boram` and `nodeul-news` remain. The main health endpoint independently reports PostgreSQL connected, authentication configured and unchanged revision `42c643d`. No database or shared environment group was deleted.
 - Local baseline typecheck and production build passed. The local execution environment disconnected immediately afterward, before implementation. Continue through a feature branch and actual CI; do not infer tests or browser inspection passed.
 
 ## Evidence and order
@@ -34,9 +34,16 @@ Implement through `feat/creative-workspace-20261106`; retain each actual check a
 
 ## Implementation checkpoint
 
-PR #73 has persisted commits through `04d63db3b74286479e3a87e535da5feca8135312`; modified code typecheck passed on GitHub CI run 42127611517. The complete PostgreSQL suite is running; no passing database or browser result is claimed yet. Pending local-in-session changes add read-only cache retention, matched skeletons and stricter capture validation/channel locking. Keep the PR draft until these changes and WebKit visual evidence pass.
-
-The user repeated authorization to delete only ai-mom-studio. Read-only Render listing confirms both services still exist. Plugin discovery found an optional browser automation connection (TinyFish); it is not connected, so no browser deletion was executed. Shared DB/environment groups remain untouched.
+PR #73 initially persisted commits through `04d63db3b74286479e3a87e535da5feca8135312`. Subsequent head `3c7232f` and follow-ups below supersede this checkpoint. The obsolete Render service has been deleted as recorded above; the main service and shared DB/environment groups remain intact.
 
 
 Baseline CI run 42122117526 passed 208 files / 2131 tests in 447.61 seconds, then passed the production build and renderer memory checks. It was cancelled at the 30-minute job limit while Playwright's system dependencies downloaded from azure.archive.ubuntu.com. This was a browser dependency installation failure, not an application test failure. The PR changes that mirror to the official Ubuntu archive and retains WebKit as the required engine; it does not silently downgrade the browser gate.
+
+
+## Verified continuation
+
+- PR head `3c7232f` passed changed-contract PostgreSQL tests, all 210 files / 2,137 tests, typecheck, build, renderer memory checks, mobile WebKit, one-page editing and news editorial checks (CI 42128741725). The run finished with two browser failures: document width 405px at a 393px new-channel board, and an inaccessible manuscript field inside a closed advanced section. Neither is counted as a pass.
+- Local UI checks passed 22 tests; working-preview changes passed 29 UI tests and typecheck.
+- Follow-up work in the working tree adds a shared selected-cut preview beside the editor on PC, a collapsible mobile preview, manuscript before AI tools, explicit uncertain-upload wording, final-video media-type validation and video revision recovery. These changes require a final combined CI run.
+- Browser dependency installation now succeeds after the official Ubuntu mirror change. No new paid server, database or scheduler was provisioned.
+- Interruption hardening: browser failures now retain URL, rendered text, visible fields, errors and a screenshot in CI artifacts; layout diagnostics include the header, navigation and notifications. Local manuscript placement is corrected, the channel select is constrained to its control width, and the legacy `.studio` blue override is removed so controls use the shared teal token. These corrections still require combined WebKit verification.

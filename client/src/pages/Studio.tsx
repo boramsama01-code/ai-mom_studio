@@ -1,4 +1,5 @@
 import { WorkspaceSkeleton } from "../WorkspaceSkeleton";
+import { StudioWorkingPreview } from "../StudioWorkingPreview";
 import { emptyVideoProject } from "@shared/videoProject";
 const VideoEditor = lazy(() => import("./VideoEditor").then(m => ({ default: m.VideoEditor })));
 import { creativeProfileFor } from "@shared/creativeProfile";
@@ -463,7 +464,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
       {testConnection.error && <ErrorBox error={testConnection.error} />}
     </div></details>}
     {latestJob?.status === "succeeded" && latestJob.result?.applied === true && Array.isArray(latestJob.result.changedFields) && latestJob.result.changedFields.length > 0 && <p className="notice ok small" role="status">작성 완료: {latestJob.result.changedFields.filter((f): f is string => typeof f === "string").join(" · ")}</p>}
-    {tab === "content" ? <div className="studio-editor-layout studio-guided-editor">
+    {tab === "content" ? <div className={`studio-editor-layout studio-guided-editor${editorStep !== "finish" ? " has-working-preview" : ""}`}>
       <nav className="studio-editor-steps" aria-label="제작 순서">{([['story','01','이야기'],['images','02','그림'],['finish','03','완성']] as const).map(([id, number, label]) => <button key={id} aria-current={editorStep === id ? "step" : undefined} onClick={() => setEditorStep(id)}><span>{number}</span><strong>{label}</strong></button>)}</nav>
       <details className="content-options"><summary>캐릭터·포즈 설정</summary><StudioRegisteredCharacters cast={form.characters} onChange={changeCast} disabled={busy || working || newer} onChoosePoses={() => { setEditorStep("images"); setPosePickerRequest(current => current + 1); }} /></details>
       <section className="panel stack" id="studio-story" hidden={editorStep !== "story"}>
@@ -471,6 +472,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         <label className="field">제목<input id="studio-title" disabled={busy} value={form.title} maxLength={160} onChange={e => change("title", e.target.value)} /></label>
         <label className="field">기획·참고 자료<textarea disabled={busy} value={form.memo} rows={3} maxLength={12000} onChange={e => change("memo", e.target.value)} placeholder="이야기의 핵심이나 확인한 자료를 적어 주세요. 이미 컷을 썼다면 비워 두어도 됩니다." /></label>
         <label className="field">형식<select id="studio-format" disabled={busy} value={form.format} onChange={e => change("format", e.target.value as Format)}>{!formats.includes(form.format) && <option value={form.format}>{form.format} · 기획용</option>}{formats.map(f => <option key={f}>{f}</option>)}</select></label>
+        <label className="field">전체 원고<textarea disabled={busy} value={form.script} rows={8} maxLength={24000} onChange={e => change("script", e.target.value)} placeholder="전체 원고가 없어도 장면·대사에서 바로 그림을 만들 수 있습니다." /></label>
         <WorkModeControl mode={textMode === "api" ? "auto" : "manual"} onChange={mode => setTextMode(mode === "auto" ? "api" : "chatgpt")} disabled={busy} automaticUnavailable={settings.data?.ai.text[provider] === false ? `${aiProviderLabels[provider]} 연결이 필요합니다. 연결 후 앱 안에서 원고를 만들 수 있습니다.` : null} onConfigure={() => guard.confirmLeave(() => navigate(`/connections?service=${provider}`))} />
         <div className="stack" hidden={textMode !== "api"} data-testid="studio-api-writing">
           <label className="field">작성 AI<select value={provider} disabled={busy || working} onChange={e => setProviderOverride({ channel: form.channel, provider: e.target.value as AiProvider })}><option value="gemini">Gemini</option><option value="openai">GPT · OpenAI</option><option value="anthropic">Claude</option></select><span className="hint">{providerOverride?.channel === form.channel ? "이 작업에서 선택한 AI입니다. 채널 기본값은 설정에서 바꿀 수 있습니다." : `채널의 카드 문구 AI를 사용합니다${channelAi?.effectiveAiSettings?.copy.model ? ` · ${channelAi.effectiveAiSettings.copy.model}` : ""}.`}</span></label>
@@ -480,8 +482,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         </div>
         <div hidden={textMode !== "chatgpt"}><StudioTextImport content={form} channelName={channelName(form.channel)} disabled={busy || working || newer} apply={setForm} /></div>
         {archivedChannel && <p className="notice warn small">보관된 채널입니다. 새 AI 생성은 <GuardedLink href="/settings">채널 복원</GuardedLink> 후 사용할 수 있습니다.</p>}
-        <details className="studio-more" open={!!form.script || undefined}><summary>전체 원고·작업 정보</summary><div className="stack">
-          <label className="field">전체 원고<textarea disabled={busy} value={form.script} rows={6} maxLength={24000} onChange={e => change("script", e.target.value)} placeholder="전체 원고가 없어도 장면·대사에서 바로 그림을 만들 수 있습니다." /></label>
+        <details className="studio-more"><summary>채널·분류·작업 정보</summary><div className="stack">
           <div className="studio-form-grid">
             <label className="field">채널<select disabled={busy} value={form.channel} onChange={e => setForm(f => ({ ...f, channel: e.target.value, subcategory: "" }))}>{channels.filter(c => c.active || c.id === form.channel).map(c => <option key={c.id} value={c.id}>{c.name}{c.active ? "" : " (보관됨)"}</option>)}</select></label>
             <CategorySelect channel={form.channel} categories={channels.find(c => c.id === form.channel)?.categories} value={form.subcategory ?? ""} onChange={v => change("subcategory", v)} disabled={busy} />
@@ -540,6 +541,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         <label className="field">바꿀 내용<textarea disabled={busy} rows={3} maxLength={6000} value={instruction} onChange={e => setInstruction(e.target.value)} placeholder="예: 마지막 반전은 유지하고 전체 흐름을 더 짧게 바꿔줘." /></label>
         <AiUsageGuide provider={provider} /><button className="btn" disabled={!canWrite || !instruction.trim()} onClick={() => run({ kind: "text", textTarget: "rewrite", instruction })}>전체 원고 수정 · {aiProviderLabels[provider]}</button>
       </div></details>
+      {editorStep !== "finish" && <StudioWorkingPreview form={form} base={base} selected={selectedPanel} onSelect={setSelectedPanel} onEdit={() => setEditorStep("images")} />}
     </div> : <section className="panel stack">
       <div className="row between"><h2>버전 기록</h2><span className="small muted">복원해도 이전 기록은 유지됩니다.</span></div>
       {!data.revisions.length ? <p className="muted">저장한 버전이 없습니다.</p> : <div className="studio-history-layout">

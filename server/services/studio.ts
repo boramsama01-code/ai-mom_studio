@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
-import { channels, creationReceipts, appSettings, approvals, deliveries, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
+import { channels, creationReceipts, appSettings, approvals, deliveries, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioMedia, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
 import { channelSlug, normalizeStudioChannel } from "../../shared/channelKeys";
 import { studioContentSchema, type StudioGeneration, type StudioContent, type StudioCard, type StudioJob, type StudioRevision } from "../../shared/studio";
 import { conflict, HttpError, parse } from "../routes/util";
@@ -197,6 +197,10 @@ export async function saveStudioCard(db: DB, cardId: number, version: number, pa
       const allowed = new Set(content.experience?.media.map(media => media.id) ?? []);
       const selected = [content.videoProject.coverMediaId, content.videoProject.outputMediaId, ...content.videoProject.scenes.map(scene => scene.mediaId)].filter((id): id is number => id !== null);
       if (selected.some(id => !allowed.has(id))) throw new HttpError(400, "이 콘텐츠에 업로드한 촬영 자료만 선택해 주세요.");
+      if (content.videoProject.outputMediaId) {
+        const [output] = await tx.select({ kind: studioMedia.kind }).from(studioMedia).where(and(eq(studioMedia.cardId, cardId), eq(studioMedia.id, content.videoProject.outputMediaId)));
+        if (output?.kind !== "video") throw new HttpError(400, "완성 영상에는 업로드한 동영상 파일을 선택해 주세요.");
+      }
     }
     const [row] = await tx.update(studioCards).set({ content, version: version + 1, updatedAt: new Date() }).where(and(eq(studioCards.id, cardId), eq(studioCards.version, version))).returning();
     if (!row) conflict(studioCardDto(current));

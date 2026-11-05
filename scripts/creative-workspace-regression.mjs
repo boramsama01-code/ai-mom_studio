@@ -10,6 +10,7 @@ const require=createRequire(import.meta.url);
 let pw; try{pw=require("playwright");}catch{pw=require(require.resolve("playwright",{paths:[process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES??"/nonexistent"]}));}
 const output="test-results/creative-workspace";await mkdir(output,{recursive:true});
 const image=await readFile("client/public/cardnews14/cinematic-cover.webp");
+const familyImage=await sharp(await readFile("client/public/studio-assets/poses-v2/family-v2.png")).webp({quality:85}).toBuffer();
 const stamp="2026-11-06T00:00:00Z", clone=value=>structuredClone(value);
 const ai={defaultProvider:"openai",text:{openai:false,anthropic:false,gemini:false},image:false};
 const channels=[
@@ -18,8 +19,8 @@ const channels=[
  {id:3,slug:"current-dialogue",name:"ALLligodang",contentType:"current_dialogue",accentColor:"#9c6d35"},
  {id:4,slug:"fryday",name:"fryday",contentType:"manual",accentColor:"#9e542d"},
 ].map(channel=>({...channel,active:true,version:1,categories:[],description:"검증용 채널",audience:"중학생과 부모",editorialGuide:"",budget:{},creativeProfile:null,aiSettings:null}));
-const panels=()=>Array.from({length:4},(_,index)=>({scene:"장면 "+(index+1),dialogue:"기존에 저장한 대사 "+(index+1),imageId:index+1,poseRefs:[]}));
-const card=(id,title,channel,stage,format="카드뉴스")=>({id,title,channel,stage,format,version:1,subcategory:"",dueDate:"",memo:"검증용 기획과 참고 자료",script:"모바일에서 저장하고 PC에서 이어 쓰는 원고",caption:"저장한 캡션",exportDesign:"editorial",sourceLabel:"브라우저 검증용 합성 자료",panels:panels(),characters:[],imagePath:"",finishedDeck:null,experience:null,altTexts:[],sourceItemId:null,createdAt:stamp,updatedAt:stamp});
+const panels=(cardId=0)=>Array.from({length:4},(_,index)=>({scene:"장면 "+(index+1),dialogue:"기존에 저장한 대사 "+(index+1),imageId:cardId*10+index+1,poseRefs:[]}));
+const card=(id,title,channel,stage,format="카드뉴스")=>({id,title,channel,stage,format,version:1,subcategory:"",dueDate:"",memo:"검증용 기획과 참고 자료",script:"모바일에서 저장하고 PC에서 이어 쓰는 원고",caption:"저장한 캡션",exportDesign:"editorial",sourceLabel:"브라우저 검증용 합성 자료",panels:panels(id),characters:[],imagePath:"",finishedDeck:null,experience:null,altTexts:[],sourceItemId:null,createdAt:stamp,updatedAt:stamp});
 const initial=[
  card(10,"우주펭귄 가족, 퇴근 후의 작은 소동과 아주 긴 한국어 제목을 다듬는 시간","penguin","writing","웹툰"),
  card(9,"이번 주 놓치면 아쉬운 과학 캠프 세 가지","highscoop","review"),
@@ -58,14 +59,15 @@ async function intercept(route,origin,errors,writes){
  else if(/\/studio\/cards\/\d+\/media$/.test(p))data=[];
  else if(p==="/api/canva/status")data={connected:false};
  else if(/\/studio\/cards\/\d+\/publication$/.test(p))data={channelId:1,channelName:"우주펭귄상회",expectedUsername:"spacepenguin.co",ready:false,blockers:["검증용 환경 · 외부 게시 차단"],dailyLimit:0,dryRun:true,autoPublish:false,destinations:[],deliveries:[],publicationDraft:{version:0,options:{destinationIds:[],timing:"now",scheduledAtKst:""}}};
- else if(/^\/api\/studio\/(images\/|characters\/)/.test(p)||/export\.png$/.test(p))return route.fulfill({contentType:"image/webp",body:image});
+ else if(/^\/api\/studio\/(images\/|characters\/)/.test(p)||/export\.png$/.test(p))return route.fulfill({contentType:"image/webp",body:/\/images\/10[1-4]$|\/characters\//.test(p)?familyImage:image});
  else if(/\/channels\/\d+\/capture$/.test(p)&&method==="POST"){
   const saved=card(31,body.title||"이동 중 저장한 링크","highscoop","writing");cards.set(31,saved);data={studioCardId:31,itemId:100,duplicate:false,bodyStatus:"not_fetched"};
  }else{errors.push(method+" "+p);return route.fulfill({status:404,json:{error:"Unmocked fixture API: "+p}});}
  return route.fulfill({json:data});
 }
 async function noOverflow(page,label){
- const value=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,offenders:[...document.querySelectorAll("main *")].filter(node=>{const r=node.getBoundingClientRect();return r.width&&r.left>=0&&r.right>innerWidth+1;}).slice(0,5).map(n=>({tag:n.tagName,cls:n.className,rect:n.getBoundingClientRect().toJSON()}))}));
+ await page.evaluate(async()=>{await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
+ const value=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,scrollX,body:document.body.scrollWidth,offenders:[...document.querySelectorAll("body *")].filter(node=>{const r=node.getBoundingClientRect();return r.width&&r.right>innerWidth+1;}).slice(0,12).map(n=>({tag:n.tagName,cls:n.className,rect:n.getBoundingClientRect().toJSON(),overflow:getComputedStyle(n).overflowX}))}));
  assert(value.scroll<=value.width+1,label+": "+JSON.stringify(value));
 }
 async function shot(page,label){await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:output+"/"+label+".png"});}
@@ -76,6 +78,7 @@ async function run(root,label,port){
  for(const width of [360,393,430,768,1440]){
   const context=await browsers.newContext({viewport:{width,height:1000},locale:"ko-KR",timezoneId:"Asia/Seoul",isMobile:width<768,hasTouch:width<768,reducedMotion:"reduce",serviceWorkers:"block"});
   const page=await context.newPage(),errors=[],writes=[];
+  try{
   page.on("pageerror",e=>errors.push(e.message));
   await context.route("**/*",route=>intercept(route,origin,errors,writes));
   await page.goto(origin+"/");await page.locator(".studio-content-card").first().waitFor();
@@ -137,7 +140,11 @@ async function run(root,label,port){
   results.push({label,width,passed:true,navigation,syntheticApi:true,existingTemplateArtwork:true});
   await writeFile(output+"/results.json",JSON.stringify(results,null,2));
   console.log(label+" "+width+"px: render, layout, saved context and safe actions passed");
-  await context.close();
+  }catch(error){
+   await shot(page,label+"-failure-"+width);
+   const state={url:page.url(),errors,writes:writes.map(write=>write.p),screen:await page.locator("main").innerText(),fields:await page.locator("textarea").evaluateAll(nodes=>nodes.map(node=>({label:node.closest("label")?.textContent?.slice(0,80),visible:node.getBoundingClientRect().height>0}))),message:String(error)};
+   await writeFile(output+"/"+label+"-failure-"+width+".json",JSON.stringify(state,null,2));console.log("CREATIVE_FAILURE "+JSON.stringify(state));throw error;
+  }finally{await context.close();}
  }
  }finally{await new Promise(resolve=>server.httpServer.close(resolve));}
 }

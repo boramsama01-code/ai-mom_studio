@@ -116,7 +116,8 @@ async function ready(page) {
   assert.equal(await page.locator('.content-workspace [role="tablist"]').count(), 0);
 }
 async function noOverflow(page, label) {
-  const dimensions = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth, offenders: [...document.querySelectorAll("main *")].filter(node => { const r = node.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right > innerWidth + 1; }).slice(0, 8).map(node => ({ tag: node.tagName, class: node.className, width: node.getBoundingClientRect().width })) }));
+  await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
+  const dimensions = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth, scrollX, body: document.body.scrollWidth, offenders: [...document.querySelectorAll("body *")].filter(node => { const r = node.getBoundingClientRect(); return r.width > 0 && r.right > innerWidth + 1; }).slice(0, 12).map(node => ({ tag: node.tagName, class: node.className, rect: node.getBoundingClientRect().toJSON(), overflow: getComputedStyle(node).overflowX })) }));
   assert(dimensions.scroll <= dimensions.width + 1, `${label}: horizontal overflow ${JSON.stringify(dimensions)}`);
   for (const input of await page.locator(".card-copy-fields textarea").all()) {
     const box = await input.boundingBox();

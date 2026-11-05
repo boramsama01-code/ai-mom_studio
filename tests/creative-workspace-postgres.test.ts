@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
+import sharp from "sharp";
+import { emptyExperience } from "../shared/experience";
+import { emptyVideoProject } from "../shared/videoProject";
 import { login, resetDb, setTestEnv } from "./helpers";
 import { creativeProfileFor } from "../shared/creativeProfile";
 import { channels, creationReceipts, sourceDocuments, studioCards } from "../shared/schema";
@@ -20,6 +23,25 @@ async function fixture() {
   return {agent,H,ch:response.body,slug};
 }
 describe("creative workspace on real PostgreSQL", () => {
+  it("keeps uploaded video-project media owned by its content and rejects a photo as final video", async () => {
+    const f = await fixture();
+    const created = await f.agent.post("/api/studio/cards").set(f.H).send({ title: "영상 장면 구성", channel: f.slug, format: "릴스", experience: emptyExperience(), videoProject: emptyVideoProject() });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const photo = await sharp({ create: { width: 120, height: 80, channels: 3, background: "#73957c" } }).jpeg().toBuffer();
+    const uploaded = await f.agent.post(`/api/studio/cards/${created.body.id}/media?version=${created.body.version}&name=cover.jpg`).set(f.H).type("image/jpeg").send(photo);
+    expect(uploaded.status, JSON.stringify(uploaded.body)).toBe(201);
+    const endpoint = `/api/studio/cards/${created.body.id}`;
+    const invalid = await f.agent.patch(endpoint).set(f.H).send({ version: uploaded.body.card.version, videoProject: { ...emptyVideoProject(), outputMediaId: uploaded.body.mediaId } });
+    expect(invalid.status).toBe(400);
+    const foreign = await f.agent.patch(endpoint).set(f.H).send({ version: uploaded.body.card.version, videoProject: { ...emptyVideoProject(), coverMediaId: uploaded.body.mediaId + 100000 } });
+    expect(foreign.status).toBe(400);
+    const project = { ...emptyVideoProject(), coverMediaId: uploaded.body.mediaId, scenes: [{ id: randomUUID(), mediaId: uploaded.body.mediaId, title: "첫 장면", duration: 3, subtitle: "직접 쓴 자막", narration: "대본", audio: "현장음" }] };
+    const saved = await f.agent.patch(endpoint).set(f.H).send({ version: uploaded.body.card.version, videoProject: project });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    const reopened = (await f.agent.get(endpoint)).body.card;
+    expect(reopened.videoProject.scenes[0]).toMatchObject({ subtitle: "직접 쓴 자막", mediaId: uploaded.body.mediaId });
+    expect(reopened.experience.media).toHaveLength(1);
+  });
   it("resolves concurrent and lost-response creation retries to one durable card", async () => {
     const f=await fixture(), requestId=randomUUID();
     const body={title:"모바일에서 시작한 같은 원고",channel:f.slug,format:"카드뉴스",requestId};
