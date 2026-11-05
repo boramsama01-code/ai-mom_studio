@@ -140,6 +140,8 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   counts.officialNew = 0;
   counts.officialDuplicates = 0;
   const boardLimit = Math.min(boards.length, (budget.fetchCallsPerRun ? Math.max(1, Math.floor(budget.fetchCallsPerRun / 2)) : 0));
+  const hasSupplement = budget.naverCallsPerRun > 0 && (rules.length > 0 || (!opts.subcategory && budget.discovery?.enabled));
+  const officialResultLimit = hasSupplement ? Math.ceil(budget.resultsPerRun * 2 / 3) : budget.resultsPerRun;
   const officialTargets: number[][] = [];
   for (const o of boards) {
     currentGenerationSignal()?.throwIfAborted();
@@ -163,24 +165,21 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     }
     if (r.warnings?.length) errors.push(...r.warnings.map(message => ({ scope: `official:${o.id}`, message: `${o.name}: ${message}` })));
     counts.officialSucceeded++;
-    const urls = r.entries.flatMap(e => { try { return [normalizeUrl(e.url)]; } catch { return []; } });
-    const known = urls.length ? await db.select({ url: sourceDocuments.normalizedUrl }).from(sourceDocuments)
+    const entries = r.entries.flatMap(e => { try { return [{ ...e, normalized: normalizeUrl(e.url) }]; } catch { return []; } });
+    const urls = entries.map(e => e.normalized);
+    const known = urls.length ? await db.select({ url: sourceDocuments.normalizedUrl, status: sourceDocuments.fetchStatus, text: sourceDocuments.fetchedText }).from(sourceDocuments)
       .innerJoin(contentItems, eq(contentItems.primarySourceId, sourceDocuments.id))
       .where(and(eq(contentItems.channelId, channel.id), inArray(sourceDocuments.normalizedUrl, urls))) : [];
-    const knownUrls = new Set(known.map(r => r.url));
-    // New entries must not be starved by already-saved pinned posts or earlier GED pages.
-    const ordered = [...r.entries].sort((a, b) => Number(knownUrls.has(normalizeUrl(a.url))) - Number(knownUrls.has(normalizeUrl(b.url))));
+    const priority = new Map(known.map(r => [r.url, !r.text && r.status === "not_fetched" ? 1 : 2]));
+    // New notices, then deferred bodies, before previously completed pinned posts.
+    const ordered = entries.sort((a, b) => (priority.get(a.normalized) ?? 0) - (priority.get(b.normalized) ?? 0));
     let sourceNew = 0;
     const targets: number[] = [];
     // Reserve diversity even when a single feed has hundreds of entries.
-    const sourceLimit = Math.max(1, Math.ceil(budget.resultsPerRun / Math.max(2, boardLimit)));
-    let accepted = 0;
+    const sourceLimit = Math.max(1, Math.ceil(officialResultLimit / Math.max(2, boardLimit)));
+    let accepted = 0, deferred = 0;
     for (const e of ordered) {
       currentGenerationSignal()?.throwIfAborted();
-      if (counts.results >= budget.resultsPerRun || accepted >= sourceLimit) {
-        counts.officialResultsDeferred = (counts.officialResultsDeferred ?? 0) + 1;
-        continue;
-      }
       const category = officialCategory(channel.slug, o, e.title, channel.categories);
       if (opts.subcategory && category !== opts.subcategory) continue;
       const day = parseBoardDate(e.dateText);
@@ -195,6 +194,10 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
           continue;
         }
       }
+      if (counts.results >= officialResultLimit || accepted >= sourceLimit) {
+        if ((priority.get(e.normalized) ?? 0) < 2) deferred++;
+        continue;
+      }
       counts.results++;
       accepted++;
       const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e, category);
@@ -204,6 +207,11 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
         counts.newItems++;
       } else if (saved) { counts.officialDuplicates++; counts.duplicates++; }
       if (saved && (saved.isNew || saved.needsFetch)) targets.push(saved.itemId);
+    }
+    if (deferred) {
+      counts.officialResultsDeferred = (counts.officialResultsDeferred ?? 0) + deferred;
+      (r.warnings ??= []).push(`처리 한도로 새 공고·미확보 본문 ${deferred}건을 남겼습니다. 다음 조회에서도 목록에 남아 있는 자료부터 이어서 확인합니다.`);
+      errors.push({ scope: `official:${o.id}`, message: `${o.name}: ${r.warnings[r.warnings.length - 1]}` });
     }
     officialTargets.push(targets);
     await db.update(officialSources).set({ lastCheckedAt: now, lastStatus: r.warnings?.length ? "partial" : "ok", lastError: r.warnings?.join(" · ") ?? null, lastNewCount: sourceNew }).where(eq(officialSources.id, o.id));

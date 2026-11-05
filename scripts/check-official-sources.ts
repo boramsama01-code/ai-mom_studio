@@ -5,27 +5,30 @@ import { fetchBoardList } from "../server/services/boardAdapter";
 import { fetchPublisherArticle } from "../server/services/publisherLookup";
 import { safeFetch } from "../server/services/safeFetch";
 import { decodePublicText } from "../server/services/publicTextResponse";
+import { classifyNotice } from "../shared/noticeIntent";
 
 let succeeded = 0;
-for (const source of OFFICIAL_CATALOG) {
+const sources = OFFICIAL_CATALOG.filter(s => s.enabled !== false);
+for (const source of sources) {
   const result = await fetchBoardList(source.boardUrl, source.domain, source.config, undefined, { takeExtraCall: () => true });
   if (result.ok) succeeded++;
   console.log(JSON.stringify({ name: source.name, url: source.boardUrl, ...result, ...(result.ok ? { total: result.entries.length, entries: result.entries.slice(0, 2) } : {}) }, null, 2));
   if (result.ok) {
-    const sample = result.entries.find(e => !source.config.recruitmentOnly || /신청|모집|입학/.test(e.title)) ?? result.entries[0];
+    const sample = result.entries.find(e => !source.config.recruitmentOnly || classifyNotice(e.title) === "candidate") ?? result.entries[0];
     const inspectFetch: typeof safeFetch = async (url, opts) => {
       const res = await safeFetch(url, opts);
       if (process.argv.includes("--inspect")) {
         const $ = load(decodePublicText(res.body, res.contentType));
         console.log(JSON.stringify({ name: source.name, articleMarkup: { expected: sample.title, url: res.finalUrl,
           heads: $("h1,h2,h3,h4,meta[property='og:title'],meta[name='twitter:title']").toArray().map(el => $(el).prop("outerHTML")?.slice(0, 600)).slice(0, 35),
-          candidates: $("[id],[class]").toArray().filter(el => /title|subject|board_view|view_cont|viewCont|bbs_view|post-content|news_view|ntt|bbsContent/i.test(($(el).attr("class") ?? "") + " " + ($(el).attr("id") ?? ""))).slice(-40).map(el => $(el).prop("outerHTML")?.slice(0, 800))
+          candidates: $("[id],[class]").toArray().filter(el => /title|subject|board_view|view_cont|viewCont|bbs_view|post-content|news_view|ntt|bbsContent/i.test(($(el).attr("class") ?? "") + " " + ($(el).attr("id") ?? ""))).slice(-40).map(el => $(el).prop("outerHTML")?.slice(0, 800)),
+          bodyCandidates: $("main,article,[class*='cont'],[class*='body'],[class*='view']").toArray().filter(el => $(el).text().length > 100 && $(el).text().length < 20000).slice(-20).map(el => ({ tag: el.tagName, id: $(el).attr("id"), class: $(el).attr("class"), length: $(el).text().trim().length, preview: $(el).text().trim().slice(0, 150) }))
         }}));
       }
       return res;
     };
     const article = await fetchPublisherArticle(sample.url, inspectFetch, { title: sample.title, takeExtraCall: () => false });
-    console.log(JSON.stringify({ name: source.name, article: article.ok ? { ok: true, finalUrl: article.finalUrl, textLength: article.text.length, attachments: article.attachments.map(a => ({ kind: a.kind, status: a.status })) } : article }));
+    console.log(JSON.stringify({ name: source.name, article: article.ok ? { ok: true, finalUrl: article.finalUrl, textLength: article.text.length, preview: article.text.slice(0, 300), end: article.text.slice(-200), attachments: article.attachments.map(a => ({ kind: a.kind, status: a.status })) } : article }));
   }
   if (process.argv.includes("--inspect")) {
     try {
@@ -35,5 +38,5 @@ for (const source of OFFICIAL_CATALOG) {
     } catch (error) { console.log(`Inspect unavailable: ${(error as Error).message}`); }
   }
 }
-console.log(`Public source check: ${succeeded}/${OFFICIAL_CATALOG.length} returned entries.`);
-if (succeeded !== OFFICIAL_CATALOG.length) process.exitCode = 1;
+console.log(`Public source check: ${succeeded}/${sources.length} active sources returned entries; ${OFFICIAL_CATALOG.length - sources.length} disabled.`);
+if (succeeded !== sources.length) process.exitCode = 1;

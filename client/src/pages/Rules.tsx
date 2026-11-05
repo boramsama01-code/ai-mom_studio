@@ -547,7 +547,7 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
       onClose();
     },
   });
-  const test = useMutation({ mutationFn: () => api<{ entries: Array<{ url: string; title: string; dateText: string | null }> }>(`/channels/${cid}/official-sources/${src.id}/test-board`, { method: "POST", body: {} }) });
+  const test = useMutation({ mutationFn: () => api<{ entries: Array<{ url: string; title: string; dateText: string | null }>; warnings?: string[] }>(`/channels/${cid}/official-sources/${src.id}/test-board`, { method: "POST", body: {} }) });
   return (
     <Modal title={`공식 출처: ${src.name}`} onClose={onClose}>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); m.mutate(); }}>
@@ -596,6 +596,7 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
                 </button>
               </div>
               {test.error && <ErrorBox error={test.error} />}
+              {test.data?.warnings?.map(w => <p className="small muted" key={w}>{w}</p>)}
               {test.data && (test.data.entries.length ? <ul className="small">{test.data.entries.map((e) => <li key={e.url}>{e.dateText ?? ""} {e.title}</li>)}</ul> : <p className="small muted">목록을 찾지 못했습니다. 선택자를 확인하세요.</p>)}
             </div>
           )}

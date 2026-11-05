@@ -199,7 +199,7 @@ channelRoutes.post(
     if (!cfg.linkSelector) throw new HttpError(400, "목록 링크 선택자를 먼저 저장하세요.");
     const r = await fetchBoardList(src.boardUrl, src.domain, src.adapterConfig as never);
     if (!r.ok) throw new HttpError(502, r.error);
-    res.json({ entries: r.entries });
+    res.json({ entries: r.entries, warnings: r.warnings ?? [], pages: r.pages ?? 1 });
   }),
 );
 

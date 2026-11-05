@@ -76,6 +76,26 @@ export function articleAccessProblem(html: string, pageUrl?: string): string | n
 
 const relatedContent = "aside,nav,footer,[role='navigation'],.related-news,.related-articles,.related,.recommended,.recommendations,.advertisement,[aria-hidden='true'],[hidden]";
 
+/** Verified official detail layouts often use the site/section name as h1/og:title. */
+function officialDetailHeadlines(html: string, pageUrl?: string): string[] {
+  if (!pageUrl) return [];
+  let u: URL;
+  try { u = new URL(pageUrl); } catch { return []; }
+  const host = u.hostname.replace(/^www\./, "");
+  const selector = host === "scienceall.com" && u.pathname.startsWith("/brd/board/") && u.searchParams.has("bbsSn") ? ".board_view.bd_noti .title .tit"
+    : host === "koi.or.kr" && /^\/notice\/\d{4}\/\d{2}\/\d{2}\//.test(u.pathname) ? "td.subject > b[aria-current='page']"
+    : host === "mcst.go.kr" && /\/s_notice\/press\/pressView\.jsp$/.test(u.pathname) && u.searchParams.has("pSeq") ? "h3.view_title"
+    : host === "ksa.hs.kr" && /^\/Home\/BoardRead\/\d+$/.test(u.pathname) && u.searchParams.has("DataId") ? ".board_view > .title_bar"
+    : host === "kaist.ac.kr" && u.pathname === "/news/html/news/" && u.searchParams.get("mode") === "V" && u.searchParams.has("mng_no") ? "meta[property='og:title']" : null;
+  if (!selector) return [];
+  const $ = load(html);
+  $(relatedContent).remove();
+  const nodes = $(selector);
+  if (nodes.length !== 1) return [];
+  const value = clean(nodes.attr("content") || nodes.text());
+  return value ? [value] : [];
+}
+
 /** Only page-level and primary visible headlines can identify an article. */
 function primaryMarkupHeadlines(html: string): string[] {
   const $ = load(html), titles = new Set<string>();
@@ -119,6 +139,8 @@ function primaryStructuredArticles(html: string, pageUrl?: string, expectedTitle
 
 /** Descriptions, related headings and unrelated JSON-LD nodes are never identity evidence. */
 export function articleHeadlines(html: string, pageUrl?: string): string[] {
+  const official = officialDetailHeadlines(html, pageUrl);
+  if (official.length) return official;
   const primary = primaryMarkupHeadlines(html);
   if (primary.length) return primary;
   return primaryStructuredArticles(html, pageUrl).flatMap(article => typeof article.headline === "string" && article.headline.trim() ? [clean(article.headline)] : []);

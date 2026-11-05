@@ -59,7 +59,7 @@ export function extractHtml(html: string, baseUrl: string, context: ArticleConte
   $("script,style,noscript,iframe,svg,header,footer,nav,form,aside,button,[hidden],[aria-hidden='true'],.related-news,.related-articles,.article-tools,.share-buttons,.advertisement").remove();
   $("br").replaceWith("\n");
   $("p,div,section,li,h1,h2,h3,h4,tr").append("\n");
-  const selectors = ["#dic_area", "#newsct_article", "#harmonyContainer", "#articletxt", "#cont_newstext", "#news_body_id", "#CmAdContent", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",
+  const selectors = [".board_view.bd_noti", ".board_view > .view_body", "#dic_area", "#newsct_article", "#harmonyContainer", "#articletxt", "#cont_newstext", "#news_body_id", "#CmAdContent", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",
     "#article-view-content-div", "#articleBodyContents", "#articleBody", "#article-body", "#article_body", "#article_content", "#articleContent", "#newsEndContents", "#news_content", "#newsContent", "#news_text", "#news_txt", "section.news_view", ".article-body", ".article_body", ".article_view", ".article_txt", ".article-text", ".article-content", ".article__body", ".news-article-body", ".news-text", ".news_body", "article",
     "[class*='board_view']", "[class*='bbs_view']", "[class*='view_cont']", "[class*='viewCont']"];
   let text = "";
@@ -156,7 +156,9 @@ export async function fetchAndExtract(url: string, fetchImpl = safeFetch, contex
         const advertised = publicArticleAlternate(html, res.finalUrl, context);
         if (advertised && !visited.has(advertised.url) && hop < 2) { alternate = advertised; target = advertised.url; continue; }
       }
-      return { ok: false, status: "unsupported", error: `공개 HTML·구조화 데이터${alternate ? "·공식 대체 페이지" : ""}에서 충분한 본문을 찾지 못했습니다. 자바스크립트로만 표시되는 페이지이거나 본문 형식 확인이 필요합니다. 원문을 직접 열어 확인하거나 본문을 붙여넣어 주세요.`, attachments, finalUrl: res.finalUrl };
+      return { ok: false, status: "unsupported", error: attachments.length
+        ? "본문 대신 첨부 문서가 있는 공고입니다. 첨부 형식과 내용을 원문에서 확인하거나 본문을 붙여넣어 주세요."
+        : `공개 HTML·구조화 데이터${alternate ? "·공식 대체 페이지" : ""}에서 충분한 본문을 찾지 못했습니다. 자바스크립트로만 표시되는 페이지이거나 본문 형식 확인이 필요합니다. 원문을 직접 열어 확인하거나 본문을 붙여넣어 주세요.`, attachments, finalUrl: res.finalUrl };
     }
     return { ok: true, finalUrl: res.finalUrl, title, text, hash: sha256(text), attachments, contentKind: "html" };
   }

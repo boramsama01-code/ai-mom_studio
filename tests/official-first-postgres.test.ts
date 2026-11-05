@@ -75,3 +75,15 @@ it("bounds official results and never treats a list date as an application deadl
   expect(result.counts.newItems).toBe(1); expect(result.counts.results).toBe(1);
   expect((await getDb().select().from(contentItems))[0].scheduleStatus).toBe("unknown");
 });
+it("finds new posts behind old pinned entries, then resumes deferred bodies", async () => {
+  await board("a"); await budget(4, 1, 2);
+  const entries = [1, 2, 3].map(i => ({ title: `입학 모집 ${i}`, url: `https://school.example/${i}`, dateText: null }));
+  const options = { trigger: "cli" as const, collectionOnly: true, fetchBoard: async () => ({ ok: true as const, entries }), fetchSource: body };
+  for (let i = 0; i < 3; i++) expect((await runCollect(getDb(), 1, options)).counts.officialNew).toBe(1);
+  expect(await getDb().select().from(contentItems)).toHaveLength(3);
+  await getDb().update(sourceDocuments).set({ fetchedText: null, fetchStatus: "not_fetched" }).where(eq(sourceDocuments.originalUrl, "https://school.example/3"));
+  const fetchSource = vi.fn(body);
+  const resumed = await runCollect(getDb(), 1, { ...options, fetchSource });
+  expect(resumed.counts).toMatchObject({ newItems: 0, fetchedOk: 1 });
+  expect(fetchSource.mock.calls[0][0]).toBe("https://school.example/3");
+});
