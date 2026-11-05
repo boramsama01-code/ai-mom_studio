@@ -2,6 +2,7 @@ import { z } from "zod";
 import { aiStageProvenanceSchema } from "./aiProvenance";
 import { FAMILY_PAGE_COLORS } from "./familyDialogueTheme";
 import { familyDisplayOverridesSchema } from "./familyDisplay";
+import { FAMILY_ENDING_ASSET_IDS } from "./characterVariantAssets";
 
 export const FAMILY_FORMAT_ID = "family_dialogue_8" as const;
 export const FAMILY_SCHEMA_VERSION = "family-dialogue-v2.1";
@@ -64,13 +65,23 @@ export const familyCardCopyAiSchema = makeCardSchema(true);
 export type CardCopyV2 = z.infer<typeof familyCardCopySchema>;
 
 const percent = z.number().min(0).max(100);
+export const outroPresentationSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("template") }).strict(),
+  z.object({ mode: z.literal("full_image"), assetId: z.enum(FAMILY_ENDING_ASSET_IDS) }).strict(),
+]);
 export const pageDesignSchema = z.object({
   alignment: z.enum(["center", "left"]),
   background: z.object({ kind: z.enum(["none", "brand", "image"]), assetId: z.number().int().positive().optional(), inheritCover: z.boolean().optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fit: z.enum(["cover", "contain"]), focalX: percent, focalY: percent, brightness: z.number().min(0).max(200), overlay: percent }).strict().refine(value => value.kind !== "image" || value.assetId !== undefined, "이미지 배경에는 저장된 자산이 필요합니다."),
   previousAssetIds: z.array(z.number().int().positive()).max(20).optional(),
+  // Omitted in historical drafts. Complete artwork never replaces editable copy.
+  outroPresentation: outroPresentationSchema.optional(),
 }).strict();
 export type PageDesign = z.infer<typeof pageDesignSchema>;
-export const pageDesignsSchema = z.record(z.enum(FAMILY_PAGE_IDS), pageDesignSchema);
+export const pageDesignsSchema = z.record(z.enum(FAMILY_PAGE_IDS), pageDesignSchema).superRefine((designs, ctx) => {
+  for (const id of FAMILY_PAGE_IDS) if (id !== "outro" && designs[id].outroPresentation !== undefined) {
+    ctx.addIssue({ code: "custom", path: [id, "outroPresentation"], message: "엔딩 이미지 선택은 마지막 장에서만 사용할 수 있습니다." });
+  }
+});
 export type PageDesigns = z.infer<typeof pageDesignsSchema>;
 export function defaultPageDesigns(): PageDesigns {
   const designs = {} as PageDesigns;

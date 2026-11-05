@@ -12,7 +12,8 @@ vi.mock("../server/services/familyEditorialImage", () => ({ generateFamilyCoverA
 import type { DB } from "../server/db";
 import type { Channel, ContentItem } from "../shared/schema";
 import { defaultChannelRoleSettings } from "../shared/channelAi";
-import { readingProfileForTemplateKey, READING_PROFILE_LOGO_ID } from "../shared/readingCardProfiles";
+import { readingProfileForTemplateKey } from "../shared/readingCardProfiles";
+import { HIGHSCOOP_HANDLE, HIGHSCOOP_OUTRO_THEMES, HIGHSCOOP_PROFILE_ASSET_ID } from "../shared/highscoopOutro";
 import { familyExecutionPlan, proposeFamilyDialogue, type FamilyGenerateInput } from "../server/services/familyEditorial";
 import { familyEvidenceFixture } from "./fixtures/familyEvidence";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
@@ -42,6 +43,28 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("family editorial pipeline with mock provider HTTP", () => {
+  it("uses the real HighScoop profile for a new reading set and retains a saved manual profile on regeneration", async () => {
+    for (const saved of [false, true]) {
+      const f = fixture(saved);
+      f.channel.slug = "opportunities"; f.channel.name = "HighScoop";
+      f.item.subcategory = "고등입시";
+      f.input.templateKey = "reading-ink-lime-v1";
+      if (saved) {
+        const outro = (f.revision.payload as any).cardCopy.pages[7];
+        outro.fields.logoAssetId = "brand:space-penguin-company:20261101";
+        outro.fields.handle = "@my_saved_account";
+        outro.fields.brandLine = "직접 정한 마지막 문구";
+      }
+      const before = structuredClone(f.revision.payload);
+      const mock = createFamilyProviderMock(); vi.stubGlobal("fetch", vi.fn(mock.fetch));
+      const result = await proposeFamilyDialogue(db, f.item, f.channel, f.revision, f.input, f.plan);
+      const expected = saved ? { logoAssetId: "brand:space-penguin-company:20261101", handle: "@my_saved_account", brandLine: "직접 정한 마지막 문구" }
+        : { logoAssetId: HIGHSCOOP_PROFILE_ASSET_ID, handle: HIGHSCOOP_HANDLE, brandLine: HIGHSCOOP_OUTRO_THEMES.high_admission.cue };
+      expect(mock.calls.find(call => call.stage === "card_copy")?.input.channelSettings).toMatchObject(expected);
+      expect(result.copy?.pages[7].fields).toMatchObject(expected);
+      expect(f.revision.payload).toEqual(before);
+    }
+  });
   it("passes actual serif/sans typography and the connected reading-body contract for a new 14-style profile", async () => {
     const f = fixture(), profile = readingProfileForTemplateKey("cardnews14-sharp-serif-v1")!;
     f.input.templateKey = profile.templateKey;
@@ -76,7 +99,7 @@ describe("family editorial pipeline with mock provider HTTP", () => {
     expect(logo.reviewFlags).toContainEqual(expect.objectContaining({ code: "approved_logo_only" }));
     expect(fetcher).not.toHaveBeenCalled(); expect(controlled.image).not.toHaveBeenCalled();
   });
-  it("pins the reading layout and approved profile asset while preserving manual text and photos on regeneration", async () => {
+  it("pins the reading layout while preserving the saved approved profile, manual text and photos on regeneration", async () => {
     const f = fixture(true), payload = f.revision.payload as any, profile = readingProfileForTemplateKey("reading-ink-lime-v1")!;
     f.input.templateKey = profile.templateKey;
     payload.cardCopy.pages[1].displayOverrides = { sourceCredit: "직접 확인한 기사", kicker: "오늘 함께 읽기" };
@@ -85,7 +108,7 @@ describe("family editorial pipeline with mock provider HTTP", () => {
     const mock = createFamilyProviderMock(); vi.stubGlobal("fetch", vi.fn(mock.fetch));
     const result = await proposeFamilyDialogue(db, f.item, f.channel, f.revision, f.input, f.plan);
     expect(result.copy?.templateKey).toBe(profile.templateKey);
-    expect(result.copy?.pages[7].fields).toMatchObject({ logoAssetId: READING_PROFILE_LOGO_ID, brandLine: "서로의 판단 기준을 나눠요" });
+    expect(result.copy?.pages[7].fields).toMatchObject({ logoAssetId: payload.cardCopy.pages[7].fields.logoAssetId, brandLine: "서로의 판단 기준을 나눠요" });
     expect(result.copy?.pages[1].displayOverrides).toEqual(payload.cardCopy.pages[1].displayOverrides);
     expect(result.pageDesigns?.cover).toMatchObject({ alignment: "left", background: { kind: "image", assetId: 700, color: "#171918" } });
     expect(result.pageDesigns?.news_summary.background).toMatchObject({ kind: "brand", color: "#F4F3E9" });

@@ -1,22 +1,23 @@
-import fs from "node:fs";
-import path from "node:path";
-import { createHash } from "node:crypto";
 import type { Font } from "opentype.js";
 import sharp, { type Sharp } from "sharp";
 import { Resvg } from "@resvg/resvg-js";
 import type { CardCopyV2, FamilyPage, PageDesign } from "../../shared/familyDialogue";
-import { FAMILY_COLORS as C, FAMILY_PAGE_COLORS } from "../../shared/familyDialogueTheme";
+import { FAMILY_COLORS, FAMILY_PAGE_COLORS } from "../../shared/familyDialogueTheme";
+import { cardDesign } from "../../shared/cardDesigns";
 import { familyDisplayDescriptors, resolveFamilyDisplay, type FamilyDisplayContext } from "../../shared/familyDisplay";
 import { CardOverflowError, loadFonts, wrapText, type CardStyle } from "./card";
+import { selectedFamilyEnding } from "../../shared/characterVariantAssets";
+import { registeredProfileDataUrl, renderRegisteredFamilyEnding } from "./characterVariantAssets";
+import { HIGHSCOOP_PROFILE_ASSET_ID } from "../../shared/highscoopOutro";
+import { highscoopOutroDecorations, type HighscoopCardContext } from "./highscoopOutroDecorations";
 
 const W = 1080, H = 1350, SAFE = 84, INNER = W - SAFE * 2;
 export const APPROVED_PARENT_LOGO_ID = "brand:space-penguin-company:20261101";
-const APPROVED_PARENT_LOGO_HASH = "a66350333b86e9e0c14981154e67e26218497ecc2942dc4b826f87a48fff55ad";
 type Box = { x: number; y: number; width: number; height: number };
 type Weight = "regular" | "semibold" | "bold";
 export type FamilyTextRun = Box & { field: string; text: string; lines: string[]; size: number; lineHeight: number; align: "center" | "left" };
 type TextOptions = { field: string; size: number; min?: number; weight?: Weight; color?: string; leading?: number; maxLines?: number; vertical?: "top" | "middle"; align?: "center" | "left" };
-export type FamilyCardContext = { brandName: string; accent: string; sourceCredit?: string };
+export type FamilyCardContext = { brandName: string; accent: string; sourceCredit?: string } & HighscoopCardContext;
 type RenderOptions = { imageDataUrl?: string; imageCredit?: string; parentLogoDataUrl?: string };
 
 const safeHex = (value: unknown, fallback: string) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
@@ -44,11 +45,13 @@ function fitText(font: Font, value: string, box: Box, opts: TextOptions) {
 /** Local draft renderer only. Canva exports have their own immutable final assets. */
 export function layoutFamilyDialogueCard(page: FamilyPage, design: PageDesign, context: FamilyCardContext, style: CardStyle, options: RenderOptions = {}) {
   const fonts = loadFonts(), elements: string[] = [], textRuns: FamilyTextRun[] = [];
+  const collection = style.collection ? cardDesign(style.collection) : undefined;
+  const C = collection ? { ...FAMILY_COLORS, charcoal: collection.bg, deepGreen: collection.bg, paper: collection.ink, butter: collection.accent, muted: collection.ink, panel: collection.soft } : FAMILY_COLORS;
   const display = resolveFamilyDisplay(page, { ...context, imageCredit: options.imageCredit });
   const displayField = (key: string) => `cardCopy.pages.${page.page - 1}.displayOverrides.${key}`;
   const bg = design.background.kind === "none" ? C.white : safeHex(design.background.color, FAMILY_PAGE_COLORS[page.id]);
   const ink = readable(bg, C.paper), accent = readable(bg, C.butter), muted = readable(bg, C.muted);
-  const panel = C.panel, panelInk = C.paper;
+  const panel = C.panel, panelInk = readable(panel, collection?.onSoft ?? C.paper);
   const field = (key: string) => `cardCopy.pages.${page.page - 1}.fields.${key}`;
   const rect = (x: number, y: number, width: number, height: number, fill: string, radius = 0, opacity = 1) => elements.push(`<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${radius}" fill="${fill}" opacity="${opacity}"/>`);
   const line = (x: number, y: number, width: number, color = ink, opacity = .23, stroke = 1) => elements.push(`<path d="M${x} ${y}h${width}" fill="none" stroke="${color}" stroke-width="${stroke}" opacity="${opacity}"/>`);
@@ -70,7 +73,7 @@ export function layoutFamilyDialogueCard(page: FamilyPage, design: PageDesign, c
     const x = options.x ?? 91, width = options.width ?? 898;
     const fill = options.fill ?? C.panel, foreground = readable(fill, C.paper);
     rect(x, y, width, height, fill, 25);
-    text(label, { x: x + 38, y: y + 25, width: width - 76, height: 67 }, { field: field(`${prefix}.label`), size: options.labelSize ?? 32, min: 26, weight: "bold", maxLines: 2, color: C.butter });
+    text(label, { x: x + 38, y: y + 25, width: width - 76, height: 67 }, { field: field(`${prefix}.label`), size: options.labelSize ?? 32, min: 26, weight: "bold", maxLines: 2, color: readable(fill, C.butter) });
     line(x + 60, y + 109, width - 120, C.muted, .25);
     text(body, { x: x + 42, y: y + 132, width: width - 84, height: height - 157 }, { field: field(`${prefix}.body`), size: options.bodySize ?? 48, min: 32, maxLines: 8, leading: 1.36, color: foreground });
   }
@@ -133,7 +136,7 @@ export function layoutFamilyDialogueCard(page: FamilyPage, design: PageDesign, c
     if (f.mode === "value_definition") {
       for (const [index, value] of [f.definitionA, f.definitionB].entries()) {
         const y = 503 + index * 169; rect(92, y, 896, 146, panel, 21);
-        text(index === 0 ? display.definitionIndexA : display.definitionIndexB, { x: 115, y: y + 41, width: 66, height: 58 }, { field: displayField(index === 0 ? "definitionIndexA" : "definitionIndexB"), size: 31, color: C.butter, weight: "bold", align: "center", maxLines: 1 });
+        text(index === 0 ? display.definitionIndexA : display.definitionIndexB, { x: 115, y: y + 41, width: 66, height: 58 }, { field: displayField(index === 0 ? "definitionIndexA" : "definitionIndexB"), size: 31, color: readable(panel, C.butter), weight: "bold", align: "center", maxLines: 1 });
         text(value, { x: 200, y: y + 22, width: 742, height: 102 }, { field: field(index === 0 ? "definitionA" : "definitionB"), size: 40, min: 30, maxLines: 3, color: panelInk });
       }
       centered(f.boundaryCase, 866, 137, { field: field("boundaryCase"), size: 37, min: 29, maxLines: 4 });
@@ -151,7 +154,7 @@ export function layoutFamilyDialogueCard(page: FamilyPage, design: PageDesign, c
     centered(display.duration, 420, 28, { field: displayField("duration"), size: 20, min: 18, maxLines: 1, color: muted });
     const activity = (value: typeof f.homeActivity, y: number, height: number, prefix: string, size: number) => {
       rect(91, y, 898, height, panel, 12);
-      centered(value.label, y + 25, 68, { field: field(`${prefix}.label`), size: 33, min: 27, weight: "bold", maxLines: 2, color: C.butter }, 790);
+      centered(value.label, y + 25, 68, { field: field(`${prefix}.label`), size: 33, min: 27, weight: "bold", maxLines: 2, color: readable(panel, C.butter) }, 790);
       line(152, y + 112, 776, C.muted, .25);
       centered(value.action, y + 138, height - 156, { field: field(`${prefix}.action`), size, min: 33, maxLines: 8, color: panelInk, leading: 1.36 }, 805);
     };
@@ -164,6 +167,7 @@ export function layoutFamilyDialogueCard(page: FamilyPage, design: PageDesign, c
     const f = page.fields;
     if (options.parentLogoDataUrl) {
       if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(options.parentLogoDataUrl)) throw new Error("승인된 부모 브랜드 자산만 사용할 수 있습니다.");
+      if (context.highscoopOutroTheme && f.logoAssetId === HIGHSCOOP_PROFILE_ASSET_ID) rect(410, 183, 260, 260, "#FFFFFF", 130);
       elements.push(`<image x="380" y="193" width="320" height="240" preserveAspectRatio="xMidYMid meet" href="${options.parentLogoDataUrl}"/>`);
     }
     centered(f.brandName, 456, 125, { field: field("brandName"), size: 82, min: 42, weight: "bold", maxLines: 2 }, 900);
@@ -172,6 +176,10 @@ export function layoutFamilyDialogueCard(page: FamilyPage, design: PageDesign, c
     centered(f.brandLine, 735, 157, { field: field("brandLine"), size: 48, min: 32, weight: "semibold", maxLines: 4 });
     centered(f.cta, 969, 88, { field: field("cta"), size: 35, min: 28, color: accent, weight: "semibold", maxLines: 2 }, 748);
     centered(f.handle, 1116, 49, { field: field("handle"), size: 28, min: 21, maxLines: 1, color: muted });
+    if (context.highscoopOutroTheme) {
+      const additions = highscoopOutroDecorations(context.highscoopOutroTheme, { mode: "family", background: bg, ink, accent, handle: f.handle });
+      elements.push(additions.svg); textRuns.push(...additions.textRuns);
+    }
   }
 
   if (display.imageCredit) centered(display.imageCredit, 1191, 30, { field: displayField("imageCredit"), size: 20, min: 17, maxLines: 1, align: "center" });
@@ -180,19 +188,13 @@ export function layoutFamilyDialogueCard(page: FamilyPage, design: PageDesign, c
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${elements.join("")}</svg>`, textRuns };
 }
 
-let parentLogo: string | undefined;
 function approvedParentLogo(page: FamilyPage): string | undefined {
   if (page.type !== "outro" || !page.fields.logoAssetId) return undefined;
-  if (page.fields.logoAssetId !== APPROVED_PARENT_LOGO_ID) throw new Error("승인 목록에 없는 브랜드 자산입니다. 원고는 유지했습니다.");
-  if (!parentLogo) {
-    const bytes = fs.readFileSync(path.resolve(process.cwd(), "assets/branding/space-penguin-company.png"));
-    if (createHash("sha256").update(bytes).digest("hex") !== APPROVED_PARENT_LOGO_HASH) throw new Error("승인된 브랜드 이미지가 변경됐습니다. 이미지 생성 전에 자산을 확인해 주세요.");
-    parentLogo = `data:image/png;base64,${bytes.toString("base64")}`;
-  }
-  return parentLogo;
+  return registeredProfileDataUrl(page.fields.logoAssetId);
 }
 
 export function checkFamilyDialogueCard(page: FamilyPage, design: PageDesign, context: FamilyCardContext, style: CardStyle) {
+  if (selectedFamilyEnding(page.id, design)) return [];
   return layoutFamilyDialogueCard(page, design, context, style).textRuns;
 }
 
@@ -201,7 +203,7 @@ export async function prepareFamilyPageImage(bytes: Buffer, design: PageDesign):
   const source = sharp(bytes, { limitInputPixels: 40_000_000, failOn: "error" }).rotate();
   const normalized = await source.toBuffer(), meta = await sharp(normalized).metadata();
   if (!meta.width || !meta.height) throw new Error("배경 이미지 크기를 확인할 수 없습니다.");
-  const bg = safeHex(design.background.color, C.charcoal), settings = design.background;
+  const bg = safeHex(design.background.color, FAMILY_COLORS.charcoal), settings = design.background;
   let output: Sharp;
   if (settings.fit === "contain") output = sharp(normalized).resize(W, H, { fit: "contain", background: bg });
   else {
@@ -213,6 +215,8 @@ export async function prepareFamilyPageImage(bytes: Buffer, design: PageDesign):
 }
 
 export async function renderFamilyDialogueCard(page: FamilyPage, design: PageDesign, context: FamilyCardContext, style: CardStyle, image: Buffer | null = null, imageCredit = "") {
+  const ending = selectedFamilyEnding(page.id, design);
+  if (ending) return renderRegisteredFamilyEnding(ending.id);
   const data = image ? await prepareFamilyPageImage(image, design) : null;
   const { svg } = layoutFamilyDialogueCard(page, design, context, style, {
     imageDataUrl: data ? `data:image/jpeg;base64,${data.toString("base64")}` : undefined,

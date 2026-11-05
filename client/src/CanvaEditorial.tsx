@@ -2,7 +2,7 @@ import { useEffect,useRef,useState } from 'react';
 import { useMutation,useQuery,useQueryClient } from '@tanstack/react-query';
 import { api,ApiError } from './api';
 import { ErrorBox,GuardedLink } from './ui';
-import type { CardCopyV2 } from '../../shared/familyDialogue';
+import type { CardCopyV2, PageDesigns } from '../../shared/familyDialogue';
 import { canvaVariant,type CanvaJobDto } from '../../shared/canvaEditorial';
 import { clearCanvaRequest,parseCanvaAcceptance,parseCanvaConnection,parseCanvaJob,parseCanvaJobs,parseCanvaMaster,parseCanvaMasters,readCanvaRequest,type CanvaRequestBody } from './canvaEditorialContract';
 import { canvaReconciliations } from '../../shared/canvaReconciliation';
@@ -12,16 +12,20 @@ import { CANVA_READING_MASTERS,CANVA_READING_TEMPLATE_VERSION } from '../../shar
 import { READING_CARD_PROFILES,readingProfileForTemplateKey,readingProfileForTemplateVersion,readingArtworkPages } from '../../shared/readingCardProfiles';
 import { cardnews14Source } from '../../shared/cardnews14Catalog';
 import { readingMasterSourceApproved } from '../../shared/readingCanvaMasters';
+import { selectedFamilyEnding } from '../../shared/characterVariantAssets';
 
 const phaseLabels:Record<string,string>={validate:'템플릿 확인 중',images:'페이지 이미지 준비 중',autofill_prepare:'문구·이미지 연결 준비 중',autofill_submitting:'Canva에 새 디자인 요청 중',autofill_polling:'8장 디자인 만드는 중',export_prepare:'완성된 디자인 확인 중',export_submitting:'8장 이미지 내보내는 중',export_polling:'내보내기 기다리는 중',download:'이미지 저장 중',complete:'8장 저장 완료'};
 type RequestBody=CanvaRequestBody;
 
-export function CanvaEditorial({channelId,itemId,version,revisionId,copy,disabled,onLocalRender}:{channelId:number;itemId:number;version:number;revisionId:number;copy:CardCopyV2;disabled:boolean;onLocalRender?:()=>void}){
+export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDesigns,disabled,onLocalRender}:{channelId:number;itemId:number;version:number;revisionId:number;copy:CardCopyV2;pageDesigns?:PageDesigns;disabled:boolean;onLocalRender?:()=>void}){
   const qc=useQueryClient(),base=`/channels/${channelId}/items/${itemId}/canva/jobs`,key=['canva-jobs',channelId,itemId];
   const connection=useQuery({queryKey:['canva-editorial-status'],queryFn:async()=>parseCanvaConnection(await api('/canva/editorial/status')),retry:false,staleTime:60_000});
   const masters=useQuery({queryKey:['canva-masters',channelId],queryFn:async()=>parseCanvaMasters(await api(`/channels/${channelId}/canva/masters`))});
   const jobs=useQuery({queryKey:key,queryFn:async()=>parseCanvaJobs(await api(base)),refetchInterval:q=>q.state.data?.items.some(j=>['queued','running'].includes(j.status))?3000:false});
   const readingProfile=readingProfileForTemplateKey(copy.templateKey);
+  const outro=copy.pages.find(page=>page.id==='outro'),fullImageEnding=selectedFamilyEnding('outro',pageDesigns?.outro);
+  const expectedProfile=readingProfile?'brand:allligodang:bw:20261104':'brand:space-penguin-company:20261101';
+  const unsupportedOutro=fullImageEnding?'전체 이미지 엔딩은 스튜디오에서 8장으로 출력합니다. 현재 Canva 마스터는 이 엔딩을 지원하지 않습니다.':outro?.fields.logoAssetId!==expectedProfile?'선택한 프로필은 스튜디오 8장 출력에서 사용할 수 있습니다. Canva 자동 제작은 현재 마스터에 연결된 기본 프로필을 사용해야 합니다.':null;
   const variant=canvaVariant(copy),available=masters.data?.items.filter(m=>m.status==='ready'&&(readingProfile?m.templateVersion===readingProfile.templateVersion&&readingMasterSourceApproved(readingProfile,m.sourceId):!readingProfileForTemplateVersion(m.templateVersion)&&m.conceptMode===variant.conceptMode&&m.hasExternalActivity===variant.hasExternalActivity))??[];
   const [choice,setChoice]=useState<number|null>(null),selected=available.find(m=>m.id===choice)??available[0];
   const [focusedJobId,setFocusedJobId]=useState<number|null>(null);
@@ -43,6 +47,7 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,disable
   const start=useMutation({mutationFn:async(importFromJobId?:number)=>{
     if(busy.current)throw new Error('이미 요청 중입니다. 잠시 기다려 주세요.');
     if(disabled)throw new Error('문구와 이미지 설정을 먼저 저장해 주세요.');
+    if(unsupportedOutro&&!importFromJobId&&!lostRequest)throw new Error(unsupportedOutro);
     const body=lostRequest??{version,requestId:crypto.randomUUID(),...(!importFromJobId&&selected?{masterId:selected.id}:{}),...(importFromJobId?{importFromJobId}:{})};
     busy.current=true;setLostRequest(body);try{sessionStorage.setItem(requestKey,JSON.stringify(body));}catch{/* Server idempotency remains authoritative. */}
     try{
@@ -66,13 +71,14 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,disable
   const pages=Array.isArray(current?.result?.pages)?current!.result!.pages as Array<{id:number;title:string;sha256:string}>:[];
   const originals=Array.isArray(current?.result?.originals)?current!.result!.originals as Array<{id:number;page:number}>:[];
   const drawing=pending||start.isPending||action.isPending;
-  const canStart=!disabled&&!drawing&&connection.isSuccess&&masters.isSuccess&&jobs.isSuccess&&connection.data?.autofill&&!!selected&&!lostRequest&&!unresolved;
-  const preferLocal=!!readingProfile?.sourceStyleId&&!!onLocalRender&&!available.length;
+  const canStart=!disabled&&!drawing&&!unsupportedOutro&&connection.isSuccess&&masters.isSuccess&&jobs.isSuccess&&connection.data?.autofill&&!!selected&&!lostRequest&&!unresolved;
+  const preferLocal=!!onLocalRender&&(!!unsupportedOutro||!!readingProfile?.sourceStyleId&&!available.length);
   const reviewMatchesCurrent=current?.sourceVersion===version&&current?.sourceRevisionId===revisionId;
   const canReexport=current?.status==='failed'&&!!current.exportJobId&&(current.errorCode==='export_expired'||current.errorCode==='job_failed'&&current.phase==='export_polling');
   return <section className="canva-editorial stack" aria-label={preferLocal?'스튜디오 8장 디자인':'Canva 8장 디자인'}>
     <div className="row between"><div><h3>8장 디자인 완성</h3><p className="small muted">{preferLocal?'저장한 문구와 사진으로 선택한 스타일의 8장을 만듭니다.':'저장한 문구와 페이지 이미지를 Canva 템플릿에 넣습니다.'}</p></div><span className="pill">자동 · {preferLocal?'스튜디오':'Canva'}</span></div>
     {readingProfile && <p className={`notice ${available.length?'':'warn'}`} data-testid="reading-canva-readiness">{readingProfile.label} · {available.length?'검증된 같은 스타일 마스터를 선택할 수 있습니다.':`스튜디오 문구 편집·미리보기를 사용할 수 있습니다. Canva 자동 제작은 8장·46개 문구·${readingProfile.images.length}개 이미지의 연결과 실제 출력을 검증한 뒤 사용할 수 있습니다.`}</p>}
+    {unsupportedOutro&&<p className="notice small" data-testid="canva-outro-support">{unsupportedOutro} 직접 작성한 마지막 장 문구는 보관합니다.</p>}
     {!connection.isLoading&&!connection.error&&!connection.data?.connected&&<p className={preferLocal?'small muted':'notice warn'}>{preferLocal?'Canva 출력도 사용하려면 계정을 연결해 주세요.':'Canva 계정을 먼저 연결해 주세요.'} <GuardedLink href="/connections?service=canva">Canva 연결 설정</GuardedLink></p>}
     {connection.data?.connected&&!connection.data.autofill&&<div className="notice warn stack" data-testid="canva-capability-status" role="status"><strong>{connection.data.capabilityStatus==='unknown'?'자동 채우기 권한을 아직 확인하지 못했습니다':'연결한 계정에서 자동 채우기를 사용할 수 없습니다'}</strong><p>{connection.data.message??'연결한 계정·팀의 기능 이용 권한을 확인해 주세요.'}</p><div className="row wrap"><button className="btn sm" disabled={connection.isFetching} onClick={()=>connection.refetch()}>{connection.isFetching?'확인 중…':'권한 다시 확인'}</button>{['missing_scope','auth_required'].includes(connection.data.reason??'')&&<GuardedLink href="/connections?service=canva">Canva 다시 연결</GuardedLink>}</div></div>}
     {connection.error&&<ErrorBox error={connection.error} retry={()=>connection.refetch()}/>}

@@ -3,66 +3,114 @@ import { CanvaMasterSettings } from "../CanvaEditorial";
  * 카드 디자인 — 템플릿 고르기, 내 배경 템플릿 올리기, Canva 자동 채우기, 대량 제작·망고보드용 글자 내보내기
  */
 import { BRAND_REVISION } from "@shared/branding";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiUpload } from "../api";
 import { useChannel } from "../state";
 import { useToast } from "../toast";
 import { Badge, Empty, ErrorBox, GuardedLink, Loading } from "../ui";
 import { CARD_FIELD_KEYS } from "@shared/cardFields";
+import { templateIncludesKey, templateSelection, type TemplateCatalogItem, type TemplateListReply, type TemplateOption } from "@shared/templateCatalog";
+import "../templateCatalog.css";
 
-export type Tpl = { key: string; name: string; description: string; kind: "builtin" | "custom"; family?: "recruitment" | "news" | "food"; setId?: string; pageCount?: number; colors?: { key: string; name: string; bg: string; ink: string; accent: string; secondary?: string }[]; id?: number; layout?: string; textTone?: string; overlay?: number; allChannels?: boolean };
-const includesKey = (template: Tpl, key: string) => template.key === key || !!template.colors?.some(color => color.key === key);
+export type Tpl = TemplateOption;
+export type { TemplateListReply } from "@shared/templateCatalog";
+const includesKey = templateIncludesKey;
 
 export function useTemplates(cid: number | "all") {
-  return useQuery({ queryKey: ["ch", cid, "templates"], queryFn: () => api<{ items: Tpl[]; current: string }>(`/channels/${cid}/templates`), enabled: cid !== "all" });
+  return useQuery({ queryKey: ["ch", cid, "templates"], queryFn: () => api<TemplateListReply>(`/channels/${cid}/templates`), enabled: cid !== "all" });
 }
 
-export function TemplatePicker({ cid, value, onChange, items, version, studioChannel, disabled = false }: { cid: number | "studio"; value: string; onChange: (k: string) => void; items: Tpl[]; version?: string; studioChannel?: string; disabled?: boolean }) {
-  const [family, setFamily] = useState<string>(() => { const selected = items.find(t => includesKey(t, value)); return selected ? selected.family ?? "other" : items[0]?.family ?? "other"; });
+export function TemplatePicker({ cid, value, onChange, items, version, studioChannel, disabled = false }: { cid: number | "studio"; value: string; onChange: (k: string, item?: TemplateCatalogItem) => void; items: Tpl[]; version?: string; studioChannel?: string; disabled?: boolean }) {
+  const [family, setFamily] = useState("all");
+  const [pageFilter, setPageFilter] = useState("all");
+  const [search, setSearch] = useState("");
   const [preview, setPreview] = useState<string>(value);
   const [page, setPage] = useState(0);
-  const visible = items.filter(t => (t.family ?? "other") === family);
+  const [overview, setOverview] = useState(false);
+  const previousValue = useRef(value);
+  useEffect(() => {
+    // Switching only the palette should update the page being inspected,
+    // instead of jumping back to the cover and hiding the changed body colour.
+    const sameSet = items.some(item => includesKey(item, value) && includesKey(item, previousValue.current));
+    setPreview(value);
+    if (!sameSet) { setPage(0); setOverview(false); }
+    previousValue.current = value;
+  }, [value]);
+  const normalize = (text: string) => text.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, "");
+  const searchTerm = normalize(search);
+  const countOf = (item: Tpl) => item.previewPageCount ?? item.pageCount ?? 1;
+  const visible = items.filter(t => (family === "all" || (t.family ?? "other") === family)
+    && (pageFilter === "all" || String(countOf(t)) === pageFilter)
+    && (!searchTerm || normalize(`${t.name} ${t.description} ${t.key} ${t.setId ?? ""}`).includes(searchTerm)));
   const active = visible.find(t => includesKey(t, preview)) ?? visible[0];
   const activeKey = active && includesKey(active, preview) ? preview : active?.key ?? "";
   const activeColor = active?.colors?.find(color => color.key === activeKey);
-  const pages = active?.pageCount ?? 1;
+  const activeIsApplied = !!active && includesKey(active, value);
+  const pages = active ? countOf(active) : 1;
   const shownPage = Math.min(page, pages - 1);
-  const src = (key: string, p = 0, small = true) => `${cid === "studio" ? "/api/studio/design-preview" : `/api/channels/${cid}/templates/preview`}?${small ? "size=sm&" : ""}key=${encodeURIComponent(key)}&page=${p}&v=${encodeURIComponent(`${BRAND_REVISION}-${version ?? ""}`)}${studioChannel ? `&channel=${encodeURIComponent(studioChannel)}` : ""}`;
+  const pageLabel = active?.pageLabels?.[shownPage] ?? (shownPage === 0 ? "표지" : `본문 ${shownPage}`);
+  const versionedAsset = (url: string, item: Tpl) => `${url}${url.includes("?") ? "&" : "?"}v=${encodeURIComponent(item.templateVersion ?? BRAND_REVISION)}`;
+  const src = (key: string, p = 0, small = true) => {
+    const item = items.find(t => includesKey(t, key));
+    return `${cid === "studio" ? "/api/studio/design-preview" : `/api/channels/${cid}/templates/preview`}?${small ? "size=sm&" : ""}key=${encodeURIComponent(key)}&page=${p}&v=${encodeURIComponent(`${BRAND_REVISION}-${item?.templateVersion ?? ""}-${version ?? ""}`)}${studioChannel ? `&channel=${encodeURIComponent(studioChannel)}` : ""}`;
+  };
+  const showOverview = !!active?.overviewUrl && overview;
+  const detailSrc = active && showOverview ? versionedAsset(active.overviewUrl!, active) : src(activeKey, shownPage);
   return (
     <div className="collection-picker">
       {!items.some(t => includesKey(t, value)) && <p className="small muted collection-legacy">현재 작업에는 이전 디자인이 적용되어 있습니다. 아래에서 새 디자인을 적용할 수 있습니다.</p>}
-      <div className="collection-filters" role="group" aria-label="디자인 종류">
-        {[{ id: "recruitment", label: "모집정보" }, { id: "news", label: "뉴스·속보" }, { id: "food", label: "Fryday" }, { id: "other", label: "내 배경" }].filter(f => items.some(t => (t.family ?? "other") === f.id)).map(f => <button key={f.id} type="button" className="collection-filter" aria-pressed={family === f.id} onClick={() => { setFamily(f.id); setPage(0); }}>{f.label}<span>{items.filter(t => (t.family ?? "other") === f.id).length}</span></button>)}
+      <div className="collection-toolbar">
+        <label className="field collection-search">디자인 검색<input type="search" value={search} placeholder="이름으로 찾기 · 시네마틱, BANG BANG…" onChange={event => { setSearch(event.target.value); setPage(0); }} /></label>
+        <label className="field collection-length">세트 구성<select value={pageFilter} onChange={event => { setPageFilter(event.target.value); setPage(0); setOverview(false); }}>
+          <option value="all">모든 구성</option>
+          {items.some(item => countOf(item) === 8) && <option value="8">8장 풀세트</option>}
+          {items.some(item => countOf(item) === 5) && <option value="5">기본 세트 · 예시 5장</option>}
+          {items.some(item => countOf(item) === 1) && <option value="1">내 배경 · 예시 1장</option>}
+        </select></label>
       </div>
+      <div className="collection-filters" role="group" aria-label="디자인 종류">
+        {[{ id: "all", label: "전체" }, { id: "recruitment", label: "모집정보" }, { id: "news", label: "뉴스·속보" }, { id: "food", label: "Fryday" }, { id: "other", label: "내 배경" }].filter(f => f.id === "all" || items.some(t => (t.family ?? "other") === f.id)).map(f => <button key={f.id} type="button" className="collection-filter" aria-pressed={family === f.id} onClick={() => { setFamily(f.id); setPage(0); setOverview(false); }}>{f.label}<span>{f.id === "all" ? items.length : items.filter(t => (t.family ?? "other") === f.id).length}</span></button>)}
+      </div>
+      <p className="small muted collection-results" role="status">{visible.length}개 디자인 · 컬러는 각 디자인 안에서 고릅니다.</p>
+      {!visible.length && <Empty>조건에 맞는 디자인이 없습니다. 검색어나 세트 구성을 바꿔 주세요.</Empty>}
       <div className="collection-workspace">
         <div className="tpl-grid collection-grid" role="group" aria-label="카드 템플릿">
           {visible.map((t) => (
-            <button key={t.key} type="button" className="tpl" aria-pressed={active?.key === t.key} aria-label={`${t.setId?.toUpperCase() ?? ""} ${t.name} 미리보기`.trim()} onClick={() => { setPreview(includesKey(t, value) ? value : t.key); setPage(0); }}>
-              <div className="collection-cover"><img src={src(active?.key === t.key ? activeKey : includesKey(t, value) ? value : t.key)} alt="" loading="lazy" />{includesKey(t, value) && <span className="collection-applied">사용 중</span>}</div>
+            <button key={t.key} type="button" className="tpl" aria-pressed={active?.key === t.key} aria-label={`${t.setId?.toUpperCase() ?? ""} ${t.name} 미리보기`.trim()} onClick={() => { setPreview(includesKey(t, value) ? value : t.key); setPage(0); setOverview(false); }}>
+              <div className="collection-cover"><img src={t.thumbnailUrl ? versionedAsset(t.thumbnailUrl, t) : src(active?.key === t.key ? activeKey : includesKey(t, value) ? value : t.key)} alt="" loading="lazy" />{includesKey(t, value) && <span className="collection-applied">사용 중</span>}<span className="collection-set-badge">{countOf(t) === 8 ? "8장 풀세트" : `예시 ${countOf(t)}장`}</span></div>
               <span className="tpl-name"><small>{t.setId?.toUpperCase()}</small>{t.name}</span>
               <span className="tpl-desc">{t.description}</span>
             </button>
           ))}
         </div>
         {active && <aside className="collection-detail" aria-label="선택한 디자인 상세">
-          <div className="row between"><span className="small muted">{active.setId?.toUpperCase() ?? "템플릿"} · {shownPage === 0 ? "표지" : `본문 ${shownPage}`}</span><span className="small muted">{shownPage + 1} / {pages}</span></div>
-          <a href={src(activeKey, shownPage, false)} target="_blank" rel="noopener noreferrer" aria-label={`${active.name} ${activeColor?.name ?? ""} ${shownPage === 0 ? "표지" : `본문 ${shownPage}`} 크게 보기`}><img className="collection-large" src={src(activeKey, shownPage)} alt={`${active.name} ${activeColor?.name ?? ""} ${shownPage === 0 ? "표지" : `본문 ${shownPage}`} 디자인 예시`} /></a>
-          {pages > 1 && <div className="collection-pages" role="group" aria-label="세트 페이지">
-            {Array.from({ length: pages }, (_, i) => <button key={i} type="button" aria-pressed={shownPage === i} onClick={() => setPage(i)}>{i ? `본문 ${i}` : "표지"}</button>)}
+          <div className="row between"><span className="small muted">디자인 예시 · {showOverview ? "전체 구성" : pageLabel}</span><span className="small muted">{showOverview ? `${pages}장` : `${shownPage + 1} / ${pages}`}</span></div>
+          {!!active.overviewUrl && <div className="collection-view-mode" role="group" aria-label="미리보기 방식">
+            <button type="button" aria-pressed={!showOverview} onClick={() => setOverview(false)}>한 장씩</button>
+            <button type="button" aria-pressed={showOverview} onClick={() => setOverview(true)}>8장 전체보기</button>
+          </div>}
+          <a href={showOverview ? detailSrc : src(activeKey, shownPage, false)} target="_blank" rel="noopener noreferrer" aria-label={`${active.name} ${activeColor?.name ?? ""} ${showOverview ? "전체 구성" : pageLabel} 크게 보기`}><img className={showOverview ? "collection-overview" : "collection-large"} src={detailSrc} alt={`${active.name} ${activeColor?.name ?? ""} ${showOverview ? "8장 전체 구성" : pageLabel} 디자인 예시`} /></a>
+          {pages > 1 && !showOverview && <div className="collection-pages" role="group" aria-label="세트 페이지">
+            {Array.from({ length: pages }, (_, i) => <button key={i} type="button" aria-pressed={shownPage === i} onClick={() => setPage(i)}>{active.pageLabels?.[i] ?? (i ? `본문 ${i}` : "표지")}</button>)}
           </div>}
           <h3>{active.name}</h3><p>{active.description}</p>
-          {!!active.colors?.length && <div className="collection-color-section">
+          {!!active.colors && active.colors.length > 1 && <div className="collection-color-section">
             <div className="row between"><strong className="small">컬러</strong><span className="small muted" aria-live="polite">{activeColor?.name}</span></div>
             <div className="collection-colors" role="group" aria-label="디자인 컬러">
-              {active.colors.map(color => <button key={color.key} type="button" className="collection-color" aria-pressed={activeKey === color.key} onClick={() => setPreview(color.key)}>
+              {active.colors.map(color => <button key={color.key} type="button" className="collection-color" disabled={disabled} aria-pressed={activeKey === color.key} onClick={() => {
+                setPreview(color.key); setOverview(false);
+                // Browsing another set remains a preview. A colour choice for
+                // the already-applied set is an actual editable selection.
+                if (activeIsApplied && value !== color.key) onChange(color.key, templateSelection(active, color.key));
+              }}>
                 <span className="collection-color-chip" style={{ background: color.bg, color: color.ink }} aria-hidden="true"><span>Aa</span><i style={{ background: color.secondary ? `linear-gradient(90deg, ${color.accent} 50%, ${color.secondary} 50%)` : color.accent }} /></span><span>{color.name}</span>
               </button>)}
             </div>
-            <p className="small muted">선택한 컬러가 표지와 본문 전체에 적용됩니다.</p>
+            <p className="small muted">{activeIsApplied ? "컬러를 고르면 현재 디자인의 표지와 본문 전체에 바로 적용됩니다." : "컬러를 고르면 예시가 바뀝니다. 아래 ‘이 디자인 사용’을 누르면 원고에 적용됩니다."}</p>
           </div>}
-          {pages > 1 && <p className="small muted">디자인 예시 {pages}장입니다. 실제 장수는 편집 중인 원고를 따릅니다. 뉴스 대화는 표지부터 닫는 표지까지 8장으로 구성할 수 있어요.</p>}
-          <button type="button" className="btn primary" disabled={disabled || value === activeKey} onClick={() => onChange(activeKey)}>{value === activeKey ? "현재 사용 중인 디자인" : "이 디자인 사용"}</button>
+          {pages > 1 && <p className="small muted">{active.cardCopyVersion === 2 ? "표지 · 뉴스 읽기 2장 · STEP 1–4 · 닫는 표지, 총 8장입니다. 실제 문구와 사진은 편집 화면에서 바꿀 수 있어요." : `디자인 예시 ${pages}장입니다. 실제 장수는 편집 중인 원고를 따릅니다.`}</p>}
+          <button type="button" className="btn primary" disabled={disabled || value === activeKey} onClick={() => onChange(activeKey, templateSelection(active, activeKey))}>{value === activeKey ? "현재 사용 중인 디자인" : "이 디자인 사용"}</button>
         </aside>}
       </div>
     </div>
@@ -114,7 +162,7 @@ function DefaultTemplate({ cid, accent }: { cid: number; accent: string }) {
     <section className="panel stack">
       <div className="row between">
         <h2 style={{ margin: 0 }}>카드 디자인 컬렉션</h2>
-        <span className="small muted">디자인 5종 · 컬러 30가지 · 표지부터 본문까지</span>
+        <span className="small muted">{q.data ? `디자인 ${q.data.items.length}종 · 8장 풀세트 ${q.data.items.filter(item => item.cardCopyVersion === 2).length}종` : "표지부터 본문까지 한 세트로"}</span>
       </div>
       {q.isLoading ? <Loading lines={1} /> : q.error ? <ErrorBox error={q.error} /> : <TemplatePicker cid={cid} value={q.data!.current} disabled={set.isPending} onChange={(k) => set.mutate(k)} items={q.data!.items} version={accent} />}
       <p className="small muted" style={{ margin: 0 }}>콘텐츠마다 카드를 만들 때 다른 템플릿을 고를 수도 있습니다.</p>

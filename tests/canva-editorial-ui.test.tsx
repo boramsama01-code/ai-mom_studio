@@ -7,7 +7,9 @@ import { CanvaEditorial, CanvaMasterSettings } from "../client/src/CanvaEditoria
 import { ApiError } from "../client/src/api";
 import type { CanvaJobDto, CanvaMasterDto } from "../shared/canvaEditorial";
 import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
-import { READING_CARD_PROFILES } from "../shared/readingCardProfiles";
+import { READING_CARD_PROFILES, READING_PROFILE_LOGO_ID } from "../shared/readingCardProfiles";
+import { defaultPageDesigns } from "../shared/familyDialogue";
+import { FAMILY_ENDING_ASSET_IDS, FAMILY_PROFILE_ASSET_ID } from "../shared/characterVariantAssets";
 const mocks = vi.hoisted(() => ({ api: vi.fn(), local: vi.fn(), sourceApproved:vi.fn() }));
 vi.mock("../shared/readingCanvaMasters", () => ({ readingMasterSourceApproved:mocks.sourceApproved }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
@@ -97,6 +99,7 @@ describe("Canva editorial request and import UI", () => {
 
   it("keeps a new reading profile previewable but blocks Canva creation until a matching master is registered", async () => {
     props.copy.templateKey=READING_CARD_PROFILES[0].templateKey;
+    const outro=props.copy.pages.find(page=>page.id==='outro')!;outro.fields.logoAssetId=READING_PROFILE_LOGO_ID;
     await render();
     expect(host.querySelector('[data-testid="reading-canva-readiness"]')?.textContent).toContain("실제 출력을 검증한 뒤");
     expect(button("Canva 8장 만들기").disabled).toBe(true);expect(writes()).toHaveLength(0);
@@ -110,6 +113,20 @@ describe("Canva editorial request and import UI", () => {
     await act(async()=>{await client.invalidateQueries({queryKey:['canva-masters',3]});});await settle();
     expect(button("Canva 8장 만들기").disabled).toBe(false);
     await click("Canva 8장 만들기");expect(writes()[0][1].body.masterId).toBe(9);
+  });
+  it("offers local eight-page output for a complete ending even when a Canva master is ready",async()=>{
+    const designs=defaultPageDesigns();designs.outro.outroPresentation={mode:'full_image',assetId:FAMILY_ENDING_ASSET_IDS[0]};
+    await render({pageDesigns:designs});
+    expect(host.querySelector('[data-testid="canva-outro-support"]')?.textContent).toContain('전체 이미지 엔딩');
+    expect(button('Canva 8장 만들기').disabled).toBe(true);
+    await click('스튜디오에서 8장 만들기');expect(mocks.local).toHaveBeenCalledTimes(1);expect(writes()).toHaveLength(0);
+    await render({pageDesigns:defaultPageDesigns()});expect(button('Canva 8장 만들기').disabled).toBe(false);
+  });
+  it("does not send a selected family profile to a Canva master with a different pinned profile",async()=>{
+    const outro=props.copy.pages.find(page=>page.id==='outro')!;outro.fields.logoAssetId=FAMILY_PROFILE_ASSET_ID;
+    await render();expect(button('Canva 8장 만들기').disabled).toBe(true);
+    expect(host.querySelector('[data-testid="canva-outro-support"]')?.textContent).toContain('선택한 프로필');
+    await click('스튜디오에서 8장 만들기');expect(mocks.local).toHaveBeenCalledTimes(1);expect(writes()).toHaveLength(0);
   });
   it("can import an existing design after its original master is no longer ready", async () => {
     masters = []; connection.autofill = false; connection.capabilities = [];

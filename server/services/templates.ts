@@ -1,17 +1,26 @@
 /**
- * 카드 템플릿 — 선택한 레이아웃 5종 × 컬러 6가지 + 내가 올린 배경
- * 이전 키는 기존 작업을 다시 출력할 수 있도록 유지한다.
+ * 완료된 37개 카드 세트와 내 배경. 미리보기는 저장된 원고와 분리된다.
  */
+import fs from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
 import { and, eq, isNull, or } from "drizzle-orm";
 import type { DB } from "../db";
 import { cardTemplates, type Channel } from "../../shared/schema";
 import { BUILTIN_LAYOUTS, renderCardJpeg, type CardLayout, type CardStyle } from "./card";
 import { buildCardModel } from "./cardModel";
-import { cardDesignOptions, cardDesign } from "../../shared/cardDesigns";
+import { cardDesign } from "../../shared/cardDesigns";
 import { renderCollectionPreview } from "./cardDesignSamples";
-import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
+import { readingProfileForTemplateKey, readingProfileDesigns, type ReadingCardProfile } from "../../shared/readingCardProfiles";
+import { templateCatalogOptions, type TemplateCatalogItem } from "../../shared/templateCatalog";
+import { defaultPageDesigns } from "../../shared/familyDialogue";
+import cardnews14Layout from "../../shared/cardnews14Layout.json";
+import { layoutReadingProfilePage } from "./readingCard";
+import { prepareReadingArtwork } from "./readingCardImages";
+import { rasterizeReadingSvg } from "./readingCardRaster";
 
 export class TemplateNotFound extends Error {}
+export class TemplatePreviewPageError extends Error {}
 
 export async function resolveStyle(db: DB, key: string, channelId: number): Promise<CardStyle> {
   // Reading profiles render from their versioned 8-page contract. Their keys
@@ -39,14 +48,15 @@ export async function resolveStyle(db: DB, key: string, channelId: number): Prom
   throw new TemplateNotFound(`알 수 없는 템플릿: ${key}`);
 }
 
-export async function listTemplates(db: DB, channelId: number) {
+export async function listTemplates(db: DB, channelId: number): Promise<TemplateCatalogItem[]> {
   const customs = await db
     .select({ id: cardTemplates.id, name: cardTemplates.name, layout: cardTemplates.layout, textTone: cardTemplates.textTone, overlay: cardTemplates.overlay, channelId: cardTemplates.channelId, createdAt: cardTemplates.createdAt })
     .from(cardTemplates)
     .where(and(isNull(cardTemplates.deletedAt), or(isNull(cardTemplates.channelId), eq(cardTemplates.channelId, channelId))));
   return [
-    ...cardDesignOptions(),
-    ...customs.map((c) => ({ key: `custom:${c.id}`, name: c.name, description: `내 배경 · ${c.textTone === "light" ? "밝은 글자" : "어두운 글자"}${c.overlay ? ` · 막 ${c.overlay}%` : ""}`, kind: "custom" as const, id: c.id, layout: c.layout, textTone: c.textTone, overlay: c.overlay, allChannels: c.channelId === null })),
+    ...templateCatalogOptions(),
+    ...customs.map((c) => ({ key: `custom:${c.id}`, templateKey: `custom:${c.id}`, name: c.name, description: `내 배경 · ${c.textTone === "light" ? "밝은 글자" : "어두운 글자"}${c.overlay ? ` · 막 ${c.overlay}%` : ""}`, kind: "custom" as const, id: c.id, layout: c.layout, textTone: c.textTone, overlay: c.overlay, allChannels: c.channelId === null,
+      format: "standard" as const, cardCopyVersion: 1 as const, pageCount: 1, previewPageCount: 1, pageCountMode: "variable" as const })),
   ];
 }
 
@@ -73,24 +83,94 @@ const SAMPLE: Record<string, Record<string, unknown>> = {
   },
 };
 
-/** 미리보기(예시 문구) — 메모리 캐시 */
+type SourcePreviewPage = { elements: Array<{ kind: string; field?: string; copy?: string; asset?: string }> };
+const sourceLayouts = new Map<string, { pages: SourcePreviewPage[] }>();
+const sourceImages = new Map<string, Buffer>();
+const legacyPreviewSource: Record<string, string> = { "reading-ink-lime-v1": "ink-lime", "reading-cobalt-paper-v1": "cobalt-paper" };
+
+function verifiedPreviewAsset(filename: string, sha256: string): Buffer {
+  const hit = sourceImages.get(filename);
+  if (hit) return hit;
+  const bytes = fs.readFileSync(path.resolve(process.cwd(), filename));
+  if (createHash("sha256").update(bytes).digest("hex") !== sha256) throw new Error("디자인 예시 이미지의 원본을 확인해 주세요.");
+  sourceImages.set(filename, bytes);
+  return bytes;
+}
+
+/** Only versioned example copy and supplied example images enter this path.
+ * No item, revision, generated image or Canva operation is read or written. */
+export function readingPreviewSample(profile: ReadingCardProfile, page: number) {
+  const source = cardnews14Layout.styles.find(style => style.id === (profile.sourceStyleId ?? legacyPreviewSource[profile.id]));
+  if (!source) throw new TemplateNotFound("이 카드 세트의 미리보기 원본이 없습니다.");
+  let layout = sourceLayouts.get(source.id);
+  if (!layout) {
+    const bytes = fs.readFileSync(path.resolve(process.cwd(), source.sourceLayoutPath));
+    if (createHash("sha256").update(bytes).digest("hex") !== source.sourceLayoutSha256) throw new Error("디자인 예시 레이아웃의 원본을 확인해 주세요.");
+    layout = JSON.parse(bytes.toString("utf8")) as { pages: SourcePreviewPage[] };
+    sourceLayouts.set(source.id, layout);
+  }
+  const sourcePage = layout.pages[page];
+  if (!sourcePage) throw new TemplatePreviewPageError("미리보기 페이지를 찾을 수 없습니다.");
+  const values = Object.fromEntries(sourcePage.elements.filter(element => element.kind === "text" && element.field).map(element => [element.field!, element.copy ?? ""]));
+  return { source, sourcePage, values };
+}
+
+async function renderReadingPreview(profile: ReadingCardProfile, page: number): Promise<Buffer> {
+  // Admission happens before image decoding and font path construction, just
+  // as it does for actual eight-page exports on memory-limited workers.
+  return rasterizeReadingSvg(async () => {
+    const { source, sourcePage, values } = readingPreviewSample(profile, page);
+    const layout = profile.pages[page];
+    const designs = readingProfileDesigns(profile, defaultPageDesigns());
+    const images = new Map<string, string>();
+    let profileDataUrl: string | undefined, imageDataUrl: string | undefined;
+    for (const slot of layout.imageBoxes) {
+      if (slot.kind === "profile") {
+        const bytes = verifiedPreviewAsset(profile.profileImagePath, profile.profileImageSha256);
+        profileDataUrl = `data:image/png;base64,${bytes.toString("base64")}`;
+        images.set(slot.field, profileDataUrl);
+        continue;
+      }
+      const assetKey = sourcePage.elements.find(element => element.kind === "image" && element.field === slot.field)?.asset;
+      const asset = source.sourceAssets.find(asset => asset.key === assetKey);
+      if (!asset) throw new Error("이 카드의 디자인 예시 사진을 찾을 수 없습니다.");
+      const photo = verifiedPreviewAsset(`assets/cardnews14/${asset.path}`, asset.sha256);
+      const bytes = await prepareReadingArtwork(photo, designs[slot.pageId], slot, layout.background);
+      const data = `data:image/png;base64,${bytes.toString("base64")}`;
+      images.set(slot.field, data);
+      imageDataUrl ??= data;
+    }
+    return layoutReadingProfilePage(profile, page + 1, values, { images, imageDataUrl, profileDataUrl }).svg;
+  });
+}
+
+/** 미리보기(예시 문구) — 페이지별 캐시, 같은 이미지의 동시 요청 합치기 */
 const cache = new Map<string, Buffer>();
+const pending = new Map<string, Promise<Buffer>>();
 export async function renderPreview(db: DB, key: string, channel: Channel, page = 0): Promise<Buffer> {
   const ck = `${key}|${page}|${channel.id}|${channel.accentColor}|${channel.name}|${channel.contentType}`;
   const hit = cache.get(ck);
   if (hit) return hit;
-  const style = await resolveStyle(db, key, channel.id);
-  if (style.collection) {
-    const jpeg = await renderCollectionPreview(style.collection, page, channel.name, channel.slug);
-    if (cache.size >= 120) cache.clear();
+  const inflight = pending.get(ck);
+  if (inflight) return inflight;
+  const work = (async () => {
+    const style = await resolveStyle(db, key, channel.id);
+    const profile = readingProfileForTemplateKey(key);
+    const pageCount = profile ? profile.pages.length : style.collection ? 5 : 1;
+    if (!Number.isInteger(page) || page < 0 || page >= pageCount) throw new TemplatePreviewPageError(`이 템플릿의 미리보기는 ${pageCount}장입니다.`);
+    let jpeg: Buffer;
+    if (profile) jpeg = await renderReadingPreview(profile, page);
+    else if (style.collection) jpeg = await renderCollectionPreview(style.collection, page, channel.name, channel.slug);
+    else {
+      const model = buildCardModel({ kind: channel.contentType, payload: SAMPLE[channel.contentType] ?? SAMPLE.notice, channelName: channel.name, channelSlug: channel.slug, accent: channel.accentColor, sourceOrg: "예시 기관", checkedDate: "2026-09-29" });
+      jpeg = (await renderCardJpeg(model, style)).jpeg;
+    }
+    if (cache.size >= 60) cache.delete(cache.keys().next().value!);
     cache.set(ck, jpeg);
     return jpeg;
-  }
-  const model = buildCardModel({ kind: channel.contentType, payload: SAMPLE[channel.contentType] ?? SAMPLE.notice, channelName: channel.name, channelSlug: channel.slug, accent: channel.accentColor, sourceOrg: "예시 기관", checkedDate: "2026-09-29" });
-  const { jpeg } = await renderCardJpeg(model, style);
-  if (cache.size > 60) cache.clear();
-  cache.set(ck, jpeg);
-  return jpeg;
+  })();
+  pending.set(ck, work);
+  try { return await work; } finally { pending.delete(ck); }
 }
 
 export function clearPreviewCache() {

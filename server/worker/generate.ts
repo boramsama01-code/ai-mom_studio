@@ -16,6 +16,7 @@ import { generateCardCopy } from "../services/llm";
 import type { AiSelection } from "../../shared/channelAi";
 import type { AiExecutionPlan } from "../../shared/aiProvenance";
 import { generateFamilySourceDraft } from "../services/familySourceDraft";
+import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
 
 export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider, templateKey?: string, options: { budget?: LlmBudget; summary?: AiSelection; copy?: AiSelection; familyPlan?: AiExecutionPlan; explicitRetry?: boolean; requestId?: string } = {}) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
@@ -46,6 +47,7 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   if (!previousRevision?.payload.cardCopy && primary && sources.some(source => source.source_id === primary.id && source.text.trim().length >= 100)) {
     return generateFamilySourceDraft(db, item, channel, selectedTemplate, { budget: options.budget, plan: options.familyPlan, explicitRetry: options.explicitRetry, requestId: options.requestId });
   }
+  if (!previousRevision?.payload.cardCopy && readingProfileForTemplateKey(selectedTemplate)) return { ok: false as const, error: "선택한 8장 풀세트에 사용할 원문 본문을 먼저 확보하거나 붙여넣어 주세요. 제목만으로 다른 형식의 카드를 만들지 않습니다." };
 
   if (item.kind === "current_dialogue" && !sources.length)
     return { ok: false as const, error: "시사 대화는 원문이 확보된 자료가 있어야 생성합니다(제목만으로 생성하지 않음)." };
@@ -64,7 +66,7 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   const totalUsage = { ...r.usage };
   // Never replace a saved operator's deck just because the article summary was refreshed.
   if (!previousRevision?.payload.cardCopy) {
-    const args = { kind: item.kind, title: item.title, payload, templateKey: selectedTemplate, channelName: channel.name, sources, budget, ...copyAi };
+    const args = { kind: item.kind, title: item.title, payload, templateKey: selectedTemplate, channelName: channel.name, channelSlug: channel.slug, sources, budget, ...copyAi };
     const written = sources.length ? await generateNewsCardCopy(args) : await generateCardCopy(args);
     if (written.usage) { totalUsage.inputTokens += written.usage.inputTokens; totalUsage.outputTokens += written.usage.outputTokens; }
     if (written.ok) { payload.cardCopy = written.data; copyModel = written.model; }

@@ -321,3 +321,67 @@ describe("발행함과 제작 보드의 전송 상태", () => {
     expect(writes()).toEqual([]);
   });
 });
+
+describe("발행함 보관·삭제·복원", () => {
+  function enableOrganization() {
+    detail.deliveries = [
+      { d: { id: 100, approvalId: 10, status: "succeeded", listState: "active", listVersion: 1, lastError: null, externalId: "proof-100", externalUrl: expectedUrl, completedAt: past }, dest: { label: "@highscoop.official", platform: "instagram" } },
+      { d: { id: 101, approvalId: 10, status: "processing", listState: "active", listVersion: 1, lastError: null, externalUrl: null, completedAt: null }, dest: { label: "전송 중 계정", platform: "instagram" } },
+    ];
+    const original = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: any }) => {
+      if (path.startsWith("/deliveries?")) {
+        const view = new URL(path, "https://fixture.invalid").searchParams.get("view") || "active";
+        return detail.deliveries.filter((row: any) => row.d.listState === view).map((row: any) => ({ ...structuredClone(row), ap: detail.approvals[0], item: detail.item }));
+      }
+      if (path === "/channels/2/deliveries/organize") {
+        const items = options!.body.records.map((record: any) => {
+          const row = detail.deliveries.find((value: any) => value.d.id === record.id)!;
+          const previousState = row.d.listState;
+          expect(record.version).toBe(row.d.listVersion);
+          row.d.listState = options!.body.state; row.d.listVersion++;
+          return { id: row.d.id, channelId: 2, listState: row.d.listState, listVersion: row.d.listVersion, previousState };
+        });
+        return { updated: items.length, items };
+      }
+      return original(path, options);
+    });
+  }
+
+  it("moves a posted test record to trash, preserves its SNS link, and restores it without resending", async () => {
+    enableOrganization(); await render(createElement(PublishPage));
+    expect(host.querySelectorAll('input[aria-label$="발행 기록 선택"]')).toHaveLength(1);
+    await click("삭제");
+    expect(detail.deliveries[0].d).toMatchObject({ status: "succeeded", externalId: "proof-100", externalUrl: expectedUrl, listState: "trashed" });
+    expect(host.querySelector(`a[href="${expectedUrl}"]`)).toBeNull();
+    await click("휴지통");
+    expect(host.querySelector(`a[href="${expectedUrl}"]`)).not.toBeNull();
+    expect(host.textContent).toContain("SNS의 게시물은 ‘게시물 보기’를 열어 직접 삭제하거나 보관");
+    await click("복원"); await click("발행 목록");
+    expect(detail.deliveries[0].d.listState).toBe("active");
+    expect(writes().map(([path, options]) => [path, options.body.state])).toEqual([["/channels/2/deliveries/organize", "trashed"], ["/channels/2/deliveries/organize", "active"]]);
+  });
+
+  it("selects only completed records and supports undo from the archive toast", async () => {
+    enableOrganization(); await render(createElement(PublishPage));
+    const select = host.querySelector<HTMLInputElement>('input[aria-label="이 페이지에서 정리 가능한 기록 모두 선택"]')!;
+    await act(async () => select.click()); await settle();
+    await click("선택 보관");
+    expect(writes()[0][1].body).toEqual({ state: "archived", records: [{ id: 100, version: 1 }] });
+    expect(detail.deliveries[1].d.listState).toBe("active");
+    const undo = mocks.toast.mock.calls.find(([, , action]) => action?.label === "실행 취소")![2].onClick;
+    await act(async () => { await undo(); }); await settle();
+    expect(detail.deliveries[0].d.listState).toBe("active");
+    expect(writes()).toHaveLength(2);
+    expect(writes().every(([path]) => path.endsWith("/deliveries/organize"))).toBe(true);
+  });
+
+  it("keeps a stale record visible and reports an organization conflict", async () => {
+    enableOrganization(); const previous = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (path: string, options?: any) => { if (path.endsWith("/deliveries/organize")) throw new Error("다른 화면에서 발행 목록을 변경했습니다."); return previous(path, options); });
+    await render(createElement(PublishPage)); await click("삭제");
+    expect(host.textContent).toContain("다른 화면에서 발행 목록을 변경했습니다.");
+    expect(detail.deliveries[0].d.listState).toBe("active");
+    expect(host.querySelector(`a[href="${expectedUrl}"]`)).not.toBeNull();
+  });
+});

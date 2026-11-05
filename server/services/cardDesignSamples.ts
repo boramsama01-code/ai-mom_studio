@@ -2,8 +2,7 @@ import { cardBrandName, channelBrandName, CHANNEL_BRANDS } from "../../shared/br
 import fs from "node:fs";
 import path from "node:path";
 import { cardDesign } from "../../shared/cardDesigns";
-import { planCarousel, renderCarouselCover } from "./cardCarousel";
-import { renderCollectionBody } from "./cardCollection";
+import { planCarousel, renderCarouselCover, renderCarouselPage } from "./cardCarousel";
 import type { CardStyle } from "./card";
 
 /** Fictional, explicitly labelled content. Never used as actual generated content. */
@@ -38,7 +37,8 @@ export function collectionSample(id: string, channelName?: string, channelSlug?:
       discussion_questions: ["AI의 도움과 나의 생각을 어떻게 구분해 표시하면 좋을까요?"],
       parent_hints: "정답을 정하기보다 도움받은 과정부터 함께 이야기해 보세요.",
     },
-    channelName: channelName ?? (notice ? CHANNEL_BRANDS.highscoop.name : CHANNEL_BRANDS.news.name), channelSlug, accent: d.accent,
+    channelName: channelName ?? (notice ? CHANNEL_BRANDS.highscoop.name : CHANNEL_BRANDS.news.name), channelSlug: channelSlug ?? (channelName ? undefined : notice ? "opportunities" : "current-dialogue"), accent: d.accent,
+    ...(notice ? { subcategory: "캠프·체험 선발모집" } : {}),
     sourceOrg: "디자인 예시", checkedDate: "2026-10-31",
   };
   const style: CardStyle = { layout: "minimal", collection: id };
@@ -59,5 +59,5 @@ export async function renderCollectionPreview(id: string, page = 0, channelName?
   if (page === 0) return renderCarouselCover(plan.base, plan.count, collectionSampleArt(id), "이미지: AI 생성 · 연출 이미지", style);
   const model = plan.pages[page - 1];
   if (!model) throw new Error("미리보기 페이지를 찾을 수 없습니다.");
-  return renderCollectionBody(model, id);
+  return renderCarouselPage(plan, page, style, null, "");
 }

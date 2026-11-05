@@ -1,18 +1,20 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import {createHash} from 'node:crypto';
 import sharp from 'sharp';
 import {Resvg} from '@resvg/resvg-js';
 import type {CardCopyV2,FamilyPage,PageDesign} from '../../shared/familyDialogue';
 import {familyReadingTextValues,type FamilyDisplayContext} from '../../shared/familyDisplay';
-import {readingProfileForTemplateKey,readingImageSlot,READING_PROFILE_LOGO_ID,type ReadingTextBox,type ReadingCardProfile,type ReadingElement} from '../../shared/readingCardProfiles';
+import {readingProfileForTemplateKey,readingImageSlot,type ReadingTextBox,type ReadingCardProfile,type ReadingElement} from '../../shared/readingCardProfiles';
+import {isRegisteredProfileAssetId,selectedFamilyEnding} from '../../shared/characterVariantAssets';
+import {registeredProfileDataUrl,renderRegisteredFamilyEnding} from './characterVariantAssets';
 import {CardOverflowError,loadFonts,wrapText} from './card';
 import {prepareReadingArtwork} from './readingCardImages';
 import {loadReadingFont,wrapReadingText} from './readingCardFonts';
 import {rasterizeReadingSvg} from './readingCardRaster';
+import {HIGHSCOOP_PROFILE_ASSET_ID} from '../../shared/highscoopOutro';
+import {highscoopOutroDecorations,type HighscoopCardContext} from './highscoopOutroDecorations';
 
 export type ReadingTextRun=ReadingTextBox & {text:string;lines:string[];size:number;renderedLineHeight:number};
-type Options={imageDataUrl?:string;profileDataUrl?:string;imageCredit?:string;images?:ReadonlyMap<string,string>;measureOnly?:boolean};
+type Options={imageDataUrl?:string;profileDataUrl?:string;imageCredit?:string;images?:ReadonlyMap<string,string>;measureOnly?:boolean;profileBacking?:boolean};
+type ReadingContext=FamilyDisplayContext & HighscoopCardContext;
 const escaped=(value:string)=>value.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const decimal=(value:number)=>String(Math.round(value*10000)/10000);
 function verifiedPng(value:string):string {
@@ -84,12 +86,15 @@ function orderedLayout(profile:ReadingCardProfile,pageNumber:number,values:Reado
     if(element.kind==='image') {
       const data=options.images?.get(element.field)??(element.pageId==='outro'?options.profileDataUrl:options.imageDataUrl);
       if(data) {
+        const backed=element.pageId==='outro'&&options.profileBacking,side=Math.max(element.width,element.height);
+        const box=backed?{...element,x:element.x+(element.width-side)/2,y:element.y+(element.height-side)/2,width:side,height:side}:element;
         const clip=`reading-image-clip-${index}`;
-        if(element.radius)definitions.push(`<clipPath id="${clip}"><rect x="${element.x}" y="${element.y}" width="${element.width}" height="${element.height}" rx="${Math.min(element.radius,element.width/2,element.height/2)}"/></clipPath>`);
-        const rotation=element.rotation?` transform="rotate(${element.rotation} ${element.x+element.width/2} ${element.y+element.height/2})"`:'';
+        if(box.radius)definitions.push(`<clipPath id="${clip}"><rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="${Math.min(box.radius,box.width/2,box.height/2)}"/></clipPath>`);
+        const rotation=box.rotation?` transform="rotate(${box.rotation} ${box.x+box.width/2} ${box.y+box.height/2})"`:'';
+        if(backed)elements.push(`<circle cx="${box.x+box.width/2}" cy="${box.y+box.height/2}" r="${side/2+4}" fill="#FFFFFF"/>`);
         // Artwork bytes already contain crop/tone/rounding; no second crop or
         // colour operation here. A profile image retains its intrinsic ratio.
-        elements.push(`<image data-field="${escaped(element.field)}" x="${element.x}" y="${element.y}" width="${element.width}" height="${element.height}" preserveAspectRatio="${element.pageId==='outro'?'xMidYMid meet':'none'}" opacity="${element.opacity??1}" href="${verifiedPng(data)}"${element.radius?` clip-path="url(#${clip})"`:''}${rotation}/>`);
+        elements.push(`<image data-field="${escaped(box.field)}" x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" preserveAspectRatio="${box.pageId==='outro'?'xMidYMid meet':'none'}" opacity="${box.opacity??1}" href="${verifiedPng(data)}"${box.radius?` clip-path="url(#${clip})"`:''}${rotation}/>`);
       }
       continue;
     }
@@ -123,16 +128,21 @@ function orderedLayout(profile:ReadingCardProfile,pageNumber:number,values:Reado
 }
 
 /** The same 46 values, fixed rectangles, and image ratios used by Autofill. */
-export function layoutReadingCard(copy:CardCopyV2,page:FamilyPage,context:FamilyDisplayContext={},options:Options={}) {
+export function layoutReadingCard(copy:CardCopyV2,page:FamilyPage,context:ReadingContext={},options:Options={}) {
   const profile=readingProfileForTemplateKey(copy.templateKey);
   if(!profile) throw new Error('읽는 카드뉴스 스타일을 확인해 주세요.');
   const values=familyReadingTextValues(copy,context,{[page.id]:{imageCredit:options.imageCredit??context.imageCredit??''}});
-  return layoutReadingProfilePage(profile,page.page,values,options);
+  const result=layoutReadingProfilePage(profile,page.page,values,{...options,profileBacking:page.id==='outro'&&!!context.highscoopOutroTheme&&page.fields.logoAssetId===HIGHSCOOP_PROFILE_ASSET_ID});
+  if(page.id!=='outro'||!context.highscoopOutroTheme)return result;
+  const layout=profile.pages[page.page-1],ink=layout.textBoxes.find(box=>box.field==='P08_BRAND_LINE')?.color??'#F6F1E7';
+  const shape=layout.shapes[0],accent=shape?(shape.type==='line'?shape.stroke:shape.fill):'#D5EF58';
+  const additions=highscoopOutroDecorations(context.highscoopOutroTheme,{mode:'reading',background:layout.background,ink,accent,handle:page.fields.handle,measureOnly:options.measureOnly});
+  return {svg:result.svg.replace('</svg>',`${additions.svg}</svg>`),textRuns:[...result.textRuns,...additions.textRuns.map(run=>({...run,fontSize:run.size,fontWeight:600,lineHeight:1.3,maxLines:1,renderedLineHeight:run.lineHeight}))]};
 }
 
 /** Preflight checks exactly the same widths, line breaks and height limits,
  * without constructing eight complete SVG outlines that the caller discards. */
-export function checkReadingCard(copy:CardCopyV2,page:FamilyPage,context:FamilyDisplayContext={}) {
+export function checkReadingCard(copy:CardCopyV2,page:FamilyPage,context:ReadingContext={}) {
   return layoutReadingCard(copy,page,context,{measureOnly:true}).textRuns;
 }
 
@@ -152,6 +162,7 @@ export function layoutReadingProfilePage(profile:ReadingCardProfile,pageNumber:n
   for(const slot of layout.imageBoxes) {
     const data=slot.kind==='profile'?options.profileDataUrl:options.imageDataUrl;
     if(data) {
+      if(slot.kind==='profile'&&options.profileBacking)elements.push(`<circle cx="${slot.x+slot.width/2}" cy="${slot.y+slot.height/2}" r="${Math.max(slot.width,slot.height)/2+4}" fill="#FFFFFF"/>`);
       elements.push(`<image x="${slot.x}" y="${slot.y}" width="${slot.width}" height="${slot.height}" preserveAspectRatio="xMidYMid meet" href="${verifiedPng(data)}"/>`);
     }
   }
@@ -170,16 +181,14 @@ export function layoutReadingProfilePage(profile:ReadingCardProfile,pageNumber:n
   return {svg:`<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350"><title>${escaped(profile.label+' · '+pageNumber)}</title>${elements.join('')}</svg>`,textRuns};
 }
 
-let profileLogo:{hash:string;data:string}|undefined;
 export function approvedReadingProfileLogo(copy:CardCopyV2):string {
   const profile=readingProfileForTemplateKey(copy.templateKey),outro=copy.pages.find(page=>page.id==='outro');
-  if(!profile||!outro||outro.id!=='outro'||outro.fields.logoAssetId!==READING_PROFILE_LOGO_ID) throw new Error('이 스타일의 승인된 ALL 프로필을 선택해 주세요.');
-  if(profileLogo?.hash===profile.profileImageSha256) return profileLogo.data;
-  const bytes=fs.readFileSync(path.resolve(process.cwd(),profile.profileImagePath));
-  if(createHash('sha256').update(bytes).digest('hex')!==profile.profileImageSha256) throw new Error('승인된 ALL 프로필 이미지가 변경됐습니다. 원본을 확인해 주세요.');
-  profileLogo={hash:profile.profileImageSha256,data:`data:image/png;base64,${bytes.toString('base64')}`};return profileLogo.data;
+  if(!profile||!outro||outro.id!=='outro'||!isRegisteredProfileAssetId(outro.fields.logoAssetId)) throw new Error('이 스타일의 승인된 ALL 프로필 또는 등록된 가족 프로필을 선택해 주세요.');
+  return registeredProfileDataUrl(outro.fields.logoAssetId);
 }
-export async function renderReadingCard(copy:CardCopyV2,page:FamilyPage,design:PageDesign,context:FamilyDisplayContext={},image:Buffer|null=null,imageCredit='') {
+export async function renderReadingCard(copy:CardCopyV2,page:FamilyPage,design:PageDesign,context:ReadingContext={},image:Buffer|null=null,imageCredit='') {
+  const ending=selectedFamilyEnding(page.id,design);
+  if(ending)return renderRegisteredFamilyEnding(ending.id);
   const profile=readingProfileForTemplateKey(copy.templateKey)!;
   const slot=readingImageSlot(profile,page.id);
   const makeSvg=async()=>{
@@ -195,8 +204,10 @@ export async function renderReadingCard(copy:CardCopyV2,page:FamilyPage,design:P
 export async function rasterizeReadingCardSvg(svg:string):Promise<Buffer>{
   return rasterizeReadingSvg(()=>svg);
 }
-export function readingPageText(copy:CardCopyV2,page:FamilyPage,context:FamilyDisplayContext={}):string[] {
+export function readingPageText(copy:CardCopyV2,page:FamilyPage,context:ReadingContext={}):string[] {
   const profile=readingProfileForTemplateKey(copy.templateKey)!;
   const values=familyReadingTextValues(copy,context);
-  return profile.pages[page.page-1].textBoxes.map(box=>values[box.field]).filter(Boolean);
+  const texts=profile.pages[page.page-1].textBoxes.map(box=>values[box.field]).filter(Boolean);
+  if(page.id==='outro'&&context.highscoopOutroTheme)texts.push(...layoutReadingCard(copy,page,context,{measureOnly:true}).textRuns.filter(run=>run.field.startsWith('highscoop.')).map(run=>run.text));
+  return texts;
 }

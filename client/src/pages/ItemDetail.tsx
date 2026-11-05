@@ -1,5 +1,5 @@
 import { CanvaEditorial } from "../CanvaEditorial";
-import { editorialPlanSchema, familyCardCopySchema } from "@shared/familyDialogue";
+import { editorialPlanSchema, familyCardCopySchema, pageDesignsSchema } from "@shared/familyDialogue";
 import { CategorySelect } from "../CategorySelect";
 import { CardCarousel } from "../CardCarousel";
 import { CardCopyEditor, type StoredCardCopyResponse } from "../CardCopyEditor";
@@ -29,6 +29,7 @@ import { itemChatGptPrompt } from "@shared/chatgptLink";
 import { readIdea } from "@shared/ideaBank";
 import { IdeaDetail } from "./IdeaDetail";
 import { collectionUsesArt } from "@shared/cardDesigns";
+import { readingProfileForTemplateKey } from "@shared/readingCardProfiles";
 import { sourceRecovery } from "@shared/sourceRecovery";
 import type { PublicationReadiness } from "@shared/publicationReadiness";
 import { deliveryState, deliverySummary, PublicationRuntimeNotice, usePublicationRuntime, type PublicationRuntime } from "../publicationStatus";
@@ -486,6 +487,9 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
       // must be reviewed before an explicit Canva export, not sent to the legacy
       // /card AI renderer as an automatic second image request.
       if (familyCardCopySchema.safeParse(generated.edited?.cardCopy).success) return generated;
+      // A selected full set must never fall through to the legacy five-page
+      // renderer, including partial notice drafts or a preserved older copy.
+      if (readingProfileForTemplateKey(draftTemplate)) return generated;
       // A saved summary is a partial success when copy creation fails. Do not
       // spend on an image of an incomplete deck or imply it is ready to approve.
       if (warnings.length) return generated;
@@ -532,6 +536,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
         </div></details>
         <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate || t.colors?.some(color => color.key === draftTemplate))?.name ?? "기본"} ▾</button>
         {showTemplates && templates.data && <TemplatePicker cid={cid} value={draftTemplate} items={templates.data.items} disabled={gen.isPending} onChange={key => { setLocalTemplate(key); onTemplateChange?.(key); }} />}
+        {readingProfileForTemplateKey(draftTemplate) && <p className="notice small">선택한 풀세트는 표지부터 마지막 장까지 8장으로 만듭니다. 기존 카드 원고가 있으면 아래 편집기에서 새 8장 제안을 비교한 뒤 전환하세요. 선택만으로 생성하거나 기존 내용을 덮어쓰지 않습니다.</p>}
         <p className="hint">요약 AI가 원문을 분석하고, 문구 AI가 선택한 디자인에 맞게 카드를 작성합니다. 아래 카드 편집기에서 세부 문구를 고치거나 다시 제안받을 수 있어요.</p>
         <AiUsageGuide provider={provider} />
         {ai.data?.integrations[provider] === false && <p className="notice warn small">선택한 AI의 키가 없습니다. <GuardedLink href={`/connections?service=${provider}`}>API 키 입력 →</GuardedLink></p>}
@@ -543,7 +548,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
         {generation.cancelled && <p className="notice small" role="status">AI 요청을 중단했습니다. 기존 원고를 직접 편집하거나 새로 요청할 수 있습니다.</p>}
         {generation.cancelError && <ErrorBox error={generation.cancelError} />}
       </details></div>
-      <div hidden={workMode !== "manual"}><details className="content-options" open><summary>수동 · 외부에서 초안 가져오기</summary><ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, source: d.primary ? {
+      <div hidden={workMode !== "manual"}><details className="content-options" open><summary>수동 · 외부에서 초안 가져오기</summary><ChatGptLaunch prompt={itemChatGptPrompt({ title: d.item.title, kind: d.item.kind, channelSlug: aiChannel?.slug, source: d.primary ? {
         title: d.primary.title ?? d.item.title, url: d.primary.originalUrl,
         text: d.primary.fetchStatus === "ok" ? d.primary.fetchedText ?? "" : "", snippet: d.primary.snippet ?? "",
         quotes: Array.isArray(d.primary.meta.quotes) ? d.primary.meta.quotes.filter((q): q is string => typeof q === "string") : [],
@@ -662,6 +667,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
   const toast = useToast();
   const copyIncomplete = incompleteCardCopy(d);
   const familyCopy = familyCardCopySchema.safeParse(d.current?.payload.cardCopy);
+  const savedPageDesigns = pageDesignsSchema.safeParse(d.current?.payload.pageDesigns);
   const familyPlan = editorialPlanSchema.safeParse(d.current?.payload.editorialPlan);
   const captionCoreQuestion = familyPlan.success ? familyPlan.data.coreQuestion : "";
   const [coverChoice, setCoverChoice] = useState<"reuse" | "ai" | "typography" | null>(null);
@@ -738,7 +744,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
   const [confirmed, setConfirmed] = useState(false);
   const tpls = useTemplates(cid);
   const [tpl, setTpl] = useState<string | null>(null);
-  const templateKey = templateChoice ?? tpl ?? currentCard?.templateKey ?? tpls.data?.current ?? "builtin:classic";
+  const templateKey = templateChoice ?? tpl ?? d.current?.payload.cardCopy?.templateKey ?? currentCard?.templateKey ?? tpls.data?.current ?? "builtin:classic";
   const templateKeyRef = useRef(templateKey); templateKeyRef.current = templateKey;
   const chooseTemplate = (key: string) => { setTpl(key); onTemplateChange?.(key); };
   const typographyOnly = templateKey.startsWith("set:") && !collectionUsesArt(templateKey.slice(4));
@@ -886,14 +892,17 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
             <TemplatePicker cid={cid} value={templateKey} onChange={chooseTemplate} items={tpls.data.items} version={ch?.accentColor} disabled={render.isPending} />
           )}
           {sourceDirty && <p className="notice warn small" role="status">자료·초안에 저장하지 않은 변경이 있습니다. 먼저 저장한 뒤 이미지를 갱신하고 게시 준비를 완료해 주세요.</p>}
-          <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateChoice ?? tpl} onTemplateChange={chooseTemplate} coverMode={coverMode} previewRevision={`${currentCard?.id ?? ""}:${render.data && !olderRender(render.data) ? render.data.id : ""}`} showAi={workMode === "auto"} disabled={render.isPending || altDirty} renderDisabled={sourceDirty || imageGeneration.unresolved || !familyCopy.success && (!!coverRecovery.pending || workMode === "auto" && coverDraft.regenerateCover && (typographyOnly || !d.imageAiAvailable))} onDirtyChange={setCopyDirty} onApplyCaption={text => captionDraft.setCaptions({ ...caps, instagram: text })} onEditCaption={openManualCaption} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel={workMode === "auto" ? coverDraft.regenerateCover ? "표지 1장 다시 그리기 · 이미지 갱신" : "이미지 생성·갱신" : "카드 이미지 저장"} />
-          {familyCopy.success && d.current && <CanvaEditorial key={`canva-${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} version={d.item.version} revisionId={d.current.id} copy={familyCopy.data} disabled={sourceDirty || copyDirty || altDirty || render.isPending || localRender.isPending || confirmManualCaption.isPending || imageGeneration.unresolved} onLocalRender={() => localRender.mutate()} />}
+          <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateKey} onTemplateChange={chooseTemplate} coverMode={coverMode} previewRevision={`${currentCard?.id ?? ""}:${render.data && !olderRender(render.data) ? render.data.id : ""}`} showAi={workMode === "auto"} disabled={render.isPending || altDirty} renderDisabled={sourceDirty || imageGeneration.unresolved || !familyCopy.success && (!!coverRecovery.pending || workMode === "auto" && coverDraft.regenerateCover && (typographyOnly || !d.imageAiAvailable))} onDirtyChange={setCopyDirty} onApplyCaption={text => captionDraft.setCaptions({ ...caps, instagram: text })} onEditCaption={openManualCaption} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel={workMode === "auto" ? coverDraft.regenerateCover ? "표지 1장 다시 그리기 · 이미지 갱신" : "이미지 생성·갱신" : "카드 이미지 저장"} />
+          {familyCopy.success && d.current && <CanvaEditorial key={`canva-${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} version={d.item.version} revisionId={d.current.id} copy={familyCopy.data} pageDesigns={savedPageDesigns.success ? savedPageDesigns.data : undefined} disabled={sourceDirty || copyDirty || altDirty || render.isPending || localRender.isPending || confirmManualCaption.isPending || imageGeneration.unresolved} onLocalRender={() => localRender.mutate()} />}
           {localRender.error && <ErrorBox error={localRender.error} />}
           {render.isPending && <p className="notice small" role="status">{renderedIntent.current?.redraw ? "새 표지 그림 1장을 요청하고 있습니다. OpenAI 이미지 API 비용이 발생하며, 완료한 그림으로 카드 이미지를 갱신합니다." : renderedIntent.current?.coverMode === "ai" ? "표지 일러스트와 각 페이지를 만들고 있어요. 몇 분 정도 걸릴 수 있습니다." : "원고를 페이지로 나누고 보드에 저장하고 있어요."}</p>}
           {render.error && <ErrorBox error={render.error} />}
           {imageGeneration.unresolved && <div className="notice warn stack" role="status"><strong>이미지 요청의 결과를 확인하고 있습니다.</strong><p className="small">저장된 문구는 유지합니다. 결과 확인은 같은 요청 ID를 사용하며 새 이미지 작업을 중복 시작하지 않습니다.</p><div className="row"><button className="btn" disabled={render.isPending} onClick={() => render.mutate(null)}>이전 이미지 결과 확인</button><button className="btn" disabled={imageGeneration.cancelling} onClick={() => void imageGeneration.cancel()}>{imageGeneration.cancelling ? "중단 확인 중…" : "이미지 요청 중단"}</button></div></div>}
           {imageGeneration.cancelError && <ErrorBox error={imageGeneration.cancelError} />}
           {render.data && <p className="small muted" role="status">{olderRender(render.data) ? "이전 이미지 요청의 완료를 확인했습니다. 현재의 더 최신 이미지와 표지 요청은 유지했습니다." : `${render.data.carousel.pages.length}장 이미지에 수정 내용을 반영했어요.`}</p>}
+          {currentCard && <section className="stack generated-image-preview" aria-label="승인 전 완성 이미지 미리보기"><div className="row between"><h3>완성 이미지 미리보기</h3><span className="small muted">최종 승인 전</span></div><p className="hint">생성한 모든 장을 먼저 확인하세요. 문구·색상·그림을 수정하고 다시 만들 수 있습니다.</p>
+          {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} onDirtyChange={setAltDirty} downloadDisabled={copyDirty || staleArtifact} />}
+          </section>}
           {currentCard && <button className="btn primary" disabled={copyIncomplete || sourceDirty || copyDirty || altDirty || coverPending || imageGeneration.unresolved || staleArtifact || render.isPending} onClick={() => { setPublishOpen(true); window.setTimeout(() => document.getElementById("publish-options")?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); }}>이미지 확인 · 게시 준비 열기</button>}
 
           {!familyCopy.success && canva.data?.connected && (
@@ -944,7 +953,6 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
           {currentCard && <p className="small muted">게시 이미지: {staleArtifact ? "이전 원고" : `원고 r${d.current.revisionNo}`} · 이미지 #{currentCard.id}{copyDirty || sourceDirty || staleArtifact ? " · 수정 내용을 저장하고 이미지를 다시 만들어야 합니다" : " · 저장된 원고 반영"}</p>}
           {staleArtifact && <div className="notice warn small">원고가 다른 곳에서 변경됐습니다. 이전 이미지에 입력한 설명을 보존했습니다. <button className="btn sm" onClick={() => guard.confirmLeave(() => { heldCard.current = null; setAltDirty(false); setPickedCard(null); }, [`card-alt-${currentCard!.id}`])}>설명 정리 후 최신 이미지 보기</button></div>}
 
-          {currentCard && <CardCarousel key={currentCard.id} channelId={cid} assetId={currentCard.id} pages={currentCard.carousel?.pages ?? [{ id: currentCard.id, title: d.item.title }]} credit={currentCard.carousel?.cover.credit} onDirtyChange={setAltDirty} downloadDisabled={copyDirty || staleArtifact} />}
           <details className="content-options"><summary>외부 편집 도구로 문구 복사</summary><CopyFields cid={cid} itemId={d.item.id} revisionId={d.current.id} /></details>
 
           <h3 style={{ margin: "8px 0 0" }}>게시물 캡션 (카드 이미지 밖의 글)</h3>

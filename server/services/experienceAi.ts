@@ -8,6 +8,7 @@ import { experiencePageSchema } from "../../shared/experience";
 import { studioContentSchema, type StudioContent } from "../../shared/studio";
 import { env } from "../env";
 import { openaiRequest, AiServiceError } from "./llm";
+import { CAPTION_EMOJI_GUIDE } from "../../shared/captionStyle";
 
 export const experienceDraftSchema=z.object({title:z.string().trim().min(1).max(100),caption:z.string().trim().min(1).max(2200),coverId:z.number().int().positive().nullable(),coverAltText:z.string().refine(value => !altTextError(value, true), "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.").default(""),
  pages:z.array(experiencePageSchema.extend({altText:z.string().refine(value => !altTextError(value, true), "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.").default("")})).min(2).max(9),questions:z.array(z.string().max(300)).max(8)}).strict();
@@ -42,7 +43,8 @@ export async function generateExperience(db:DB,cardId:number,content:StudioConte
 Highscoop은 모집 공고와 실제 참여 후기를 구별하고 신청 가능 여부나 다음 모집 일정을 만들지 않습니다. Alligodang은 현장에서 관찰한 것과 일반 지식을 구별합니다. Fryday도 실제 시식하지 않은 맛·향을 만들지 않습니다.
 총 페이지에는 표지 1장이 포함됩니다. pages는 정확히 총장수-1개입니다. 각 본문 제목 35자 이내, 본문 170자 이내로 짧게 쓰세요. 읽기 흐름에 맞춰 자료를 배치하고, 자료 ID는 selected_media에 있는 ID 또는 null만 쓰세요. 선택한 표지는 우선 존중합니다. fit은 얼굴·대상 잘림을 피하도록 기본 contain으로 합니다.
 coverAltText와 각 pages의 altText는 시각장애인이 카드를 이해할 수 있도록 실제 보이는 장면과 카드에 적힌 핵심 글을 함께 설명합니다. 각 페이지는 공백 포함 최대 ${ALT_TEXT_LIMIT}자, 반드시 1~2문장으로 쓰며 해시태그·검색 키워드 나열·인물 신원 추정·확인 질문은 넣지 않습니다. 사진에 없는 동작이나 감정을 만들지 않습니다.
-caption은 바로 편집 가능한 SNS 게시 초안(2200자 이내), 홍보 과장·억지 감성·이모지 남발 없이 요청한 톤으로 작성합니다. 비공개 확인 질문을 캡션에 섞지 않습니다.`,
+caption은 바로 편집 가능한 SNS 게시 초안(2200자 이내), 홍보 과장·억지 감성·이모지 남발 없이 요청한 톤으로 작성합니다. 비공개 확인 질문을 캡션에 섞지 않습니다.
+${CAPTION_EMOJI_GUIDE}`,
   input:[{role:"user",content:parts}],tools:[{type:"function",name:"save_experience",description:"사진 기반 후기 카드뉴스와 캡션의 편집 가능한 초안",strict:false,parameters:{type:"object",additionalProperties:false,properties:{title:{type:"string"},caption:{type:"string"},coverId:{type:["integer","null"]},coverAltText:{type:"string"},pages:{type:"array",items:{type:"object",additionalProperties:false,properties:{mediaId:{type:["integer","null"]},title:{type:"string"},body:{type:"string"},altText:{type:"string"},fit:{type:"string",enum:["contain","cover"]}},required:["mediaId","title","body","fit","altText"]}},questions:{type:"array",items:{type:"string"}}},required:["title","caption","coverId","coverAltText","pages","questions"]}}],tool_choice:{type:"function",name:"save_experience"},parallel_tool_calls:false});
  const block=response.output?.find((v:any)=>v.type==="function_call"&&v.name==="save_experience");
  if(response.status==="incomplete"||typeof block?.arguments!=="string")throw new AiServiceError("후기 초안이 완성되지 않아 적용하지 않았습니다.","parse");

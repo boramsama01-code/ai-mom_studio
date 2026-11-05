@@ -13,6 +13,7 @@ import { CANVA_APPROVED_PARENT_LOGO, CANVA_PAGE_IDS } from '../../shared/canvaEd
 import { READING_PROFILE_LOGO_ID, readingProfileDesignErrors, type ReadingCardProfile } from '../../shared/readingCardProfiles';
 import { resolvedReadingPageDesigns } from '../../shared/readingPageImages';
 import { prepareReadingArtwork } from './readingCardImages';
+import { selectedFamilyEnding } from '../../shared/characterVariantAssets';
 
 export function canonicalJson(value:unknown):string {
   if(Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -24,6 +25,7 @@ export const canvaInputHash=(value:unknown)=>sha256(canonicalJson(value));
 /** The fixed masters have light type and an approved static outro. Reject
  * unsupported studio options instead of silently dropping them at Autofill. */
 export function assertCanvaDesignSettings(pageDesigns:PageDesigns,profile?:ReadingCardProfile) {
+  if(selectedFamilyEnding('outro',pageDesigns.outro)) throw new HttpError(422,'선택한 엔딩은 전체 이미지로 적용하는 수정안입니다. 현재 Canva 마스터는 전체 이미지 엔딩을 지원하지 않습니다. 스튜디오에서 8장 만들기를 사용하거나 문구를 편집하는 마무리로 바꿔 주세요. 기존 입력은 보존했습니다.',{code:'canva_full_image_outro_unsupported'});
   if(profile) {
     const errors=readingProfileDesignErrors(profile,pageDesigns);
     if(errors.length) throw new HttpError(422,'선택한 읽기 디자인의 배경·정렬과 저장된 페이지 설정이 다릅니다. 현재 원고는 유지했습니다. '+errors.join(' '),{code:'canva_layout_unsupported',details:errors});

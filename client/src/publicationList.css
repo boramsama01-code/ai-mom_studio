@@ -1,0 +1,11 @@
+.publication-folders { margin: 4px 0 18px; gap: 8px; }
+.publication-list-toolbar { margin: 0 0 12px; padding: 12px 14px; background: var(--surface-alt, #f5f7f7); border: 1px solid var(--border); border-radius: 10px; }
+.publication-list-toolbar .check, .publication-record-select { display: inline-flex; align-items: center; gap: 8px; margin: 0; cursor: pointer; }
+.publication-record-head { display: flex; align-items: flex-start; gap: 10px; }
+.publication-record-select { flex-shrink: 0; padding-top: 4px; }
+.publication-record-select input, .publication-list-toolbar input { position: static; flex-shrink: 0; margin: 0; width: 18px; height: 18px; }
+.publication-record-head .title { min-width: 0; overflow-wrap: anywhere; }
+.publication-list-actions { gap: 8px; margin: 10px 0; }
+.publication-list-actions .small { flex-basis: 100%; }
+.publication-organize-hint { margin-top: 8px; }
+@media (max-width: 480px) { .publication-list-toolbar { align-items: flex-start; gap: 10px; } .publication-list-toolbar > .check { flex-basis: 100%; } }

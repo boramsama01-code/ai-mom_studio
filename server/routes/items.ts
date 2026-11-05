@@ -3,6 +3,7 @@ import { studioCards } from "../../shared/schema";
 import { cardCopyFromPayload, loadCardPages, planCarousel, renderCarouselPage } from "../services/cardCarousel";
 import { channelAiSelection } from "../services/channelAi";
 import { familyCardCopySchema, pageDesignsSchema } from "../../shared/familyDialogue";
+import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
 import { storedCardCopySchema } from "../../shared/storedCardCopy";
 import { FAMILY_METADATA_KEYS, familyExecutionPlan, familyGenerateSchema, familyMetadataFromPayload, proposeFamilyDialogue, synchronizeFamilyQuestion } from "../services/familyEditorial";
 import { assertFamilyEvidenceForCopy, confirmFamilyCaption, familyCaptionConfirmSchema, familyProposalMetadata, familySaveSchema, saveFamilyCardCopy } from "../services/familyEditorialPersistence";
@@ -75,6 +76,8 @@ import type { PublicationOrphan } from "../../shared/publicationReadiness";
 import { publicationDraftSaveSchema } from "../../shared/publicationDraft";
 import { saveItemPublicationDraft } from "../services/publicationDraft";
 import { restoreSourceRevision } from "../services/sourceRevisionRestore";
+import { organizePublicationsSchema, publicationListStates } from "../../shared/publicationList";
+import { organizePublications, publicationListCondition } from "../services/publicationList";
 
 export const itemRoutes = Router();
 
@@ -497,7 +500,8 @@ itemRoutes.post(
     const ai = { summary: channelAiSelection(ch, "summary", { provider }), copy: channelAiSelection(ch, "copy"), familyPlan: familyExecutionPlan(ch, item.currentRevisionId ?? 0) };
     const result = await runSourceGeneration(db, { type: "source_generate", itemId: item.id, channelId: ch.id, version: version ?? item.version, requestId: logicalRequestId, intent: { provider: provider ?? null, templateKey: templateKey ?? null }, configuration: ai, actor: actorOf(req) }, async () => {
       if (item.kind === "notice") {
-        const r = await extractForItem(db, item.id, new LlmBudget(4), new Date(), undefined, provider, templateKey, ai);
+        const calls = readingProfileForTemplateKey(templateKey ?? ch.cardTemplate) ? Math.min(12, Math.max(0, ch.budget.llmCallsPerRun)) : 4;
+        const r = await extractForItem(db, item.id, new LlmBudget(calls), new Date(), undefined, provider, templateKey, ai);
         if (!r.ok) throw new HttpError(r.kind === "not_configured" ? 503 : 400, r.error);
       } else {
         const r = await generateDialogueDraft(db, item.id, new Date(), provider, templateKey, { ...ai, explicitRetry: true, requestId: logicalRequestId });
@@ -540,6 +544,11 @@ function cardCopyRenderError(error: unknown): never {
   throw error;
 }
 
+/** An eight-page layout must never silently fall through to the legacy renderer. */
+function assertLegacyTemplate(key: string) {
+  if (readingProfileForTemplateKey(key)) throw new HttpError(422, "이 디자인은 8장 원고용입니다. 현재 원고를 보존한 채 ‘8장 구성으로 제안받기’에서 비교한 뒤 적용해 주세요.", { code: "eight_page_copy_required" });
+}
+
 /** Editable image copy is separate from article facts and destination captions. */
 itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
@@ -556,23 +565,30 @@ itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     return;
   }
   const saved = cardCopySchema.safeParse(revision.payload.cardCopy);
+  if (query.templateKey) assertLegacyTemplate(query.templateKey);
   let key = query.templateKey || (saved.success ? saved.data.templateKey : null) || ch.cardTemplate || "builtin:classic";
   let style, templateRecovery: string | undefined;
+  if (readingProfileForTemplateKey(key)) {
+    key = "builtin:classic";
+    templateRecovery = "선택한 기본 디자인은 8장 원고용입니다. 기존 원고는 그대로 열었습니다. 8장 디자인을 고른 뒤 새 구성과 비교해서 적용해 주세요.";
+  }
   try { style = await resolveCardCopyStyle(key, ch.id); }
   catch (error) {
     if (!(error instanceof HttpError) || error.status !== 400 || query.templateKey || !saved.success) throw error;
-    key = ch.cardTemplate !== key ? ch.cardTemplate : "builtin:classic";
+    // A removed custom layout can fall back only to another V1 layout. An
+    // eight-page channel default must not relabel this preserved legacy copy.
+    key = ch.cardTemplate !== key && !readingProfileForTemplateKey(ch.cardTemplate) ? ch.cardTemplate : "builtin:classic";
     try { style = await resolveCardCopyStyle(key, ch.id); }
     catch (fallbackError) {
       if (!(fallbackError instanceof HttpError) || fallbackError.status !== 400) throw fallbackError;
       key = "builtin:classic"; style = await resolveCardCopyStyle(key, ch.id);
     }
-    templateRecovery = "이전에 사용한 템플릿을 찾을 수 없어 현재 기본 디자인으로 미리봅니다. 작성한 문구와 기존 저장본은 유지했습니다. 디자인을 고른 뒤 저장해 주세요.";
+    templateRecovery = "이전에 사용한 템플릿을 찾을 수 없어 기존 카드 형식에 맞는 기본 디자인으로 미리봅니다. 작성한 문구와 기존 저장본은 유지했습니다. 디자인을 고른 뒤 저장해 주세요.";
   }
   try {
     const invalidSavedCopy = revision.payload.cardCopy !== undefined && !saved.success;
     const { cardCopy: _oldCopy, ...sourcePayload } = revision.payload;
-    const copy = cardCopyFromPayload({ kind: item.kind, payload: invalidSavedCopy ? sourcePayload : revision.payload, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style, key);
+    const copy = cardCopyFromPayload({ kind: item.kind, payload: invalidSavedCopy ? sourcePayload : revision.payload, channelName: ch.name, channelSlug: ch.slug, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style, key);
     const recoveryNotice = templateRecovery ?? (invalidSavedCopy ? "이전 카드 문구의 형식을 읽을 수 없어 원문 요약에서 편집 문구를 가져왔습니다. 기존 저장본은 유지했으며, 내용을 확인한 뒤 저장하면 새 버전으로 기록됩니다." : undefined);
     res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, hasSavedCopy: saved.success && !templateRecovery, recommendedStoryFormat: item.kind === "notice" ? null : "family_dialogue_8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") }, ...(recoveryNotice ? { recoveryNotice } : {}) });
   } catch (error) { cardCopyRenderError(error); }
@@ -589,6 +605,7 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
     return;
   }
   const body = parse(z.object({ version: zVersion, copy: cardCopySchema, proposalJobId: z.number().int().positive().optional() }).strict(), req.body);
+  assertLegacyTemplate(body.copy.templateKey);
   await resolveCardCopyStyle(body.copy.templateKey, ch.id);
   const result = await getDb().transaction(async tx => {
     const [fresh] = await tx.select().from(contentItems).where(and(eq(contentItems.id, item.id), eq(contentItems.channelId, ch.id))).for("update");
@@ -664,6 +681,7 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
     return;
   }
   const body = parse(z.object({ version: zVersion, requestId: z.string().uuid().optional(), templateKey: z.string().min(1).max(40), provider: z.enum(aiProviders).optional(), instructions: z.string().trim().max(1500).optional(), selectedPage: z.number().int().min(0).max(9).optional(), storyFormat: z.literal("discussion8").optional(), refreshAnalysis: z.boolean().optional() }).strict(), req.body);
+  assertLegacyTemplate(body.templateKey);
   const db = getDb();
   const ai = { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy", { provider: body.provider }) };
   const result = await runSourceGeneration(db, { type: "card_copy_generate", channelId: ch.id, itemId: item.id, version: body.version, requestId: body.requestId, intent: { templateKey: body.templateKey, provider: body.provider ?? null, ...(body.instructions ? { instructions: body.instructions } : {}), ...(body.selectedPage !== undefined ? { selectedPage: body.selectedPage } : {}), ...(body.storyFormat ? { storyFormat: body.storyFormat } : {}), ...(body.refreshAnalysis ? { refreshAnalysis: true } : {}) }, configuration: ai, actor: actorOf(req) }, async () => {
@@ -677,7 +695,7 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
   const existingCopy = cardCopySchema.safeParse(revision.payload.cardCopy);
   if (body.selectedPage !== undefined && existingCopy.success && body.selectedPage > existingCopy.data.pages.length) throw new HttpError(400, "수정할 카드 페이지를 확인해 주세요.");
   const storyFormat = body.storyFormat ?? (existingCopy.success ? existingCopy.data.storyFormat : undefined);
-  const args = { kind: item.kind, title: item.title, payload: revision.payload, templateKey: body.templateKey, channelName: ch.name, sources, instructions: body.instructions, selectedPage: body.selectedPage, budget: new LlmBudget(4) };
+  const args = { kind: item.kind, title: item.title, payload: revision.payload, templateKey: body.templateKey, channelName: ch.name, channelSlug: ch.slug, sources, instructions: body.instructions, selectedPage: body.selectedPage, budget: new LlmBudget(4) };
   const generated = storyFormat === "discussion8"
     ? await proposeNewsDiscussion({ ...args, ...ai, refreshAnalysis: body.refreshAnalysis })
     : await generateCardCopy({ ...args, ...ai.copy });
@@ -703,7 +721,7 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/preview", ah(async (req, res
     await assertFamilyEvidenceForCopy(db, item, body.copy, metadata);
     const style = await resolveCardCopyStyle(body.copy.templateKey, ch.id);
     try {
-      const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, ...metadata, cardCopy: body.copy, pageDesigns: body.pageDesigns }, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, revision.payload), checkedDate: kstToday(new Date()) }, style);
+      const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, ...metadata, cardCopy: body.copy, pageDesigns: body.pageDesigns }, channelName: ch.name, channelSlug: ch.slug, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, revision.payload), checkedDate: kstToday(new Date()) }, style);
       const images = await loadCardPageArtworkForPage(db, item.id, ch.id, body.copy, body.page, body.pageDesigns);
       const bytes = await renderCarouselPage(plan, body.page, style, null, "우주펭귄상회 스튜디오 · 본문 근거 확인", images);
       res.set("Cache-Control", "no-store").type("image/jpeg").send(bytes);
@@ -711,13 +729,14 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/preview", ah(async (req, res
     return;
   }
   const body = parse(z.object({ version: zVersion, copy: cardCopySchema, page: z.number().int().min(0).max(9), coverMode: z.enum(["ai", "typography", "reuse"]).optional() }).strict(), req.body);
+  assertLegacyTemplate(body.copy.templateKey);
   if (item.version !== body.version) conflict(item);
   if (body.page > body.copy.pages.length) throw new HttpError(400, "카드 페이지를 확인해 주세요.");
   const revision = await cardCopyRevision(item);
   const style = await resolveCardCopyStyle(body.copy.templateKey, ch.id);
   await assertNewsEditorialResources(getDb(), item, body.copy);
   try {
-    const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, cardCopy: body.copy }, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style);
+    const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, cardCopy: body.copy }, channelName: ch.name, channelSlug: ch.slug, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style);
     const pageImages = await loadCardPageArtworkForPage(getDb(), item.id, ch.id, body.copy, body.page);
     const savedArt = body.coverMode === "typography" ? null : await findReusableCardCover(getDb(), item.id, revision.payload);
     const credit = savedArt ? "표지: AI 생성 · OpenAI" : style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오";
@@ -738,6 +757,10 @@ itemRoutes.post(
       .refine(value => !value.regenerateCover || (value.version !== undefined && value.requestId !== undefined), "새 표지를 만들려면 최신 원고 버전과 요청 ID가 필요합니다.")
       .refine(value => !value.coverInstruction || value.regenerateCover, "표지 수정 지시는 새 표지 생성과 함께 요청해 주세요."), req.body ?? {});
     const savedRevision = item.currentRevisionId ? await cardCopyRevision(item) : null;
+    if ((savedRevision?.payload.cardCopy as { version?: unknown } | undefined)?.version !== 2) {
+      const savedKey = (savedRevision?.payload.cardCopy as { templateKey?: string } | undefined)?.templateKey;
+      assertLegacyTemplate(body.templateKey || savedKey || ch.cardTemplate);
+    }
     if ((savedRevision?.payload.cardCopy as { version?: unknown } | undefined)?.version === 2 && savedRevision?.payload.rendererProvider === "canva") throw new HttpError(409, "이 원고는 Canva 이미지로 발행하도록 선택했습니다. Canva에서 최신 8장을 가져오거나, '스튜디오 자체 이미지로 전환'을 직접 선택한 뒤 생성해 주세요.", { code: "explicit_renderer_switch_required" });
     const imageAi = channelAiSelection(ch, "image");
     const render = async () => {
@@ -897,7 +920,14 @@ const publicationListQuery = z.object({
   status: z.string().max(150).transform(value => value.split(",")).pipe(z.array(z.enum(["waiting", "scheduled", "processing", "succeeded", "failed", "unknown", "cancelled", "dry_run"])).min(1)).optional(),
   from: collectionDateSchema.optional(),
   to: collectionDateSchema.optional(),
+  view: z.enum(publicationListStates).default("active"),
 });
+
+itemRoutes.post("/channels/:cid/deliveries/organize", ah(async (req, res) => {
+  const channel = await loadChannel(req.params.cid);
+  const input = parse(organizePublicationsSchema, req.body);
+  res.json(await organizePublications(getDb(), channel.id, input, actorOf(req)));
+}));
 
 function publicationDateConditions(q: z.infer<typeof publicationListQuery>): SQL[] {
   if (q.from && q.to && q.from > q.to) throw new HttpError(400, "조회 시작일은 종료일보다 늦을 수 없습니다.");
@@ -933,7 +963,7 @@ itemRoutes.get(
   ah(async (req, res) => {
     const q = parse(publicationListQuery, req.query);
     const db = getDb();
-    const base = and(q.channelId === "all" ? undefined : eq(deliveries.channelId, q.channelId), ...publicationDateConditions(q));
+    const base = and(q.channelId === "all" ? undefined : eq(deliveries.channelId, q.channelId), ...publicationDateConditions(q), publicationListCondition(q.view));
     const where = and(base, q.status ? or(inArray(deliveries.status, q.status), q.status.includes("unknown") ? eq(deliveries.needsReconciliation, true) : undefined) : undefined);
     const page = q.page ?? 1, pageSize = q.pageSize ?? 30;
     const paged = q.page !== undefined || q.pageSize !== undefined;

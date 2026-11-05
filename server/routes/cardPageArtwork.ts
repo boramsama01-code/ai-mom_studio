@@ -5,7 +5,7 @@ import { contentItems, jobs } from "../../shared/schema";
 import { getDb } from "../db";
 import { actorOf } from "../auth";
 import { ah, HttpError, intParam, loadChannel, parse, zVersion } from "./util";
-import { CARD_PAGE_UPLOAD_MAX_DATA_URL, cardPageArtworkCredit, createCardPageArtwork, loadCardPageArtworkAsset, type CardPageId } from "../services/cardPageArtwork";
+import { CARD_PAGE_UPLOAD_MAX_DATA_URL, cardPageArtworkCredit, createCardPageArtwork, loadCardPageArtworkAsset, readCardPageImagePrompt, saveCardPageImagePrompt, type CardPageId } from "../services/cardPageArtwork";
 import { cardPageArtworkIdSchema } from "../../shared/cardPageArtworkId";
 
 export const cardPageArtworkRoutes = Router();
@@ -16,10 +16,11 @@ const backgroundRequest = z.object({
   pageId: cardPageArtworkIdSchema,
   mode: z.enum(["ai", "upload"]),
   instruction: z.string().trim().max(2000).optional(),
+  prompt: z.string().trim().min(1).max(25000).optional(),
   imageData: z.string().min(1).max(CARD_PAGE_UPLOAD_MAX_DATA_URL).optional(),
 }).strict().refine(value => value.mode === "upload" ? !!value.imageData : value.imageData === undefined,
   { path: ["imageData"], message: "파일 업로드에는 이미지 데이터가 필요하며, AI 요청에는 이미지 데이터를 직접 보내지 마세요." })
-  .refine(value => value.mode === "ai" || !value.instruction, { path: ["instruction"], message: "그림 지시는 AI 이미지 생성에서만 사용할 수 있습니다." });
+  .refine(value => value.mode === "ai" || (!value.instruction && !value.prompt), { path: ["instruction"], message: "그림 지시는 AI 이미지 생성에서만 사용할 수 있습니다." });
 
 async function scope(cid: unknown, id: unknown) {
   const channel = await loadChannel(cid);
@@ -29,6 +30,20 @@ async function scope(cid: unknown, id: unknown) {
   if (!item) throw new HttpError(404, "콘텐츠를 찾을 수 없습니다.");
   return { channelId: channel.id, itemId };
 }
+
+cardPageArtworkRoutes.get("/channels/:cid/items/:id/card-copy/image-prompt", ah(async (req, res) => {
+  const target = await scope(req.params.cid, req.params.id);
+  const pageId = parse(cardPageArtworkIdSchema, req.query.pageId) as CardPageId;
+  res.set("Cache-Control", "private, no-store").json(await readCardPageImagePrompt(getDb(), { ...target, pageId }));
+}));
+
+cardPageArtworkRoutes.put("/channels/:cid/items/:id/card-copy/image-prompt", ah(async (req, res) => {
+  const target = await scope(req.params.cid, req.params.id);
+  const body = parse(z.object({ version: zVersion, promptVersion: z.number().int().min(0), pageId: cardPageArtworkIdSchema,
+    prompt: z.string().trim().min(1).max(25000).nullable(), instruction: z.string().trim().max(2000).default("") }).strict(), req.body);
+  const result = await saveCardPageImagePrompt(getDb(), { ...target, ...body, pageId: body.pageId as CardPageId, actor: actorOf(req) });
+  res.set("Cache-Control", "private, no-store").json(result);
+}));
 
 cardPageArtworkRoutes.post("/channels/:cid/items/:id/card-copy/background", ah(async (req, res) => {
   const target = await scope(req.params.cid, req.params.id);

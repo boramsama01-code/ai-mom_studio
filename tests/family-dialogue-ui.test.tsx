@@ -14,6 +14,7 @@ import { defaultPageDesigns, familyFieldValue } from "../shared/familyDialogue";
 import type { FamilyEvidenceView } from "../shared/familyEvidence";
 import { familyEvidenceFixture } from "./fixtures/familyEvidence";
 import { familyEvidenceView, validateFamilyEvidenceReferences } from "../server/services/familyEvidence";
+import { FAMILY_PROFILE_ASSET_ID, FAMILY_ENDING_ASSET_IDS } from "../shared/characterVariantAssets";
 
 const mocks = vi.hoisted(() => ({ api: vi.fn(), blob: vi.fn(), guard: { setDirty: vi.fn() } }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api, apiBlob: mocks.blob }));
@@ -96,6 +97,30 @@ async function connectEvidence(path: string, evidenceId: string) {
 }
 
 describe("family dialogue v2 editor", () => {
+  it("saves and reopens character revisions, preserves the selected profile across styles, and restores editable ending text",async()=>{
+    const choose=async(label:string,value:string)=>{const picker=host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;expect(picker).not.toBeNull();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(picker,value);picker.dispatchEvent(new Event('change',{bubbles:true}));});await settle();};
+    await render();await selectPage('8페이지 · 닫는 표지');await input('fields.cta','다음 대화를 위해 저장해 주세요.');
+    await choose('마지막 장 프로필',FAMILY_PROFILE_ASSET_ID);
+    await choose('카드뉴스 스타일','cardnews14-cinematic-v1');
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="마지막 장 프로필"]')!.value).toBe(FAMILY_PROFILE_ASSET_ID);
+    const endingOptions=host.querySelector<HTMLSelectElement>('[aria-label="마지막 장 방식"]')!.options;
+    expect([...endingOptions].filter(option=>option.textContent?.includes('전체 이미지로 적용'))).toHaveLength(3);
+    expect([...endingOptions].filter(option=>option.textContent?.includes('이전 수정안'))).toHaveLength(2);
+    await choose('마지막 장 방식',FAMILY_ENDING_ASSET_IDS[2]);await choose('마지막 장 방식',FAMILY_ENDING_ASSET_IDS[0]);
+    expect(host.textContent).toContain('이미지 속 문구 고정');expect(host.textContent).toContain('@spacepenguin.co');
+    expect(field('fields.cta').value).toBe('다음 대화를 위해 저장해 주세요.');
+    await choose('카드뉴스 스타일','cardnews14-ink-lime-v1');await click('문구·디자인 저장');
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro.outroPresentation).toEqual({mode:'full_image',assetId:FAMILY_ENDING_ASSET_IDS[0]});
+    expect(saved.copy.pages[7]).toMatchObject({fields:{logoAssetId:FAMILY_PROFILE_ASSET_ID,cta:'다음 대화를 위해 저장해 주세요.'}});
+    const copied=familyCopyText(saved.copy as FamilyDialogueResponse['copy'],saved as FamilyDialogueResponse);expect(copied).toContain('고정 문구: 구독 · 좋아요 · @spacepenguin.co');
+    await render(null);client.clear();await render();await selectPage('8페이지 · 닫는 표지');
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="마지막 장 방식"]')!.value).toBe(FAMILY_ENDING_ASSET_IDS[0]);
+    await choose('마지막 장 방식','template');expect(host.querySelector('[data-testid="family-outro-full-image-notice"]')).toBeNull();
+    expect(field('fields.cta').value).toBe('다음 대화를 위해 저장해 주세요.');expect(field('fields.cta').disabled).toBe(false);
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="마지막 장 프로필"]')!.value).toBe(FAMILY_PROFILE_ASSET_ID);
+    await input('fields.cta','돌아온 뒤 직접 수정');await click('문구·디자인 저장');
+    expect((saved as FamilyDialogueResponse).pageDesigns.outro.outroPresentation).toEqual({mode:'template'});expect(saved.copy.pages[7]).toMatchObject({fields:{cta:'돌아온 뒤 직접 수정'}});
+  });
   it("saves and reopens the 14-style photo layouts without losing an edited field or an intentionally empty display label",async()=>{
     await render(); await input('fields.headline','내가 고친 제목');await input('displayOverrides.kicker','');
     const choose=async(key:string)=>{const picker=host.querySelector<HTMLSelectElement>('[aria-label="카드뉴스 스타일"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(picker,key);picker.dispatchEvent(new Event('change',{bubbles:true}));});await settle();};
@@ -120,7 +145,7 @@ describe("family dialogue v2 editor", () => {
     await selectPage("8페이지 · 닫는 표지");expect(host.querySelector('[data-testid="family-reading-outro-design"]')).not.toBeNull();
     await input("fields.brandLine", "오늘 서로의 생각은?");await click("문구·디자인 저장");
     expect(saved.copy.templateKey).toBe(READING_CARD_PROFILES[0].templateKey);
-    expect(saved.copy.pages[7]).toMatchObject({fields:{logoAssetId:READING_PROFILE_LOGO_ID,brandLine:"오늘 서로의 생각은?"}});
+    expect(saved.copy.pages[7]).toMatchObject({fields:{logoAssetId:"brand:space-penguin-company:20261101",brandLine:"오늘 서로의 생각은?"}});
     await render(null);client.clear();await render();
     expect(host.querySelector<HTMLSelectElement>('[aria-label="카드뉴스 스타일"]')!.value).toBe(READING_CARD_PROFILES[0].templateKey);
     expect(field("fields.headline").value).toBe("서로의 판단 기준");
@@ -318,7 +343,7 @@ describe("family dialogue v2 editor", () => {
   it("preserves a v1 deck until the operator explicitly saves the full v2 proposal as a new revision", async () => {
     saved = { version: 3, revisionId: 30, hasSavedCopy: true, recommendedStoryFormat: "discussion8", copy: cardCopyFixture() };
     const original = structuredClone(saved.copy), proposal = fresh();
-    generate = async () => ({ ...proposal, status: "ready", reviewFlags: [], scope: "all", jobId: 91, baseRevision: 30 });
+    generate = async body => ({ ...proposal, copy: { ...proposal.copy, templateKey: body.templateKey }, status: "ready", reviewFlags: [], scope: "all", jobId: 91, baseRevision: 30 });
     patch = async body => { expect(body.proposalJobId).toBe(91); saved = { ...proposal, ...body, version: 4, revisionId: 31, hasSavedCopy: true }; return structuredClone(saved); };
     await render(); await click("새 8장 형식 자동 제안");
     expect(saved.copy).toEqual(original); expect(host.querySelectorAll(".family-page-strip>button")).toHaveLength(0);

@@ -19,11 +19,15 @@ import { checkFamilyDialogueCard, familyBrandName, familyPageText, familyPageTit
 import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
 import { resolvedReadingPageDesigns } from "../../shared/readingPageImages";
 import { checkReadingCard, readingPageText, renderReadingCard } from "./readingCard";
+import { FAMILY_ENDING_FIXED_TEXT, selectedFamilyEnding } from "../../shared/characterVariantAssets";
+import { renderRegisteredFamilyEnding } from "./characterVariantAssets";
+import { HIGHSCOOP_HANDLE, HIGHSCOOP_OUTRO_THEMES, highscoopOutroTheme, isHighscoopChannel, type HighscoopOutroThemeId } from "../../shared/highscoopOutro";
+import { checkHighscoopOutro, renderHighscoopOutro } from "./highscoopOutro";
 
 type Block = CardModel["blocks"][number];
 type Section = { title: string; blocks: Block[] };
-export type ModelInput = Parameters<typeof buildCardModel>[0];
-export type CarouselPlan = { base: CardModel; pages: CardModel[]; count: number; copy?: CardCopy; family?: { copy: CardCopyV2; designs: PageDesigns; context: FamilyCardContext } };
+export type ModelInput = Parameters<typeof buildCardModel>[0] & { subcategory?: string | null };
+export type CarouselPlan = { base: CardModel; pages: CardModel[]; count: number; copy?: CardCopy; highscoopOutro?: HighscoopOutroThemeId; family?: { copy: CardCopyV2; designs: PageDesigns; context: FamilyCardContext } };
 export type CarouselPageImages = ReadonlyMap<number, Buffer> & { credits?: ReadonlyMap<number, string> };
 const block = (field: string, label: string, text: unknown): Block => ({ field, label, text: Array.isArray(text) ? text.filter(Boolean).join("\n\n") : String(text ?? ""), maxLines: 30 });
 
@@ -52,6 +56,7 @@ export function carouselSections(kind: string, p: Record<string, any>): Section[
 /** Measure real typography. Overflow continues on another page; text is never sliced away. */
 export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan {
   const base = buildCardModel(input);
+  const highscoopOutro = input.kind === "notice" && isHighscoopChannel(input.channelSlug) ? highscoopOutroTheme(input.subcategory, input.payload) : undefined;
   if (input.payload.cardCopy?.version === 2) {
     const parsed = familyCardCopySchema.safeParse(input.payload.cardCopy);
     if (!parsed.success) throw new HttpError(422, "8장 원고의 필드와 순서를 확인해 주세요. 기존 문구는 유지했습니다.");
@@ -59,12 +64,15 @@ export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan 
     if (!designResult.success) throw new HttpError(422, "페이지 디자인 저장값을 확인해 주세요. 기존 문구와 배경은 유지했습니다.");
     const copy = parsed.data, designs = designResult.data;
     const caption = captionPackageSchema.safeParse(input.payload.captionPackage);
-    const context: FamilyCardContext = { ...familyDisplayContext(copy, caption.success ? caption.data : null), brandName: familyBrandName(copy, input.channelName), accent: input.accent };
+    const context: FamilyCardContext = { ...familyDisplayContext(copy, caption.success ? caption.data : null), brandName: familyBrandName(copy, input.channelName), accent: input.accent,
+      ...(isHighscoopChannel(input.channelSlug) ? { highscoopOutroTheme: highscoopOutroTheme(input.subcategory, input.payload) } : {}),
+    };
     const readingProfile = readingProfileForTemplateKey(copy.templateKey);
     const models = copy.pages.map(page => {
-      if (readingProfile) checkReadingCard(copy, page, context); else checkFamilyDialogueCard(page, designs[page.id], context, style);
-      return { ...base, title: familyPageTitle(page), subtitle: undefined,
-        blocks: (readingProfile ? readingPageText(copy, page, context) : familyPageText(page, context)).map((text, i) => ({ field: `cardCopy.pages.${page.page - 1}.fields.${i}`, text, maxLines: 30 })),
+      const ending = selectedFamilyEnding(page.id, designs[page.id]);
+      if (!ending) { if (readingProfile) checkReadingCard(copy, page, context); else checkFamilyDialogueCard(page, designs[page.id], context, style); }
+      return { ...base, title: ending?.label ?? familyPageTitle(page), subtitle: undefined,
+        blocks: (ending ? [...FAMILY_ENDING_FIXED_TEXT] : readingProfile ? readingPageText(copy, page, context) : familyPageText(page, context)).map((text, i) => ({ field: `cardCopy.pages.${page.page - 1}.fields.${i}`, text, maxLines: 30 })),
         badge: `${String(page.page).padStart(2, "0")} / 08`,
       };
     });
@@ -84,44 +92,50 @@ export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan 
     }));
     // A saved card has a stable identity. Overflow is actionable; it never silently splits or clips edited copy.
     if (cover.editorial) checkEditorialCard(cover, style);
-    for (const page of pages) {
-      if (page.editorial) checkEditorialCard(page, style);
+    const closingTheme = copy.storyFormat ? undefined : highscoopOutro;
+    for (const [index, page] of pages.entries()) {
+      if (closingTheme && index === pages.length - 1) checkHighscoopOutro(page, style, closingTheme);
+      else if (page.editorial) checkEditorialCard(page, style);
       else if (style.collection) layoutCollectionBody(page, style.collection); else layoutCard(page, style);
     }
-    return { base: cover, pages, count, copy };
+    return { base: cover, pages, count, copy, ...(closingTheme ? { highscoopOutro: closingTheme } : {}) };
   }
   const pages: CardModel[] = [];
-  const append = (title: string, blocks: Block[], depth = 0) => {
+  const append = (title: string, blocks: Block[], depth = 0, closing = false) => {
     const model = { ...base, title, blocks, badge: "02 / 10", footer: base.footer };
     try {
       // Bound the expensive font layout before drawing paths for an obviously overfull page.
       if (blocks.reduce((sum, b) => sum + b.text.length, 0) > 700) throw new CardOverflowError("본문", "다음 페이지에 이어서 배치");
       if (style.collection) layoutCollectionBody(model, style.collection); else layoutCard(model, style);
+      if (closing && highscoopOutro) checkHighscoopOutro(model, style, highscoopOutro);
       pages.push(model);
     }
     catch (e) {
       if (!(e instanceof CardOverflowError) || depth > 12 || e.field === "title" || e.field === "footer" || e.field === "brandLine") throw e;
       if (blocks.length > 1) {
         const mid = Math.ceil(blocks.length / 2);
-        append(title, blocks.slice(0, mid), depth + 1); append(`${title.replace(/ · 계속$/, "")} · 계속`, blocks.slice(mid), depth + 1);
+        append(title, blocks.slice(0, mid), depth + 1, closing); append(`${title.replace(/ · 계속$/, "")} · 계속`, blocks.slice(mid), depth + 1, closing);
       } else {
         const text = blocks[0]?.text ?? "";
         if (text.length < 40) throw e;
         let cut = Math.floor(text.length / 2);
         const boundary = text.lastIndexOf(" ", cut);
         if (boundary > cut / 2) cut = boundary;
-        append(title, [{ ...blocks[0], text: text.slice(0, cut).trim() }], depth + 1);
-        append(`${title.replace(/ · 계속$/, "")} · 계속`, [{ ...blocks[0], text: text.slice(cut).trim() }], depth + 1);
+        append(title, [{ ...blocks[0], text: text.slice(0, cut).trim() }], depth + 1, closing);
+        append(`${title.replace(/ · 계속$/, "")} · 계속`, [{ ...blocks[0], text: text.slice(cut).trim() }], depth + 1, closing);
       }
     }
     if (pages.length > 9) throw new CardOverflowError("본문", "전체 원고가 10장을 넘습니다. 핵심 내용 위주로 편집해 주세요. 내용은 자르지 않았습니다.");
   };
-  for (const section of carouselSections(input.kind, input.payload)) {
+  const sections = carouselSections(input.kind, input.payload);
+  for (const [index, section] of sections.entries()) {
     const blocks = section.blocks.filter(b => b.text.trim());
-    append(section.title, blocks.length ? blocks : [block("closing", "함께 확인해요", "원문과 출처를 다시 살펴보고, 궁금한 점을 이야기해 보세요.")]);
+    append(section.title, blocks.length ? blocks : [block("closing", "함께 확인해요", "원문과 출처를 다시 살펴보고, 궁금한 점을 이야기해 보세요.")], 0, index === sections.length - 1);
   }
   const count = pages.length + 1;
-  return { base, pages: pages.map((p, i) => ({ ...p, badge: `${String(i + 2).padStart(2, "0")} / ${String(count).padStart(2, "0")}`, footer: base.footer })), count };
+  const numberedPages = pages.map((p, i) => ({ ...p, badge: `${String(i + 2).padStart(2, "0")} / ${String(count).padStart(2, "0")}`, footer: base.footer }));
+  if (highscoopOutro && numberedPages.length) checkHighscoopOutro(numberedPages.at(-1)!, style, highscoopOutro);
+  return { base, pages: numberedPages, count, ...(highscoopOutro ? { highscoopOutro } : {}) };
 }
 
 /** Lossless editable seed for old decks. Preserve their actual pagination and every block label. */
@@ -180,6 +194,8 @@ export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, 
   if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= plan.count) throw new HttpError(400, "카드 페이지를 확인해 주세요.");
   if (plan.family) {
     const { copy, designs, context } = plan.family, page = copy.pages[pageIndex], design = resolvedReadingPageDesigns(copy, designs)[page.id];
+    const ending = selectedFamilyEnding(page.id, design);
+    if (ending) return renderRegisteredFamilyEnding(ending.id);
     const assetId = design.background.kind === "image" ? design.background.assetId : undefined;
     const image = assetId ? pageImages.get(assetId) : undefined;
     if (design.background.kind === "image" && (!assetId || !image)) throw new HttpError(422, "이 페이지에 선택한 배경을 불러올 수 없습니다. 저장한 원고는 유지했습니다. 배경을 다시 선택해 주세요.");
@@ -189,6 +205,7 @@ export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, 
       : renderFamilyDialogueCard(page, design, context, style, image ?? null, imageCredit);
   }
   const model = pageIndex === 0 ? plan.base : plan.pages[pageIndex - 1];
+  if (plan.highscoopOutro && pageIndex === plan.count - 1) return renderHighscoopOutro(model, style, plan.highscoopOutro);
   const background = pageIndex === 0 ? plan.copy?.cover.background : plan.copy?.pages[pageIndex - 1].background;
   const bytes = background ? pageImages.get(background.assetId) : undefined;
   if (background && !bytes) throw new HttpError(422, "이 카드의 배경 이미지를 불러올 수 없습니다. 배경을 다시 선택해 주세요. 기존 저장본은 유지했습니다.");
@@ -200,10 +217,14 @@ export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, 
 
 export async function renderCarouselPages(plan: CarouselPlan, style: CardStyle, art: Buffer | null, credit: string, pageImages: CarouselPageImages = new Map()) {
   const visibleAlt = (index:number,fallback:string[]) => {
+    if (plan.highscoopOutro && index === plan.count - 1) return conciseAlt([`하이스쿱 ${HIGHSCOOP_OUTRO_THEMES[plan.highscoopOutro].label} 뒷표지.`,...fallback,`HighScoop 계정 로고, ${HIGHSCOOP_HANDLE}, 팔로우 버튼.`]);
     if(!plan.family) return conciseAlt(fallback);
-    const {copy,designs,context}=plan.family,page=copy.pages[index],bg=resolvedReadingPageDesigns(copy,designs)[page.id].background;
+    const {copy,designs,context}=plan.family,page=copy.pages[index],design=resolvedReadingPageDesigns(copy,designs)[page.id],bg=design.background;
+    const ending=selectedFamilyEnding(page.id,design);
+    if(ending)return conciseAlt([`${index+1}페이지, ${ending.alt}`]);
     const displayContext={...context,imageCredit:bg.kind==='image'&&bg.assetId?pageImages.credits?.get(bg.assetId)??'배경 이미지':''};
-    return conciseAlt([`${index+1}페이지.`,...(readingProfileForTemplateKey(copy.templateKey)?readingPageText(copy,page,displayContext):familyPageText(page,displayContext))]);
+    const pageText=readingProfileForTemplateKey(copy.templateKey)?readingPageText(copy,page,displayContext):familyPageText(page,displayContext);
+    return conciseAlt([`${index+1}페이지.`,...(page.id==='outro'&&context.highscoopOutroTheme?[`하이스쿱 ${HIGHSCOOP_OUTRO_THEMES[context.highscoopOutroTheme].label} 뒷표지.`,`${HIGHSCOOP_HANDLE}, 팔로우 버튼.`]:[]),...pageText]);
   };
   const output = [{ title: plan.base.title, altText:visibleAlt(0,[`카드뉴스 표지. ${plan.base.title}`,plan.base.subtitle ?? "",plan.base.brandLine,plan.base.footer]), bytes: await renderCarouselPage(plan, 0, style, art, credit, pageImages) }];
   // Sequential rendering keeps the free instance's peak memory bounded.

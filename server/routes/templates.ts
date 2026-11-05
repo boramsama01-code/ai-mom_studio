@@ -12,7 +12,7 @@ import { ah, HttpError, intParam, loadChannel, parse } from "./util";
 import { actorOf } from "../auth";
 import { audit } from "../audit";
 import { env } from "../env";
-import { clearPreviewCache, listTemplates, renderPreview, resolveStyle, TemplateNotFound } from "../services/templates";
+import { clearPreviewCache, listTemplates, renderPreview, resolveStyle, TemplateNotFound, TemplatePreviewPageError } from "../services/templates";
 import { normalizeBackground, CARD_W, CARD_H } from "../services/card";
 import { cardFields, csvCell, CARD_FIELD_KEYS } from "../../shared/cardFields";
 import { sourceOrgFor } from "../worker/publish";
@@ -56,7 +56,7 @@ templateRoutes.get(
   ah(async (req, res) => {
     const ch = await loadChannel(req.params.cid);
     const key = String(req.query.key ?? "");
-    const page = parse(z.coerce.number().int().min(0).max(4).default(0), req.query.page);
+    const page = parse(z.coerce.number().int().min(0).max(7).default(0), req.query.page);
     try {
       const jpg = await renderPreview(getDb(), key, ch, page);
       const thumb = req.query.size === "sm" ? await sharp(jpg).resize(360, 450).jpeg({ quality: 82 }).toBuffer() : jpg;
@@ -65,6 +65,7 @@ templateRoutes.get(
       res.send(thumb);
     } catch (e) {
       if (e instanceof TemplateNotFound) throw new HttpError(404, e.message);
+      if (e instanceof TemplatePreviewPageError) throw new HttpError(400, e.message);
       throw new HttpError(422, `미리보기를 만들 수 없습니다: ${(e as Error).message}`);
     }
   }),

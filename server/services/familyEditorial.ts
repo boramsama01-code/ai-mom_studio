@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { captionTopicEmoji, composeReadableCaption } from "../../shared/captionStyle";
 import { preserveFamilyDisplayOverrides } from "../../shared/familyDisplay";
 import { readingProfileForTemplateKey, readingProfileDesigns, readingImageSlot, READING_PROFILE_LOGO_ID } from "../../shared/readingCardProfiles";
 import { readingArtworkComposition, readingArtworkPagesLabel, readingArtworkPrompt } from "../../shared/readingImagePrompts";
@@ -26,6 +27,11 @@ import { FAMILY_EDITORIAL_PROMPTS, FAMILY_PROMPT_VERSION } from "./familyEditori
 import { currentGenerationSignal } from "./generationContext";
 import { channelBrandName } from "../../shared/branding";
 import { generateFamilyCoverArtwork } from "./familyEditorialImage";
+import { legacyFamilyCopy, legacyFamilyPageDesigns, LEGACY_FAMILY_CONVERSION_RULES } from "../../shared/familyLegacyConversion";
+import { reuseLegacyFamilyCover } from "./familyLegacyArtwork";
+import { isRegisteredProfileAssetId } from "../../shared/characterVariantAssets";
+import { highscoopTitlePrompt } from "../../shared/highscoopTitlePrompt";
+import { HIGHSCOOP_HANDLE, HIGHSCOOP_PROFILE_ASSET_ID, HIGHSCOOP_OUTRO_THEMES, highscoopOutroTheme, isHighscoopChannel } from "../../shared/highscoopOutro";
 
 export const FAMILY_METADATA_KEYS = ["editorialPlan", "evidenceBinding", "pageDesigns", "parentGuide", "captionPackage", "visualBriefs", "editorialReview", "fieldLocks", "generationRuns", "dependencies"] as const;
 export const familyGenerateSchema = z.object({
@@ -102,10 +108,11 @@ export function applyFamilyFieldPatches(copy: CardCopyV2, patches: FamilyFieldPa
   return parsed.data;
 }
 
-function brandFor(channel: Channel, existing: CardCopyV2 | null) {
+function brandFor(channel: Channel, existing: CardCopyV2 | null, subcategory?: string | null, payload: Record<string, unknown> = {}) {
   const prior = existing?.pages.find(page => page.id === "outro");
   if (prior?.id === "outro") { const { cta: _cta, ...brand } = prior.fields; return brand; }
   const name = channelBrandName(channel), news = /all+igodang|알리고당/i.test(name);
+  if (isHighscoopChannel(channel.slug)) return { brandName: "HighScoop", parentBrand: "우주펭귄상회", brandLine: HIGHSCOOP_OUTRO_THEMES[highscoopOutroTheme(subcategory, payload)].cue, handle: HIGHSCOOP_HANDLE, logoAssetId: HIGHSCOOP_PROFILE_ASSET_ID };
   return { brandName: news ? "ALLligodang" : name, parentBrand: "우주펭귄상회", brandLine: news ? "오늘, 서로의 어떤 생각을 발견했나요?" : channel.description || name, handle: "", logoAssetId: "brand:space-penguin-company:20261101" };
 }
 function canonicalQuestion(copy: CardCopyV2, metadata: FamilyDialogueMetadata) {
@@ -127,7 +134,16 @@ export function familySourceCredits(snapshot: SourceSnapshot, resources: Verifie
 }
 export function composeFamilyCaption(draft: z.infer<typeof captionDraftSchema>, snapshot: SourceSnapshot, revisionId: number, resources: VerifiedResource[] = []): CaptionPackage {
   const sourceCredit = familySourceCredits(snapshot, resources);
-  const fullCaption = [draft.hook, draft.newsSummary, draft.coreQuestion, draft.conversationGuide, draft.parentLine, draft.optionalFollowup, draft.cta, draft.hashtags.join(" "), sourceCredit.map(source => `출처: ${source.title}${source.publisher ? ` · ${source.publisher}` : ""}${source.url ? `\n${source.url}` : " · 직접 제공한 원문"}`).join("\n")].filter(Boolean).join("\n\n");
+  const fullCaption = composeReadableCaption([
+    { text: draft.hook, emoji: captionTopicEmoji(`${draft.hook} ${draft.newsSummary}`) },
+    { text: draft.newsSummary, emoji: "📖" },
+    { text: draft.coreQuestion, emoji: "💬" },
+    { text: draft.conversationGuide, emoji: "⏱️" },
+    { text: draft.parentLine }, { text: draft.optionalFollowup },
+    { text: draft.cta, emoji: /저장/.test(draft.cta) ? "🔖" : /댓글/.test(draft.cta) ? "✍️" : "✨" },
+    { text: draft.hashtags.join(" ") },
+    { text: sourceCredit.map(source => `출처: ${source.title}${source.publisher ? ` · ${source.publisher}` : ""}${source.url ? `\n${source.url}` : " · 직접 제공한 원문"}`).join("\n"), emoji: "🔗" },
+  ]);
   return captionPackageSchema.parse({ ...draft, sourceCredit, contentRevision: revisionId, fullCaption });
 }
 function validateCaption(draft: z.infer<typeof captionDraftSchema>, metadata: FamilyDialogueMetadata): ReviewFlag[] {
@@ -147,7 +163,7 @@ function failure(input: FamilyGenerateInput, revisionId: number, status: FamilyP
 /** Pure editorial proposal. Only immutable evidence/stage records are persisted here, never content copy. */
 export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: Channel, revision: { id: number; payload: Record<string, unknown> }, input: FamilyGenerateInput, executionPlan: AiExecutionPlan, options: { budget?: LlmBudget; allowPaidRetry?: boolean } = {}): Promise<FamilyProposal> {
   if (revision.id !== input.baseRevision) throw new HttpError(409, "요청한 편집 버전과 현재 원고가 다릅니다. 기존 문구를 유지했습니다.");
-  const existing = copyOf(revision.payload), savedMetadata = familyMetadataFromPayload(revision.payload);
+  const existing = copyOf(revision.payload), savedMetadata = familyMetadataFromPayload(revision.payload), legacyCopy = existing ? null : legacyFamilyCopy(revision.payload);
   const runs: GenerationRun[] = [], context: FamilyStageContext = { db, itemId: item.id, channelId: channel.id, baseRevision: revision.id, requestId: input.requestId, plan: executionPlan, budget: options.budget ?? new LlmBudget(Math.min(12, Math.max(0, channel.budget.llmCallsPerRun))), runs, allowPaidRetry: options.allowPaidRetry, startedAt: Date.now() };
   let copy: CardCopyV2, metadata: FamilyDialogueMetadata, bundle: FamilyEvidenceBundle;
   const flags: ReviewFlag[] = [];
@@ -164,7 +180,7 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
     // cannot choose another item's record ID or retarget an earlier fact set.
     let analysis: SourceAnalysis = { ...analysisFields, sourceAnalysisId: `analysis-${familyHash({ snapshot: snapshot.id, analysisFields })}` };
     analysis = await putFamilyEvidence(db, { id: analysis.sourceAnalysisId, itemId: item.id, channelId: channel.id, kind: "source_analysis", sourceSnapshotId: snapshot.id, fingerprint: familyHash({ snapshot: snapshot.id, analysis }), payload: analysis });
-    const planned = await runFamilyEditorialStage(context, { stage: "editorial_plan", role: "card_copy", schema: editorialPlanSchema, prompt: FAMILY_EDITORIAL_PROMPTS.plan, data: { sourceAnalysis: analysis, articleBody: sourceInput.articleBody, channelSettings: { name: channel.name, audience: channel.audience, editorialGuide: channel.editorialGuide }, currentQuestion: savedMetadata?.editorialPlan.coreQuestion ?? null, instructions: input.instructions ?? "" } });
+    const planned = await runFamilyEditorialStage(context, { stage: "editorial_plan", role: "card_copy", schema: editorialPlanSchema, prompt: [FAMILY_EDITORIAL_PROMPTS.plan, legacyCopy ? LEGACY_FAMILY_CONVERSION_RULES : ""].filter(Boolean).join("\n\n"), data: { sourceAnalysis: analysis, articleBody: sourceInput.articleBody, channelSettings: { name: channel.name, audience: channel.audience, editorialGuide: channel.editorialGuide }, contentKind: item.kind, existingLegacyCopy: legacyCopy, currentQuestion: savedMetadata?.editorialPlan.coreQuestion ?? null, instructions: input.instructions ?? "" } });
     if (planned.status !== "ready" || !planned.data) return failure(input, revision.id, planned.status === "needs_source" ? "needs_source" : "needs_review", planned.reviewFlags, { generationRuns: runs, sourceAnalysis: analysis });
     const researched = await researchFamilyResources(context, { snapshot, analysis, editorialPlan: planned.data, needsDefinition: planned.data.conceptMode === "scientific_explanation" });
     const evidenceSet = await createFamilyEvidenceSet(db, item, snapshot, analysis, researched.data, researched.sources);
@@ -172,9 +188,10 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
     const evidenceBinding = { evidenceSetId: evidenceSet.evidenceSetId, sourceSnapshotId: snapshot.id, sourceAnalysisId: analysis.sourceAnalysisId, resourceResearchId: researched.data.resourceResearchId };
     if (existing && savedMetadata && Object.values(savedMetadata.fieldLocks).some(Boolean) && familyHash(savedMetadata.evidenceBinding) !== familyHash(evidenceBinding)) return failure(input, revision.id, "needs_review", [flag("fieldLocks", "locked_evidence_changed", "원문·근거 버전이 바뀌었습니다. 잠긴 문구의 근거를 바꾸지 않도록 전체 제안을 중단했습니다. 잠금을 유지한 부분 수정 또는 확인 후 잠금 해제를 선택해 주세요.")], { generationRuns: runs });
     const readingProfile = readingProfileForTemplateKey(input.templateKey);
-    const brand = { ...brandFor(channel, existing), ...(readingProfile ? { logoAssetId: READING_PROFILE_LOGO_ID } : {}) };
-    const generated = await runFamilyEditorialStage(context, { stage: "card_copy", role: "card_copy", schema: draftSchema, prompt: FAMILY_EDITORIAL_PROMPTS.copy,
-      data: { articleBody: sourceInput.articleBody, sourceSnapshotId: snapshot.id, evidenceBinding, sourceAnalysis: analysis, editorialPlan: planned.data, resourceResearch: researched.data, visitSettings: context.plan.editorial, channelSettings: brand, brandAssets: [brand.logoAssetId], templateContract: { templateKey: input.templateKey, formatId: FAMILY_FORMAT_ID, ...(readingProfile ? { fixedTypography: { doNotShrink: true, countExplicitLineBreaks: true, overflowAction: "문구를 다시 작성하되 발언·전망의 조건과 핵심 근거는 보존한다.", fields: readingProfile.pages.flatMap(page => page.textBoxes.map(box => ({ field: box.field, width: box.width, height: box.height, fontFamily: box.fontFamily ?? "Pretendard", fontWeight: box.fontWeight, effectiveFontWeight: box.effectiveFontWeight ?? (box.fontFamily ? box.fontWeight : box.fontWeight >= 700 ? 700 : box.fontWeight >= 500 ? 600 : 400), fontSize: box.fontSize, lineHeight: box.lineHeight, maxLines: box.maxLines, letterSpacing: box.letterSpacing ?? 0, align: box.align }))) }, readingBodyMapping: readingProfile.sourceStyleId ? "2장 P02_READING_BODY에는 facts와 caveat를 빈 줄로 이어, 확인된 사실과 주체·시점·조건이 함께 읽히는 뉴스 본문을 만든다. 3장 P03_READING_BODY는 기존 takeaway 필드 안에서 의미·조건·남은 질문을 간결하게 연결한다. 남은 질문은 4장의 중심 질문으로 이어지게 하고 새 사실·근거를 만들지 않는다. 각 기존 필드의 스키마 글자 수 한도를 그대로 지키며, 길이를 줄이려고 발언·전망·불확실성을 확정된 사실로 바꾸지 않는다. 7장 추가 활동이 있으면 homeActivity.action 뒤에 label/action을 빈 줄로 이어 같은 영역에 표시한다. 전체 합산 길이와 실제 서체·자간·정렬을 고려한다." : "2장 사실과 caveat를 빈 줄로 이어 본문에 표시한다. 3장은 takeaway를 본문으로 표시한다. 7장 추가 활동이 있으면 homeActivity.action 뒤에 label/action을 빈 줄로 이어 같은 영역에 표시한다. 전체 합산 길이를 고려한다." } : {}) }, existingCopyAndLocks: existing ? { copy: existing, fieldLocks: savedMetadata?.fieldLocks ?? {} } : null, instructions: input.instructions ?? "" },
+    const priorBrand = brandFor(channel, existing, item.subcategory, revision.payload);
+    const brand = { ...priorBrand, ...(readingProfile && !isHighscoopChannel(channel.slug) && !(existing && isRegisteredProfileAssetId(priorBrand.logoAssetId)) ? { logoAssetId: READING_PROFILE_LOGO_ID } : {}) };
+    const generated = await runFamilyEditorialStage(context, { stage: "card_copy", role: "card_copy", schema: draftSchema, prompt: [FAMILY_EDITORIAL_PROMPTS.copy, legacyCopy ? LEGACY_FAMILY_CONVERSION_RULES : "", highscoopTitlePrompt(channel.slug, "family")].filter(Boolean).join("\n\n"),
+      data: { articleBody: sourceInput.articleBody, sourceSnapshotId: snapshot.id, evidenceBinding, sourceAnalysis: analysis, editorialPlan: planned.data, resourceResearch: researched.data, visitSettings: context.plan.editorial, channelSettings: brand, brandAssets: [brand.logoAssetId], templateContract: { templateKey: input.templateKey, formatId: FAMILY_FORMAT_ID, ...(readingProfile ? { fixedTypography: { doNotShrink: true, countExplicitLineBreaks: true, overflowAction: "문구를 다시 작성하되 발언·전망의 조건과 핵심 근거는 보존한다.", fields: readingProfile.pages.flatMap(page => page.textBoxes.map(box => ({ field: box.field, width: box.width, height: box.height, fontFamily: box.fontFamily ?? "Pretendard", fontWeight: box.fontWeight, effectiveFontWeight: box.effectiveFontWeight ?? (box.fontFamily ? box.fontWeight : box.fontWeight >= 700 ? 700 : box.fontWeight >= 500 ? 600 : 400), fontSize: box.fontSize, lineHeight: box.lineHeight, maxLines: box.maxLines, letterSpacing: box.letterSpacing ?? 0, align: box.align }))) }, readingBodyMapping: readingProfile.sourceStyleId ? "2장 P02_READING_BODY에는 facts와 caveat를 빈 줄로 이어, 확인된 사실과 주체·시점·조건이 함께 읽히는 뉴스 본문을 만든다. 3장 P03_READING_BODY는 기존 takeaway 필드 안에서 의미·조건·남은 질문을 간결하게 연결한다. 남은 질문은 4장의 중심 질문으로 이어지게 하고 새 사실·근거를 만들지 않는다. 각 기존 필드의 스키마 글자 수 한도를 그대로 지키며, 길이를 줄이려고 발언·전망·불확실성을 확정된 사실로 바꾸지 않는다. 7장 추가 활동이 있으면 homeActivity.action 뒤에 label/action을 빈 줄로 이어 같은 영역에 표시한다. 전체 합산 길이와 실제 서체·자간·정렬을 고려한다." : "2장 사실과 caveat를 빈 줄로 이어 본문에 표시한다. 3장은 takeaway를 본문으로 표시한다. 7장 추가 활동이 있으면 homeActivity.action 뒤에 label/action을 빈 줄로 이어 같은 영역에 표시한다. 전체 합산 길이를 고려한다." } : {}) }, existingCopyAndLocks: existing ? { copy: existing, fieldLocks: savedMetadata?.fieldLocks ?? {} } : legacyCopy ? { copy: legacyCopy, fieldLocks: {}, conversion: LEGACY_FAMILY_CONVERSION_RULES } : null, contentKind: item.kind, instructions: input.instructions ?? "" },
       force: !!input.instructions, validate: data => {
         const errors = validateFamilyEvidenceReferences(data.cardCopy, bundle, planned.data!, data.parentGuide);
         if (familyHash(data.editorialPlan) !== familyHash(planned.data)) errors.push(flag("editorialPlan", "plan_changed", "확정한 중심 질문·개념·사고 기능을 문구 단계에서 임의로 바꾸지 않았는지 확인해 주세요."));
@@ -187,7 +204,8 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
     copy.templateKey = input.templateKey;
     const outro = copy.pages.find(page => page.id === "outro")!;
     if (outro.id === "outro") outro.fields = { ...outro.fields, ...brand };
-    metadata = { editorialPlan: planned.data, evidenceBinding, parentGuide: generated.data.parentGuide, pageDesigns: savedMetadata?.pageDesigns ?? defaultPageDesigns(), fieldLocks: savedMetadata?.fieldLocks ?? {}, captionPackage: null, visualBriefs: savedMetadata?.visualBriefs ?? {}, editorialReview: null, generationRuns: [], dependencies: { caption: "not_generated", visuals: savedMetadata && Object.keys(savedMetadata.visualBriefs).length ? "needs_review" : "not_generated", review: "not_generated", render: "needs_review" } };
+    const reusedCoverId = legacyCopy && !legacyCopy.cover.background ? await reuseLegacyFamilyCover(db, item, revision) : null;
+    metadata = { editorialPlan: planned.data, evidenceBinding, parentGuide: generated.data.parentGuide, pageDesigns: savedMetadata?.pageDesigns ?? (legacyCopy ? legacyFamilyPageDesigns(legacyCopy, reusedCoverId) : defaultPageDesigns()), fieldLocks: savedMetadata?.fieldLocks ?? {}, captionPackage: null, visualBriefs: savedMetadata?.visualBriefs ?? {}, editorialReview: null, generationRuns: [], dependencies: { caption: "not_generated", visuals: savedMetadata && Object.keys(savedMetadata.visualBriefs).length ? "needs_review" : "not_generated", review: "not_generated", render: "needs_review" } };
     if (readingProfile && (!existing || existing.templateKey !== readingProfile.templateKey)) metadata.pageDesigns = readingProfileDesigns(readingProfile, metadata.pageDesigns);
     if (existing && savedMetadata) {
       const lockedChanges = validateFamilyLockedFields(existing, copy, metadata.fieldLocks);
@@ -203,7 +221,8 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
   if (input.scope === "page" || input.scope === "field") {
     const allowed = writablePaths(copy, metadata, input), targetFieldHash = familyTargetHash(copy, metadata, allowed);
     if (input.targetFieldHash && input.targetFieldHash !== targetFieldHash) throw new HttpError(409, "선택한 문구가 변경됐습니다. 현재 입력을 유지했으니 최신 저장본으로 다시 요청해 주세요.");
-    const result = await runFamilyEditorialStage(context, { stage: "partial_copy", role: "card_copy", schema: partialOutputSchema, prompt: FAMILY_EDITORIAL_PROMPTS.partial,
+    const titlePrompt = input.pageId === "cover" && allowed.some(path => path === "pages.cover.fields.headline" || path === "pages.cover.fields.subtitle") ? highscoopTitlePrompt(channel.slug, "family") : "";
+    const result = await runFamilyEditorialStage(context, { stage: "partial_copy", role: "card_copy", schema: partialOutputSchema, prompt: [FAMILY_EDITORIAL_PROMPTS.partial, titlePrompt, titlePrompt ? "이번 부분 수정 응답은 기존 partial_copy patches 스키마만 사용하며 허용된 path의 값에만 새 문구를 넣는다. 전체 카드와 후보 배열을 반환하지 않는다." : ""].filter(Boolean).join("\n\n"),
       data: { baseRevision: revision.id, targetFieldHash, allowedFieldPaths: allowed, editorialPlan: metadata.editorialPlan, evidenceBinding: metadata.evidenceBinding, evidenceSet: bundle.evidenceSet, articleBody: bundle.snapshot.sources.find(source => source.id === bundle.snapshot.primarySourceId)!.text, cardCopy: copy, fieldLocks: metadata.fieldLocks, instructions: input.instructions ?? "" }, force: true });
     if (result.status !== "ready" || !result.data) return { ...base(), copy: null, status: "needs_review", reviewFlags: result.reviewFlags, targetFieldHash };
     const patched = applyFamilyFieldPatches(copy, result.data.patches, allowed, metadata.fieldLocks), nextMetadata = canonicalQuestion(patched, metadata);

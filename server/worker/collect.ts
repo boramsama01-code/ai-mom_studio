@@ -45,6 +45,9 @@ import type { NoticePayload } from "../../shared/payloads";
 import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { itemPrimarySource } from "../services/itemSources";
 import { preserveCardCopy } from "../../shared/cardCopy";
+import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
+import { generateFamilySourceDraft } from "../services/familySourceDraft";
+import type { AiExecutionPlan } from "../../shared/aiProvenance";
 
 export type CollectOptions = {
   trigger: "manual" | "worker" | "cli" | "schedule";
@@ -444,7 +447,7 @@ export async function extractForItem(
   officials?: Awaited<ReturnType<typeof loadOfficials>>,
   provider?: AiProvider,
   templateKey?: string,
-  selections?: { summary: AiSelection; copy: AiSelection },
+  selections?: { summary: AiSelection; copy: AiSelection; familyPlan?: AiExecutionPlan; explicitRetry?: boolean; requestId?: string },
 ) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
   if (!item) return { ok: false as const, kind: "no_source", error: "항목 없음" };
@@ -467,11 +470,17 @@ export async function extractForItem(
   const { cardCopy: _summaryCopy, ...facts } = r.data;
   const payload: NoticePayload = { ...facts };
   const [priorRevision] = item.currentRevisionId ? await db.select().from(contentRevisions).where(eq(contentRevisions.id, item.currentRevisionId)) : [];
+  const selectedTemplate = templateKey ?? channel.cardTemplate;
+  if (!priorRevision?.payload.cardCopy && payload.relevance !== "irrelevant" && readingProfileForTemplateKey(selectedTemplate)) {
+    const scheduleStatus = computeScheduleStatus(payload.schedules, now);
+    const family = await generateFamilySourceDraft(db, item, channel, selectedTemplate!, { budget, plan: selections?.familyPlan, explicitRetry: selections?.explicitRetry, requestId: selections?.requestId, initialPayload: payload, noticeState: { scheduleStatus, evidenceStatus: computeEvidenceStatus(doc, payload, offs), relevance: payload.relevance } });
+    return family.ok ? { ...family, scheduleStatus } : { ok: false as const, kind: "api" as const, error: family.error };
+  }
   const warnings: string[] = [];
   let copyModel: string | null = null;
   const totalUsage = { ...r.usage };
   if (!priorRevision?.payload.cardCopy && payload.relevance !== "irrelevant") {
-    const copy = await generateCardCopy({ kind: item.kind, title: item.title, payload, templateKey: templateKey ?? channel.cardTemplate, channelName: channel.name, sources, budget, ...copyAi });
+    const copy = await generateCardCopy({ kind: item.kind, title: item.title, payload, templateKey: selectedTemplate, channelName: channel.name, channelSlug: channel.slug, sources, budget, ...copyAi });
     if (copy.usage) { totalUsage.inputTokens += copy.usage.inputTokens; totalUsage.outputTokens += copy.usage.outputTokens; }
     if (copy.ok) { payload.cardCopy = copy.data; copyModel = copy.model; }
     else warnings.push(`기사 요약은 저장했습니다. 카드 문구는 완성하지 못했습니다: ${copy.error} 카드 편집에서 문구만 다시 제안받을 수 있습니다.`);

@@ -19,6 +19,8 @@ import { resolveChannelAiSettings } from "./channelAi";
 import { AiServiceError } from "./llm";
 import { runSourceGeneration } from "./sourceGeneration";
 import { sha256 } from "./text";
+import { cardImagePrompts } from "../../shared/cardImagePromptDb";
+import { studioImagePrompt, type CardImagePromptView } from "../../shared/studioImagePrompt";
 
 export const CARD_PAGE_ARTWORK_KIND = "card_page_art";
 export const CARD_PAGE_UPLOAD_MAX_BYTES = 8 * 1024 * 1024;
@@ -36,6 +38,7 @@ export type CardPageArtworkInput = {
   pageId: CardPageId;
   mode: CardPageArtworkSource;
   instruction?: string;
+  prompt?: string;
   imageData?: string;
   actor: string;
 };
@@ -170,13 +173,13 @@ function selectedPage(copy: CardCopy | CardCopyV2, pageId: CardPageId, pageDesig
 }
 
 /** Short transaction only: no DB connection or item lock is held during provider I/O. */
-async function pageSnapshot(db: DB, input: CardPageArtworkInput) {
+async function pageSnapshot(db: DB, input: { channelId: number; itemId: number; version?: number; pageId: CardPageId }) {
   return db.transaction(async tx => {
     const [channel] = await tx.select().from(channels).where(eq(channels.id, input.channelId)).for("share");
     if (!channel?.active) throw new HttpError(409, "보관된 채널입니다. 채널을 복원한 뒤 배경을 만들어 주세요.");
     const [item] = await tx.select().from(contentItems).where(and(eq(contentItems.id, input.itemId), eq(contentItems.channelId, input.channelId))).for("update");
     if (!item) throw new HttpError(404, "콘텐츠를 찾을 수 없습니다.");
-    if (item.version !== input.version) throw new HttpError(409, "원고가 변경됐습니다. 최신 카드 문구를 확인한 뒤 배경을 만들어 주세요.");
+    if (input.version !== undefined && item.version !== input.version) throw new HttpError(409, "원고가 변경됐습니다. 최신 카드 문구를 확인한 뒤 배경을 만들어 주세요.");
     const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
     if (board) assertStudioActive(board);
     const [revision] = item.currentRevisionId ? await tx.select().from(contentRevisions)
@@ -188,36 +191,108 @@ async function pageSnapshot(db: DB, input: CardPageArtworkInput) {
     if (!savedDesigns.success) throw new HttpError(409, "페이지 디자인을 확인하고 저장한 뒤 배경을 만들어 주세요.");
     const page = selectedPage(savedCopy.data, input.pageId, savedDesigns.data);
     await assertGenerationActive(tx as unknown as DB);
-    return { item, revision, copy: savedCopy.data, page };
+    return { item, revision, copy: savedCopy.data, page, pageDesigns: savedDesigns.data, pageId: input.pageId };
   });
+}
+
+/** Pure prompt construction shared by preview, per-page generation and full-deck rendering. */
+export function defaultCardPageImagePrompt(input: { articleTitle: string; copy: CardCopy | CardCopyV2; pageId: CardPageId; pageDesigns?: PageDesigns; visualBriefs?: unknown }) {
+  const page = selectedPage(input.copy, input.pageId, input.pageDesigns);
+  const photoComposition = "photoComposition" in page ? page.photoComposition : undefined;
+  const visualBriefs = input.visualBriefs;
+  const pageId = "role" in page && page.role ? page.role : input.pageId;
+  const visualBrief = visualBriefs && typeof visualBriefs === "object" ? (visualBriefs as Record<string, unknown>)[pageId] : undefined;
+  return JSON.stringify({
+    use: photoComposition ? readingArtworkPrompt(photoComposition) : "An original editorial background with a calm, uncluttered central area for separately rendered Korean text. No lettering, diagrams with invented values, logos, or documentary-style depictions of real events.",
+    ...(photoComposition ? { photoComposition } : {}),
+    articleTitle: input.articleTitle, pageTitle: page.title, subtitle: page.subtitle,
+    body: "body" in page ? page.body : "", role: pageId,
+    perspectives: "columns" in page ? page.columns : undefined,
+    ...(visualBrief ? { visualBrief } : {}),
+  }, null, 2);
+}
+
+function defaultPageImagePrompt(snapshot: Awaited<ReturnType<typeof pageSnapshot>>) {
+  return defaultCardPageImagePrompt({ articleTitle: snapshot.item.title, copy: snapshot.copy, pageId: snapshot.pageId,
+    pageDesigns: snapshot.pageDesigns, visualBriefs: snapshot.revision.payload.visualBriefs });
+}
+
+const imagePromptWhere = (input: { channelId: number; itemId: number; pageId: string }) => and(
+  eq(cardImagePrompts.channelId, input.channelId), eq(cardImagePrompts.contentItemId, input.itemId), eq(cardImagePrompts.pageId, input.pageId),
+);
+
+/** A read-only prompt preview: no provider request, approval, or artwork is created. */
+export async function readCardPageImagePrompt(db: DB, input: { channelId: number; itemId: number; pageId: CardPageId }): Promise<CardImagePromptView> {
+  const snapshot = await pageSnapshot(db, input);
+  const [saved] = await db.select().from(cardImagePrompts).where(imagePromptWhere(input));
+  const selected = await resolveChannelAiSettings(db, input.channelId, "image");
+  const defaultPrompt = defaultPageImagePrompt(snapshot);
+  const background = (snapshot.page as typeof snapshot.page & { background?: Background | null }).background;
+  return { itemVersion: snapshot.item.version, revisionId: snapshot.revision.id, pageId: input.pageId,
+    promptVersion: saved?.version ?? 0, defaultPrompt, prompt: saved?.prompt ?? defaultPrompt,
+    instruction: saved?.instruction ?? "", custom: saved?.prompt != null,
+    basedOnRevisionId: saved?.basedOnRevisionId ?? null,
+    stale: !!(saved?.prompt || saved?.instruction) && saved?.basedOnRevisionId !== snapshot.revision.id,
+    model: selected.model, referenceAssetId: background?.assetId ?? null,
+    lastGeneration: saved?.lastGeneration ?? null };
+}
+
+/** Prompt-only saves are versioned independently from the article and never alter its approval. */
+export async function saveCardPageImagePrompt(db: DB, input: { channelId: number; itemId: number; pageId: CardPageId; version: number; promptVersion: number; prompt: string | null; instruction: string; actor: string }) {
+  const snapshot = await pageSnapshot(db, input);
+  await db.transaction(async tx => {
+    const [channel] = await tx.select().from(channels).where(eq(channels.id, input.channelId)).for("share");
+    if (!channel?.active) throw new HttpError(409, "채널이 보관돼 프롬프트를 저장하지 않았습니다. 입력한 지시와 기존 작업은 유지했습니다.");
+    const [item] = await tx.select().from(contentItems).where(and(eq(contentItems.id, input.itemId), eq(contentItems.channelId, input.channelId))).for("update");
+    if (!item || item.version !== input.version || item.currentRevisionId !== snapshot.revision.id) throw new HttpError(409, "원고가 변경됐습니다. 입력한 프롬프트를 보존하고 최신 저장 원고를 확인해 주세요.");
+    const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
+    if (board) assertStudioActive(board);
+    const [saved] = await tx.select().from(cardImagePrompts).where(imagePromptWhere(input));
+    if ((saved?.version ?? 0) !== input.promptVersion) throw new HttpError(409, "다른 화면에서 이미지 프롬프트를 먼저 수정했습니다. 현재 입력을 복사한 뒤 저장된 프롬프트를 다시 확인해 주세요.");
+    const values = { prompt: input.prompt, instruction: input.instruction.trim(), version: input.promptVersion + 1, basedOnRevisionId: snapshot.revision.id, updatedAt: new Date() };
+    await tx.insert(cardImagePrompts).values({ contentItemId: item.id, channelId: input.channelId, pageId: input.pageId, ...values })
+      .onConflictDoUpdate({ target: [cardImagePrompts.contentItemId, cardImagePrompts.pageId], set: values });
+    await audit(tx, { actor: input.actor, action: "save_card_image_prompt", entity: "content_item", entityId: item.id, channelId: input.channelId, detail: { pageId: input.pageId, promptVersion: values.version, custom: input.prompt !== null } });
+  });
+  return readCardPageImagePrompt(db, input);
 }
 
 /** Create an immutable proposal; applying it is an explicit, versioned card-copy save. */
 export async function createCardPageArtwork(db: DB, input: CardPageArtworkInput) {
   const imageSelection = input.mode === "ai" ? await resolveChannelAiSettings(db, input.channelId, "image") : undefined;
+  // Hash the submitted intent, not mutable saved defaults. A completed request
+  // must still replay after another tab changes those defaults.
   const intent = {
     pageBackground: true,
     pageId: input.pageId,
     mode: input.mode,
-    instruction: input.instruction?.trim() ?? "",
+    instruction: input.instruction?.trim() ?? null,
+    ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
     uploadHash: input.imageData ? sha256(input.imageData) : null,
   };
   return runSourceGeneration(db, { type: "card_render", channelId: input.channelId, itemId: input.itemId, version: input.version,
     requestId: input.requestId, intent, configuration: imageSelection ? { image: imageSelection } : undefined, actor: input.actor }, async () => {
     const snapshot = await pageSnapshot(db, input);
+    // Resolve saved directions only for the first execution, then keep this
+    // version fixed until provider output is committed or rejected.
+    const [savedPrompt] = input.mode === "ai" ? await db.select().from(cardImagePrompts).where(imagePromptWhere(input)) : [];
+    const promptVersion = savedPrompt?.version ?? 0;
+    const requestedPrompt = input.prompt ?? savedPrompt?.prompt ?? undefined;
+    const instruction = input.instruction ?? savedPrompt?.instruction ?? "";
     let normalized: Awaited<ReturnType<typeof normalizeCardPageArtwork>>;
     let model: string | null = null;
+    let submittedPrompt: string | null = null;
     if (input.mode === "upload") {
       if (!input.imageData) throw new HttpError(400, "배경으로 사용할 이미지를 선택해 주세요.");
       normalized = await decodeCardPageUpload(input.imageData);
     } else {
       const background = (snapshot.page as typeof snapshot.page & { background?: Background | null }).background;
-      const photoComposition = "photoComposition" in snapshot.page ? snapshot.page.photoComposition : undefined;
       const previous = background ? await loadCardPageArtworkAsset(db, input.itemId, input.channelId, background.assetId) : null;
       try {
+        const prompt = requestedPrompt ?? defaultPageImagePrompt(snapshot);
+        submittedPrompt = studioImagePrompt({ purpose: "cover", prompt, instruction });
         const generated = await generateStudioImage({ provider: "openai", model: imageSelection!.model, purpose: "cover",
-          prompt: JSON.stringify({ use: photoComposition ? readingArtworkPrompt(photoComposition) : "An original editorial background with a calm, uncluttered central area for separately rendered Korean text. No lettering, diagrams with invented values, logos, or documentary-style depictions of real events.", ...(photoComposition ? { photoComposition } : {}), articleTitle: snapshot.item.title, pageTitle: snapshot.page.title, subtitle: snapshot.page.subtitle, body: "body" in snapshot.page ? snapshot.page.body : "", role: "role" in snapshot.page ? snapshot.page.role : "cover", perspectives: "columns" in snapshot.page ? snapshot.page.columns : undefined }),
-          instruction: input.instruction?.trim(),
+          prompt, instruction: instruction.trim(),
           referenceImages: previous ? [`data:image/jpeg;base64,${previous.bytes.toString("base64")}`] : undefined,
           signal: currentGenerationSignal(),
         });
@@ -236,6 +311,10 @@ export async function createCardPageArtwork(db: DB, input: CardPageArtworkInput)
       const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
       if (board) assertStudioActive(board);
       await assertGenerationActive(tx as unknown as DB);
+      if (input.mode === "ai") {
+        const [latestPrompt] = await tx.select().from(cardImagePrompts).where(imagePromptWhere(input));
+        if ((latestPrompt?.version ?? 0) !== promptVersion) throw new HttpError(409, "이미지를 만드는 동안 프롬프트가 변경돼 이전 지시로 만든 그림을 적용하지 않았습니다. 새 지시와 기존 그림은 유지했습니다.", { code: "image_prompt_changed" });
+      }
       const hash = sha256(normalized.bytes);
       await tx.insert(mediaAssets).values({ channelId: input.channelId, contentItemId: input.itemId, revisionId: snapshot.revision.id,
         kind: CARD_PAGE_ARTWORK_KIND, source: input.mode, templateKey: model, sha256: hash, ...normalized,
@@ -246,6 +325,11 @@ export async function createCardPageArtwork(db: DB, input: CardPageArtworkInput)
       const source: CardPageArtworkSource = asset.source === "ai" ? "ai" : "upload";
       const response = { assetId: asset.id, version: input.version, pageId: input.pageId, source,
         credit: cardPageArtworkCredit(source) };
+      if (submittedPrompt) {
+        const lastGeneration = { assetId: asset.id, prompt: submittedPrompt, model, generatedAt: new Date().toISOString() };
+        await tx.insert(cardImagePrompts).values({ contentItemId: item.id, channelId: input.channelId, pageId: input.pageId, lastGeneration })
+          .onConflictDoUpdate({ target: [cardImagePrompts.contentItemId, cardImagePrompts.pageId], set: { lastGeneration } });
+      }
       await audit(tx, { actor: input.actor, action: "create_card_page_background", entity: "media_asset", entityId: asset.id, channelId: input.channelId,
         detail: { itemId: input.itemId, revisionId: snapshot.revision.id, pageId: input.pageId, source, model } });
       await completeGenerationResult(tx as unknown as DB, response);

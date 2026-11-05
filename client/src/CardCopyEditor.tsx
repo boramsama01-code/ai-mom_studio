@@ -16,6 +16,8 @@ import { PageBackgroundEditor, type PageArtworkResult } from "./PageBackgroundEd
 import type { StoredCardCopy } from "@shared/storedCardCopy";
 import { familyDialogueMetadataSchema, type FamilyDialogueMetadata } from "@shared/familyDialogue";
 import { FamilyDialogueEditor, familyCopyText, type FamilyDialogueResponse, type FamilyProposal } from "./FamilyDialogueEditor";
+import { readingProfileForTemplateKey } from "@shared/readingCardProfiles";
+import { collectionUsesArt } from "@shared/cardDesigns";
 
 export type CardCopyResponse = { version: number; revisionId: number; copy: CardCopy; hasSavedCopy: boolean; recoveryNotice?: string; recommendedStoryFormat?: "discussion8" | "family_dialogue_8" | null; ai?: Record<"summary" | "copy" | "image", AiSelection> };
 export type StoredCardCopyResponse = Omit<CardCopyResponse, "copy"> & { copy: StoredCardCopy } & Partial<FamilyDialogueMetadata>;
@@ -118,19 +120,22 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   const previewCurrent = preview?.signature === signature;
   const callbacks = useRef({ onSaved, onTemplateChange });
   callbacks.current = { onSaved, onTemplateChange };
+  // A visual choice is not a schema conversion. Keep the editable v1 draft and
+  // its real renderer until the operator applies the separately reviewed v2 proposal.
+  const pendingFamilyTemplate = readingProfileForTemplateKey(templateKey);
 
   function put(next: CardCopy) { copyRef.current = next; setCopy(next); }
   function adopt(next: CardCopyResponse, preserveTemplate = false) {
-    const nextCopy = preserveTemplate && templateKey ? { ...next.copy, templateKey } : next.copy;
+    const nextCopy = preserveTemplate && templateKey && !readingProfileForTemplateKey(templateKey) ? { ...next.copy, templateKey } : next.copy;
     baseRef.current = next; setBase(next); put(nextCopy);
     appliedProposal.current = null;
     setSaveError(null); setConflicting(null); setProposal(null);
-    callbacks.current.onTemplateChange?.(nextCopy.templateKey);
+    if (!pendingFamilyTemplate) callbacks.current.onTemplateChange?.(nextCopy.templateKey);
   }
   const recovery = useDraftRecovery<CardCopy | null>({
     recoveryKey: `item:${channelId}:${itemId}:card-copy`, label: "카드 문구", version: base?.version ?? 0,
     value: copy, serverValue: base?.copy ?? null, dirty, ready: !!base && !!copy,
-    parse: parseRecoveryCopy, onRestore: next => { if (next) { put(next); setProposal(null); setSaveError(null); callbacks.current.onTemplateChange?.(next.templateKey); } },
+    parse: parseRecoveryCopy, onRestore: next => { if (next) { put(next); setProposal(null); setSaveError(null); if (!pendingFamilyTemplate) callbacks.current.onTemplateChange?.(next.templateKey); } },
   });
   const busy = disabled || !!recovery.pending || rendering || familyApplying || (generating && !generation.cancelled);
   const locked = busy || saving || conflictLoading || backgroundBusy || formatConflict;
@@ -145,6 +150,7 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   }, [itemVersion]);
   useEffect(() => {
     if (!templateKey || !copyRef.current || copyRef.current.templateKey === templateKey) return;
+    if (readingProfileForTemplateKey(templateKey)) { setProposal(null); setFamilyProposal(null); return; }
     put({ ...copyRef.current, templateKey }); setProposal(null); setSaveError(null);
   }, [templateKey, !!copy]);
   useEffect(() => { setSelected(value => Math.min(value, copy?.pages.length ?? 0)); }, [copy?.pages.length]);
@@ -218,7 +224,7 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   useEffect(() => () => { if (previewUrl.current) URL.revokeObjectURL(previewUrl.current); }, []);
 
   async function saveAndRender() {
-    if (!onSaveAndRender || renderDisabled || locked || conflicting || action.current) return;
+    if (!onSaveAndRender || renderDisabled || pendingFamilyTemplate || locked || conflicting || action.current) return;
     action.current = "render";
     setRendering(true); setSaveError(null);
     try { const saved = await saveNow(); await onSaveAndRender(saved); }
@@ -227,6 +233,7 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   }
   async function generate(rebuild = false): Promise<void> {
     if (generation.unresolved && generation.pendingBody?.formatId === "family_dialogue_8") return generateFamily();
+    if (pendingFamilyTemplate && !generation.unresolved) return generateFamily();
     if (((!aiReady || (rebuild && !summaryReady)) && !generation.unresolved) || locked || conflicting || action.current) return;
     action.current = "generate";
     setGenerating(true); setAiError(null); setProposal(null);
@@ -249,14 +256,17 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
     try {
       const saved = generation.unresolved ? baseRef.current! : await saveNow();
       const source = JSON.stringify(saved.copy);
-      const result = await generation.run<FamilyProposal>(`${path}/generate`, { version: saved.version, baseRevision: saved.revisionId, formatId: "family_dialogue_8", templateKey: saved.copy.templateKey, scope: "all", ...(instructions.trim() ? { instructions: instructions.trim() } : {}) });
+      const result = await generation.run<FamilyProposal>(`${path}/generate`, { version: saved.version, baseRevision: saved.revisionId, formatId: "family_dialogue_8", templateKey: pendingFamilyTemplate?.templateKey ?? saved.copy.templateKey, scope: "all", ...(instructions.trim() ? { instructions: instructions.trim() } : {}) });
       if (!result.copy) throw new Error(result.reviewFlags?.map(flag => flag.message).join("\n") || "원문 또는 근거가 더 필요합니다. 기존 문구는 유지했습니다.");
       setFamilyProposal({ ...result, source });
     } catch (error) { setAiError(error as Error); }
     finally { action.current = null; setGenerating(false); }
   }
   async function applyFamilyProposal() {
-    if (!familyProposal?.copy || familyProposal.lateResult || familyProposal.version !== baseRef.current?.version || familyProposal.source !== JSON.stringify(copyRef.current) || locked || action.current) return;
+    // The selection may have returned to the saved V1 design while this paid
+    // proposal was running. Its unchanged copy/version alone is not consent to
+    // adopt the former eight-page selection.
+    if (!familyProposal?.copy || familyProposal.lateResult || familyProposal.version !== baseRef.current?.version || familyProposal.source !== JSON.stringify(copyRef.current) || familyProposal.copy.templateKey !== (templateKey ?? copyRef.current?.templateKey) || locked || action.current) return;
     action.current = "render"; setFamilyApplying(true); setSaveError(null);
     try {
       const saved = await api<FamilyDialogueResponse>(path, { method: "PATCH", body: { version: baseRef.current!.version, copy: familyProposal.copy, pageDesigns: familyProposal.pageDesigns, fieldLocks: familyProposal.fieldLocks ?? {}, parentGuide: familyProposal.parentGuide, captionPackage: familyProposal.captionPackage, proposalJobId: familyProposal.jobId } });
@@ -284,7 +294,7 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   }
   function applyBackground(result: PageArtworkResult, priorAssetId: number | null) {
     const current = copyRef.current, baseline = baseRef.current;
-    if (!current || current.storyFormat !== "discussion8" || baseline?.version !== result.version) return false;
+    if (!current || (current.storyFormat !== "discussion8" && result.pageId !== "cover") || baseline?.version !== result.version) return false;
     const index = result.pageId === "cover" ? 0 : current.pages.findIndex(p => p.id === result.pageId) + 1;
     if (result.pageId !== "cover" && index === 0) return false;
     const target = index === 0 ? current.cover : current.pages[index - 1];
@@ -308,11 +318,13 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   const editorialPage = pageIndex > 0 ? copy.pages[pageIndex - 1] : null;
   const pageLabel = pageIndex === 0 ? "표지" : editorialPage?.role ? `${pageIndex + 1}페이지 · ${NEWS_EDITORIAL_LABELS[editorialPage.role]}` : `${pageIndex}번째 본문`;
   const canApplyProposal = !!proposal && proposal.version === base.version && proposal.source === JSON.stringify(copy);
+  const canApplyFamilyProposal = !!familyProposal?.copy && !familyProposal.lateResult && familyProposal.version === base.version && familyProposal.source === JSON.stringify(copy) && familyProposal.copy.templateKey === (templateKey ?? copy.templateKey);
   return <section className="card-copy-editor stack" aria-labelledby={`${uid}-heading`}>
     <div className="card-copy-heading"><div><h3 id={`${uid}-heading`}>문구·미리보기</h3><p className="small muted">카드를 선택해서 글을 고치세요. 게시물 캡션과 별도로 저장합니다.</p></div><span className={`badge ${dirty ? "warn" : "ok"}`} role="status">{saving ? "문구 저장 중…" : dirty ? "저장하지 않은 수정" : base.hasSavedCopy ? "문구 저장됨" : "원고에서 가져온 문구"}</span></div>
     <RecoveryNotice recovery={recovery} formatValue={value => value ? copyText(value) : ""} />
     {base.recoveryNotice && <p className="notice warn small" role="status">{base.recoveryNotice} 문구를 저장하기 전까지 기존 저장 내용은 바뀌지 않습니다.</p>}
-    {showAi && (base.recommendedStoryFormat || copy.storyFormat === "discussion8") && <div className="card-copy-story-action"><div><strong>{base.hasSavedCopy ? "새 8장 편집기로 전환 제안" : "기사 한 편으로 8장 대화 만들기"}</strong><p className="hint">사실 2~3개, 중심 질문, 두 가지 개념 모드, 부모 대화 안내를 각각 편집합니다. 기존 원고는 새 제안을 확인하고 저장하기 전까지 유지됩니다.</p></div><button className="btn primary" disabled={locked || invalid || !!conflicting} onClick={() => void generateFamily()}>{familyApplying ? "새 버전 저장 중…" : generating ? "원문에서 새 구성 제안 중…" : base.hasSavedCopy ? "새 8장 형식 자동 제안" : "8장 카드뉴스 자동 만들기"}</button></div>}
+    {pendingFamilyTemplate && <div className="notice small stack" role="status"><strong>{pendingFamilyTemplate.label} · 8장 전환 준비</strong><p>선택한 풀세트는 새 8장 편집 형식을 사용합니다. 지금 입력한 원고와 이미지는 유지하며, 아래에서 새 제안을 확인하고 적용하면 선택한 디자인으로 전환됩니다. 디자인 선택만으로 AI를 호출하지 않습니다.</p>{!showAi && <p>자동 작업으로 바꾼 뒤 8장 제안을 요청할 수 있습니다. 현재 원고는 계속 직접 수정하고 저장할 수 있어요.</p>}</div>}
+    {showAi && (pendingFamilyTemplate || base.recommendedStoryFormat || copy.storyFormat === "discussion8") && <div className="card-copy-story-action"><div><strong>{base.hasSavedCopy ? "새 8장 편집기로 전환 제안" : "기사 한 편으로 8장 대화 만들기"}</strong><p className="hint">현재 입력을 먼저 저장하고 새 8장 구성을 제안합니다. 기존 원고는 새 제안을 확인하고 저장하기 전까지 유지됩니다. 요약·문구·이미지 등 채널에 설정한 AI의 API 요금과 한도가 적용됩니다.</p></div><button className="btn primary" disabled={locked || invalid || !!conflicting} onClick={() => void generateFamily()}>{familyApplying ? "새 버전 저장 중…" : generating ? "원문에서 새 구성 제안 중…" : base.hasSavedCopy ? "새 8장 형식 자동 제안" : "8장 카드뉴스 자동 만들기"}</button></div>}
     {showAi && (base.recommendedStoryFormat === "discussion8" || copy.storyFormat === "discussion8") && <details className="card-copy-legacy-tools"><summary>이전 카드 형식을 유지하는 도구</summary><div className="card-copy-story-action"><div><strong>뉴스 한 편에서 시작하는 8장 대화</strong><p className="hint">표지 → 요약 → 의미 → 질문 → 두 시선 → 개념 정의 → 활동 → 닫는 표지</p><p className="hint">기사 요약 {aiProviderLabels[summaryProvider]} · 문구 {aiProviderLabels[provider]} · <GuardedLink href="/settings">채널별 AI 설정</GuardedLink></p></div><button className="btn primary" disabled={locked || invalid || !!conflicting || ((!aiReady || !summaryReady) && !generation.unresolved)} onClick={() => void generate(true)}>{generating ? "원문을 확인하고 8장 구성 중…" : generation.unresolved ? "기존 AI 작업 결과 확인" : "8장 뉴스 대화로 다시 구성"}</button>{(!aiReady || !summaryReady) && <p className="hint">선택한 요약·문구 AI를 연결한 뒤 사용할 수 있습니다. 기존 문구는 직접 편집하고 저장할 수 있어요.</p>}</div></details>}
     <div hidden={!showAi && !generation.unresolved}><details className="card-copy-ai-tools"><summary>AI로 문구 다듬기</summary><div className="card-copy-ai"><label className="field">문구 작성 AI<select value={provider} disabled={locked || generation.unresolved} onChange={event => setProviderChoice(event.target.value as AiProvider)}>{aiProviders.map(p => <option key={p} value={p}>{aiProviderLabels[p]}{status.data && !status.data.text[p] ? " · 연결 필요" : ""}</option>)}</select></label><div><button className="btn" disabled={generating || locked || (!aiReady && !generation.unresolved) || invalid || !!conflicting} onClick={() => void generate()}>{generating ? "템플릿에 맞춰 작성 중…" : generation.unresolved ? "기존 AI 작업 결과 확인" : dirty || !base.hasSavedCopy ? "문구 저장 후 AI 제안받기" : "AI로 템플릿 문구 제안받기"}</button><p className="hint">선택한 템플릿에 맞는 제목·부제·본문을 제안합니다. 확인 후 적용하며, 선택한 AI의 API 요금·한도가 적용됩니다.</p></div></div>
     {providerChoice && <button className="btn ghost sm" disabled={locked || generation.unresolved} onClick={() => setProviderChoice(null)}>채널 기본 AI로 되돌리기</button>}
@@ -324,7 +336,7 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
     {generation.unresolved && <div className="stack"><p className="small muted">기존 요청의 결과를 확인합니다. 응답이 없어도 새 유료 작업을 자동으로 시작하지 않습니다.</p><div><button className="btn sm" disabled={generation.cancelling} onClick={() => void generation.cancel()}>{generation.cancelling ? "중단 확인 중…" : "AI 요청 중단"}</button></div></div>}
     {generation.cancelled && <p className="notice small" role="status">AI 요청을 중단했습니다. 직접 편집·저장을 계속할 수 있습니다.</p>}
     {generation.cancelError && <ErrorBox error={generation.cancelError} />}
-    {familyProposal?.copy && <div className="notice card-copy-proposal stack"><strong>새 8장 형식 제안 · 기존 원고는 유지 중</strong><div className="card-copy-compare"><div><h4>기존 원고</h4><pre>{copyText(copy)}</pre></div><div><h4>새 8장 원고</h4><pre>{familyCopyText(familyProposal.copy, familyProposal)}</pre></div></div>{familyProposal.reviewFlags?.map((flag, i) => <p className="hint" key={i}>{flag.message}</p>)}<div className="row"><button className="btn primary" disabled={locked || familyProposal.lateResult || familyProposal.version !== base.version || familyProposal.source !== JSON.stringify(copy)} onClick={() => void applyFamilyProposal()}>새 8장 원고로 저장·전환</button><button className="btn ghost" onClick={() => setFamilyProposal(null)}>기존 원고 유지</button></div><p className="hint">새 콘텐츠 버전으로 저장하며 이전 저장 원고는 이력에 남습니다. 전환 후 각 칸을 직접 수정할 수 있습니다.</p>{(familyProposal.lateResult || familyProposal.version !== base.version || familyProposal.source !== JSON.stringify(copy)) && <p role="alert">제안 뒤 원고가 달라졌습니다. 현재 작업을 유지하고 최신 원고로 다시 제안받아 주세요.</p>}</div>}
+    {familyProposal?.copy && <div className="notice card-copy-proposal stack"><strong>새 8장 형식 제안 · 기존 원고는 유지 중</strong><div className="card-copy-compare"><div><h4>기존 원고</h4><pre>{copyText(copy)}</pre></div><div><h4>새 8장 원고</h4><pre>{familyCopyText(familyProposal.copy, familyProposal)}</pre></div></div>{familyProposal.reviewFlags?.map((flag, i) => <p className="hint" key={i}>{flag.message}</p>)}<div className="row"><button className="btn primary" disabled={locked || !canApplyFamilyProposal} onClick={() => void applyFamilyProposal()}>새 8장 원고로 저장·전환</button><button className="btn ghost" onClick={() => setFamilyProposal(null)}>기존 원고 유지</button></div><p className="hint">새 콘텐츠 버전으로 저장하며 이전 저장 원고는 이력에 남습니다. 전환 후 각 칸을 직접 수정할 수 있습니다.</p>{!canApplyFamilyProposal && <p role="alert">제안 뒤 원고나 선택한 디자인이 달라졌습니다. 현재 작업을 유지하고 최신 원고로 다시 제안받아 주세요.</p>}</div>}
     {proposal && <div className="notice card-copy-proposal stack"><strong>AI 문구 제안 · 아직 카드에 반영하지 않았어요</strong><details open><summary>{proposal.copy.pages.length + 1}장 제안 전체 보기</summary><pre>{copyText(proposal.copy)}</pre></details><div className="row">{proposal.scope !== "all" && <button className="btn primary sm" disabled={locked || !canApplyProposal || proposal.copy.storyFormat !== copy.storyFormat || (proposal.selectedPage > 0 && !proposal.copy.pages[proposal.selectedPage - 1])} onClick={() => {
       const index = proposal.selectedPage;
       appliedProposal.current = proposal.jobId ?? null;
@@ -340,12 +352,12 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
         <label className="field" htmlFor={`${uid}-subtitle`}><span className="row between"><strong>{pageIndex === 0 ? "표지 부제" : "본문 부제"} <span className="muted small">선택</span></strong><span className="hint">{chars(page.subtitle)}자 · {limits.recommended.subtitle}자 권장</span></span><textarea ref={subtitleRef} id={`${uid}-subtitle`} rows={2} value={page.subtitle} disabled={busy} aria-invalid={!!issue("subtitle")} aria-describedby={`${uid}-subtitle-help`} onChange={event => update("subtitle", event.target.value)} /><span id={`${uid}-subtitle-help`} className={issue("subtitle") ? "card-copy-error" : "hint"}>{issue("subtitle") ?? "제목을 보충하는 짧은 문장입니다. 비워 두면 표시하지 않습니다."}</span></label>
         {bodyText !== null && <label className="field" htmlFor={`${uid}-body`}><span className="row between"><strong>카드 본문</strong><span className="hint">{chars(bodyText)}자 · {limits.recommended.body}자 권장</span></span><textarea ref={bodyRef} id={`${uid}-body`} rows={6} value={bodyText} disabled={busy} aria-invalid={!!issue("body")} aria-describedby={`${uid}-body-help`} onChange={event => update("body", event.target.value)} /><span id={`${uid}-body-help`} className={issue("body") ? "card-copy-error" : "hint"}>{issue("body") ?? (chars(bodyText) > limits.recommended.body ? `${limits.recommended.body}자를 넘었습니다. 글자가 잘리지 않도록 미리보기와 저장 안내를 확인해 주세요. 입력한 내용은 자동으로 자르지 않습니다.` : "이미지 안에 들어가는 본문입니다. 캡션·대체텍스트와 별도로 저장합니다.")}</span></label>}
         {editorialPage?.columns && <fieldset className="card-copy-columns"><legend>{editorialPage.role === "concept" ? "서로 다른 정의의 예시" : "두 가지 시선"}</legend>{editorialPage.columns.map((column, index) => <div className="stack" key={index}><label className="field">{index + 1}번 칸 제목<input id={`${uid}-column-${index}-title`} value={column.title} disabled={busy} onChange={event => updateColumn(index, "title", event.target.value)} /></label><label className="field">{index + 1}번 칸 설명<textarea id={`${uid}-column-${index}-body`} rows={4} value={column.body} disabled={busy} onChange={event => updateColumn(index, "body", event.target.value)} /><span className="hint">{chars(column.body)}자 · 100자 권장</span></label></div>)}</fieldset>}
-        {copy.storyFormat === "discussion8" && <PageBackgroundEditor key={`${channelId}:${itemId}`} channelId={channelId} itemId={itemId} pageIndex={pageIndex} background={page.background} disabled={busy || saving || conflictLoading || !!conflicting || invalid} showAi={showAi} imageReady={!!status.data?.image} imageModel={base.ai?.image.model} save={saveNow} onApply={applyBackground} onChange={next => setBackground(pageIndex, next)} onBusyChange={setBackgroundBusy} />}
+        {(copy.storyFormat === "discussion8" || pageIndex === 0 && (!copy.templateKey.startsWith("set:") || collectionUsesArt(copy.templateKey.slice(4)) || !!page.background)) && <PageBackgroundEditor key={`${channelId}:${itemId}`} channelId={channelId} itemId={itemId} pageIndex={pageIndex} background={page.background} disabled={busy || saving || conflictLoading || !!conflicting || invalid} showAi={showAi && (copy.storyFormat === "discussion8" || !copy.templateKey.startsWith("set:") || collectionUsesArt(copy.templateKey.slice(4)))} imageReady={!!status.data?.image} imageModel={base.ai?.image.model} save={saveNow} onApply={applyBackground} onChange={next => setBackground(pageIndex, next)} onBusyChange={setBackgroundBusy} />}
         {editorialPage?.resource && <div className="notice small stack"><strong>함께 볼 자료 · 확보한 원문</strong><a href={editorialPage.resource.url} target="_blank" rel="noreferrer">{editorialPage.resource.title}</a><p className="hint">이 콘텐츠에 연결된 자료의 실제 제목과 주소입니다. 방문 일정·이용 조건은 원문에서 확인하세요.</p><button className="btn ghost sm" disabled={busy} onClick={() => put({ ...copy, pages: copy.pages.map((p, i) => i === pageIndex - 1 ? { ...p, resource: undefined } : p) })}>이 참고자료 빼기</button></div>}
       </div>
     </div>
     {invalid && <p className="notice warn small" role="alert">제목과 본문은 비울 수 없습니다. 제목·부제·본문의 글자 수 안내를 확인한 뒤 저장해 주세요. 입력한 내용은 그대로 유지됩니다.</p>}
     {saveError && <ErrorBox error={saveError} />}
-    <div className="card-copy-savebar"><p className="small muted">{dirty ? "수정 내용을 저장하고 이미지에 반영하세요." : "작성한 글은 이 카드에만 반영돼요."}</p><div className="row"><button className="btn" disabled={locked || invalid || !!conflicting || (!dirty && base.hasSavedCopy)} onClick={() => void saveNow().catch(() => {})}>{saving ? "저장 중…" : "문구 저장"}</button>{onSaveAndRender && <button className="btn primary" disabled={generating || renderDisabled || locked || invalid || !!conflicting} onClick={() => void saveAndRender()}>{rendering ? "카드뉴스 만드는 중…" : `${dirty || !base.hasSavedCopy ? "저장하고 " : ""}${renderLabel}`}</button>}</div></div>
+    <div className="card-copy-savebar"><p className="small muted">{dirty ? "수정 내용을 저장하고 이미지에 반영하세요." : "작성한 글은 이 카드에만 반영돼요."}</p><div className="row"><button className="btn" disabled={locked || invalid || !!conflicting || (!dirty && base.hasSavedCopy)} onClick={() => void saveNow().catch(() => {})}>{saving ? "저장 중…" : "문구 저장"}</button>{onSaveAndRender && <button className="btn primary" disabled={generating || renderDisabled || !!pendingFamilyTemplate || locked || invalid || !!conflicting} onClick={() => void saveAndRender()}>{rendering ? "카드뉴스 만드는 중…" : `${dirty || !base.hasSavedCopy ? "저장하고 " : ""}${renderLabel}`}</button>}</div></div>
   </section>;
 }

@@ -141,13 +141,19 @@ export async function renderCollectionCover(model: CardModel, count: number, art
       text("AN INVITATION", 118, 218, 844, 60, { size: 40, weight: "semibold", align: "center" }); line(435, 316, 210, d.accent, 2);
       headline();
       text(tag, 124, 858, 832, 65, { size: 34, align: "center" });
-      line(435, 984, 210, d.accent, 2); text("다음 가능성으로의 초대", 124, 1054, 832, 55, { size: 33, align: "center" }); break;
+      line(435, 984, 210, d.accent, 2);
+      if (model.subtitle === undefined) text("다음 가능성으로의 초대", 124, 1054, 832, 55, { size: 33, align: "center" });
+      else if (model.subtitle) text(model.subtitle, 124, 1018, 832, 123, { size: 33, min: 24, align: "center", field: "cardCopy.cover.subtitle" });
+      break;
     case "r08":
       c.header(model.brandLine, page); rect(64, 164, 952, 610, d.accent, 28);
       text("NEXT / OPEN", 108, 208, 864, 60, { size: 36, weight: "semibold", color: d.onAccent });
       headline();
       await photo(64, 799, 465, 351, 24); rect(553, 799, 463, 351, "#F6FBD9", 24);
-      text(tag, 591, 848, 383, 145, { size: 38, min: 30, weight: "semibold" }); text("다음 장에서\n자세히 알아보기 →", 591, 1040, 383, 85, { size: 29, weight: "semibold" }); break;
+      text(tag, 591, 848, 383, 145, { size: 38, min: 30, weight: "semibold" });
+      if (model.subtitle === undefined) text("다음 장에서\n자세히 알아보기 →", 591, 1040, 383, 85, { size: 29, weight: "semibold" });
+      else if (model.subtitle) text(model.subtitle, 591, 1007, 383, 128, { size: 28, min: 22, weight: "semibold", field: "cardCopy.cover.subtitle" });
+      break;
     case "r09":
       rect(0, 0, 38, H, d.accent); c.header(model.brandLine, page); pill(tag, 80, 170);
       headline(); await photo(240, 684, 760, 360, 8);
@@ -157,7 +163,9 @@ export async function renderCollectionCover(model: CardModel, count: number, art
       c.header(model.brandLine, page); line(80, 173, 70, d.accent, 5);
       text(tag, 80, 223, 920, 66, { size: 32, weight: "semibold", color: d.accent });
       headline(); await photo(660, 812, 340, 305, 0);
-      text("새로운 배움은\n작은 시작에서.", 80, 901, 510, 155, { size: 43, weight: "semibold" }); break;
+      if (model.subtitle === undefined) text("새로운 배움은\n작은 시작에서.", 80, 901, 510, 155, { size: 43, weight: "semibold" });
+      else if (model.subtitle) text(model.subtitle, 80, 865, 510, 252, { size: 43, min: 26, weight: "semibold", field: "cardCopy.cover.subtitle" });
+      break;
     case "n01":
       await photo(0, 0, W, 1170); rect(0, 0, W, 1170, d.overlay ?? "#070E19", 0, 'opacity=".65"');
       c.header(model.brandLine, page); rect(80, 164, 440, 70, d.accent); text("NEWS / BRIEF", 106, 178, 390, 48, { size: 34, weight: "bold", color: d.onAccent });
@@ -243,9 +251,11 @@ export function layoutCollectionBody(model: CardModel, id: string, picture?: { d
     let y = top; const candidate: BodyEntry[] = [];
     for (const block of blocks) {
       const lines = wrapText(c.fonts.regular, block.text, size, width);
-      const labelLines = block.label && !ledger ? wrapText(c.fonts.semibold, block.label, 26, width) : [];
-      const labelHeight = labelLines.length ? 46 + (labelLines.length - 1) * 34 : 0;
-      const h = lines.length * size * 1.42 + labelHeight + (boxed ? 55 : 0);
+      const labelLines = block.label ? wrapText(c.fonts.semibold, block.label, ledger ? 28 : 26, ledger ? 205 : width) : [];
+      const labelHeight = !ledger && labelLines.length ? 46 + (labelLines.length - 1) * 34 : 0;
+      // The ledger caption occupies its own column, so a long edited caption
+      // must contribute to the row height even when the body is only one line.
+      const h = Math.max(lines.length * size * 1.42 + labelHeight + (boxed ? 55 : 0), ledger ? labelLines.length * 28 * 1.26 + 4 : 0);
       candidate.push({ block, lines, labelLines, labelHeight, y, h, size }); y += h + 42;
     }
     const total = split ? Math.max(...candidate.map(e => e.h), 0) : y - top - 42;
@@ -265,7 +275,7 @@ export function layoutCollectionBody(model: CardModel, id: string, picture?: { d
       text(String(i + 1).padStart(2, "0"), 89, y + 10, 40, 38, { size: 26, weight: "bold", color: d.onAccent });
     }
     if (ledger) {
-      text(e.block.label ?? String(i + 1).padStart(2, "0"), 80, y + 4, 205, 135, { size: 28, min: 24, weight: "semibold", color: d.accent, field: e.block.field });
+      text(e.block.label ?? String(i + 1).padStart(2, "0"), 80, y + 4, 205, e.h - 4, { size: 28, weight: "semibold", color: d.accent, field: e.block.field.replace(/\.body$/, ".subtitle") });
       line(80, y + e.h + 21, 920, d.soft, 2);
     }
     const labelY = y + (boxed ? 25 : 0);

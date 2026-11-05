@@ -28,6 +28,7 @@ import {
 } from "../../shared/schema";
 import { payloadSchemaFor } from "../../shared/payloads";
 import { collectionUsesArt } from "../../shared/cardDesigns";
+import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
 import { validateCaptions } from "../services/cardModel";
 import { CardOverflowError, CardFontError } from "../services/card";
 import { sha256 } from "../services/text";
@@ -47,7 +48,9 @@ import * as ig from "../services/instagram";
 import { audit } from "../audit";
 import { resolveStyle } from "../services/templates";
 import { cardApprovalHash, loadCardPages, planCarousel, renderCarouselPage, renderCarouselPages } from "../services/cardCarousel";
-import { loadCardPageArtwork } from "../services/cardPageArtwork";
+import { defaultCardPageImagePrompt, loadCardPageArtwork } from "../services/cardPageArtwork";
+import { cardImagePrompts } from "../../shared/cardImagePromptDb";
+import { studioImagePrompt } from "../../shared/studioImagePrompt";
 import { assertNewsEditorialResources } from "../services/newsEditorialSources";
 import { assertCanvaPublication } from "../services/canvaPublication";
 import { channelAiSelection } from "../services/channelAi";
@@ -130,6 +133,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
     if (options.regenerateCover) return { ok: false as const, code: "invalid_image_request", error: "표지의 '이 페이지 배경 다시 만들기'에서 저장된 이미지 브리프를 확인하고 요청해 주세요." };
   }
   const key = templateKey || (savedFamily.success ? savedFamily.data.templateKey : savedCopy.success ? savedCopy.data.templateKey : null) || ch.cardTemplate || "builtin:classic";
+  if (!savedFamily.success && readingProfileForTemplateKey(key)) return { ok: false as const, code: "invalid_payload", error: "선택한 디자인은 8장 원고용입니다. 기존 원고를 보존한 채 8장 구성 제안을 비교·적용한 뒤 이미지를 만들어 주세요." };
   const copy = savedCopy.success ? { ...savedCopy.data, templateKey: key } : undefined;
   const familyCopy = savedFamily.success ? { ...savedFamily.data, templateKey: key } : undefined;
   if (copy) {
@@ -156,10 +160,10 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   if (coverMode === "ai" && !cachedArt && !env.openaiKey) return { ok: false as const, code: "ai_not_configured", error: "AI 표지는 OpenAI 이미지 연결이 필요합니다. 연결 설정에서 키를 입력하거나 글자 중심 표지를 선택하세요." };
   if (coverMode === "ai" && !cachedArt && await getSetting(db, "global_stop", false)) return { ok: false as const, code: "global_stop", error: "전역 정지 상태입니다. 정지를 해제한 뒤 AI 표지를 만들어 주세요." };
   let output;
-  let newCoverArt: { bytes: Buffer; model: string } | null = null;
+  let newCoverArt: { bytes: Buffer; model: string; prompt: string; promptVersion: number } | null = null;
   let cover: CardCarousel["cover"] = { kind: "typography", credit: style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오" };
   try {
-    const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, channelSlug: ch.slug, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
+    const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, channelSlug: ch.slug, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
     const pageImages = copy || familyCopy ? await loadCardPageArtwork(db, item.id, ch.id, familyCopy ?? copy!, familyMetadata?.pageDesigns) : new Map<number, Buffer>();
     const coverBackgroundId = familyCopy ? familyMetadata?.pageDesigns.cover.background.assetId : copy?.cover.background?.assetId;
     if (coverBackgroundId) {
@@ -175,17 +179,19 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
         art = cached.bytes;
         cover = { kind: "ai", credit: "표지: AI 생성 · OpenAI", model: cached.templateKey ?? undefined };
       } else {
+        const [savedPrompt] = await db.select().from(cardImagePrompts).where(and(eq(cardImagePrompts.channelId, ch.id), eq(cardImagePrompts.contentItemId, item.id), eq(cardImagePrompts.pageId, "cover")));
+        const prompt = savedPrompt?.prompt ?? (copy ? defaultCardPageImagePrompt({ articleTitle: item.title, copy, pageId: "cover" }) : JSON.stringify({ title, topic: payload.topic, summary: payload.summary ?? payload.one_line_summary ?? payload.background, channel: ch.name }));
+        const instruction = options.regenerateCover ? options.coverInstruction?.trim() || savedPrompt?.instruction || "같은 주제를 새로운 구도로 다시 그려 주세요." : savedPrompt?.instruction;
         const generated = await generateStudioImage({
           purpose: "cover",
           model: (options.imageAi ?? channelAiSelection(ch, "image")).model,
-          prompt: JSON.stringify({ title, subtitle: copy?.cover.subtitle, topic: payload.topic, summary: payload.summary ?? payload.one_line_summary ?? payload.background, channel: ch.name }),
+          prompt, instruction,
           ...(options.regenerateCover ? {
-            instruction: options.coverInstruction?.trim() || "같은 주제를 새로운 구도로 다시 그려 주세요.",
             referenceImages: previousArt ? [`data:image/png;base64,${previousArt.bytes.toString("base64")}`] : [],
           } : {}),
         });
         art = generated.bytes;
-        newCoverArt = { bytes: art, model: generated.model };
+        newCoverArt = { bytes: art, model: generated.model, prompt: studioImagePrompt({ purpose: "cover", prompt, instruction }), promptVersion: savedPrompt?.version ?? 0 };
         cover = { kind: "ai", credit: "표지: AI 생성 · OpenAI", model: generated.model };
       }
     }
@@ -197,6 +203,10 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   }
   const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
   if (fresh.currentRevisionId !== rev.id || (options.version !== undefined && fresh.version !== options.version)) return { ok: false as const, code: "conflict", error: "생성 중 원고가 변경됐습니다. 최신 원고를 확인한 뒤 다시 만들어 주세요." };
+  if (newCoverArt) {
+    const [currentPrompt] = await db.select({ version: cardImagePrompts.version }).from(cardImagePrompts).where(and(eq(cardImagePrompts.channelId, ch.id), eq(cardImagePrompts.contentItemId, item.id), eq(cardImagePrompts.pageId, "cover")));
+    if ((currentPrompt?.version ?? 0) !== newCoverArt.promptVersion) return { ok: false as const, code: "conflict", error: "그림을 만드는 동안 프롬프트가 바뀌었습니다. 새 프롬프트와 기존 그림을 유지했습니다. 최신 요청을 확인해 주세요." };
+  }
   const [freshBoard] = await db.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id)).for("update");
   if (freshBoard) assertStudioActive(freshBoard);
   if (freshBoard && (!existingBoard || freshBoard.version !== existingBoard.version)) throw new HttpError(409, "생성 중 보드의 작업 상태가 변경되어 결과를 반영하지 않았습니다. 최신 작업에서 다시 생성하세요.");
@@ -204,7 +214,16 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   if (needsImageReview) await revokePublicationEligibility(db, item.id, "표지 그림을 새로 생성해 이전 승인을 철회했습니다. 새 그림을 검토한 뒤 다시 승인하세요.", options.actor ?? "system", now);
   await assertGenerationActive(db);
   // Acquire the source/card locks before inserting assets (and their foreign-key locks).
-  if (newCoverArt) await db.insert(mediaAssets).values({ channelId: ch.id, contentItemId: item.id, revisionId: rev.id, kind: "cover_art", source: "ai", templateKey: newCoverArt.model, mime: "image/png", width: 1024, height: 1024, bytes: newCoverArt.bytes, sha256: sha256(newCoverArt.bytes) }).onConflictDoNothing();
+  if (newCoverArt) {
+    const imageHash = sha256(newCoverArt.bytes);
+    await db.insert(mediaAssets).values({ channelId: ch.id, contentItemId: item.id, revisionId: rev.id, kind: "cover_art", source: "ai", templateKey: newCoverArt.model, mime: "image/png", width: 1024, height: 1024, bytes: newCoverArt.bytes, sha256: imageHash }).onConflictDoNothing();
+    const [savedArt] = await db.select({ id: mediaAssets.id }).from(mediaAssets).where(and(eq(mediaAssets.contentItemId, item.id), eq(mediaAssets.revisionId, rev.id), eq(mediaAssets.sha256, imageHash)));
+    if (savedArt) {
+      const lastGeneration = { assetId: savedArt.id, prompt: newCoverArt.prompt, model: newCoverArt.model, generatedAt: now.toISOString() };
+      await db.insert(cardImagePrompts).values({ contentItemId: item.id, channelId: ch.id, pageId: "cover", lastGeneration })
+        .onConflictDoUpdate({ target: [cardImagePrompts.contentItemId, cardImagePrompts.pageId], set: { lastGeneration } });
+    }
+  }
   const pages: CardCarousel["pages"] = [];
   for (const [index, page] of output.entries()) {
     const hash = sha256(page.bytes);
@@ -590,6 +609,7 @@ export async function retryDelivery(db: DB, deliveryId: number, actor: string, c
     await tx.insert(deliveryAttemptEvents).values({ deliveryId: d.id, attemptId: d.lastAttemptId, event: d.status === "unknown" ? "operator_confirmed_not_posted_and_retry" : "retry_requested", phase: d.phase, status: d.status, source: "operator", actor,
       externalContainerId: d.externalContainerId, note: d.status === "unknown" ? "운영자가 게시되지 않았음을 확인하고 재전송을 요청했습니다." : "운영자가 이 목적지만 재전송을 요청했습니다." });
     const changed = await tx.update(deliveries).set({ status: "scheduled", phase: "queued", lastError: null, errorKind: null, completedAt: null, requestStartedAt: null, dispatchStartedAt: null,
+      listState: "active", listVersion: (d.listVersion ?? 1) + 1, listUpdatedAt: now,
       leaseToken: null, leaseOwner: null, leaseExpiresAt: null, outcomeSource: null, resolutionNote: null,
       externalUrl: null, externalContainerId: d.status === "unknown" || d.outcomeSource === "operator_not_posted" || unusableContainer ? null : d.externalContainerId, updatedAt: now })
       .where(and(eq(deliveries.id, d.id), eq(deliveries.approvalId, ap.id), eq(deliveries.status, d.status))).returning({ id: deliveries.id });

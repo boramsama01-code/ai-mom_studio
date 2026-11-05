@@ -11,7 +11,7 @@ const makeImage = vi.hoisted(() => vi.fn());
 vi.mock("../server/services/studioAi", async original => ({ ...await original<object>(), generateStudioImage: (...args: unknown[]) => makeImage(...args) }));
 const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
-const { contentItems, contentRevisions, mediaAssets, approvals, deliveries, destinations } = await import("../shared/schema");
+const { channels, contentItems, contentRevisions, mediaAssets, approvals, deliveries, destinations } = await import("../shared/schema");
 let app: ReturnType<typeof createApp>;
 
 const sourcePayload = {
@@ -56,6 +56,27 @@ function binary(res: any, done: (error: Error | null, body?: Buffer) => void) {
 }
 
 describe("editable text on collected card-news pages", () => {
+  it("requires an actual eight-page copy before a reading template can be saved, previewed or rendered", async () => {
+    const { agent, H, detail, copyEndpoint, endpoint } = await setup();
+    const templateKey = "cardnews14-cinematic-v1";
+    const requests = [
+      agent.get(copyEndpoint).query({ templateKey }),
+      agent.patch(copyEndpoint).set(H).send({ version: detail.item.version, copy: { ...copy, templateKey } }),
+      agent.post(`${copyEndpoint}/preview`).set(H).send({ version: detail.item.version, copy: { ...copy, templateKey }, page: 0 }),
+      agent.post(`${copyEndpoint}/generate`).set(H).send({ version: detail.item.version, templateKey }),
+      agent.post(`${endpoint}/card`).set(H).send({ version: detail.item.version, templateKey, coverMode: "reuse" }),
+    ];
+    for (const pending of requests) {
+      const response = await pending;
+      expect(response.status, JSON.stringify(response.body)).toBe(422);
+      expect(response.body.error).toContain("8장");
+    }
+    const after = (await agent.get(endpoint)).body;
+    expect(after.current).toEqual(detail.current);
+    expect(after.item.version).toBe(detail.item.version);
+    expect(after.cards).toEqual(detail.cards);
+  });
+
   it("checks authentication, CSRF and channel scope for saved and preview copy", async () => {
     const { agent, H, detail, copyEndpoint } = await setup();
     const body = { version: detail.item.version, copy };
@@ -205,6 +226,29 @@ describe("editable text on collected card-news pages", () => {
     expect(after.revisions).toEqual(before.revisions);
     expect(after.cards).toEqual(before.cards);
     expect(after.current.payload.cardCopy).toEqual(missingTemplateCopy);
+  });
+
+  it("keeps a deleted-template V1 draft editable when the channel default is an eight-page set", async () => {
+    const { agent, H, endpoint, copyEndpoint, detail } = await setup(), db = getDb();
+    const missingTemplateCopy = { ...copy, templateKey: "custom:999999" };
+    await db.update(contentRevisions).set({ payload: { ...sourcePayload, cardCopy: missingTemplateCopy } }).where(eq(contentRevisions.id, detail.current.id));
+    const [channel] = await db.select().from(channels).where(eq(channels.id, 2));
+    await db.update(channels).set({ cardTemplate: "cardnews14-cinematic-v1" }).where(eq(channels.id, 2));
+    try {
+      const before = (await agent.get(endpoint)).body;
+      const recovered = await agent.get(copyEndpoint);
+      expect(recovered.status, JSON.stringify(recovered.body)).toBe(200);
+      expect(recovered.body).toMatchObject({ version: before.item.version, revisionId: before.current.id, hasSavedCopy: false });
+      expect(recovered.body.copy).toEqual({ ...missingTemplateCopy, templateKey: "builtin:classic" });
+      expect((await agent.get(endpoint)).body.current).toEqual(before.current);
+      const saved = await agent.patch(copyEndpoint).set(H).send({ version: recovered.body.version, copy: recovered.body.copy });
+      expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+      expect(saved.body.copy).toEqual(recovered.body.copy);
+      const [original] = await db.select().from(contentRevisions).where(eq(contentRevisions.id, detail.current.id));
+      expect(original.payload.cardCopy).toEqual(missingTemplateCopy);
+    } finally {
+      await db.update(channels).set({ cardTemplate: channel.cardTemplate }).where(eq(channels.id, 2));
+    }
   });
 
   it("previews and exports the saved text with identical body pixels, without rewriting old image files", async () => {

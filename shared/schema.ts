@@ -382,10 +382,14 @@ export const deliveries = pgTable(
     errorKind: text("error_kind"), // auth | rate_limit | terminal | transient | timeout | unknown
     requestStartedAt: ts("request_started_at"),
     completedAt: ts("completed_at"),
+    // List organization is independent from immutable publication evidence/status.
+    listState: text("list_state").$type<"active" | "archived" | "trashed">().notNull().default("active"),
+    listVersion: integer("list_version").notNull().default(1),
+    listUpdatedAt: ts("list_updated_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [uniqueIndex("deliveries_unique").on(t.approvalId, t.destinationId), index("deliveries_recovery").on(t.status, t.leaseExpiresAt)],
+  (t) => [uniqueIndex("deliveries_unique").on(t.approvalId, t.destinationId), index("deliveries_recovery").on(t.status, t.leaseExpiresAt), index("deliveries_list").on(t.channelId, t.listState)],
 );
 
 /** Append-only attempt headers; mutable progress lives on deliveries, never here. */

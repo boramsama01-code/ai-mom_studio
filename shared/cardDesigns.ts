@@ -6,7 +6,7 @@ export type CardDesign = {
   art: "lab" | "rocket" | "city" | "globe" | "fries";
   layoutId?: string; colorName?: string; overlay?: string; onSoft?: string;
 };
-/** Retained only to render previously saved work without changing its design. */
+/** All completed cover/body sets retain their original persisted identity. */
 export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
   { id: "r01", name: "캠퍼스 에디토리얼", family: "recruitment", description: "사진과 여백으로 여는 차분한 모집 안내", bg: "#F4F1E9", ink: "#163B35", accent: "#176752", soft: "#E3E9DC", onAccent: "#FFFFFF", body: "plain", art: "lab" },
   { id: "r02", name: "오픈콜", family: "recruitment", description: "큰 글자와 코발트 블루의 선명한 공고", bg: "#2447E8", ink: "#FFFFFF", accent: "#E4FF83", soft: "#3557EF", onAccent: "#173224", body: "bands", art: "rocket" },
@@ -30,7 +30,8 @@ export const PERSISTED_CARD_DESIGNS: CardDesign[] = [
   { id: "n10", name: "미니멀 업데이트", family: "news", description: "작은 업데이트 표시와 큰 제목에 집중", bg: "#FAF8F3", ink: "#22262B", accent: "#AA342B", soft: "#EEEBE3", onAccent: "#FFFFFF", body: "notes", art: "city" },
   { id: "f01", name: "Fryday · 크리스프", family: "food", description: "전체 배경 이미지와 큰 제목, 네 장의 지식·비교 카드", bg: "#2C201B", ink: "#FFF5E0", accent: "#F9CB45", soft: "#453329", onAccent: "#2C201B", body: "panels", art: "fries" },
 ];
-export const CARD_DESIGNS = PERSISTED_CARD_DESIGNS.filter(d => ["r01", "r05", "n01", "n03", "n04", "f01"].includes(d.id));
+export const CARD_DESIGNS = PERSISTED_CARD_DESIGNS;
+const COLOR_DESIGN_IDS = ["r01", "r05", "n01", "n03", "n04", "f01"];
 type Palette = Pick<CardDesign, "bg" | "ink" | "accent" | "soft" | "onAccent" | "overlay" | "onSoft"> & { suffix: string; name: string };
 const palette = (suffix: string, name: string, bg: string, ink: string, accent: string, soft: string, onAccent: string, overlay?: string, onSoft?: string): Palette => ({ suffix, name, bg, ink, accent, soft, onAccent, onSoft, ...(overlay ? { overlay } : {}) });
 const ORIGINAL_NAMES: Record<string, string> = { f01: "브라운", r01: "아이보리", r05: "미드나이트", n01: "시그널 레드", n03: "페이퍼", n04: "레몬" };
@@ -75,11 +76,14 @@ const PALETTES: Record<string, Palette[]> = {
 export function cardDesignVariants(layoutId: string): CardDesign[] {
   const base = CARD_DESIGNS.find(d => d.id === layoutId);
   if (!base) return [];
-  return [{ ...base, layoutId, colorName: ORIGINAL_NAMES[layoutId] }, ...(PALETTES[layoutId] ?? []).map(({ suffix, name, ...colors }) => ({ ...base, ...colors, id: `${layoutId}-${suffix}`, layoutId, colorName: name }))];
+  return [{ ...base, layoutId, colorName: ORIGINAL_NAMES[layoutId] ?? "기본" }, ...(PALETTES[layoutId] ?? []).map(({ suffix, name, ...colors }) => ({ ...base, ...colors, id: `${layoutId}-${suffix}`, layoutId, colorName: name }))];
 }
-export const CARD_COLOR_VARIANTS = CARD_DESIGNS.flatMap(d => cardDesignVariants(d.id));
+// Keep the existing 33 palette identities. The other completed sets expose
+// their original colour, rather than inventing new variants for old designs.
+export const CARD_COLOR_VARIANTS = CARD_DESIGNS.filter(d => COLOR_DESIGN_IDS.includes(d.id)).flatMap(d => cardDesignVariants(d.id));
 export const cardDesign = (id: string) => CARD_COLOR_VARIANTS.find(d => d.id === id) ?? PERSISTED_CARD_DESIGNS.find(d => d.id === id);
 export const collectionUsesArt = (id: string) => !["r02", "r07", "n04", "n07", "n08", "n10"].includes(cardDesign(id)?.layoutId ?? id);
-export const cardDesignOptions = () => CARD_DESIGNS.map(d => ({ key: `set:${d.id}`, name: d.name, description: d.description, kind: "builtin" as const, family: d.family, setId: d.id, pageCount: 5,
+export const cardDesignOptions = () => CARD_DESIGNS.map(d => ({ key: `set:${d.id}`, templateKey: `set:${d.id}`, name: d.name, description: d.description, kind: "builtin" as const, family: d.family, setId: d.id,
+  format: "standard" as const, cardCopyVersion: 1 as const, pageCount: 5, previewPageCount: 5, pageCountMode: "variable" as const, generation: "legacy" as const,
   colors: cardDesignVariants(d.id).map(v => ({ key: `set:${v.id}`, name: v.colorName!, bg: v.bg, ink: v.ink, accent: v.accent, ...(v.onSoft ? { secondary: v.soft } : {}) })),
 }));

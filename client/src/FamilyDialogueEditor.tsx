@@ -5,6 +5,8 @@ import type { AiSelection } from "@shared/channelAi";
 import { familyDisplayContext, familyDisplayDescriptors, familyReadingTextValues, preserveFamilyDisplayOverrides, resolveFamilyDisplay, type FamilyDisplayKey } from "@shared/familyDisplay";
 import { resolvedReadingPageDesigns } from "@shared/readingPageImages";
 import { READING_CARD_PROFILES, READING_PROFILE_LOGO_ID, readingProfileForTemplateKey, readingProfileDesigns, readingDisplayDescriptors, readingImageSlot, readingArtworkPages } from "@shared/readingCardProfiles";
+import { familyCollectionDesign, familyCollectionPageDesigns } from "@shared/familyCollectionDesigns";
+import { FAMILY_PROFILE_ASSET, FAMILY_ENDING_ASSETS, FAMILY_ENDING_FIXED_TEXT, REGISTERED_PROFILE_ASSETS, isRegisteredProfileAssetId, familyEndingAsset, selectedFamilyEnding } from "@shared/characterVariantAssets";
 import type { FamilyEvidenceView } from "@shared/familyEvidence";
 import { api, apiBlob, ApiError } from "./api";
 import { ErrorBox, fmtDate } from "./ui";
@@ -39,9 +41,14 @@ export const familyCopyText = (copy: CardCopyV2, context: FamilyCopyContext = {}
     const designs = context.pageDesigns && resolvedReadingPageDesigns(copy,context.pageDesigns);
     const pageContexts = Object.fromEntries(copy.pages.map(page => { const background = designs?.[page.id].background; return [page.id, { imageCredit: background?.kind === "image" ? context.artworkCredits?.[String(background.assetId)] ?? "배경 이미지" : "" }]; }));
     const values = familyReadingTextValues(copy, familyDisplayContext(copy, context.captionPackage), pageContexts);
-    return profile.pages.map(page => `${page.page}. ${FAMILY_PAGE_LABELS[copy.pages[page.page - 1].id]}\n${page.textBoxes.map(box => values[box.field]).filter(Boolean).join("\n")}`).join("\n\n");
+    return profile.pages.map(page => {
+      const id=copy.pages[page.page-1].id,ending=selectedFamilyEnding(id,context.pageDesigns?.[id]);
+      return `${page.page}. ${FAMILY_PAGE_LABELS[id]}\n${ending ? `${ending.label} · 전체 이미지로 적용\n고정 문구: ${FAMILY_ENDING_FIXED_TEXT.join(" · ")}` : page.textBoxes.map(box => values[box.field]).filter(Boolean).join("\n")}`;
+    }).join("\n\n");
   }
   return copy.pages.map(page => {
+  const ending=selectedFamilyEnding(page.id,context.pageDesigns?.[page.id]);
+  if(ending)return `${page.page}. ${FAMILY_PAGE_LABELS[page.id]}\n${ending.label} · 전체 이미지로 적용\n고정 문구: ${FAMILY_ENDING_FIXED_TEXT.join(" · ")}`;
   const background = context.pageDesigns?.[page.id].background;
   const display = resolveFamilyDisplay(page, { ...familyDisplayContext(copy, context.captionPackage), imageCredit: background?.kind === "image" ? context.artworkCredits?.[String(background.assetId)] ?? "배경 이미지" : "" });
   const labels = familyDisplayDescriptors(page).map(field => display[field.key] ? `${field.label}: ${display[field.key]}` : "").filter(Boolean).join("\n");
@@ -157,7 +164,9 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const generation = useGenerationRequest(channelId, itemId, "card-copy");
   const dirty = !same(editable(base), editable(draft)), parsed = familyCardCopySchema.safeParse(draft.copy), invalid = !parsed.success;
   const page = draft.copy.pages[selected], design = draft.pageDesigns[page.id];
+  const selectedEnding = selectedFamilyEnding(page.id, design);
   const readingProfile = readingProfileForTemplateKey(draft.copy.templateKey), readingSlot = readingProfile && readingImageSlot(readingProfile, page.id);
+  const collectionPalette = familyCollectionDesign(draft.copy.templateKey);
   const effectiveDesign = resolvedReadingPageDesigns(draft.copy,draft.pageDesigns)[page.id];
   const visibleDisplayFields = readingProfile ? readingDisplayDescriptors(readingProfile, page) : familyDisplayDescriptors(page);
   const retainedDisplayFields = readingProfile ? familyDisplayDescriptors(page).filter(descriptor => !visibleDisplayFields.some(visible => visible.key === descriptor.key) && Object.hasOwn(page.displayOverrides ?? {}, descriptor.key)) : [];
@@ -190,15 +199,28 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const busy = disabled || saving || rendering || backgroundBusy || !!recovery.pending || formatConflict, aiBusy = generating && !generation.cancelled;
   function put(value: FamilyDialogueResponse) { draftRef.current = value; setDraft(value); }
   function changeReadingStyle(key: string) {
-    const current = draftRef.current, profile = readingProfileForTemplateKey(key);
+    const current = draftRef.current, profile = readingProfileForTemplateKey(key), collection = familyCollectionDesign(key);
     if (current.copy.templateKey === key) return;
-    const designs = profile ? readingProfileDesigns(profile, current.pageDesigns) : Object.fromEntries(Object.entries(defaultPageDesigns()).map(([id, fallback]) => {
+    const designs = profile ? readingProfileDesigns(profile, current.pageDesigns) : collection ? familyCollectionPageDesigns(key, current.copy.templateKey, current.pageDesigns) : Object.fromEntries(Object.entries(defaultPageDesigns()).map(([id, fallback]) => {
       const previous = current.pageDesigns[id as FamilyPageId];
-      return [id, { ...fallback, previousAssetIds: [...new Set([...(previous.previousAssetIds ?? []), ...(previous.background.assetId ? [previous.background.assetId] : [])])], ...(id !== "outro" && previous.background.kind === "image" ? { background: { ...previous.background, color: fallback.background.color } } : {}) }];
+      return [id, { ...fallback, ...(previous.outroPresentation ? {outroPresentation:previous.outroPresentation} : {}), previousAssetIds: [...new Set([...(previous.previousAssetIds ?? []), ...(previous.background.assetId ? [previous.background.assetId] : [])])], ...(id !== "outro" && previous.background.kind === "image" ? { background: { ...previous.background, color: fallback.background.color } } : {}) }];
     })) as FamilyDialogueResponse["pageDesigns"];
-    const copy = { ...current.copy, templateKey: key, pages: current.copy.pages.map(value => value.id === "outro" ? { ...value, fields: { ...value.fields, logoAssetId: profile ? READING_PROFILE_LOGO_ID : "brand:space-penguin-company:20261101" } } : value) };
+    const copy = { ...current.copy, templateKey: key, pages: current.copy.pages.map(value => value.id === "outro" ? { ...value, fields: { ...value.fields, logoAssetId: isRegisteredProfileAssetId(value.fields.logoAssetId) ? value.fields.logoAssetId : profile ? READING_PROFILE_LOGO_ID : "brand:space-penguin-company:20261101" } } : value) };
     put(invalidateDerived({ ...current, copy, pageDesigns: designs })); setProposal(null); setPreviewError(null); onTemplateChange?.(key);
-    setStructureNotice("선택한 스타일의 배치와 색을 적용했습니다. 문구와 이전 이미지는 유지되며, 저장 후에도 같은 스타일로 다시 열립니다.");
+    setStructureNotice(collection ? `${collection.name}${collection.colorName ? ` · ${collection.colorName}` : ""} 컬러를 8장 전용 배치에 적용했습니다. 8장 구성과 문구·이미지·직접 지정한 배경색은 유지합니다.` : "선택한 스타일의 배치와 색을 적용했습니다. 문구와 이전 이미지는 유지되며, 저장 후에도 같은 스타일로 다시 열립니다.");
+  }
+  function chooseOutroProfile(assetId: string) {
+    if (!isRegisteredProfileAssetId(assetId)) return;
+    const current=draftRef.current;
+    const copy={...current.copy,pages:current.copy.pages.map(value=>value.id==='outro'?{...value,fields:{...value.fields,logoAssetId:assetId}}:value)};
+    put({...current,copy,dependencies:{...current.dependencies,render:'needs_review',review:current.editorialReview?'needs_review':'not_generated'}});
+    setPreviewError(null);
+  }
+  function chooseOutroPresentation(value: string) {
+    const ending=familyEndingAsset(value),previous=draftRef.current.pageDesigns.outro;
+    if(value!=='template'&&!ending)return;
+    updateDesign('outro',{...previous,outroPresentation:ending?{mode:'full_image',assetId:ending.id}:{mode:'template'}});
+    setPreviewError(null);
   }
   function adopt(value: FamilyDialogueResponse) { baseRef.current = value; setBase(value); put(value); appliedProposal.current = null; modeDrafts.current = {}; modeLockDrafts.current = {}; setStructureNotice(null); setConflict(null); setProposal(null); setSaveError(null); }
   async function reloadEvidence() {
@@ -235,7 +257,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   useEffect(() => { if (itemVersion && itemVersion > baseRef.current.version) void props.refresh(); }, [itemVersion]);
   useEffect(() => {
     if (!templateKey || templateKey === draftRef.current.copy.templateKey) return;
-    if (readingProfileForTemplateKey(templateKey) || readingProfileForTemplateKey(draftRef.current.copy.templateKey)) changeReadingStyle(templateKey);
+    if (readingProfileForTemplateKey(templateKey) || familyCollectionDesign(templateKey) || readingProfileForTemplateKey(draftRef.current.copy.templateKey)) changeReadingStyle(templateKey);
     else { put(invalidateDerived({ ...draftRef.current, copy: { ...draftRef.current.copy, templateKey } })); setProposal(null); }
   }, [templateKey]);
   useEffect(() => { setSelectedField(null); }, [selected]);
@@ -432,7 +454,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   return <section className="card-copy-editor family-dialogue-editor stack" aria-label="가족 대화 8장 카드 편집기">
     <div className="card-copy-heading"><div><span className="card-copy-kicker">가족 대화 · 8장</span><h3>카드 안의 문구와 디자인</h3><p>뉴스에서 출발해 한 가지 질문을 나눕니다. 선택한 장을 자세히 수정하고, 자동 제안은 확인한 뒤 적용하세요.</p></div><span className={`badge ${dirty ? "warn" : "ok"}`}>{saving ? "저장 중" : saveError ? "저장 실패" : dirty ? "미저장 변경" : `저장됨 · 버전 ${base.version}`}</span></div>
     <RecoveryNotice recovery={recovery} formatValue={value => copyText(value.copy, value)} />
-    <label className="field">카드뉴스 스타일<select aria-label="카드뉴스 스타일" value={readingProfile?.templateKey ?? "legacy"} disabled={busy || aiBusy || !!conflict} onChange={event => changeReadingStyle(event.target.value === "legacy" ? "builtin:classic" : event.target.value)}><option value="legacy">기존 8장 디자인</option>{READING_CARD_PROFILES.map(profile => <option key={profile.id} value={profile.templateKey}>{profile.label}{profile.sourceStyleId ? "" : " · 기존"} · 사진 {profile.images.length - 1}장</option>)}</select><span className="hint">1080×1350 · 8장. 새 스타일의 미리보기와 문구 편집은 바로 사용할 수 있으며, Canva 자동 제작은 해당 마스터 검증·등록이 완료된 뒤 가능합니다.</span></label>
+    <label className="field">카드뉴스 스타일<select aria-label="카드뉴스 스타일" value={readingProfile?.templateKey ?? (collectionPalette ? draft.copy.templateKey : "legacy")} disabled={busy || aiBusy || !!conflict} onChange={event => changeReadingStyle(event.target.value === "legacy" ? "builtin:classic" : event.target.value)}><option value="legacy">기존 8장 디자인</option>{collectionPalette && <option value={draft.copy.templateKey}>{collectionPalette.name}{collectionPalette.colorName ? ` · ${collectionPalette.colorName}` : ""} · 8장 컬러 적용</option>}{READING_CARD_PROFILES.map(profile => <option key={profile.id} value={profile.templateKey}>{profile.label}{profile.sourceStyleId ? "" : " · 기존"} · 사진 {profile.images.length - 1}장</option>)}</select><span className="hint">{collectionPalette ? "기본 세트에서 선택한 컬러를 8장 전용 배치에 적용합니다. 현재 원고의 8장 구성과 직접 지정한 배경색은 유지합니다." : "1080×1350 · 8장. 새 스타일의 미리보기와 문구 편집은 바로 사용할 수 있으며, Canva 자동 제작은 해당 마스터 검증·등록이 완료된 뒤 가능합니다."}</span></label>
     {structureNotice && <div className="notice small row between" role="status"><span>{structureNotice}</span><button className="btn sm ghost" onClick={() => setStructureNotice(null)}>안내 닫기</button></div>}
     {saveError && <ErrorBox error={saveError} />}
     {conflict && <div className="notice warn stack" role="alert"><strong>다른 곳에서 저장한 버전이 있습니다. 현재 입력은 유지했습니다.</strong><details><summary>저장본과 현재 입력 비교</summary><div className="card-copy-compare"><pre>{conflict.copy.version === 2 ? copyText(conflict.copy, conflict) : "다른 형식으로 저장된 원고입니다."}</pre><pre>{copyText(draft.copy, draft)}</pre></div><button className="btn" disabled={busy} onClick={() => { if (conflict.copy.version === 2) { recovery.clear(); adopt(conflict as FamilyDialogueResponse); } else { recovery.clear(); qc.setQueryData(queryKey, conflict); } }}>서버 저장본 불러오기</button></details></div>}
@@ -448,6 +470,20 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
         {page.id === "concept" && <label className="field">개념을 다루는 방식<select value={page.fields.mode} disabled={disabled || !!recovery.pending} onChange={event => changeMode(event.target.value as "value_definition" | "scientific_explanation")}><option value="value_definition">가치 개념 · 나의 정의 만들기</option><option value="scientific_explanation">과학 개념 · 확인된 정의 설명하기</option></select><span className="hint">과학적 정의는 확인된 근거가 필요합니다. 두 방식의 칸은 서로 다르며 자동으로 바꾸지 않습니다.</span></label>}
         {page.id === "perspectives" && !readingProfile && <label className="field">두 시선 배치<select value={page.layout === "columns" ? "columns" : "stacked"} disabled={disabled || !!recovery.pending} onChange={event => put(invalidateDerived({ ...draftRef.current, copy: { ...draftRef.current.copy, pages: draftRef.current.copy.pages.map(value => value.id === "perspectives" ? { ...value, layout: event.target.value } : value) } }))}><option value="stacked">위아래 · 기본</option><option value="columns">좌우 · 짧은 문구에 적합</option></select></label>}
         {readingProfile && <p className="hint">이 스타일은 뉴스 본문과 STEP 문구를 고정 영역에 배치합니다. 아래 원고의 보조 제목은 보관되며 일부 페이지에서는 표시되지 않습니다. 줄이 넘치면 해당 칸을 알려 드립니다.</p>}
+        {page.id==='outro'&&<fieldset className="stack family-outro-picker" data-testid="family-outro-picker"><legend>마지막 장 이미지</legend>
+          <label className="field">마지막 장 방식<select aria-label="마지막 장 방식" value={selectedEnding?.id??'template'} disabled={busy||aiBusy||!!conflict} onChange={event=>chooseOutroPresentation(event.target.value)}>
+            <option value="template">문구를 편집하는 마무리 · 프로필 이미지 선택</option>
+            {FAMILY_ENDING_ASSETS.map(asset=><option key={asset.id} value={asset.id}>{asset.label} · {asset.revision==='latest'?'추천':'이전 수정안'} · 전체 이미지로 적용</option>)}
+          </select></label>
+          {selectedEnding?<div className="notice small stack" role="status" data-testid="family-outro-full-image-notice"><strong>전체 이미지로 적용 · 이미지 속 문구 고정</strong><p>이 엔딩의 ‘구독’, ‘좋아요’, ‘@spacepenguin.co’는 이미지에 포함되어 수정되지 않습니다. 아래 입력은 보관되며 ‘문구를 편집하는 마무리’로 돌아오면 다시 표시됩니다.</p><p>스튜디오에서 8장 이미지로 출력할 수 있습니다. 현재 Canva 자동 제작은 이 전체 이미지 엔딩을 지원하지 않습니다.</p></div>:<>
+            <label className="field">마지막 장 프로필<select aria-label="마지막 장 프로필" value={page.fields.logoAssetId??''} disabled={busy||aiBusy||!!conflict} onChange={event=>chooseOutroProfile(event.target.value)}>
+              {!isRegisteredProfileAssetId(page.fields.logoAssetId)&&<option value={page.fields.logoAssetId??''}>프로필 이미지 선택</option>}
+              {REGISTERED_PROFILE_ASSETS.map(asset=><option key={asset.id} value={asset.id}>{asset.label}{asset.id===FAMILY_PROFILE_ASSET.id?' · 추천':''}</option>)}
+            </select><span className="hint">프로필 이미지는 마지막 장에만 표시됩니다. 아래 브랜드 문구·행동 안내·계정은 계속 직접 수정할 수 있습니다.</span></label>
+            {page.fields.logoAssetId===FAMILY_PROFILE_ASSET.id&&<><img src={FAMILY_PROFILE_ASSET.publicUrl} alt={FAMILY_PROFILE_ASSET.alt} width="120" height="120" style={{objectFit:'contain',borderRadius:12}}/><p className="hint">가족 프로필 수정안은 스튜디오 8장 출력에서 사용할 수 있습니다. Canva 자동 제작은 현재 연결된 기본 프로필을 사용합니다.</p></>}
+          </>}
+        </fieldset>}
+        {selectedEnding&&<p className="hint"><strong>보관 중인 템플릿 문구</strong> · 현재 완성 이미지에는 표시되지 않습니다.</p>}
         {familyFieldDescriptors(page).map(descriptor => descriptor.kind === "array" ? <fieldset className="family-facts" key={descriptor.path}><legend>{descriptor.label}</legend>{(pageValue(page, descriptor.path) as string[]).map((_value, index) => field(descriptor, `${descriptor.path}.${index}`, `${descriptor.label} ${index + 1}`))}<div className="row"><button className="btn sm" disabled={busy || (pageValue(page, descriptor.path) as string[]).length >= 3} onClick={() => updateField(descriptor, [...pageValue(page, descriptor.path) as string[], ""])}>사실 한 칸 추가</button><button className="btn sm ghost" disabled={busy || (pageValue(page, descriptor.path) as string[]).length <= 2} onClick={() => updateField(descriptor, (pageValue(page, descriptor.path) as string[]).slice(0, -1))}>마지막 사실 칸 빼기</button></div></fieldset> : field(descriptor))}
         <fieldset className="family-display-fields stack" data-testid="family-display-fields">
           <legend>표시 문구·출처·번호</legend>
@@ -473,7 +509,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
         </figure>
         <p className="hint">{readingProfile?.sourceStyleId ? "현재 입력의 배치 미리보기입니다. 저장한 뒤 ‘8장 디자인 완성’에서 이미지를 만들고 완성된 8장을 확인하세요. 이 미리보기는 유료 이미지 생성을 요청하지 않습니다." : "현재 입력의 자체 렌더입니다. 게시할 완성본은 Canva 내보내기 미리보기에서 확인하세요. 미리보기는 유료 이미지 생성을 요청하지 않습니다."}</p>
         {previewError && <ErrorBox error={previewError} retry={() => setPreviewRetry(value => value + 1)} />}
-        {page.id === "outro" && readingProfile ? <div className="notice small stack" data-testid="family-reading-outro-design"><strong>공통 마무리 · ALL 프로필</strong><p>네이비 바탕과 왼쪽 정렬을 사용하며 ALL 원본 로고는 이 장의 프로필창에 한 번 표시합니다. 마지막 문구·행동 안내·계정은 왼쪽 입력칸에서 수정할 수 있습니다.</p></div> : page.id === "outro" ? <div className="notice small stack" data-testid="family-outro-fixed-design">
+        {selectedEnding?<div className="notice small"><strong>{selectedEnding.label}</strong><p>{selectedEnding.revision==='latest'?'최근 수정안':'이전 수정안'} · 원본 전체 이미지. 직접 작성한 문구는 보관합니다.</p><a href={selectedEnding.publicUrl} target="_blank" rel="noopener noreferrer">엔딩 원본 보기 ↗</a></div>:page.id === "outro" && readingProfile ? <div className="notice small stack" data-testid="family-reading-outro-design"><strong>공통 마무리 · 선택한 프로필</strong><p>선택한 스타일의 배치와 프로필창을 사용합니다. 프로필은 이 장에만 표시하며 마지막 문구·행동 안내·계정은 왼쪽 입력칸에서 수정할 수 있습니다.</p></div> : page.id === "outro" ? <div className="notice small stack" data-testid="family-outro-fixed-design">
           <strong>승인된 닫는 표지 디자인</strong>
           <p>8장은 승인된 브랜드 마무리로, Canva의 고정 배경·중앙 정렬·기존 로고를 사용합니다. 브랜드명·브랜드 문구·계정·마지막 행동 안내는 현재 콘텐츠의 문구 입력칸에서 수정할 수 있습니다.</p>
           {!fixedOutroDesign && <><p>기존 배경·정렬 설정은 자체 렌더용으로 보관하고 있습니다. Canva로 만들려면 승인된 닫는 표지 배치를 선택하고 저장해 주세요.</p><button className="btn" disabled={busy || aiBusy || !!conflict} onClick={useApprovedOutroDesign}>승인된 닫는 표지 배치 사용</button></>}

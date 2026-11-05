@@ -4,6 +4,7 @@
 import { cardBrandName, channelBrandName } from "../../shared/branding";
 import type { CardModel } from "./card";
 import { formatScheduleLines } from "../../shared/format";
+import { captionTopicEmoji, composeReadableCaption, type CaptionSection } from "../../shared/captionStyle";
 
 type Any = Record<string, any>;
 
@@ -66,45 +67,37 @@ export function buildCaptions(args: { kind: string; payload: Any; sourceUrl: str
   telegram: string;
 } {
   const p = args.payload;
-  let body: string;
+  const topic = [p.title, p.topic, p.category, p.key_question].filter(Boolean).join(" ");
+  let sections: CaptionSection[];
   if (args.kind === "science_dialogue") {
-    body = [
-      `오늘의 과학 질문: ${p.key_question}`,
-      "",
-      ...(p.background || []),
-      "",
-      "함께 이야기해 볼 질문",
-      ...(p.discussion_questions || []).map((q: string, i: number) => `${i + 1}. ${q}`),
-      p.parent_hints?.length ? `\n부모님 진행 팁: ${p.parent_hints[0]}` : "",
-    ].join("\n");
+    sections = [
+      { text: `오늘의 과학 질문: ${p.key_question || p.topic || ""}`, emoji: captionTopicEmoji(topic, args.kind) },
+      { text: (p.background || []).filter(Boolean).join("\n"), emoji: "📖" },
+      { text: p.discussion_questions?.length ? ["함께 이야기해 볼 질문", ...p.discussion_questions.map((q: string, i: number) => `${i + 1}. ${q}`)].join("\n") : "", emoji: "💬" },
+      { text: p.parent_hints?.length ? `부모님 진행 팁: ${p.parent_hints[0]}` : "", emoji: "💡" },
+    ];
   } else if (args.kind === "current_dialogue") {
-    body = [
-      p.title,
-      "",
-      p.summary,
-      "",
-      `왜 중요할까: ${p.why_it_matters}`,
-      "",
-      "함께 이야기해 볼 질문",
-      ...(p.discussion_questions || []).map((q: string, i: number) => `${i + 1}. ${q}`),
-    ].join("\n");
+    sections = [
+      { text: p.title, emoji: captionTopicEmoji(topic, args.kind) },
+      { text: p.summary },
+      { text: p.why_it_matters ? `왜 중요할까: ${p.why_it_matters}` : "", emoji: "🔎" },
+      { text: p.discussion_questions?.length ? ["함께 이야기해 볼 질문", ...p.discussion_questions.map((q: string, i: number) => `${i + 1}. ${q}`)].join("\n") : "", emoji: "💬" },
+    ];
   } else {
-    body = [
-      p.title,
-      "",
-      p.audience ? `대상: ${p.audience}` : "",
-      ...formatScheduleLines(p.schedules || []).map((l) => `• ${l}`),
-      p.key_details ? `\n${p.key_details}` : "",
-      "",
-      "정확한 일정과 자격은 반드시 공식 공고에서 확인하세요.",
-    ].join("\n");
+    const schedules = formatScheduleLines(p.schedules || []);
+    sections = [
+      { text: p.title, emoji: captionTopicEmoji(topic, args.kind) },
+      { text: p.audience ? `대상: ${p.audience}` : "", emoji: "👥" },
+      { text: schedules.length ? ["일정", ...schedules.map(line => `• ${line}`)].join("\n") : "", emoji: "📅" },
+      { text: p.key_details || p.one_line_summary, emoji: "📌" },
+      { text: "정확한 일정과 자격은 반드시 공식 공고에서 확인하세요.", emoji: "✅" },
+    ];
   }
-  body = body.replace(/\n{3,}/g, "\n\n").trim();
   const src = args.sourceOrg ? `출처: ${args.sourceOrg}` : "";
   return {
     // 인스타그램 캡션의 URL은 클릭 링크가 아니므로 출처 기관명만 표기
-    instagram: [body, "", src].join("\n").trim(),
-    telegram: [body, "", src, args.sourceUrl ? `원문: ${args.sourceUrl}` : ""].join("\n").trim(),
+    instagram: composeReadableCaption([...sections, { text: src, emoji: "🔗" }], topic),
+    telegram: composeReadableCaption([...sections, { text: [src, args.sourceUrl ? `원문: ${args.sourceUrl}` : ""].filter(Boolean).join("\n"), emoji: "🔗" }], topic),
   };
 }
 

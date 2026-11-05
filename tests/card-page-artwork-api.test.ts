@@ -3,7 +3,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import sharp from "sharp";
 import { eq } from "drizzle-orm";
-import { channels, contentItems, contentRevisions, jobs, mediaAssets } from "../shared/schema";
+import { approvals, channels, contentItems, contentRevisions, deliveries, jobs, mediaAssets } from "../shared/schema";
+import { cardImagePrompts } from "../shared/cardImagePromptDb";
+import { studioImagePrompt } from "../shared/studioImagePrompt";
 import { emptyPayload } from "../shared/payloads";
 import type { CardCopy } from "../shared/cardCopy";
 import { discussionCardCopyFixture } from "./fixtures/discussionCardCopy";
@@ -48,6 +50,10 @@ async function fixture() {
 }
 function input(f: Awaited<ReturnType<typeof fixture>>, extra: Record<string, unknown> = {}) {
   return { version: f.item.version, requestId: randomUUID(), pageId: "body-1", mode: "upload", imageData: upload, ...extra };
+}
+function promptEndpoint(f: Awaited<ReturnType<typeof fixture>>) { return `${f.endpoint}/card-copy/image-prompt`; }
+function promptInput(f: Awaited<ReturnType<typeof fixture>>, extra: Record<string, unknown> = {}) {
+  return { version: f.item.version, promptVersion: 0, pageId: "body-1", prompt: "노트 위의 작은 망원경. 글자 없이 차분한 파란빛.", instruction: "", ...extra };
 }
 async function assets(itemId: number) {
   return getDb().select().from(mediaAssets).where(eq(mediaAssets.contentItemId, itemId));
@@ -294,5 +300,142 @@ describe("page-specific backgrounds on PostgreSQL", () => {
     expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)))[0].payload).toEqual(f.payload);
     makeImage.mockReset(); makeImage.mockRejectedValue(new AiServiceError("설정에서 OpenAI API 키를 먼저 입력하세요.", "not_configured"));
     expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f, { mode: "ai", imageData: undefined }))).status).toBe(503);
+  });
+});
+
+describe("editable image instructions before publication approval", () => {
+  it("reads the saved page's prompt without a provider call, asset, approval or prompt write", async () => {
+    const f = await fixture(); makeImage.mockReset();
+    const beforeJobs = await getDb().select().from(jobs), beforeDeliveries = await getDb().select().from(deliveries);
+    const result = await f.agent.get(promptEndpoint(f)).query({ pageId: "body-1" });
+    expect(result.status, JSON.stringify(result.body)).toBe(200);
+    expect(result.headers["cache-control"]).toContain("private"); expect(result.headers["cache-control"]).toContain("no-store");
+    expect(result.body).toMatchObject({ itemVersion: f.item.version, revisionId: f.revision.id, pageId: "body-1", promptVersion: 0,
+      custom: false, instruction: "", basedOnRevisionId: null, stale: false, referenceAssetId: null, lastGeneration: null });
+    expect(result.body.prompt).toBe(result.body.defaultPrompt);
+    expect(result.body.prompt).toContain(f.copy.pages[0].body);
+    expect(result.body.prompt).not.toContain(f.copy.pages[1].body);
+    expect(makeImage).not.toHaveBeenCalled(); expect(await assets(f.item.id)).toHaveLength(0);
+    expect(await getDb().select().from(cardImagePrompts).where(eq(cardImagePrompts.contentItemId, f.item.id))).toHaveLength(0);
+    expect(await getDb().select().from(approvals).where(eq(approvals.contentItemId, f.item.id))).toHaveLength(0);
+    expect(await getDb().select().from(jobs)).toEqual(beforeJobs); expect(await getDb().select().from(deliveries)).toEqual(beforeDeliveries);
+    expect((await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id)))[0]).toEqual(f.item);
+    expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)))[0].payload).toEqual(f.payload);
+  });
+
+  it("saves and reopens prompt edits independently, rejects stale edits, and explicitly restores the current default", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f, { instruction: "  피사체는 오른쪽에 놓아 주세요.  " });
+    makeImage.mockReset();
+    const first = await f.agent.put(endpoint).set(f.H).send(body);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body).toMatchObject({ promptVersion: 1, prompt: body.prompt, instruction: body.instruction.trim(), custom: true,
+      itemVersion: f.item.version, revisionId: f.revision.id, basedOnRevisionId: f.revision.id, stale: false });
+    expect((await f.agent.get(endpoint).query({ pageId: "body-1" })).body).toEqual(first.body);
+    const conflict = await f.agent.put(endpoint).set(f.H).send({ ...body, prompt: "다른 화면의 오래된 입력" });
+    expect(conflict.status).toBe(409);
+    expect((await f.agent.get(endpoint).query({ pageId: "body-1" })).body.prompt).toBe(body.prompt);
+    const reset = await f.agent.put(endpoint).set(f.H).send({ ...body, promptVersion: 1, prompt: null, instruction: "" });
+    expect(reset.status, JSON.stringify(reset.body)).toBe(200);
+    expect(reset.body).toMatchObject({ promptVersion: 2, custom: false, instruction: "", stale: false });
+    expect(reset.body.prompt).toBe(reset.body.defaultPrompt);
+    expect((await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id)))[0]).toEqual(f.item);
+    expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)))[0].payload).toEqual(f.payload);
+    expect(makeImage).not.toHaveBeenCalled(); expect(await assets(f.item.id)).toHaveLength(0);
+  });
+
+  it("keeps prior directions after a source edit and reports instruction-only staleness without replacing the new copy", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f, { prompt: null, instruction: "원래 그림의 노란빛을 유지해 주세요." });
+    expect((await f.agent.put(endpoint).set(f.H).send(body)).status).toBe(200);
+    const copy = structuredClone(f.copy); copy.pages[0].body = "운영자가 직접 새로 확인한 본문입니다.";
+    const next = await getDb().transaction(async tx => {
+      const revision = await createRevision(tx, { contentItemId: f.item.id, author: "operator", payload: { ...f.payload, cardCopy: copy } });
+      await tx.update(contentItems).set({ version: f.item.version + 1 }).where(eq(contentItems.id, f.item.id));
+      return revision;
+    });
+    const reopened = await f.agent.get(endpoint).query({ pageId: "body-1" });
+    expect(reopened.body).toMatchObject({ itemVersion: f.item.version + 1, revisionId: next.id, promptVersion: 1, custom: false,
+      instruction: body.instruction, basedOnRevisionId: f.revision.id, stale: true });
+    expect(reopened.body.defaultPrompt).toContain(copy.pages[0].body);
+    expect((await f.agent.put(endpoint).set(f.H).send({ ...body, promptVersion: 1, instruction: "오래된 화면의 지시" })).status).toBe(409);
+    expect((await f.agent.get(endpoint).query({ pageId: "body-1" })).body).toEqual(reopened.body);
+    expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, next.id)))[0].payload.cardCopy).toEqual(copy);
+  });
+
+  it("uses the exact saved preview instructions for an unapproved image and records the actual submitted prompt", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f, { instruction: "왼쪽은 글자를 놓을 여백으로 비워 주세요." });
+    makeImage.mockReset(); makeImage.mockResolvedValue({ bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "recorded-image-model" });
+    const saved = await f.agent.put(endpoint).set(f.H).send(body); expect(saved.status).toBe(200);
+    const preview = (await f.agent.get(endpoint).query({ pageId: "body-1" })).body;
+    const expected = studioImagePrompt({ purpose: "cover", prompt: preview.prompt, instruction: preview.instruction });
+    expect(f.item.reviewStatus).toBe("pending"); expect(f.item.publishStatus).toBe("waiting");
+    const created = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f, { mode: "ai", imageData: undefined }));
+    expect(created.status, JSON.stringify(created.body)).toBe(200); expect(makeImage).toHaveBeenCalledTimes(1);
+    const sent = makeImage.mock.calls[0][0];
+    expect(sent).toMatchObject({ purpose: "cover", prompt: preview.prompt, instruction: preview.instruction, model: preview.model });
+    expect(studioImagePrompt(sent)).toBe(expected);
+    const reopened = (await f.agent.get(endpoint).query({ pageId: "body-1" })).body;
+    expect(reopened.lastGeneration).toMatchObject({ assetId: created.body.assetId, prompt: expected, model: "recorded-image-model", generatedAt: expect.any(String) });
+    expect(reopened.prompt).toBe(preview.prompt); expect(reopened.promptVersion).toBe(1);
+    const [item] = await getDb().select().from(contentItems).where(eq(contentItems.id, f.item.id));
+    expect(item).toMatchObject({ version: f.item.version, currentRevisionId: f.revision.id, reviewStatus: "pending", publishStatus: "waiting" });
+    expect((await getDb().select().from(contentRevisions).where(eq(contentRevisions.id, f.revision.id)))[0].payload).toEqual(f.payload);
+    expect(await getDb().select().from(approvals).where(eq(approvals.contentItemId, f.item.id))).toHaveLength(0);
+  });
+
+  it("replays a completed implicit-prompt request after another screen edits the saved prompt", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f), requestBody = input(f, { mode: "ai", imageData: undefined });
+    expect((await f.agent.put(endpoint).set(f.H).send(body)).status).toBe(200);
+    makeImage.mockReset(); makeImage.mockResolvedValue({ bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "recorded-image-model" });
+    const first = await f.agent.post(f.backgroundEndpoint).set(f.H).send(requestBody);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const changed = await f.agent.put(endpoint).set(f.H).send({ ...body, promptVersion: 1, prompt: "다음 그림은 초록 식물과 붉은 돋보기로 수정." });
+    expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    const replay = await f.agent.post(f.backgroundEndpoint).set(f.H).send(requestBody);
+    expect(replay.status, JSON.stringify(replay.body)).toBe(200); expect(replay.body).toEqual(first.body);
+    expect(makeImage).toHaveBeenCalledTimes(1); expect(await assets(f.item.id)).toHaveLength(1);
+    const reopened = (await f.agent.get(endpoint).query({ pageId: "body-1" })).body;
+    expect(reopened.prompt).toBe(changed.body.prompt);
+    expect(reopened.lastGeneration.prompt).toBe(studioImagePrompt({ purpose: "cover", prompt: body.prompt, instruction: body.instruction }));
+  });
+
+  it("rejects output from an older prompt when a different screen saves new directions during generation", async () => {
+    const f = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f), entered = deferred(), release = deferred();
+    expect((await f.agent.put(endpoint).set(f.H).send(body)).status).toBe(200);
+    const old = await f.agent.post(f.backgroundEndpoint).set(f.H).send(input(f)); expect(old.status).toBe(200);
+    makeImage.mockReset(); makeImage.mockImplementationOnce(async () => { entered.resolve(); await release.promise; return { bytes: generatedPng, mimeType: "image/png", provider: "openai", model: "recorded-image-model" }; });
+    const requestBody = input(f, { mode: "ai", imageData: undefined });
+    const pending = f.agent.post(f.backgroundEndpoint).set(f.H).send(requestBody).then(response => response);
+    try {
+      await enteredWithin(entered.promise);
+      const changed = await f.agent.put(endpoint).set(f.H).send({ ...body, promptVersion: 1, prompt: "최신 편집: 바다 대신 우주 배경" });
+      expect(changed.status, JSON.stringify(changed.body)).toBe(200);
+    } finally { release.resolve(); }
+    const stale = await pending;
+    expect(stale.status, JSON.stringify(stale.body)).toBe(409); expect(stale.body.code).toBe("image_prompt_changed");
+    expect((await assets(f.item.id)).map(asset => asset.id)).toEqual([old.body.assetId]);
+    const reopened = (await f.agent.get(endpoint).query({ pageId: "body-1" })).body;
+    expect(reopened).toMatchObject({ promptVersion: 2, prompt: "최신 편집: 바다 대신 우주 배경", lastGeneration: null });
+    expect((await f.agent.post(f.backgroundEndpoint).set(f.H).send(requestBody)).body.jobStatus).toBe("failed");
+    expect(makeImage).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps prompt access scoped to authentication, CSRF, channel, item and valid page", async () => {
+    const f = await fixture(), other = await fixture(), endpoint = promptEndpoint(f), body = promptInput(f);
+    expect((await request(app).get(endpoint).query({ pageId: "body-1" })).status).toBe(401);
+    expect((await request(app).put(endpoint).send(body)).status).toBe(401);
+    expect((await f.agent.put(endpoint).send(body)).status).toBe(403);
+    const wrongChannel = endpoint.replace("/channels/2/", "/channels/1/");
+    expect((await f.agent.get(wrongChannel).query({ pageId: "body-1" })).status).toBe(404);
+    expect((await f.agent.put(wrongChannel).set(f.H).send(body)).status).toBe(404);
+    for (const pageId of ["body-9", "not-a-page"]) {
+      expect((await f.agent.get(endpoint).query({ pageId })).status).toBe(400);
+      expect((await f.agent.put(endpoint).set(f.H).send({ ...body, pageId })).status).toBe(400);
+    }
+    expect((await f.agent.put(endpoint).set(f.H).send({ ...body, prompt: " " })).status).toBe(400);
+    expect((await f.agent.put(endpoint).set(f.H).send(body)).status).toBe(200);
+    const separate = await other.agent.get(promptEndpoint(other)).query({ pageId: "body-1" });
+    expect(separate.status).toBe(200); expect(separate.body).toMatchObject({ custom: false, promptVersion: 0, lastGeneration: null });
+    expect(separate.body.prompt).not.toContain(body.prompt);
+    expect((await f.agent.get(endpoint).query({ pageId: "body-2" })).body).toMatchObject({ custom: false, promptVersion: 0, lastGeneration: null });
   });
 });
