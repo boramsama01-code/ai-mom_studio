@@ -59,15 +59,17 @@ describe("editable text on collected card-news pages", () => {
   it("requires an actual eight-page copy before a reading template can be saved, previewed or rendered", async () => {
     const { agent, H, detail, copyEndpoint, endpoint } = await setup();
     const templateKey = "cardnews14-cinematic-v1";
+    // Construct each request only after the previous one finishes: Supertest
+    // closes its ephemeral listener after a request, invalidating prebuilt URLs.
     const requests = [
-      agent.get(copyEndpoint).query({ templateKey }),
-      agent.patch(copyEndpoint).set(H).send({ version: detail.item.version, copy: { ...copy, templateKey } }),
-      agent.post(`${copyEndpoint}/preview`).set(H).send({ version: detail.item.version, copy: { ...copy, templateKey }, page: 0 }),
-      agent.post(`${copyEndpoint}/generate`).set(H).send({ version: detail.item.version, templateKey }),
-      agent.post(`${endpoint}/card`).set(H).send({ version: detail.item.version, templateKey, coverMode: "reuse" }),
+      () => agent.get(copyEndpoint).query({ templateKey }),
+      () => agent.patch(copyEndpoint).set(H).send({ version: detail.item.version, copy: { ...copy, templateKey } }),
+      () => agent.post(`${copyEndpoint}/preview`).set(H).send({ version: detail.item.version, copy: { ...copy, templateKey }, page: 0 }),
+      () => agent.post(`${copyEndpoint}/generate`).set(H).send({ version: detail.item.version, templateKey }),
+      () => agent.post(`${endpoint}/card`).set(H).send({ version: detail.item.version, templateKey, coverMode: "reuse" }),
     ];
-    for (const pending of requests) {
-      const response = await pending;
+    for (const makeRequest of requests) {
+      const response = await makeRequest();
       expect(response.status, JSON.stringify(response.body)).toBe(422);
       expect(response.body.error).toContain("8장");
     }
