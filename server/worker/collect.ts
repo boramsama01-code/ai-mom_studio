@@ -4,7 +4,7 @@ import { validSubcategory } from "../../shared/channelCategories";
  * 1) 설정 스냅샷 → 2) 공식 게시판 → 3) 공개 뉴스 검색·저장 → 4) 원문 확보 → 5) 선택적 구조화 추출
  * 실패를 "정상 0건"으로 숨기지 않는다. 처리하지 못한 자료는 사유와 함께 보존한다.
  */
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { DB } from "../db";
 import {
   channels,
@@ -139,11 +139,11 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   counts.officialFailed = 0;
   counts.officialNew = 0;
   counts.officialDuplicates = 0;
-  const boardLimit = Math.min(boards.length, Math.floor(budget.fetchCallsPerRun / 2));
+  const boardLimit = Math.min(boards.length, (budget.fetchCallsPerRun ? Math.max(1, Math.floor(budget.fetchCallsPerRun / 2)) : 0));
   const officialTargets: number[][] = [];
   for (const o of boards) {
     currentGenerationSignal()?.throwIfAborted();
-    if (counts.officialChecked >= boardLimit || counts.results >= budget.resultsPerRun) {
+    if (counts.officialChecked >= boardLimit || fetchCalls >= Math.max(boardLimit, Math.floor(budget.fetchCallsPerRun / 2)) || counts.results >= budget.resultsPerRun) {
       counts.officialDeferred = (counts.officialDeferred ?? 0) + 1;
       continue;
     }
@@ -151,7 +151,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     fetchCalls++;
     const config = officialConfig(o);
     let r: Awaited<ReturnType<typeof fetchBoardList>>;
-    try { r = await (opts.fetchBoard ?? fetchBoardList)(o.boardUrl!, o.domain!, config); }
+    try { r = await (opts.fetchBoard ?? fetchBoardList)(o.boardUrl!, o.domain!, config, undefined, { takeExtraCall: () => { currentGenerationSignal()?.throwIfAborted(); if (fetchCalls >= Math.floor(budget.fetchCallsPerRun / 2)) return false; fetchCalls++; counts.officialExtraPages = (counts.officialExtraPages ?? 0) + 1; return true; } }); }
     catch (error) { currentGenerationSignal()?.throwIfAborted(); r = { ok: false, error: error instanceof Error ? error.message : "게시판 조회 실패" }; }
     if (!r.ok || !r.entries.length) {
       const message = r.ok ? "목록을 찾지 못했습니다. 게시판 구조·접근 상태를 확인하세요." : r.error;
@@ -161,13 +161,21 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       await opts.heartbeat?.();
       continue;
     }
+    if (r.warnings?.length) errors.push(...r.warnings.map(message => ({ scope: `official:${o.id}`, message: `${o.name}: ${message}` })));
     counts.officialSucceeded++;
+    const urls = r.entries.flatMap(e => { try { return [normalizeUrl(e.url)]; } catch { return []; } });
+    const known = urls.length ? await db.select({ url: sourceDocuments.normalizedUrl }).from(sourceDocuments)
+      .innerJoin(contentItems, eq(contentItems.primarySourceId, sourceDocuments.id))
+      .where(and(eq(contentItems.channelId, channel.id), inArray(sourceDocuments.normalizedUrl, urls))) : [];
+    const knownUrls = new Set(known.map(r => r.url));
+    // New entries must not be starved by already-saved pinned posts or earlier GED pages.
+    const ordered = [...r.entries].sort((a, b) => Number(knownUrls.has(normalizeUrl(a.url))) - Number(knownUrls.has(normalizeUrl(b.url))));
     let sourceNew = 0;
     const targets: number[] = [];
     // Reserve diversity even when a single feed has hundreds of entries.
     const sourceLimit = Math.max(1, Math.ceil(budget.resultsPerRun / Math.max(2, boardLimit)));
     let accepted = 0;
-    for (const e of r.entries) {
+    for (const e of ordered) {
       currentGenerationSignal()?.throwIfAborted();
       if (counts.results >= budget.resultsPerRun || accepted >= sourceLimit) {
         counts.officialResultsDeferred = (counts.officialResultsDeferred ?? 0) + 1;
@@ -198,7 +206,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       if (saved && (saved.isNew || saved.needsFetch)) targets.push(saved.itemId);
     }
     officialTargets.push(targets);
-    await db.update(officialSources).set({ lastCheckedAt: now, lastStatus: "ok", lastError: null, lastNewCount: sourceNew }).where(eq(officialSources.id, o.id));
+    await db.update(officialSources).set({ lastCheckedAt: now, lastStatus: r.warnings?.length ? "partial" : "ok", lastError: r.warnings?.join(" · ") ?? null, lastNewCount: sourceNew }).where(eq(officialSources.id, o.id));
     await opts.heartbeat?.();
   }
   if (counts.officialDeferred) errors.push({ scope: "official_budget", message: `공식 출처 ${counts.officialDeferred}곳은 호출·결과 한도로 다음 실행에서 먼저 확인합니다.` });

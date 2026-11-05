@@ -6,7 +6,7 @@
  * 실제 학교 게시판 구조는 학교마다 달라 선택자를 운영자가 직접 확인해 입력해야 한다.
  */
 import * as cheerio from "cheerio";
-import { safeFetch, FetchFailure } from "./safeFetch";
+import { safeFetch } from "./safeFetch";
 import { decodePublicText } from "./publicTextResponse";
 
 export type BoardConfig = {
@@ -18,6 +18,7 @@ export type BoardConfig = {
   subcategory?: string;
   maxAgeDays?: number;
   recruitmentOnly?: boolean;
+  articleBaseUrl?: string; // Explicit same-domain base for relative links in official feeds.
 };
 
 export type BoardEntry = { url: string; title: string; dateText: string | null };
@@ -32,6 +33,9 @@ function officialUrl(value: string, pageUrl: string, domain: string): string | n
     const u = new URL(value, pageUrl);
     if (!/^https?:$/.test(u.protocol) || u.username || u.password || !officialHostMatches(u.hostname, domain)) return null;
     u.hash = "";
+    if (["wr_id", "DataId", "mng_no", "articleNo", "nttSn", "bbsSn"].some(k => u.searchParams.has(k))) {
+      for (const k of ["page", "pageNo", "GotoPage", "thisPage", "article.offset", "articleLimit", "totalNoticeYn", "totalBoardNo", "sop", "sst", "sod", "sfl", "stx"]) u.searchParams.delete(k);
+    }
     return u.href;
   } catch { return null; }
 }
@@ -49,7 +53,7 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
       if (out.length >= limit) return false;
       const row = $(el);
       const href = row.find('link[rel="alternate"]').attr("href") || row.find("link").first().attr("href") || row.find("link").first().text().trim();
-      const url = officialUrl(href, pageUrl, d);
+      const url = officialUrl(href, cfg.articleBaseUrl ?? pageUrl, d);
       const title = cheerio.load(row.find("title").first().text()).text().replace(/\s+/g, " ").trim().slice(0, 500);
       const rawDate = row.find("pubDate, published, updated, dc\\:date").first().text().trim();
       const date = new Date(rawDate);
@@ -90,20 +94,47 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
   return out;
 }
 
-export async function fetchBoardList(boardUrl: string, domain: string, cfg: BoardConfig, fetchImpl = safeFetch) {
+export async function fetchBoardList(boardUrl: string, domain: string, cfg: BoardConfig, fetchImpl = safeFetch, options: { takeExtraCall?: () => boolean } = {}): Promise<{ ok: true; entries: BoardEntry[]; warnings?: string[]; pages?: number } | { ok: false; error: string }> {
   try {
     if (!officialUrl(boardUrl, boardUrl, domain)) throw new Error("게시판 URL이 확인한 공식 도메인과 다릅니다.");
+    if (cfg.articleBaseUrl && !officialUrl(cfg.articleBaseUrl, boardUrl, domain)) throw new Error("RSS 원문 기준 주소가 공식 도메인과 다릅니다.");
     const host = new URL(boardUrl).hostname;
-    const res = await fetchImpl(boardUrl, { maxBytes: 2 * 1024 * 1024, timeoutMs: 10000, allowedHosts: [host, host.startsWith("www.") ? host.slice(4) : `www.${host}`] });
-    if (!officialUrl(res.finalUrl, boardUrl, domain)) throw new Error("공식 도메인 밖으로 이동했습니다.");
-    const html = decodePublicText(res.body, res.contentType);
-    const entries = parseBoardList(html, res.finalUrl, domain, cfg);
-    if (!entries.length) throw new Error(/type=["']password|captcha|접근이 제한|로그인이 필요/i.test(html)
-      ? "로그인·접근 제한 화면입니다. 원문에서 직접 확인하세요."
-      : "목록을 찾지 못했습니다. 게시판 구조 변경·빈 목록·동적 화면 여부를 확인하세요.");
-    return { ok: true as const, entries };
+    const read = async (url: string) => {
+      const res = await fetchImpl(url, { maxBytes: 2 * 1024 * 1024, timeoutMs: 10000, allowedHosts: [host, host.startsWith("www.") ? host.slice(4) : `www.${host}`] });
+      if (!officialUrl(res.finalUrl, boardUrl, domain)) throw new Error("공식 도메인 밖으로 이동했습니다.");
+      const html = decodePublicText(res.body, res.contentType);
+      const entries = parseBoardList(html, res.finalUrl, domain, cfg);
+      if (!entries.length) throw new Error(/type=["']password|captcha|접근이 제한|로그인이 필요/i.test(html)
+        ? "로그인·접근 제한 화면입니다. 원문에서 직접 확인하세요."
+        : "목록을 찾지 못했습니다. 게시판 구조 변경·빈 목록·동적 화면 여부를 확인하세요.");
+      return { html, entries };
+    };
+    const url = new URL(boardUrl);
+    const ged = cfg.format === "ged_selection" && url.hostname === "ged.kedi.re.kr" && url.pathname === "/slct/noti/slctNotiStat.do";
+    if (ged) { url.searchParams.set("pageUnit", "100"); url.searchParams.set("pageIndex", "1"); }
+    const first = await read(url.href);
+    const entries = first.entries, warnings: string[] = [];
+    let pages = 1;
+    if (ged) {
+      // Public form and fn_pageing parameters verified against GED's actual GET response.
+      const totalPages = Math.max(1, ...[...first.html.matchAll(/fn_pageing\(\s*['"]?(\d+)/g)].map(m => Number(m[1])));
+      const seen = new Set(entries.map(e => e.url));
+      for (let page = 2; page <= Math.min(totalPages, 10); page++) {
+        if (!options.takeExtraCall?.()) { warnings.push(`GED ${totalPages}페이지 중 ${pages}페이지만 확인했습니다. 호출 한도 밖의 공고는 원문에서 확인하세요.`); break; }
+        url.searchParams.set("pageIndex", String(page));
+        try {
+          const next = await read(url.href);
+          pages++;
+          const fresh = next.entries.filter(e => !seen.has(e.url));
+          if (!fresh.length) { warnings.push("GED 다음 페이지가 같은 목록을 반환했습니다. 페이지 구성을 확인하세요."); break; }
+          for (const e of fresh) { seen.add(e.url); entries.push(e); }
+        } catch (error) { warnings.push(`GED ${page}페이지 조회 실패: ${(error as Error).message}`); break; }
+      }
+      if (totalPages > 10) warnings.push(`GED 전체 ${totalPages}페이지 중 최대 10페이지만 확인합니다.`);
+    }
+    return { ok: true, entries, warnings, pages };
   } catch (e) {
-    return { ok: false as const, error: e instanceof Error ? e.message : "게시판 조회 실패" };
+    return { ok: false, error: e instanceof Error ? e.message : "게시판 조회 실패" };
   }
 }
 

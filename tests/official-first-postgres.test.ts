@@ -1,0 +1,77 @@
+import { afterAll, beforeEach, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
+import { resetDb, setTestEnv, login } from "./helpers";
+setTestEnv();
+const { getDb, closeDb } = await import("../server/db");
+const { channels, officialSources, searchRules, contentItems, sourceDocuments } = await import("../shared/schema");
+const { runCollect } = await import("../server/worker/collect");
+const { createApp } = await import("../server/app");
+const { seedOfficialCatalog, OFFICIAL_CATALOG } = await import("../server/services/officialCatalog");
+beforeEach(async () => { await resetDb(); await getDb().update(searchRules).set({ enabled: false }); });
+afterAll(closeDb);
+async function board(name: string, category = "고등입시") {
+  const [row] = await getDb().insert(officialSources).values({ channelId: 1, name, domain: "school.example", boardUrl: `https://school.example/${name}`, enabled: true, verifiedAt: new Date(), adapter: "generic_board", adapterConfig: { linkSelector: "a", subcategory: category } }).returning();
+  return row;
+}
+async function budget(fetchCallsPerRun: number, fetchTargetsPerRun: number, resultsPerRun = 20) {
+  const [ch] = await getDb().select().from(channels).where(eq(channels.id, 1));
+  await getDb().update(channels).set({ budget: { ...ch.budget, naverCallsPerRun: 0, fetchCallsPerRun, fetchTargetsPerRun, resultsPerRun } }).where(eq(channels.id, 1));
+}
+const body = async (url: string) => ({ ok: true as const, finalUrl: url, title: "모집", text: "공식 원문 내용 ".repeat(50), hash: "test", attachments: [], contentKind: "html" as const });
+it("installs official sources idempotently while preserving a paused source and custom configuration", async () => {
+  await seedOfficialCatalog(getDb());
+  const [ged] = await getDb().select().from(officialSources).where(eq(officialSources.name, "GED 영재선발 공고"));
+  await getDb().update(officialSources).set({ enabled: false, adapterConfig: { linkSelector: ".custom" } }).where(eq(officialSources.id, ged.id));
+  await seedOfficialCatalog(getDb());
+  const rows = await getDb().select().from(officialSources).where(eq(officialSources.adapter, "generic_board"));
+  expect(rows).toHaveLength(OFFICIAL_CATALOG.length);
+  expect(rows.find(r => r.id === ged.id)).toMatchObject({ enabled: false, adapterConfig: { linkSelector: ".custom" } });
+});
+it("collects official-only subcategories through the API even with no search rules or search budget", async () => {
+  await board("camp", "캠프·체험 선발모집"); await budget(4, 2);
+  const { agent, csrf } = await login(createApp());
+  const response = await agent.post("/api/collection/collect").set("x-csrf-token", csrf).send({ channelId: 1, subcategory: "캠프·체험 선발모집" });
+  expect(response.status).toBe(202);
+  const r = await runCollect(getDb(), 1, { trigger: "cli", collectionOnly: true, subcategory: "캠프·체험 선발모집", fetchBoard: async () => ({ ok: true, entries: [{ title: "중학생 캠프 모집", url: "https://school.example/camp/1", dateText: null }] }), fetchSource: body });
+  expect(r.counts).toMatchObject({ officialChecked: 1, officialNew: 1, fetchedOk: 1 });
+  const [item] = await getDb().select().from(contentItems).where(eq(contentItems.runId, r.runId));
+  expect(item.subcategory).toBe("캠프·체험 선발모집");
+});
+it("reserves body budget, rotates skipped boards and fetches one body per source first", async () => {
+  await board("a"); await board("b"); await board("c"); await budget(4, 2);
+  const fetchBoard = vi.fn(async (url: string) => ({ ok: true as const, entries: [1, 2].map(i => ({ title: `입학 모집요강 ${url}/${i}`, url: `${url}/${i}`, dateText: null })) }));
+  const fetched: string[] = [];
+  const first = await runCollect(getDb(), 1, { trigger: "cli", collectionOnly: true, now: new Date("2026-11-06T00:00:00Z"), fetchBoard, fetchSource: async url => { fetched.push(url); return body(url); } });
+  expect(first.counts).toMatchObject({ officialChecked: 2, officialDeferred: 1, fetchedOk: 2 });
+  expect(fetched).toEqual(["https://school.example/a/1", "https://school.example/b/1"]);
+  fetchBoard.mockClear();
+  await runCollect(getDb(), 1, { trigger: "cli", collectionOnly: true, now: new Date("2026-11-06T02:00:00Z"), fetchBoard, fetchSource: body });
+  expect(fetchBoard.mock.calls[0][0]).toBe("https://school.example/c");
+});
+it("distinguishes all-board failure from healthy duplicate-only collection", async () => {
+  const source = await board("a"); await budget(4, 2);
+  const failure = await runCollect(getDb(), 1, { trigger: "cli", collectionOnly: true, fetchBoard: async () => ({ ok: false, error: "HTTP 403" }) });
+  expect(failure.status).toBe("failed"); expect(failure.counts.officialFailed).toBe(1);
+  const options = { trigger: "cli" as const, collectionOnly: true, fetchBoard: async () => ({ ok: true as const, entries: [{ title: "입학 모집", url: "https://school.example/1", dateText: null }] }), fetchSource: body };
+  await runCollect(getDb(), 1, options);
+  const duplicate = await runCollect(getDb(), 1, options);
+  expect(duplicate.status).toBe("ok_zero"); expect(duplicate.counts.officialDuplicates).toBe(1);
+  const [health] = await getDb().select().from(officialSources).where(eq(officialSources.id, source.id));
+  expect(health).toMatchObject({ lastStatus: "ok", lastError: null, lastNewCount: 0 });
+});
+it("fetches a previously deferred official body without duplicating or overwriting the edited item", async () => {
+  await board("a"); await budget(2, 0);
+  const options = { trigger: "cli" as const, collectionOnly: true, fetchBoard: async () => ({ ok: true as const, entries: [{ title: "입학 모집", url: "https://school.example/1", dateText: null }] }), fetchSource: body };
+  await runCollect(getDb(), 1, options);
+  await getDb().update(contentItems).set({ title: "사용자 수정 제목" });
+  await budget(2, 1); const r = await runCollect(getDb(), 1, options);
+  expect(r.counts).toMatchObject({ newItems: 0, officialDuplicates: 1, fetchedOk: 1 });
+  expect((await getDb().select().from(contentItems))[0].title).toBe("사용자 수정 제목");
+  expect((await getDb().select().from(sourceDocuments))[0].fetchStatus).toBe("ok");
+});
+it("bounds official results and never treats a list date as an application deadline", async () => {
+  await board("a"); await budget(4, 1, 1);
+  const result = await runCollect(getDb(), 1, { trigger: "cli", collectionOnly: true, fetchBoard: async () => ({ ok: true, entries: [1, 2, 3].map(i => ({ title: `입학 모집 ${i}`, url: `https://school.example/${i}`, dateText: "2026.11.05" })) }), fetchSource: body });
+  expect(result.counts.newItems).toBe(1); expect(result.counts.results).toBe(1);
+  expect((await getDb().select().from(contentItems))[0].scheduleStatus).toBe("unknown");
+});

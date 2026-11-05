@@ -144,6 +144,7 @@ const officialPatch = z.object({
       titleSelector: z.string().trim().max(200).nullable().optional(),
       dateSelector: z.string().trim().max(200).nullable().optional(),
       maxItems: z.number().int().min(1).max(100).optional(),
+      articleBaseUrl: z.string().url().startsWith("https://").optional(),
       subcategory: z.string().max(40).optional(),
       maxAgeDays: z.number().int().min(1).max(730).optional(),
       recruitmentOnly: z.boolean().optional(),
@@ -168,6 +169,7 @@ channelRoutes.patch(
     if (body.adapter === "generic_board" && !(body.adapterConfig ?? (cur.adapterConfig as { linkSelector?: string })).linkSelector)
       throw new HttpError(400, "게시판 수집기에는 목록 링크 선택자가 필요합니다.");
     if (body.adapterConfig?.subcategory && !validSubcategory(ch.slug, body.adapterConfig.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
+    if (body.adapterConfig?.articleBaseUrl && domain && !officialHostMatches(new URL(body.adapterConfig.articleBaseUrl).hostname, domain)) throw new HttpError(400, "RSS 원문 기준 주소가 공식 도메인과 다릅니다.");
     const { version, verified, ...rest } = body;
     const updated = await db
       .update(officialSources)
