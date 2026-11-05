@@ -5,6 +5,8 @@ import { z } from "zod";
 import { studioCharacters, studioPoseReferenceSchema, type StudioCharacter, type StudioPanel } from "../../shared/studio";
 import poseRects from "../../shared/studioPoseRects.json";
 import { HttpError } from "../routes/util";
+import { FINAL_POSE_VERSION, finalPose } from "../../shared/studioFinalAssets";
+import { studioFinalAsset } from "./studioFinalAssets";
 
 const characterSchema = z.enum(studioCharacters);
 const poseSchema = z.number().int().min(1).max(100);
@@ -31,7 +33,8 @@ async function packagedAsset(name: string): Promise<Buffer> {
   try { return await pending; } catch (error) { sourceCache.delete(name); throw error; }
 }
 
-export async function studioFamilyReference(): Promise<Buffer> {
+export async function studioFamilyReference(assetVersion?: typeof FINAL_POSE_VERSION): Promise<Buffer> {
+  if (assetVersion === FINAL_POSE_VERSION) return studioFinalAsset("MODEL_FAMILY");
   return packagedAsset("family-v2.png");
 }
 
@@ -48,9 +51,10 @@ export function studioPoseBounds(character: StudioCharacter, width: number, heig
   return { left: cell.x, top: cell.y, width: cell.width, height: cell.height };
 }
 
-export async function studioPoseReference(character: StudioCharacter, pose: number): Promise<Buffer> {
+export async function studioPoseReference(character: StudioCharacter, pose: number, assetVersion?: typeof FINAL_POSE_VERSION): Promise<Buffer> {
   const id = characterSchema.parse(character);
   poseSchema.parse(pose);
+  if (assetVersion === FINAL_POSE_VERSION) return studioFinalAsset(finalPose(id, pose)!.id);
   const key = `${id}:${pose}`;
   const cached = cropCache.get(key);
   if (cached) return cached;
@@ -68,8 +72,9 @@ export async function studioPoseReference(character: StudioCharacter, pose: numb
 /** Identity master + up to four selected cells leaves room for an existing panel (at most six refs). */
 export async function studioPanelReferences(panel: Pick<StudioPanel, "poseRefs">): Promise<string[]> {
   const selections = z.array(studioPoseReferenceSchema).max(4).refine(refs => new Set(refs.map(r => r.character)).size === refs.length).parse(panel.poseRefs ?? []);
-  const family = await sharp(await studioFamilyReference(), { limitInputPixels: 40_000_000 })
+  const version = selections.length && selections.every(ref => !ref.assetVersion) ? undefined : FINAL_POSE_VERSION;
+  const family = await sharp(await studioFamilyReference(version), { limitInputPixels: 40_000_000 })
     .resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true }).png().toBuffer();
-  const crops = await Promise.all(selections.map(ref => studioPoseReference(ref.character, ref.pose)));
+  const crops = await Promise.all(selections.map(ref => studioPoseReference(ref.character, ref.pose, ref.assetVersion)));
   return [family, ...crops].map(bytes => `data:image/png;base64,${bytes.toString("base64")}`);
 }

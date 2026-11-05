@@ -2,7 +2,7 @@
 
 /* Character references retain the accepted family art; pose numbers use the UI font. */
 .studio-character-portrait { display:block; position:relative; width:60px; height:100px; flex:0 0 auto; overflow:hidden; background-color:#fff; border-radius:8px; }
-.studio-character-portrait > img { position:absolute; top:0; width:400%; max-width:none; height:100%; object-fit:fill; margin:0; }
+.studio-character-portrait > img { display:block; width:100%; height:100%; object-fit:contain; margin:0; }
 .studio-character-portrait > img[hidden],.studio-pose-thumbnail > img[hidden],.studio-registered-artwork > img[hidden] { display:none; }
 .studio-registered-artwork { display:block; width:100%; }
 .studio-registered-artwork .studio-artwork-missing { min-height:100px; }
@@ -45,7 +45,7 @@
 .studio-pose-browse-header { display:flex; align-items:end; justify-content:space-between; gap:10px; margin-bottom:12px; }
 .studio-pose-browse-header .field { flex:1; max-width:240px; margin:0; }
 .studio-pose-browse-header select { width:100%; min-height:42px; background:#fff; }
-.studio-pose-browser-body { display:grid; grid-template-columns:minmax(0,1fr) 160px; gap:14px; align-items:start; }
+.studio-pose-browser-body { display:grid; grid-template-columns:minmax(0,1fr) minmax(210px,30%); gap:14px; align-items:start; }
 .studio-pose-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); align-content:start; gap:6px; max-height:450px; overflow:auto; scrollbar-gutter:stable; padding:3px 5px 3px 3px; }
 .studio-pose-tile { display:flex; flex-direction:column; align-items:stretch; min-width:0; min-height:44px; padding:3px; border:1px solid #e0e7e3; border-radius:8px; background:#fff; color:#50645b; cursor:pointer; overflow:hidden; }
 .studio-pose-tile[aria-pressed="true"] { border-color:#2f7861; box-shadow:0 0 0 2px #2f7861; }
@@ -489,3 +489,24 @@
 .zip-ai-caption { white-space: pre-wrap; }
 .imported-carousel-editor details > .stack { margin-top: 16px; }
 
+
+.studio-pose-title { padding:2px 3px 6px; font-size:11px; line-height:1.45; overflow-wrap:anywhere; text-align:center; }
+.studio-pose-browse-header { flex-wrap:wrap; align-items:end; }
+.studio-pose-browse-header .field { min-width:130px; }
+.studio-pose-preview > .studio-pose-thumbnail.large { min-height:200px; }
+.studio-supplementary-assets .studio-pose-tile .studio-registered-artwork { width:100%; aspect-ratio:1; }
+.studio-supplementary-assets .studio-pose-tile img { width:100%; height:100%; object-fit:contain; }
+.studio-supplementary-assets .studio-pose-preview > .studio-registered-artwork img { display:block; width:100%; height:auto; max-height:360px; object-fit:contain; }
+.studio-artwork-dialog { width:min(92vw,850px); max-height:92dvh; padding:20px; border:1px solid #cfdfd6; border-radius:16px; color:#294b3c; box-shadow:0 20px 80px #172f3b33; overflow:auto; }
+.studio-artwork-dialog::backdrop { background:#152e38aa; }
+.studio-artwork-dialog-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+.studio-artwork-dialog .studio-registered-artwork { display:block; background-color:#f8faf9; background-image:linear-gradient(45deg,#e7eeeb 25%,transparent 25%),linear-gradient(-45deg,#e7eeeb 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e7eeeb 75%),linear-gradient(-45deg,transparent 75%,#e7eeeb 75%); background-size:24px 24px; background-position:0 0,0 12px,12px -12px,-12px 0; border-radius:10px; margin-bottom:16px; }
+.studio-artwork-dialog .studio-registered-artwork img { display:block; width:100%; height:min(65dvh,600px); object-fit:contain; }
+@media(max-width:640px) {
+ .studio-pose-browser-body { display:flex; flex-direction:column-reverse; }
+ .studio-pose-preview { display:flex; flex-direction:column; width:100%; }
+ .studio-pose-preview > .studio-pose-thumbnail.large { width:100%; height:220px; aspect-ratio:auto; }
+ .studio-pose-preview > .studio-registered-artwork img { height:220px; object-fit:contain; }
+ .studio-pose-browse-header .field { flex:1 1 44%; max-width:none; }
+ .studio-artwork-dialog { padding:14px; }
+}

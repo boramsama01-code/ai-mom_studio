@@ -264,13 +264,13 @@ describe("홈과 단계별 제작 화면", () => {
     await click("목록 접기");
     await click("포즈 고르기");
     expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(100);
-    expect(host.querySelector(".studio-pose-selection a")?.getAttribute("href")).toBe("/api/studio/characters/pengpeng/poses/41");
+    expect(host.querySelector(".studio-pose-selection a")?.getAttribute("href")).toBe("/api/studio/characters/pengpeng/poses/41?version=final-v1.4");
     await act(async () => host.querySelectorAll<HTMLButtonElement>('.studio-panel-selector button')[1]!.click());
     expect(host.querySelectorAll(".studio-pose-picker")).toHaveLength(1);
     expect(host.querySelectorAll(".studio-pose-selection")).toHaveLength(0);
     await act(async () => host.querySelector<HTMLButtonElement>('.page-head button.btn.primary')!.click()); await settle();
     expect(cards[0].title).toBe("포즈를 고른 웹툰");
-    expect(cards[0].panels[0].poseRefs).toEqual([{ character: "pengpeng", pose: 41 }]);
+    expect(cards[0].panels[0].poseRefs).toEqual([{ character: "pengpeng", pose: 41, assetVersion: "final-v1.4" }]);
     expect(cards[0].panels.slice(1).every(panel => !panel.poseRefs?.length)).toBe(true);
     expect(mocks.api.mock.calls.some(([path]) => /publish|generate|deliver/.test(String(path)))).toBe(false);
   });
@@ -285,7 +285,7 @@ describe("홈과 단계별 제작 화면", () => {
     expect(host.querySelectorAll(".studio-pose-tile")).toHaveLength(0);
     await click("포즈 고르기");
     expect(host.querySelector(".studio-pose-character-tabs")?.textContent).toContain("펨펨");
-    expect(host.querySelector(".studio-pose-tile img")?.getAttribute("src")).toBe("/api/studio/characters/pempem/poses/1");
+    expect(host.querySelector(".studio-pose-tile img")?.getAttribute("src")).toBe("/api/studio/characters/pempem/poses/1?version=final-v1.4");
     expect(cards[0].stage).toBe("done");
     expect(mocks.api.mock.calls.some(([, options]) => options?.method === "PATCH")).toBe(false);
   });

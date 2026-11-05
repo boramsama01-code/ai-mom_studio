@@ -5,6 +5,7 @@ import request from "supertest";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Express } from "express";
 import { isPrivateStudioAssetPath } from "../server/studioAssetPath";
+import { studioFinalAsset } from "../server/services/studioFinalAssets";
 
 const testEnv = vi.hoisted(() => ({ databaseUrl: "memory-session-test", adminUsername: "pose-test-operator", isProduction: false, canonicalRedirectUrl: "", baseUrl: "http://localhost" }));
 vi.mock("../server/env", () => ({ env: testEnv }));
@@ -25,6 +26,27 @@ vi.mock("../server/auth", async original => {
 });
 const { createApp } = await import("../server/app");
 let temporary = "";
+
+it("protects final individual, shared scene, balloon and family PNGs and serves the exact selected original", async () => {
+  const app = createApp();
+  const operator = request.agent(app);
+  await operator.post("/test-only/session");
+  for (const [resource, id] of [
+    ["/api/studio/characters/pengpeng/poses/24?version=final-v1.4", "PP024"],
+    ["/api/studio/characters/pempem/poses/100?version=final-v1.4", "PM100"],
+    ["/api/studio/characters/assets/FA001?version=final-v1.4", "FA001"],
+    ["/api/studio/characters/assets/FX012?version=final-v1.4", "FX012"],
+    ["/api/studio/characters/reference?version=final-v1.4", "MODEL_FAMILY"],
+  ]) {
+    expect((await request(app).get(resource)).status).toBe(401);
+    const response = await operator.get(resource);
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toContain("private");
+    expect(response.body.equals(await studioFinalAsset(id))).toBe(true);
+  }
+  expect((await operator.get("/api/studio/characters/assets/PP101?version=final-v1.4")).status).toBe(404);
+  expect((await operator.get("/api/studio/characters/pengpeng/poses/1?version=unknown")).status).toBe(400);
+});
 afterEach(async () => {
   vi.restoreAllMocks();
   testEnv.databaseUrl = "memory-session-test";

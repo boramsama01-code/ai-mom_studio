@@ -4,7 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StudioCharacterArchive, StudioPosePicker, StudioRegisteredCharacters } from "../client/src/pages/StudioPosePicker";
 import { studioContentSchema, type StudioContent } from "../shared/studio";
-import { STUDIO_CHARACTERS, STUDIO_FAMILY_REFERENCE_URL, poseImageUrl, poseLabel, poseSheetUrl } from "../shared/studioCharacters";
+import { STUDIO_CHARACTERS, STUDIO_FAMILY_REFERENCE_URL, poseImageUrl, poseLabel } from "../shared/studioCharacters";
+import { FINAL_POSE_VERSION, FINAL_STUDIO_ASSETS, finalAssetUrl } from "../shared/studioFinalAssets";
 import { studioChatGptImagePrompt } from "../shared/studioImageImport";
 
 let container: HTMLDivElement;
@@ -30,20 +31,39 @@ function Harness({ disabled = false }: { disabled?: boolean }) {
 }
 
 describe("studio pose picker", () => {
+  it("enlarges a final PNG without applying it and retains legacy references until explicitly replaced", async () => {
+    const onChange = vi.fn();
+    await act(async () => root.render(<StudioPosePicker cast={["pengpeng"]} value={[{ character: "pengpeng", pose: 41 }]} onChange={onChange} disabled={false} panelIndex={0} imageMode="chatgpt" />));
+    expect(container.querySelector<HTMLImageElement>(".studio-pose-selection img")?.getAttribute("src")).toBe(poseImageUrl("pengpeng", 41));
+    const version = container.querySelector<HTMLSelectElement>("select")!;
+    expect(version.value).toBe("legacy");
+    await act(async () => { version.value = FINAL_POSE_VERSION; version.dispatchEvent(new Event("change", { bubbles: true })); });
+    await click(button("크게 보기"));
+    const dialog = container.querySelector("dialog")!;
+    expect(dialog.hasAttribute("open")).toBe(true);
+    expect(dialog.querySelector("img")?.getAttribute("src")).toBe(poseImageUrl("pengpeng", 41, FINAL_POSE_VERSION));
+    expect(onChange).not.toHaveBeenCalled();
+    await click(button("닫기"));
+    expect(container.querySelector("dialog")).toBeNull();
+    expect(container.querySelector<HTMLImageElement>(".studio-pose-selection img")?.getAttribute("src")).toBe(poseImageUrl("pengpeng", 41));
+    await click(button("이 컷에 적용"));
+    expect(onChange).toHaveBeenCalledWith([{ character: "pengpeng", pose: 41, assetVersion: FINAL_POSE_VERSION }]);
+  });
+
   it("previews before applying, persists the exact cell, and includes it in the copied guide", async () => {
     await act(async () => root.render(<Harness />));
     expect(button("목록 접기")?.getAttribute("aria-expanded")).toBe("true");
     expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(100);
-    await click(ariaButton(`${poseLabel("pengpeng", 41)} 미리보기`));
+    await click(ariaButton(`${poseLabel("pengpeng", 41, FINAL_POSE_VERSION)} 미리보기`));
     expect(container.querySelectorAll(".studio-pose-selection")).toHaveLength(0);
     await click(button("이 컷에 적용"));
     expect(container.querySelectorAll(".studio-pose-selection")).toHaveLength(1);
-    expect(container.querySelector(".studio-pose-selection a")?.getAttribute("href")).toBe(poseImageUrl("pengpeng", 41));
+    expect(container.querySelector(".studio-pose-selection a")?.getAttribute("href")).toBe(poseImageUrl("pengpeng", 41, FINAL_POSE_VERSION));
     const prompt = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="복사할 그림 가이드"]')!.value;
-    expect(prompt).toContain(poseLabel("pengpeng", 41));
-    expect(prompt).toContain(poseImageUrl("pengpeng", 41));
+    expect(prompt).toContain(poseLabel("pengpeng", 41, FINAL_POSE_VERSION));
+    expect(prompt).toContain(poseImageUrl("pengpeng", 41, FINAL_POSE_VERSION));
     await click(button("저장 후 다시 불러오기"));
-    expect(saved?.panels[0].poseRefs).toEqual([{ character: "pengpeng", pose: 41 }]);
+    expect(saved?.panels[0].poseRefs).toEqual([{ character: "pengpeng", pose: 41, assetVersion: FINAL_POSE_VERSION }]);
     expect(saved?.panels.slice(1).every(panel => !panel.poseRefs?.length)).toBe(true);
   });
 
@@ -51,25 +71,26 @@ describe("studio pose picker", () => {
     await act(async () => root.render(<Harness />));
     await click(button("이 컷에 적용"));
     await click(Array.from(container.querySelectorAll(".studio-pose-character-tabs button")).find(element => element.textContent?.includes("펨펨")));
-    await click(ariaButton(`${poseLabel("pempem", 100)} 미리보기`));
+    await click(ariaButton(`${poseLabel("pempem", 100, FINAL_POSE_VERSION)} 미리보기`));
     await click(button("이 컷에 적용"));
-    await click(ariaButton(`${poseLabel("pempem", 8)} 미리보기`));
+    await click(ariaButton(`${poseLabel("pempem", 8, FINAL_POSE_VERSION)} 미리보기`));
     await click(button("이 컷에 적용"));
     await click(button("저장 후 다시 불러오기"));
-    expect(saved?.panels[0].poseRefs).toEqual([{ character: "pengpeng", pose: 1 }, { character: "pempem", pose: 8 }]);
-    await click(ariaButton(`${poseLabel("pempem", 8)} 선택 해제`));
+    expect(saved?.panels[0].poseRefs).toEqual([{ character: "pengpeng", pose: 1, assetVersion: FINAL_POSE_VERSION }, { character: "pempem", pose: 8, assetVersion: FINAL_POSE_VERSION }]);
+    await click(ariaButton(`${poseLabel("pempem", 8, FINAL_POSE_VERSION)} 선택 해제`));
     await click(button("저장 후 다시 불러오기"));
-    expect(saved?.panels[0].poseRefs).toEqual([{ character: "pengpeng", pose: 1 }]);
+    expect(saved?.panels[0].poseRefs).toEqual([{ character: "pengpeng", pose: 1, assetVersion: FINAL_POSE_VERSION }]);
   });
 
-  it("renders category filters with ten lazy thumbnails from the measured-crop endpoint", async () => {
+  it("filters by the actual comic expression and loads final individual PNGs", async () => {
     await act(async () => root.render(<Harness />));
-    const select = container.querySelector<HTMLSelectElement>("select")!;
-    await act(async () => { select.value = "9"; select.dispatchEvent(new Event("change", { bubbles: true })); });
-    expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(10);
-    const last = ariaButton(`${poseLabel("pengpeng", 100)} 미리보기`)!;
+    const select = container.querySelectorAll<HTMLSelectElement>("select")[1];
+    await act(async () => { select.value = "wobble_shock"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    const matches = FINAL_STUDIO_ASSETS.filter(a => a.id.startsWith("PP") && a.comic_face_type === "wobble_shock");
+    expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(matches.length);
+    const last = container.querySelector(".studio-pose-tile")!;
     const thumbnail = last.querySelector<HTMLImageElement>(".studio-pose-thumbnail img")!;
-    expect(thumbnail.getAttribute("src")).toBe(poseImageUrl("pengpeng", 100));
+    expect(thumbnail.getAttribute("src")).toBe(poseImageUrl("pengpeng", Number(matches[0].id.slice(2)), FINAL_POSE_VERSION));
     expect(thumbnail.getAttribute("loading")).toBe("lazy");
     expect(thumbnail.style.backgroundImage).toBe("");
   });
@@ -94,7 +115,7 @@ describe("studio pose picker", () => {
     expect(onChange).not.toHaveBeenCalled();
     await act(async () => root.render(<StudioPosePicker cast={["pengki"]} value={[]} onChange={onChange} disabled={false} panelIndex={0} imageMode="chatgpt" />));
     expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(100);
-    expect(container.querySelector<HTMLImageElement>(".studio-pose-tile img")?.getAttribute("src")).toBe(poseImageUrl("pengki", 1));
+    expect(container.querySelector<HTMLImageElement>(".studio-pose-tile img")?.getAttribute("src")).toBe(poseImageUrl("pengki", 1, FINAL_POSE_VERSION));
     expect(onChange).not.toHaveBeenCalled();
   });
 
@@ -106,18 +127,21 @@ describe("studio pose picker", () => {
     expect(image.hidden).toBe(true);
     expect(container.querySelectorAll(".studio-pose-selection")).toHaveLength(0);
     await click(button("그림 다시 불러오기"));
-    expect(image.getAttribute("src")).toBe(`${poseImageUrl("pengpeng", 1)}?retry=1`);
+    expect(image.getAttribute("src")).toBe(`${poseImageUrl("pengpeng", 1, FINAL_POSE_VERSION)}&retry=1`);
     expect(image.hidden).toBe(false);
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(container.querySelectorAll(".studio-pose-selection")).toHaveLength(0);
   });
 
-  it("registers all four sheets in age order with the current names", async () => {
+  it("registers all final PNGs and switches between individual and supplementary assets", async () => {
     await act(async () => root.render(<StudioCharacterArchive />));
     const headings = Array.from(container.querySelectorAll(".studio-pose-archive-title h2")).map(element => element.textContent);
     expect(headings).toEqual(["펭펭40살", "펨펨37살", "김펭긴13살", "김펭키12살"]);
-    expect(container.querySelectorAll(".studio-pose-sheet-link")).toHaveLength(4);
-    for (const character of STUDIO_CHARACTERS) expect(container.querySelector(`a[download="${character.name}-100포즈.png"]`)?.getAttribute("href")).toBe(poseSheetUrl(character.id));
+    expect(container.querySelectorAll(".studio-pose-tile")).toHaveLength(112);
+    await click(button("김펭키 포즈 보기"));
+    expect(container.querySelector<HTMLImageElement>(".studio-pose-tile img")?.getAttribute("src")).toBe(poseImageUrl("pengki", 1, FINAL_POSE_VERSION));
+    await click(button("말풍선 · 12개"));
+    expect(container.querySelector<HTMLImageElement>(".studio-supplementary-assets .studio-pose-tile img")?.getAttribute("src")).toBe(finalAssetUrl("FX001"));
     expect(container.textContent).not.toContain("식품공학 대학원생");
   });
 });
@@ -131,7 +155,7 @@ describe("registered characters in the authoring page", () => {
     expect([...panel.querySelectorAll(".studio-registered-name")].map(name => name.textContent)).toEqual(["펭펭40살100포즈", "펨펨37살100포즈", "김펭긴13살100포즈", "김펭키12살100포즈"]);
     const portraits = [...panel.querySelectorAll<HTMLImageElement>(".studio-character-portrait img")];
     expect(portraits).toHaveLength(4);
-    expect(portraits.every(image => image.getAttribute("src") === STUDIO_FAMILY_REFERENCE_URL && !image.hidden)).toBe(true);
+    expect(portraits.every((image, index) => image.getAttribute("src") === poseImageUrl(STUDIO_CHARACTERS[index].id, 1, FINAL_POSE_VERSION) && !image.hidden)).toBe(true);
     const choices = [...panel.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
     expect(choices.map(choice => choice.checked)).toEqual([false, false, false, true]);
     expect(choices.map(choice => choice.getAttribute("aria-label"))).toEqual(STUDIO_CHARACTERS.map(character => `${character.name} 등장인물 선택`));
@@ -168,7 +192,7 @@ describe("registered characters in the authoring page", () => {
     const retry = button("그림 다시 불러오기")!;
     expect(retry.closest("label")).toBeNull();
     await click(retry);
-    expect(image.getAttribute("src")).toBe(`${STUDIO_FAMILY_REFERENCE_URL}?retry=1`);
+    expect(image.getAttribute("src")).toBe(`${poseImageUrl("pengpeng", 1, FINAL_POSE_VERSION)}&retry=1`);
     expect(image.hidden).toBe(false);
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect([...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].map(input => input.checked)).toEqual([false, true, false, false]);
