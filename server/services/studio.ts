@@ -7,7 +7,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
-import { channels, appSettings, approvals, deliveries, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
+import { channels, creationReceipts, appSettings, approvals, deliveries, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
 import { channelSlug, normalizeStudioChannel } from "../../shared/channelKeys";
 import { studioContentSchema, type StudioGeneration, type StudioContent, type StudioCard, type StudioJob, type StudioRevision } from "../../shared/studio";
 import { conflict, HttpError, parse } from "../routes/util";
@@ -118,11 +118,27 @@ export async function validateStudioChannel(db: DB, key: string, requireActive =
   if (requireActive && !ch.active) throw new HttpError(409, "보관된 채널입니다. 채널을 복원한 뒤 새 작업을 시작하세요.");
   return ch;
 }
-export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number) {
+export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number, requestId?: string) {
   validateStudioMode(content);
   if (content.experience && (content.experience.media.length || content.experience.coverId || content.experience.pages.some(p=>p.mediaId))) throw new HttpError(400, "새 작업을 만든 뒤 사진·영상을 올려 주세요.");
   if (content.finishedDeck?.pages.length || content.panels.some(p => p.imageId)) throw new HttpError(400, "새 콘텐츠에는 기존 이미지 ID를 넣을 수 없습니다.");
+  const receiptKey = requestId ? `studio-create:${actor}:${requestId}` : null;
+  const payloadHash = crypto.createHash("sha256").update(JSON.stringify({ content, sourceItemId: sourceItemId ?? null })).digest("hex");
   return db.transaction(async tx => {
+    if (receiptKey) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${receiptKey}, 0))`);
+      const [receipt] = await tx.select().from(creationReceipts).where(eq(creationReceipts.key, receiptKey));
+      if (receipt) {
+        if (receipt.payloadHash !== payloadHash) throw new HttpError(409, "이 요청으로 이미 다른 내용이 저장됐습니다. 기존 콘텐츠를 확인해 주세요.", { code: "creation_request_changed", cardId: receipt.resourceId });
+        const saved = await loadStudioCard(tx as unknown as DB, receipt.resourceId);
+        assertStudioActive(saved);
+        return studioCardDto(saved);
+      }
+    }
+    const remember = async (card: typeof studioCards.$inferSelect) => {
+      if (receiptKey) await tx.insert(creationReceipts).values({ key: receiptKey, payloadHash, resourceId: card.id });
+      return studioCardDto(card);
+    };
     const ch = await validateStudioChannel(tx as unknown as DB, content.channel);
     if (!validSubcategory(content.channel, content.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     if (sourceItemId) {
@@ -135,7 +151,7 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
         if (!sourceChannel || channelSlug(sourceChannel.slug) !== ch.slug) throw new HttpError(400, "선택한 채널에 속한 수집 콘텐츠만 가져올 수 있습니다.");
       }
       const [existing] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, sourceItemId));
-      if (existing) { assertStudioActive(existing); return studioCardDto(existing); }
+      if (existing) { assertStudioActive(existing); return remember(existing); }
       if (!content.subcategory && validSubcategory(content.channel, source.subcategory, ch.categories)) content = { ...content, subcategory: source.subcategory ?? "" };
       const idea = readIdea(source.edited);
       if (idea && source.origin === "idea") {
@@ -153,7 +169,7 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
     const [card] = await tx.insert(studioCards).values({ content, sourceItemId: sourceItemId ?? null }).onConflictDoNothing().returning();
     if (!card && sourceItemId) {
       const [existing] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, sourceItemId));
-      if (existing) { assertStudioActive(existing); return studioCardDto(existing); }
+      if (existing) { assertStudioActive(existing); return remember(existing); }
     }
     if (!card) throw new HttpError(409, "이미 생성된 콘텐츠입니다. 보드를 새로고침하세요.");
     await tx.insert(studioRevisions).values({ cardId: card.id, version: 1, snapshot: content, instruction: sourceItemId ? "수집 콘텐츠에서 가져오기" : "새 콘텐츠" });

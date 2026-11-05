@@ -119,12 +119,12 @@ export function TemplatePicker({ cid, value, onChange, items, version, studioCha
   );
 }
 
-export function DesignPage() {
+export function DesignPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { current, selected } = useChannel();
   if (selected === "all" || !current)
     return (
       <>
-        <h1>수집 카드 디자인</h1>
+        {!embedded && <h1>수집 카드 디자인</h1>}
         <RegisteredCardDesigns />
         <CanvaTemplateLibrary />
         <Empty>수집함에서 만드는 카드의 디자인입니다. 오른쪽 위 ‘보기 채널’에서 설정할 채널을 선택해 주세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>

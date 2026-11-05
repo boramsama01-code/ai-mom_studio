@@ -69,8 +69,8 @@ studioRoutes.get("/studio/cards", ah(async (req, res) => {
   res.json({ trashCount: total.count, cards: await studioCardsWithOutput(db, cards), ...await loadStudioNotes(db), ai: studioAiStatus() });
 }));
 studioRoutes.post("/studio/cards", ah(async (req, res) => {
-  const { sourceItemId, ...content } = parse(studioCreateSchema, req.body);
-  res.status(201).json(await createStudioCard(getDb(), content, actorOf(req), sourceItemId));
+  const { sourceItemId, requestId, ...content } = parse(studioCreateSchema, req.body);
+  res.status(201).json(await createStudioCard(getDb(), content, actorOf(req), sourceItemId, requestId));
 }));
 studioRoutes.post("/studio/export-check", ah(async (req, res) => {
   res.json(checkStudioExport(parse(studioContentSchema, req.body)));

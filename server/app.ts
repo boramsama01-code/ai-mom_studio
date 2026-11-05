@@ -1,3 +1,4 @@
+import { captureRoutes } from "./routes/capture";
 import path from "node:path";
 import fs from "node:fs";
 import express, { type NextFunction, type Request, type Response } from "express";
@@ -59,7 +60,7 @@ export function createApp() {
       if (!authConfigured() && !demoAllowed()) return res.status(503).json({ error: "운영자 인증이 설정되지 않아 운영 API를 차단했습니다.", code: "auth_not_configured" });
       next();
     });
-    app.use("/api", requireOperator, canvaTemplateLibraryRoutes, canvaEditorialRoutes, channelRoutes, ruleRoutes, cardPageArtworkRoutes, itemRoutes, opsRoutes, secretRoutes, templateRoutes, studioRoutes, collectionRoutes);
+    app.use("/api", requireOperator, captureRoutes, canvaTemplateLibraryRoutes, canvaEditorialRoutes, channelRoutes, ruleRoutes, cardPageArtworkRoutes, itemRoutes, opsRoutes, secretRoutes, templateRoutes, studioRoutes, collectionRoutes);
   }
   app.use("/api", (_req, res) => res.status(404).json({ error: "없는 API입니다." }));
 

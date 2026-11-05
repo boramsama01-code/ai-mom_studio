@@ -1,3 +1,5 @@
+import { creativeProfileFor } from "@shared/creativeProfile";
+import { CreativeProfileFields } from "../CreativeProfileFields";
 import { InstagramAccounts } from "./InstagramAccounts";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,7 +37,7 @@ export function ChannelSettingsPage() {
   const [, navigate] = useLocation();
   const guard = useDirtyGuard();
   const [tab, setTab] = useState(() => ["connections", "instagram"].includes(new URLSearchParams(location.search).get("tab") ?? "") ? new URLSearchParams(location.search).get("tab")! : "channels");
-  const [editing, setEditing] = useState<number | null>(null);
+  const [editing, setEditing] = useState<number | null>(() => { const id = Number(new URLSearchParams(location.search).get("channel")); return Number.isInteger(id) && id > 0 ? id : null; });
   const [creating, setCreating] = useState(false);
   const [createdName, setCreatedName] = useState<string | null>(null);
   const current = channels.find(c => c.id === editing);
@@ -126,7 +128,7 @@ function GlobalStop({ on }: { on: boolean }) {
   );
 }
 
-const channelFields = (ch: Channel) => ({ name: ch.name, description: ch.description, audience: ch.audience, accentColor: ch.accentColor, editorialGuide: ch.editorialGuide, budget: ch.budget, contentType: ch.contentType as ChannelContentType, categoryText: channelCategories(ch.slug, ch.categories).join("\n"), categoriesDefault: ch.categories == null, aiSettings: normalizeChannelRoleSettings(ch.aiSettings) });
+const channelFields = (ch: Channel) => ({ creativeProfile: creativeProfileFor(ch), name: ch.name, description: ch.description, audience: ch.audience, accentColor: ch.accentColor, editorialGuide: ch.editorialGuide, budget: ch.budget, contentType: ch.contentType as ChannelContentType, categoryText: channelCategories(ch.slug, ch.categories).join("\n"), categoriesDefault: ch.categories == null, aiSettings: normalizeChannelRoleSettings(ch.aiSettings) });
 function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }) {
   const qc = useQueryClient();
   const guard = useDirtyGuard();
@@ -211,6 +213,7 @@ function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }
         편집 기준
         <textarea rows={4} value={f.editorialGuide} onChange={(e) => setF({ ...f, editorialGuide: e.target.value })} />
       </label>
+      <CreativeProfileFields value={f.creativeProfile} onChange={creativeProfile => setF({ ...f, creativeProfile })} />
       <ChannelAiFields value={f.aiSettings} onChange={aiSettings => setF({ ...f, aiSettings })} runtime={base as Channel & Partial<ChannelAiRuntime>} />
       <details className="settings-details">
         <summary>고급 설정 · 실행 한도와 비용</summary><div className="stack">

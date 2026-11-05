@@ -68,7 +68,7 @@ function studioInputAltIssues(value: { altTexts?: string[]; finishedDeck?: Studi
  }
  return issues;
 }
-export const studioCreateSchema = studioContentSchema.safeExtend({ sourceItemId: z.number().int().positive().optional() }).superRefine((value, ctx) => { for (const issue of studioInputAltIssues(value)) ctx.addIssue({code:"custom",...issue}); });
+export const studioCreateSchema = studioContentSchema.safeExtend({ sourceItemId: z.number().int().positive().optional(), requestId: z.string().uuid().optional() }).superRefine((value, ctx) => { for (const issue of studioInputAltIssues(value)) ctx.addIssue({code:"custom",...issue}); });
 // Zod 4 applies defaults inside optional fields; unwrap them so a stage-only PATCH cannot erase content.
 export const studioPatchSchema = z.object({
   finishedDeck: studioContentSchema.shape.finishedDeck.unwrap().refine(
