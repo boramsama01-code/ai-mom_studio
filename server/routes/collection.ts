@@ -57,7 +57,7 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
       jobs: pendingJobs.map(j => ({ id: j.id, status: j.status, createdAt: j.createdAt, stale: j.status === "queued" ? now.getTime() - j.createdAt.getTime() > 120_000 : !j.leaseExpiresAt || j.leaseExpiresAt < now })),
       lastRun: lastRun ? { subcategory: typeof lastRun.snapshot.subcategory === "string" ? lastRun.snapshot.subcategory : null, id: lastRun.id, status: lastRun.status, startedAt: lastRun.startedAt, finishedAt: lastRun.finishedAt, counts: lastRun.counts, errors: lastRun.errors } : null };
   }));
-  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "public_rss", collectionStrategy: "official_first", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
+  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "official_naver", collectionStrategy: "official_first", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
 }));
 
 collectionRoutes.post("/channels/:cid/collection-profile", ah(async (req, res) => {

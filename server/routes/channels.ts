@@ -151,7 +151,7 @@ const officialPatch = z.object({
       sourceRole: z.enum(["official", "discovery"]).optional(),
       youthOnly: z.boolean().optional(),
       useTitleAttribute: z.boolean().optional(),
-      format: z.enum(["links", "ged_selection", "rss"]).optional(),
+      format: z.enum(["links", "ged_selection", "rss", "school_ntt", "linkareer"]).optional(),
     })
     .optional(),
 });

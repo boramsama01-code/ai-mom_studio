@@ -8,6 +8,24 @@ const feed = { name: "과학신문", url: "https://science.example/rss", site: "
 const rss = (title = "과학고 입학설명회", link = "https://science.example/1", date = "2026-10-26T00:00:00Z", source = "") => `<rss><channel><item><title>${title}</title><link>${link}</link><description>입학 설명회 안내</description><pubDate>${date}</pubDate>${source}</item></channel></rss>`;
 
 describe("노들섬 방식의 독립적인 공개 뉴스 수집", () => {
+  it("prefers Naver and never calls Google or feeds on a healthy empty result", async () => {
+    const naver = vi.fn(async () => []), loadXml = vi.fn(async () => rss());
+    const session = createNewsSearch({ naver, loadXml });
+    expect(await session.search("중학생", "news", 5, { naver: 0, limit: 5 })).toEqual([]);
+    expect(naver).toHaveBeenCalledOnce(); expect(loadXml).not.toHaveBeenCalled();
+  });
+  it("records Naver failure once, falls back only for news and respects exhausted budgets", async () => {
+    const naver = vi.fn(async (_q, _e, _d, c) => { c.naver++; throw new NaverError("HTTP 401", "auth"); });
+    const loadXml = vi.fn(async () => rss());
+    const session = createNewsSearch({ now, naver, loadXml, feeds: [feed] });
+    const counter = { naver: 0, limit: 5 };
+    expect(await session.search("과학고", "news", 5, counter)).toHaveLength(1);
+    await expect(session.search("교육청", "webkr", 5, counter)).rejects.toMatchObject({ kind: "auth" });
+    expect(naver).toHaveBeenCalledOnce(); expect(session.warnings[0].scope).toBe("naver");
+    const cappedLoad = vi.fn(async () => rss());
+    await expect(createNewsSearch({ naver, loadXml: cappedLoad }).search("a", "news", 5, { naver: 0, limit: 1 })).rejects.toMatchObject({ kind: "rate_limit" });
+    expect(cappedLoad).not.toHaveBeenCalled();
+  });
   it("공고 채널만 모집 검색을 좁히고 오래된 신청 공고를 최신 사후 기사보다 먼저 반환한다", async () => {
     const xml = `<rss><channel>${rss("과학캠프 성료", "https://science.example/report").match(/<item>.*<\/item>/)![0]}${rss("과학캠프 참가자 모집", "https://science.example/invite", "2026-10-25T00:00:00Z").match(/<item>.*<\/item>/)![0]}</channel></rss>`;
     for (const recruitment of [true, false]) {

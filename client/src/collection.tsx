@@ -71,8 +71,8 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
       <span className="muted">05:13 · 07:13 · 19:13 예약 / GitHub 실행 지연 가능</span>
     </div>
     {workroom && <p id="workroom-auto-collect-note" className="small muted">비공개 작업실에서는 예약 수집 설정을 바꿀 수 없어요. ‘지금 수집’은 바로 사용할 수 있어요.</p>}
-    {d.sourceMode === "public_rss" && <div className="small muted">공식 게시판·기관 RSS 우선 · 언론사 RSS {d.publicFeeds?.length ?? 0}곳과 Google 뉴스로 보완</div>}
-    {current?.contentType === "notice" && <div className="small muted">공식 모집 게시판부터 확인하고, 뉴스는 모집·접수 단어로 좁혀 검색합니다. 사후 홍보·대상 외 모집은 새로 저장하지 않습니다.</div>}
+    {(d.sourceMode === "public_rss" || d.sourceMode === "official_naver") && <div className="small muted">학교·기관 공지와 청소년 활동 목록 우선 · 네이버 뉴스·웹문서로 보완</div>}
+    {current?.contentType === "notice" && <div className="small muted">공식 모집 게시판과 청소년 공모전 목록부터 확인하고, 네이버 검색으로 보완합니다. 사후 홍보·대상 외 모집은 새로 저장하지 않습니다.</div>}
     {!d.naverReady && d.sourceMode !== "public_rss" && <div className="notice warn">네이버 검색 연결이 필요합니다. <GuardedLink href="/connections?service=naver">연결 확인</GuardedLink></div>}
     {searchAuthFailed && <div className="notice err" role="alert"><strong>최근 수집이 네이버 인증 단계에서 멈췄습니다.</strong><p style={{ margin: "6px 0" }}>저장된 Client ID·Client Secret 또는 검색 API 권한을 확인해 주세요. 신규 0건은 검색할 자료가 없다는 뜻이 아닙니다.</p><GuardedLink href="/connections?service=naver">네이버 키 확인·수정 →</GuardedLink><span className="small"> 키 저장 → 연결 확인 → 지금 수집 순서로 재개할 수 있습니다.</span></div>}
     {d.globalStop && <div className="notice warn">전역 정지 중이므로 수집이 실행되지 않습니다.</div>}
@@ -81,10 +81,10 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
       <div className="row between"><h3>{c.name}</h3><strong>{c.newItems}건</strong></div>
       <div className="row" aria-label={`${c.name} 소분류별 저장 자료`}>{c.categories?.map(category => <button key={category.label} className="btn sm" onClick={() => showItems(c.id, category.label)}>{category.label} · {category.newItems}건</button>)}</div>
       <p className="small muted">소분류 수치는 선택한 날짜에 저장된 자료입니다. 중복·실행 상태는 채널 단위로 표시합니다.</p>
-      <p className="small muted">검색어 {c.queries}개 · 화제 탐색 {c.discoveryQueries}개 · 연결된 공식 게시판 {c.boards}개</p>
+      <p className="small muted">검색어 {c.queries}개 · 화제 탐색 {c.discoveryQueries}개 · 연결된 게시판·활동 목록 {c.boards}개</p>
       {!!((c.noticeCandidates ?? 0) + (c.noticeUncertain ?? 0) + (c.noticeReports ?? 0)) && <p className="small"><strong>모집·접수 후보 {c.noticeCandidates ?? 0}건</strong> · 확인 필요 {c.noticeUncertain ?? 0}건 · 사후·대상 외·마감 {c.noticeReports ?? 0}건</p>}
       <div className="row small">{c.lastRun ? <><span>최근 실행 · {c.lastRun.subcategory || "채널 전체"}</span><StatusBadge type="run" value={c.lastRun.status} /><span>{fmtDate(c.lastRun.startedAt)}</span><span>신규 {c.lastRun.counts.newItems ?? 0} · 중복 {c.lastRun.counts.duplicates ?? 0}</span></> : <span>아직 수집을 실행하지 않았습니다.</span>}</div>
-      {c.lastRun && c.lastRun.counts.officialChecked !== undefined && <p className="small muted">공식 출처 {c.lastRun.counts.officialChecked}곳 확인 · 정상 {c.lastRun.counts.officialSucceeded ?? 0} · 실패 {c.lastRun.counts.officialFailed ?? 0} · 신규 {c.lastRun.counts.officialNew ?? 0}건 · 중복 {c.lastRun.counts.officialDuplicates ?? 0}건</p>}
+      {c.lastRun && c.lastRun.counts.officialChecked !== undefined && <p className="small muted">게시판·활동 목록 {c.lastRun.counts.officialChecked}곳 확인 · 정상 {c.lastRun.counts.officialSucceeded ?? 0} · 실패 {c.lastRun.counts.officialFailed ?? 0} · 신규 {c.lastRun.counts.officialNew ?? 0}건 · 중복 {c.lastRun.counts.officialDuplicates ?? 0}건</p>}
       {c.lastRun && c.lastRun.counts.rssRequests !== undefined && <p className="small muted">공개 RSS {c.lastRun.counts.rssRequests}회 확인 · 언론사 피드 {c.lastRun.counts.rssFeedOk ?? 0}곳 응답 · Google 검색 {c.lastRun.counts.googleQueries ?? 0}회</p>}
       {!!c.lastRun?.counts.noticeReportsSkipped && <p className="small muted">사후 홍보·대상 외 모집 {c.lastRun.counts.noticeReportsSkipped}건은 신규 저장에서 제외했습니다.</p>}
       {!!c.lastRun?.errors.length && <details className="small"><summary>최근 실행에서 확인할 내용 {c.lastRun.errors.length}개</summary><ul>{c.lastRun.errors.map((e, i) => <li key={i}>{e.message}</li>)}</ul></details>}
@@ -101,7 +101,7 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
       </details>}
       {!c.queries && !c.discoveryQueries && !c.boards && !c.profile && <p className="small muted">직접 창작하는 채널입니다. 외부 자료가 필요하면 검색어를 추가하세요.</p>}
     </article>)}</div> : <GuardedLink href="/today" className="small">채널별 실행 결과·검색어 확인 →</GuardedLink>}
-    <details className="small"><summary>무엇을 어떻게 수집하나요?</summary><p>학교·영재교육원·GED·기관의 공개 게시판과 공식 RSS를 먼저 확인합니다. 공식 출처가 정상 응답하면 뉴스 검색은 하이스쿱 8회, 알리고당 20회 이내에서 보완하고, 공식 경로가 모두 실패하면 기존 검색 한도로 복원합니다. 기관 발표와 언론 보도는 각각 원문을 확인해 비교합니다. 한 경로가 실패해도 다른 경로는 계속 처리하고, URL 및 같은 언론사·제목·날짜의 중복을 제외합니다. 블로그 검색에는 선택적으로 네이버 키를 사용합니다. 과학·시사는 여러 언론의 보도를 주제별로 묶어 화제도 함께 찾습니다. 한도를 넘는 검색어·공식 출처는 다음 수집에서 먼저 처리합니다. 공식 목록은 제공된 최신 목록 범위만 확인하며 과거 공고 전체를 보장하지 않습니다.</p><p>‘오늘’은 오늘 처음 저장한 날짜입니다. 원문의 게시일과 다를 수 있습니다. 일부 RSS가 중단되거나 결과 상한에 닿으면 부분 수집으로 표시합니다. 원문 확보 실패·출처 미확인은 자료별로 표시하며, 연결되지 않은 공식 게시판은 자동 수집하지 않습니다. 이 화면의 수집 버튼은 AI 생성·알림 전송·SNS 게시를 실행하지 않습니다.</p>{d.publicFeeds && <p>직접 RSS: {d.publicFeeds.join(" · ")}</p>}</details>
+    <details className="small"><summary>무엇을 어떻게 수집하나요?</summary><p>학교·영재교육원·GED·기관의 공개 게시판과 공식 RSS를 먼저 확인합니다. 공식 출처가 정상 응답하면 뉴스 검색은 하이스쿱 24회, 알리고당 20회 이내에서 보완하고, 공식 경로가 모두 실패하면 기존 검색 한도로 복원합니다. 기관 발표와 언론 보도는 각각 원문을 확인해 비교합니다. 한 경로가 실패해도 다른 경로는 계속 처리하고, URL 및 같은 언론사·제목·날짜의 중복을 제외합니다. 보완 검색은 네이버 뉴스·웹문서·블로그를 사용합니다. 네이버 장애 시 뉴스만 언론사 RSS·Google RSS로 보완하며 웹문서·블로그 오류는 표시합니다. 과학·시사는 여러 언론의 보도를 주제별로 묶어 화제도 함께 찾습니다. 한도를 넘는 검색어·공식 출처는 다음 수집에서 먼저 처리합니다. 공식 목록은 제공된 최신 목록 범위만 확인하며 과거 공고 전체를 보장하지 않습니다.</p><p>‘오늘’은 오늘 처음 저장한 날짜입니다. 원문의 게시일과 다를 수 있습니다. 일부 RSS가 중단되거나 결과 상한에 닿으면 부분 수집으로 표시합니다. 원문 확보 실패·출처 미확인은 자료별로 표시하며, 연결되지 않은 공식 게시판은 자동 수집하지 않습니다. 이 화면의 수집 버튼은 AI 생성·알림 전송·SNS 게시를 실행하지 않습니다.</p>{d.publicFeeds && <p>직접 RSS: {d.publicFeeds.join(" · ")}</p>}</details>
   </section>;
 }
 

@@ -14,7 +14,7 @@ export type BoardConfig = {
   titleSelector?: string | null; // 링크 안에서 제목을 찾을 선택자(없으면 링크 텍스트)
   dateSelector?: string | null; // 같은 행(tr/li) 안의 날짜 선택자
   maxItems?: number;
-  format?: "links" | "ged_selection" | "rss";
+  format?: "links" | "ged_selection" | "rss" | "school_ntt" | "linkareer";
   subcategory?: string;
   maxAgeDays?: number;
   recruitmentOnly?: boolean;
@@ -50,6 +50,22 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
   const d = domain.toLowerCase().replace(/^www\./, "");
   if (!officialUrl(pageUrl, pageUrl, d)) return [];
   const limit = Math.min(100, Math.max(1, cfg.maxItems ?? 20));
+  if (cfg.format === "linkareer") {
+    if (d !== "linkareer.com") return [];
+    const data = JSON.parse($("#__NEXT_DATA__").text() || "{}");
+    const state = data?.props?.pageProps?.props?.__APOLLO_STATE__ ?? {};
+    // Read public SSR data only for activities visibly linked in this result list.
+    $('a[href^="/activity/"]').each((_, el) => {
+      if (out.length >= limit) return false;
+      const id = ($(el).attr("href") || "").match(/^\/activity\/(\d+)$/)?.[1];
+      const row = id ? state[`Activity:${id}`] : null;
+      const url = id ? officialUrl(`/activity/${id}`, pageUrl, d) : null;
+      if (!row || row.__typename !== "Activity" || typeof row.title !== "string" || !url || seen.has(url)) return;
+      const published = typeof row.createdAt === "number" ? new Date(row.createdAt + 9 * 3600_000) : null;
+      seen.add(url); out.push({ url, title: row.title.trim().slice(0, 500), dateText: published && Number.isFinite(published.getTime()) ? published.toISOString().slice(0, 10) : null });
+    });
+    return out;
+  }
   if (cfg.format === "rss") {
     if (!/<(?:rss|feed|rdf:RDF)[\s>]/i.test(html)) throw new Error("공식 RSS/Atom 형식이 아닙니다.");
     $("item, entry").each((_, el) => {
@@ -82,7 +98,15 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
   }
   $(cfg.linkSelector).each((_, el) => {
     if (out.length >= limit) return false;
-    const href = $(el).attr("href");
+    let href = $(el).attr("href");
+    if (cfg.format === "school_ntt" && /\/na\/ntt\/selectNttList\.do$/.test(new URL(pageUrl).pathname)) {
+      const id = $(el).attr("data-id");
+      if (!id || !/^\d+$/.test(id)) return;
+      const detail = new URL(pageUrl);
+      detail.pathname = detail.pathname.replace(/selectNttList\.do$/, "selectNttInfo.do");
+      detail.searchParams.set("nttSn", id);
+      href = detail.href;
+    }
     if (!href || href.startsWith("javascript:") || href === "#") return;
     const resolved = officialUrl(href, pageUrl, d);
     if (!resolved) return;

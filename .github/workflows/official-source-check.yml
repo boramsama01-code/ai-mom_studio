@@ -22,6 +22,6 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Check public official lists without application credentials
-        run: node --import tsx scripts/check-official-sources.ts --inspect
+        run: node --import tsx scripts/check-official-sources.ts
       - name: Inspect education and youth contest public lists
         run: node --import tsx scripts/inspect-public-source-candidates.ts

@@ -57,7 +57,7 @@ describe("official public lists", () => {
     expect(officialCategory("opportunities", source, "과학실험교실 신청 안내")).toBe("캠프·체험 선발모집");
     expect(boardMatchesCategory("opportunities", source, "캠프·체험 선발모집")).toBe(true);
     expect(boardMatchesCategory("opportunities", source, "전국대회")).toBe(false);
-    expect(officialFirstSearchLimit("notice", 100, 1)).toBe(8);
+    expect(officialFirstSearchLimit("notice", 100, 1)).toBe(24);
     expect(officialFirstSearchLimit("current_dialogue", 40, 1)).toBe(20);
     expect(officialFirstSearchLimit("notice", 100, 0)).toBe(100);
     expect(officialFirstSearchLimit("notice", 0, 1)).toBe(0);
