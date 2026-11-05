@@ -509,6 +509,7 @@ function OfficialTab({ cid }: { cid: number }) {
                 <Badge kind={r.adapter ? "ok" : ""}>{r.adapter ? `수집기: ${r.adapter}` : "게시판 수집기 미연결"}</Badge>
                 {r.verifiedAt && <span className="muted">확인 {fmtDate(r.verifiedAt as unknown as string)}</span>}
               </div>
+              {r.lastCheckedAt && <span className="small muted">최근 확인 {fmtDate(r.lastCheckedAt as unknown as string)} · {r.lastStatus === "ok" ? `신규 ${r.lastNewCount}건` : r.lastError || "확인 필요"}</span>}
               {r.verificationNote && <span className="small muted">{r.verificationNote}</span>}
             </li>
           ))}
@@ -538,7 +539,7 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
         body: {
           version: src.version, domain: domain.trim() || null, boardUrl: boardUrl.trim() || null, aliases: aliases.split("\n").map((s) => s.trim()).filter(Boolean), verified, verificationNote: note, enabled,
           adapter: useBoard ? "generic_board" : null,
-          ...(useBoard ? { adapterConfig: { linkSelector: linkSel.trim(), dateSelector: dateSel.trim() || null, maxItems: 10 } } : {}),
+          ...(useBoard ? { adapterConfig: { ...src.adapterConfig, linkSelector: linkSel.trim(), dateSelector: dateSel.trim() || null, maxItems: src.adapterConfig.maxItems ?? 20 } } : {}),
         },
       }),
     onSuccess: () => {

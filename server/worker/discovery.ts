@@ -40,6 +40,7 @@ export async function runDiscovery(
   now: Date,
   search: SearchFunction = createNewsSearch({ now }).search,
   collectionOnly = false,
+  maxItems = Number.MAX_SAFE_INTEGER,
 ): Promise<DiscoveryResult | null> {
   const settings = channelDiscovery(channel);
   if (!settings) return null;
@@ -112,7 +113,7 @@ export async function runDiscovery(
   }
 
   /* 4) 저장 */
-  for (const { cluster, pick } of chosen) {
+  for (const { cluster, pick } of chosen.slice(0, Math.max(0, maxItems))) {
     const saved = await saveCluster(db, channel, runId, cluster, pick, now);
     if (!saved) continue;
     result.itemIds.push(saved.itemId);

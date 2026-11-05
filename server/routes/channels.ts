@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { officialHostMatches } from "../services/boardAdapter";
+import { validSubcategory } from "../../shared/channelCategories";
 import { Router } from "express";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -141,8 +143,11 @@ const officialPatch = z.object({
       linkSelector: z.string().trim().min(1).max(200),
       titleSelector: z.string().trim().max(200).nullable().optional(),
       dateSelector: z.string().trim().max(200).nullable().optional(),
-      maxItems: z.number().int().min(1).max(30).optional(),
-      format: z.enum(["links", "ged_selection"]).optional(),
+      maxItems: z.number().int().min(1).max(100).optional(),
+      subcategory: z.string().max(40).optional(),
+      maxAgeDays: z.number().int().min(1).max(730).optional(),
+      recruitmentOnly: z.boolean().optional(),
+      format: z.enum(["links", "ged_selection", "rss"]).optional(),
     })
     .optional(),
 });
@@ -158,10 +163,11 @@ channelRoutes.patch(
     if (!cur) throw new HttpError(404, "공식 출처를 찾을 수 없습니다.");
     const domain = body.domain !== undefined ? body.domain : cur.domain;
     const boardUrl = body.boardUrl !== undefined ? body.boardUrl : cur.boardUrl;
-    if (boardUrl && domain && !new URL(boardUrl).hostname.toLowerCase().endsWith(domain))
+    if (boardUrl && domain && !officialHostMatches(new URL(boardUrl).hostname, domain))
       throw new HttpError(400, "게시판 URL이 확인한 도메인과 다릅니다.");
     if (body.adapter === "generic_board" && !(body.adapterConfig ?? (cur.adapterConfig as { linkSelector?: string })).linkSelector)
       throw new HttpError(400, "게시판 수집기에는 목록 링크 선택자가 필요합니다.");
+    if (body.adapterConfig?.subcategory && !validSubcategory(ch.slug, body.adapterConfig.subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     const { version, verified, ...rest } = body;
     const updated = await db
       .update(officialSources)

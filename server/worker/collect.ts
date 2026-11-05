@@ -46,6 +46,7 @@ import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { itemPrimarySource } from "../services/itemSources";
 import { preserveCardCopy } from "../../shared/cardCopy";
 import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
+import { boardMatchesCategory, officialCategory, officialConfig, officialFirstSearchLimit } from "../services/officialCatalog";
 import { generateFamilySourceDraft } from "../services/familySourceDraft";
 import type { AiExecutionPlan } from "../../shared/aiProvenance";
 
@@ -90,14 +91,16 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   const budget = channel.budget;
   const plannedNaver = rules.length; // 규칙 1개 = 호출 1회 (news/blog 각각 별도 규칙)
-  const selected = rules.slice(0, budget.naverCallsPerRun);
+  let selected = rules.slice(0, budget.naverCallsPerRun);
   const skippedRules = rules.slice(budget.naverCallsPerRun);
 
-  const officials = await db.select().from(officialSources).where(eq(officialSources.channelId, channelId));
+  const officials = await db.select().from(officialSources).where(eq(officialSources.channelId, channelId)).orderBy(sql`${officialSources.lastCheckedAt} asc nulls first`, asc(officialSources.id));
   const unconnected = officials.filter((o) => o.enabled && !o.adapter).map((o) => o.name);
-  const boards = officials.filter((o) => !opts.subcategory && o.enabled && o.adapter === "generic_board" && o.verifiedAt && o.domain && o.boardUrl);
+  const boards = officials.filter((o) => o.enabled && o.adapter === "generic_board" && o.verifiedAt && o.domain && o.boardUrl && boardMatchesCategory(channel.slug, o, opts.subcategory, channel.categories));
 
   const snapshot = {
+    sourcePolicy: "official_first",
+    officialSources: boards.map(o => ({ id: o.id, name: o.name, url: o.boardUrl, config: officialConfig(o) })),
     subcategory: opts.subcategory ?? null,
     channel: { id: channel.id, slug: channel.slug, budget, cardTemplate: channel.cardTemplate },
     ai,
@@ -129,51 +132,101 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   let fetchCalls = 0;
 
   try {
-  /* 1-2) 자동 화제 발굴(과학·시사 채널) — 사용자 검색어보다 먼저 */
-  currentGenerationSignal()?.throwIfAborted();
-  const disc = opts.subcategory ? null : await runDiscovery(db, channel, run.id, counter, llmBudget, now, search, opts.collectionOnly);
-  if (disc) {
-    Object.assign(counts, disc.counts);
-    errors.push(...disc.errors);
-    counts.newItems += disc.itemIds.length;
-    newItemIds.push(...disc.itemIds);
-    await opts.heartbeat?.();
-  }
-
-  /* 2) 공식 게시판 우선 — 목록 조회도 원문 호출 예산에 포함 */
+  /* 1) 공식 목록 우선. 목록에 전체 예산을 소진하지 않도록 본문 조회 예산을 남긴다. */
   counts.officialBoards = boards.length;
+  counts.officialChecked = 0;
+  counts.officialSucceeded = 0;
+  counts.officialFailed = 0;
   counts.officialNew = 0;
+  counts.officialDuplicates = 0;
+  const boardLimit = Math.min(boards.length, Math.floor(budget.fetchCallsPerRun / 2));
+  const officialTargets: number[][] = [];
   for (const o of boards) {
     currentGenerationSignal()?.throwIfAborted();
-    if (fetchCalls >= budget.fetchCallsPerRun) {
-      errors.push({ scope: `official:${o.id}`, message: `${o.name}: 원문 호출 한도 도달 — 게시판 건너뜀` });
+    if (counts.officialChecked >= boardLimit || counts.results >= budget.resultsPerRun) {
+      counts.officialDeferred = (counts.officialDeferred ?? 0) + 1;
       continue;
     }
+    counts.officialChecked++;
     fetchCalls++;
-    const r = await (opts.fetchBoard ?? fetchBoardList)(o.boardUrl!, o.domain!, o.adapterConfig as BoardConfig);
-    if (!r.ok) {
-      errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판 조회 실패: ${r.error}` });
+    const config = officialConfig(o);
+    let r: Awaited<ReturnType<typeof fetchBoardList>>;
+    try { r = await (opts.fetchBoard ?? fetchBoardList)(o.boardUrl!, o.domain!, config); }
+    catch (error) { currentGenerationSignal()?.throwIfAborted(); r = { ok: false, error: error instanceof Error ? error.message : "게시판 조회 실패" }; }
+    if (!r.ok || !r.entries.length) {
+      const message = r.ok ? "목록을 찾지 못했습니다. 게시판 구조·접근 상태를 확인하세요." : r.error;
+      counts.officialFailed++;
+      errors.push({ scope: `official:${o.id}`, message: `${o.name}: ${message} · 직접 확인: ${o.boardUrl}` });
+      await db.update(officialSources).set({ lastCheckedAt: now, lastStatus: "failed", lastError: message, lastNewCount: 0 }).where(eq(officialSources.id, o.id));
+      await opts.heartbeat?.();
       continue;
     }
-    if (!r.entries.length) errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판에서 목록을 찾지 못함(선택자 확인 필요)` });
+    counts.officialSucceeded++;
+    let sourceNew = 0;
+    const targets: number[] = [];
+    // Reserve diversity even when a single feed has hundreds of entries.
+    const sourceLimit = Math.max(1, Math.ceil(budget.resultsPerRun / Math.max(2, boardLimit)));
+    let accepted = 0;
     for (const e of r.entries) {
       currentGenerationSignal()?.throwIfAborted();
+      if (counts.results >= budget.resultsPerRun || accepted >= sourceLimit) {
+        counts.officialResultsDeferred = (counts.officialResultsDeferred ?? 0) + 1;
+        continue;
+      }
+      const category = officialCategory(channel.slug, o, e.title, channel.categories);
+      if (opts.subcategory && category !== opts.subcategory) continue;
+      const day = parseBoardDate(e.dateText);
+      if (day && config.maxAgeDays && now.getTime() - Date.parse(`${day}T00:00:00+09:00`) > config.maxAgeDays * 86400_000) {
+        counts.officialOldSkipped = (counts.officialOldSkipped ?? 0) + 1;
+        continue;
+      }
       if (channel.contentType === "notice") {
         const intent = classifyNotice(e.title);
-        if (intent === "retrospective" || intent === "off_topic") {
+        if (intent === "retrospective" || intent === "off_topic" || (config.recruitmentOnly && intent !== "candidate")) {
           counts.noticeReportsSkipped = (counts.noticeReportsSkipped ?? 0) + 1;
           continue;
         }
       }
-      const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e);
+      counts.results++;
+      accepted++;
+      const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e, category);
       if (saved?.isNew) {
+        sourceNew++;
         counts.officialNew++;
         counts.newItems++;
-        newItemIds.push(saved.itemId);
-      }
+      } else if (saved) { counts.officialDuplicates++; counts.duplicates++; }
+      if (saved && (saved.isNew || saved.needsFetch)) targets.push(saved.itemId);
     }
+    officialTargets.push(targets);
+    await db.update(officialSources).set({ lastCheckedAt: now, lastStatus: "ok", lastError: null, lastNewCount: sourceNew }).where(eq(officialSources.id, o.id));
+    await opts.heartbeat?.();
+  }
+  if (counts.officialDeferred) errors.push({ scope: "official_budget", message: `공식 출처 ${counts.officialDeferred}곳은 호출·결과 한도로 다음 실행에서 먼저 확인합니다.` });
+  // Round robin gives every board a first body fetch before one board gets a second.
+  while (officialTargets.some(ids => ids.length)) for (const ids of officialTargets) {
+    const id = ids.shift(); if (id && !newItemIds.includes(id)) newItemIds.push(id);
   }
 
+  /* 2) 뉴스는 보완. 공식 경로가 모두 실패하면 기존 검색 한도로 복원한다. */
+  counter.limit = officialFirstSearchLimit(channel.contentType, budget.naverCallsPerRun, counts.officialSucceeded);
+  selected = selected.slice(0, counter.limit);
+  counts.supplementSearchLimit = counter.limit;
+  counts.rules = selected.length;
+  counts.rulesSkippedByPolicy = Math.max(0, Math.min(rules.length, budget.naverCallsPerRun) - selected.length);
+  // Keep at least half the search budget for operator keywords when discovery is enabled.
+  const discoveryCounter = counter;
+  const searchLimit = counter.limit;
+  if (rules.length && counts.officialSucceeded > 0) counter.limit = Math.floor(searchLimit / 2);
+  const disc = opts.subcategory || counts.results >= budget.resultsPerRun ? null : await runDiscovery(db, channel, run.id, discoveryCounter, llmBudget, now, search, opts.collectionOnly, budget.resultsPerRun - counts.results);
+  counter.limit = searchLimit;
+  if (disc) {
+    Object.assign(counts, disc.counts);
+    errors.push(...disc.errors);
+    counts.newItems += disc.itemIds.length;
+    counts.results += disc.itemIds.length;
+    newItemIds.push(...disc.itemIds);
+    await opts.heartbeat?.();
+  }
 
   /* 3) 검색 → 저장 */
   counts.rulesProcessed = 0;
@@ -328,7 +381,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   Object.assign(counts, publicSearch.counts);
   errors.push(...publicSearch.warnings);
   const discoveryRan = !!disc && disc.counts.discoveryQueries + disc.errors.length > 0;
-  const status = (counts.rulesSucceeded + (disc?.counts.discoveryQueries ?? 0) === 0 && counts.officialNew === 0 && (selected.length > 0 || discoveryRan) && errors.length)
+  const status = (counts.rulesSucceeded + (disc?.counts.discoveryQueries ?? 0) + counts.officialSucceeded === 0 && (boards.length > 0 || selected.length > 0 || discoveryRan) && errors.length)
     ? "failed"
     : errors.length
       ? "partial"
@@ -408,7 +461,7 @@ async function saveSearchItem(db: DB, channel: Channel, rule: SearchRule, runId:
   return { itemId: existing.id, isNew: false, excluded: false };
 }
 
-async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, schoolType: string | null, runId: number, e: { url: string; title: string; dateText: string | null }) {
+async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, schoolType: string | null, runId: number, e: { url: string; title: string; dateText: string | null }, subcategory: string | null) {
   let normalized: string;
   try {
     normalized = normalizeUrl(e.url);
@@ -432,10 +485,12 @@ async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, s
   const [doc] = await db.select().from(sourceDocuments).where(and(eq(sourceDocuments.normalizedUrl, normalized), eq(sourceDocuments.isSample, false)));
   const inserted = await db
     .insert(contentItems)
-    .values({ channelId: channel.id, kind: channel.contentType, origin: "collected", primarySourceId: doc.id, runId, title: e.title, category: schoolType ? categoryForSchoolType(schoolType) : null, scheduleStatus: "unknown" })
+    .values({ channelId: channel.id, kind: channel.contentType, origin: "collected", primarySourceId: doc.id, runId, title: e.title, category: schoolType ? categoryForSchoolType(schoolType) : null, subcategory, scheduleStatus: channel.contentType === "notice" ? "unknown" : "not_applicable" })
     .onConflictDoNothing()
     .returning({ id: contentItems.id });
-  return inserted.length ? { itemId: inserted[0].id, isNew: true } : { itemId: 0, isNew: false };
+  if (inserted.length) return { itemId: inserted[0].id, isNew: true, needsFetch: true };
+  const [existing] = await db.select({ id: contentItems.id }).from(contentItems).where(and(eq(contentItems.channelId, channel.id), eq(contentItems.primarySourceId, doc.id)));
+  return existing ? { itemId: existing.id, isNew: false, needsFetch: !doc.fetchedText && doc.fetchStatus === "not_fetched" } : null;
 }
 
 /** 한 항목 구조화 추출 — 운영자 편집값·기존 승인을 덮어쓰지 않는다 */
