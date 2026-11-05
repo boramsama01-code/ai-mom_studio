@@ -50,11 +50,11 @@ it("인증 실패로 0건인 경우 원인과 키 수정 링크를 숨기지 않
   expect(host.querySelector('[role="alert"]')).toBeNull();
 });
 it("공개 뉴스 수집은 네이버 키가 없어도 실행할 수 있다", async () => {
-  await act(async () => { client.setQueryData(["collection", "all", kstDay()], { ...overview, naverReady: false, searchReady: true, sourceMode: "public_rss", publicFeeds: ["과학신문"] }); });
+  await act(async () => { client.setQueryData(["collection", "all", kstDay()], { ...overview, naverReady: false, searchReady: true, sourceMode: "official_naver", publicFeeds: ["과학신문"] }); });
   await act(async () => { await new Promise(r => setTimeout(r, 30)); });
   const button = [...host.querySelectorAll("button")].find(b => b.textContent === "대기 수집 재개")!;
   expect(button.disabled).toBe(false);
-  expect(host.textContent).toContain("API 키 없이 이용");
+  expect(host.textContent).toContain("네이버 뉴스·웹문서로 보완");
   await act(async () => button.click());
   expect(mocks.api).toHaveBeenCalledWith("/collection/collect", { method: "POST", body: { channelId: "all" } });
 });

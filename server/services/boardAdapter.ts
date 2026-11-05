@@ -14,7 +14,7 @@ export type BoardConfig = {
   titleSelector?: string | null; // 링크 안에서 제목을 찾을 선택자(없으면 링크 텍스트)
   dateSelector?: string | null; // 같은 행(tr/li) 안의 날짜 선택자
   maxItems?: number;
-  format?: "links" | "ged_selection" | "rss" | "school_ntt" | "linkareer";
+  format?: "links" | "ged_selection" | "rss" | "school_ntt" | "linkareer" | "dje_board";
   subcategory?: string;
   maxAgeDays?: number;
   recruitmentOnly?: boolean;
@@ -107,6 +107,14 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
       detail.searchParams.set("nttSn", id);
       href = detail.href;
     }
+    if (cfg.format === "dje_board" && d === "dje.go.kr" && new URL(pageUrl).pathname === "/boardCnts/list.do") {
+      const args = ($(el).attr("onclick") || "").match(/goView\(\s*'(\d+)'\s*,\s*'(\d+)'\s*,\s*'(\d+)'\s*,\s*'([^']*)'/);
+      if (!args || args[4] === "Y" || args[1] !== new URL(pageUrl).searchParams.get("boardID")) return;
+      const detail = new URL(pageUrl); detail.pathname = "/boardCnts/view.do";
+      detail.searchParams.set("boardSeq", args[2]); detail.searchParams.set("lev", args[3]);
+      detail.searchParams.set("statusYN", "W"); detail.searchParams.set("opType", "N");
+      href = detail.href;
+    }
     if (!href || href.startsWith("javascript:") || href === "#") return;
     const resolved = officialUrl(href, pageUrl, d);
     if (!resolved) return;
@@ -115,7 +123,7 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
     const title = (cfg.useTitleAttribute && $(el).attr("title") ? $(el).attr("title")! : cfg.titleSelector ? $(el).find(cfg.titleSelector).first().text() : $(el).text()).replace(/\s+/g, " ").trim().slice(0, 500);
     const row = $(el).closest("tr, li, .item, article");
     const dateText = cfg.dateSelector ? row.find(cfg.dateSelector).first().text().replace(/\s+/g, " ").trim() || null : null;
-    if (title) { seen.add(abs.toString()); out.push({ url: abs.toString(), title, dateText }); }
+    if (title && !/^(D[-+]\s*\d+|접수\s*(중|예정|마감)|더보기)$/i.test(title)) { seen.add(abs.toString()); out.push({ url: abs.toString(), title, dateText }); }
   });
   return out;
 }

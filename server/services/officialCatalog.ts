@@ -20,6 +20,9 @@ export const EDUCATION_OFFICES = [
   ["제주특별자치도교육청", "jje.go.kr"], ["전남광주통합특별시교육청", "jge.go.kr"],
 ] as const;
 const EDUCATION_BOARDS: Record<string, { url: string; config: Partial<BoardConfig> }> = {
+  "sen.go.kr": { url: "https://www.sen.go.kr/user/bbs/BD_selectBbsList.do?q_bbsSn=1100", config: { linkSelector: 'td.bbs_title a[href*="q_bbsDocNo="]', dateSelector: ".bbs_date" } },
+  "goe.go.kr": { url: "https://goe.go.kr/goe/na/ntt/selectNttList.do?bbsId=2012&mi=10100", config: { format: "school_ntt", linkSelector: "a.nttInfoBtn[data-id]", dateSelector: 'td[data-table="date"]', titleSelector: "em" } },
+  "dje.go.kr": { url: "https://www.dje.go.kr/boardCnts/list.do?boardID=450&m=030101&s=dje", config: { format: "dje_board", linkSelector: 'td.link a[onclick*="goView("]', dateSelector: "td:last-child", useTitleAttribute: true } },
   "pen.go.kr": { url: "https://www.pen.go.kr/dep08/na/ntt/selectNttList.do?mi=31184&bbsId=2555", config: { format: "school_ntt", linkSelector: "a.nttInfoBtn[data-id]", dateSelector: 'td:contains("등록일")', subcategory: "캠프·체험 선발모집" } },
   "ice.go.kr": { url: "https://www.ice.go.kr/ice/na/ntt/selectNttList.do?mi=10840&bbsId=1482", config: { format: "school_ntt", linkSelector: "a.nttInfoBtn[data-id]", dateSelector: 'td[data-table="date"]', useTitleAttribute: true } },
   "cbe.go.kr": { url: "https://www.cbe.go.kr/cbe/na/ntt/selectNttList.do?mi=11576&bbsId=1762", config: { format: "school_ntt", linkSelector: "a.nttInfoBtn[data-id]", dateSelector: 'td[data-table="date"]' } },

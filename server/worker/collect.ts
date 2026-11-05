@@ -273,7 +273,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       counts.results++;
       if (channel.contentType === "notice") {
         const intent = classifyNotice(it.title, it.description);
-        if (intent === "retrospective" || intent === "off_topic") {
+        if (!isYouthOpportunity(it.title) || intent === "retrospective" || intent === "off_topic") {
           counts.noticeReportsSkipped = (counts.noticeReportsSkipped ?? 0) + 1;
           continue;
         }

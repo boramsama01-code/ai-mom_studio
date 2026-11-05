@@ -22,6 +22,12 @@ it("reads only visible Linkareer activities from public JSON, with a real listin
   const rows = parseBoardList(html, "https://linkareer.com/search?q=청소년", "linkareer.com", { format: "linkareer", linkSelector: "a" });
   expect(rows).toEqual([{ title: "청소년 영상 공모전", url: "https://linkareer.com/activity/123", dateText: "2026-11-06" }]);
 });
+it("parses Daejeon's public notice links but refuses private posts and another board", () => {
+  const link = (board: string, seq: string, privateFlag: string) => `<a onclick="goView('${board}','${seq}','0','${privateFlag}','W','1','N','','0','0','0')" href="#contents">청소년 공모전</a>`;
+  const rows = parseBoardList(link("450", "123", "null") + link("450", "124", "Y") + link("9", "125", "null"), "https://www.dje.go.kr/boardCnts/list.do?boardID=450&m=030101&s=dje", "dje.go.kr", { format: "dje_board", linkSelector: "a" });
+  expect(rows).toHaveLength(1);
+  expect(new URL(rows[0].url).searchParams.get("boardSeq")).toBe("123");
+});
 
 it("excludes staff recruitment and college-only mentors while preserving mixed-age contests", () => {
   for (const title of ["청소년 AI 페스티벌 서포터즈 대학생 모집", "청소년 마케터 대학생 멘토 모집", "교육청 평가위원 공개 모집", "고등학교 입찰 공고", "중등 교사 임용후보자 선발 공고", "직장어린이집 원아 모집"]) expect(isYouthOpportunity(title), title).toBe(false);

@@ -6,7 +6,7 @@ const { getDb, closeDb } = await import("../server/db");
 const { channels, officialSources, searchRules, contentItems, sourceDocuments } = await import("../shared/schema");
 const { runCollect } = await import("../server/worker/collect");
 const { createApp } = await import("../server/app");
-const { seedOfficialCatalog, OFFICIAL_CATALOG } = await import("../server/services/officialCatalog");
+const { seedOfficialCatalog, OFFICIAL_CATALOG, YOUTH_WEB_QUERIES } = await import("../server/services/officialCatalog");
 beforeEach(async () => { await resetDb(); await getDb().update(searchRules).set({ enabled: false }); });
 afterAll(closeDb);
 async function board(name: string, category = "고등입시") {
@@ -26,6 +26,34 @@ it("installs official sources idempotently while preserving a paused source and 
   const rows = await getDb().select().from(officialSources).where(eq(officialSources.adapter, "generic_board"));
   expect(rows).toHaveLength(OFFICIAL_CATALOG.length);
   expect(rows.find(r => r.id === ged.id)).toMatchObject({ enabled: false, adapterConfig: { linkSelector: ".custom" } });
+});
+it("adds regional web searches once without resurrecting deleted or paused rules", async () => {
+  await seedOfficialCatalog(getDb());
+  const rows = (await getDb().select().from(searchRules)).filter(r => r.endpoint === "webkr");
+  expect(rows).toHaveLength(YOUTH_WEB_QUERIES.length);
+  await getDb().update(searchRules).set({ deletedAt: new Date(), enabled: false }).where(eq(searchRules.id, rows[0].id));
+  await getDb().update(searchRules).set({ enabled: false }).where(eq(searchRules.id, rows[1].id));
+  await seedOfficialCatalog(getDb());
+  const again = (await getDb().select().from(searchRules)).filter(r => r.endpoint === "webkr");
+  expect(again).toHaveLength(rows.length);
+  expect(again.find(r => r.id === rows[0].id)?.deletedAt).not.toBeNull();
+  expect(again.find(r => r.id === rows[1].id)?.enabled).toBe(false);
+});
+it("supports news, blogs and web documents in the existing rule editor API", async () => {
+  const { agent, csrf } = await login(createApp());
+  const response = await agent.post("/api/channels/1/rules").set("x-csrf-token", csrf).send({ query: "청소년 실험캠프", endpoints: ["news", "blog", "webkr"] });
+  expect(response.status).toBe(201);
+  expect((await getDb().select().from(searchRules)).filter(r => r.query === "청소년 실험캠프").map(r => r.endpoint).sort()).toEqual(["blog", "news", "webkr"]);
+});
+it("stores youth aggregator posts as secondary listings and filters college mentor recruitment", async () => {
+  const source = await board("youth", "전국대회"); await budget(4, 2, 10);
+  await getDb().update(officialSources).set({ adapterConfig: { linkSelector: "a", sourceRole: "discovery", youthOnly: true } }).where(eq(officialSources.id, source.id));
+  const r = await runCollect(getDb(), 1, { trigger: "cli", collectionOnly: true, fetchSource: body, fetchBoard: async () => ({ ok: true, entries: [
+    { title: "청소년 영상 공모전", url: "https://school.example/contest", dateText: null },
+    { title: "청소년 AI 페스티벌 대학생 모집", url: "https://school.example/adult", dateText: null },
+  ] }) });
+  expect(r.counts.newItems).toBe(1);
+  expect((await getDb().select().from(sourceDocuments))[0].kind).toBe("opportunity_listing");
 });
 it("collects official-only subcategories through the API even with no search rules or search budget", async () => {
   await board("camp", "캠프·체험 선발모집"); await budget(4, 2);

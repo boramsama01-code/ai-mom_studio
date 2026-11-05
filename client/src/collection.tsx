@@ -73,7 +73,7 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
     {workroom && <p id="workroom-auto-collect-note" className="small muted">비공개 작업실에서는 예약 수집 설정을 바꿀 수 없어요. ‘지금 수집’은 바로 사용할 수 있어요.</p>}
     {(d.sourceMode === "public_rss" || d.sourceMode === "official_naver") && <div className="small muted">학교·기관 공지와 청소년 활동 목록 우선 · 네이버 뉴스·웹문서로 보완</div>}
     {current?.contentType === "notice" && <div className="small muted">공식 모집 게시판과 청소년 공모전 목록부터 확인하고, 네이버 검색으로 보완합니다. 사후 홍보·대상 외 모집은 새로 저장하지 않습니다.</div>}
-    {!d.naverReady && d.sourceMode !== "public_rss" && <div className="notice warn">네이버 검색 연결이 필요합니다. <GuardedLink href="/connections?service=naver">연결 확인</GuardedLink></div>}
+    {!d.naverReady && d.sourceMode !== "public_rss" && <div className="notice warn">네이버가 미연결 상태입니다. 학교·기관 공지는 직접 읽고 뉴스는 공개 RSS로 보완합니다. 웹문서·블로그 검색은 연결 후 사용할 수 있습니다. <GuardedLink href="/connections?service=naver">연결 확인</GuardedLink></div>}
     {searchAuthFailed && <div className="notice err" role="alert"><strong>최근 수집이 네이버 인증 단계에서 멈췄습니다.</strong><p style={{ margin: "6px 0" }}>저장된 Client ID·Client Secret 또는 검색 API 권한을 확인해 주세요. 신규 0건은 검색할 자료가 없다는 뜻이 아닙니다.</p><GuardedLink href="/connections?service=naver">네이버 키 확인·수정 →</GuardedLink><span className="small"> 키 저장 → 연결 확인 → 지금 수집 순서로 재개할 수 있습니다.</span></div>}
     {d.globalStop && <div className="notice warn">전역 정지 중이므로 수집이 실행되지 않습니다.</div>}
     <p className="small muted" style={{ margin: 0 }}>{d.lastScheduledAt ? `최근 실제 예약 수집: ${fmtDate(d.lastScheduledAt)}` : "실제 예약 수집 기록이 아직 없습니다. 연결 검사 성공과 자료 수집 완료는 별개입니다."}</p>

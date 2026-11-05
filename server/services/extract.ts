@@ -56,6 +56,21 @@ export function extractHtml(html: string, baseUrl: string, context: ArticleConte
       status: kind === "pdf" ? "pending" : "manual_check",
       reason: kind === "pdf" ? undefined : `${kind.toUpperCase()} 파일은 자동 추출하지 않음 — 수동 확인 필요` });
   });
+  // MCST's public download handler uses these literal arguments. Parse them;
+  // never execute site JavaScript or mistake the HTML preview for the PDF.
+  const base = new URL(baseUrl);
+  if (base.hostname.replace(/^www\./, "") === "mcst.go.kr" && /\/s_notice\/press\/pressView\.jsp$/.test(base.pathname)) {
+    $('a[onclick*="file_download("]').each((_, a) => {
+      const args = ($(a).attr("onclick") || "").match(/file_download\(\s*'([^']+)'\s*,\s*'([\w.-]+\.pdf)'\s*,\s*'(\d+)'\s*(?:,\s*'(\d*)'\s*)?\)/i);
+      if (!args) return;
+      let name: string;
+      try { name = decodeURIComponent(args[1].replace(/\+/g, " ")); } catch { return; }
+      const url = new URL("/servlets/eduport/front/upload/UplDownloadFile", baseUrl);
+      url.search = new URLSearchParams({ pFileName: name, pRealName: args[2], pPath: args[3], pFlag: args[4] ?? "" }).toString();
+      for (let i = attachments.length - 1; i >= 0; i--) if (new URL(attachments[i].url).searchParams.get("fn") === args[2]) attachments.splice(i, 1);
+      if (!attachments.some(x => x.url === url.href)) attachments.push({ url: url.href, name, kind: "pdf", status: "pending" });
+    });
+  }
   $("script,style,noscript,iframe,svg,header,footer,nav,form,aside,button,[hidden],[aria-hidden='true'],.related-news,.related-articles,.article-tools,.share-buttons,.advertisement").remove();
   $("br").replaceWith("\n");
   $("p,div,section,li,h1,h2,h3,h4,tr").append("\n");

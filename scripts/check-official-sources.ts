@@ -15,8 +15,10 @@ for (const source of sources) {
   console.log(JSON.stringify({ name: source.name, url: source.boardUrl, ...result, ...(result.ok ? { total: result.entries.length, entries: result.entries.slice(0, 2) } : {}) }, null, 2));
   if (result.ok) {
     const sample = result.entries.find(e => !source.config.recruitmentOnly || classifyNotice(e.title) === "candidate") ?? result.entries[0];
+    let detailHtml = "", detailUrl = "";
     const inspectFetch: typeof safeFetch = async (url, opts) => {
       const res = await safeFetch(url, opts);
+      if (res.contentType.includes("html")) { detailHtml = decodePublicText(res.body, res.contentType); detailUrl = res.finalUrl; }
       if (process.argv.includes("--inspect") && res.contentType.includes("html")) {
         const $ = load(decodePublicText(res.body, res.contentType));
         console.log(JSON.stringify({ name: source.name, articleMarkup: { expected: sample.title, url: res.finalUrl,
@@ -29,6 +31,10 @@ for (const source of sources) {
     };
     let extra = 1;
     const article = await fetchPublisherArticle(sample.url, inspectFetch, { title: sample.title, takeExtraCall: () => extra-- > 0 });
+    if (!article.ok && detailHtml && /교육청|링커리어|위비티|콘테스트/.test(source.name)) {
+      const $ = load(detailHtml);
+      console.log(JSON.stringify({name: source.name, failedDetail: {url:detailUrl,heads: $("h1,h2,h3,h4,[class*='tit'],[class*='Tit'],[class*='subject']").toArray().filter(el=>/202[67]|모집|공모|전형|선발|공지/.test($(el).text())).slice(-12).map(el=>$(el).prop("outerHTML")?.replace(/\s+/g," ").slice(0,800)), containers: $("[class*='view'],[class*='View'],[class*='cont'],[class*='Cont']").toArray().filter(el=>$(el).text().length>100 && $(el).text().length<10000).slice(-15).map(el=>({class:$(el).attr("class"),id:$(el).attr("id"),preview:$(el).text().replace(/\s+/g," ").slice(0,150)}))}}));
+    }
     console.log(JSON.stringify({ name: source.name, article: article.ok ? { ok: true, finalUrl: article.finalUrl, textLength: article.text.length, preview: article.text.slice(0, 300), end: article.text.slice(-200), attachments: article.attachments.map(a => ({ kind: a.kind, status: a.status })) } : article }));
   }
   if (process.argv.includes("--inspect")) {
