@@ -1,5 +1,5 @@
 import { emptyVideoProject } from "@shared/videoProject";
-import { VideoEditor } from "./VideoEditor";
+const VideoEditor = lazy(() => import("./VideoEditor").then(m => ({ default: m.VideoEditor })));
 import { creativeProfileFor } from "@shared/creativeProfile";
 import { useWorkspaceView } from "../useWorkspaceView";
 import { QuickCapture } from "../QuickCapture";
@@ -15,7 +15,7 @@ import { SourceStudioCard } from "./SourceStudioCard";
 import { aiProviderLabels, type AiProvider } from "@shared/aiProviders";
 import { legacyChannelAiSettings, type ChannelAiRuntime } from "@shared/channelAi";
 import { AiUsageGuide } from "../AiUsageGuide";
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { lazy, useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { api, apiUpload } from "../api";

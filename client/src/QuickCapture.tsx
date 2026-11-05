@@ -33,7 +33,7 @@ export function QuickCapture({ onClose }: { onClose: () => void }) {
     <form className="stack quick-capture" onSubmit={e => { e.preventDefault(); if (submitting.current) return; submitting.current = true; save.mutate(); }}>
       <p className="muted">먼저 링크를 모아 두세요. 본문과 원고는 나중에 확인해도 됩니다.</p>
       <label className="field">저장할 채널<select required value={channel} disabled={save.isPending} onChange={e => setChannel(e.target.value)}><option value="" disabled>채널 선택</option>{channels.map(ch => <option key={ch.id} value={ch.id}>{ch.name}</option>)}</select></label>
-      <label className="field">원문 URL<div className="capture-url"><input ref={input} type="url" required inputMode="url" autoComplete="off" autoCapitalize="none" placeholder="https://" value={url} maxLength={2000} disabled={save.isPending} onChange={e => setUrl(e.target.value)}/><button type="button" className="btn" disabled={save.isPending} onClick={paste}>붙여넣기</button></div></label>
+      <label className="field">원문 URL<div className="capture-url"><input aria-label="원문 URL" ref={input} type="url" required inputMode="url" autoComplete="off" autoCapitalize="none" placeholder="https://" value={url} maxLength={2000} disabled={save.isPending} onChange={e => setUrl(e.target.value)}/><button type="button" className="btn" disabled={save.isPending} onClick={paste}>붙여넣기</button></div></label>
       {clipboardMessage && <p className="small muted" role="status">{clipboardMessage}</p>}
       <label className="field">내가 알아볼 제목 <span className="muted">(선택)</span><input value={title} maxLength={160} disabled={save.isPending} onChange={e => setTitle(e.target.value)} placeholder="나중에 찾기 쉽게 짧게 적어 주세요"/></label>
       {save.error && <ErrorBox error={save.error}/>}

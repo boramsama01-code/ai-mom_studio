@@ -55,11 +55,26 @@ jobs:
       - name: Verify automatic images, manual fallback and final page previews
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/studio-automatic-regression.mjs
+      - name: Build verified before screen for design comparison
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        run: |
+          git fetch --no-tags --depth=1 origin 42c643d2161db59be2b78ceabf15b1eaa48c4298
+          mkdir -p /tmp/creative-baseline
+          git archive 42c643d2161db59be2b78ceabf15b1eaa48c4298 | tar -x -C /tmp/creative-baseline
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/creative-baseline/node_modules
+          cd /tmp/creative-baseline
+          npm run build
+      - name: Verify creative workspace directions, mobile capture and safe resume
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        env:
+          CREATIVE_BASELINE_DIR: /tmp/creative-baseline
+        run: node scripts/creative-workspace-regression.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mobile-webkit-screenshots
           path: |
+            test-results/creative-workspace
             test-results/mobile
             test-results/workspace
             test-results/news-editorial
