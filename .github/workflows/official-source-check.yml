@@ -5,6 +5,7 @@ on:
       - 'server/services/officialCatalog.ts'
       - 'server/services/boardAdapter.ts'
       - 'scripts/check-official-sources.ts'
+      - 'scripts/inspect-public-source-candidates.ts'
       - '.github/workflows/official-source-check.yml'
   workflow_dispatch:
 permissions:
@@ -22,3 +23,5 @@ jobs:
       - run: npm ci
       - name: Check public official lists without application credentials
         run: node --import tsx scripts/check-official-sources.ts --inspect
+      - name: Inspect education and youth contest public lists
+        run: node --import tsx scripts/inspect-public-source-candidates.ts
