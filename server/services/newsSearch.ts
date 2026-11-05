@@ -1,6 +1,6 @@
 /**
  * Public news collection, adapted from nodeul_news's independent-source pipeline.
- * Google News RSS + publisher RSS continue without a Naver key. Blog is optional.
+ * Prefer Naver; publisher/Google RSS are a degraded news-only fallback.
  * Bound requests, record partial coverage, and stop a failed provider for this run.
  * Never bypass a login, paywall, rate limit, or bot challenge.
  */
@@ -79,16 +79,16 @@ async function pacedGoogle<T>(fn: () => Promise<T>, paced: boolean): Promise<T> 
   return result;
 }
 
-export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?: Feed[]; naver?: SearchFunction; recruitment?: boolean } = {}) {
+export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?: Feed[]; naver?: SearchFunction; recruitment?: boolean; preferNaver?: boolean } = {}) {
   const now = opts.now ?? new Date(), feeds = opts.feeds ?? PUBLIC_NEWS_FEEDS;
-  const counts = { rssRequests: 0, rssFeedOk: 0, rssFeedFailed: 0, googleQueries: 0, googleFailed: 0, blogSkipped: 0 };
+  const counts = { rssRequests: 0, rssFeedOk: 0, rssFeedFailed: 0, googleQueries: 0, googleFailed: 0, blogSkipped: 0, naverQueries: 0, naverFailed: 0 };
   const warnings: Array<{ scope: string; message: string }> = [];
   const loadXml = opts.loadXml ?? (async (url: string) => {
     currentGenerationSignal()?.throwIfAborted();
     const response = await safeFetch(url, { maxBytes: 2 * 1024 * 1024, timeoutMs: 8000, accept: "application/rss+xml,application/atom+xml,application/xml,text/xml;q=0.9" });
     return decodePublicText(response.body, response.contentType);
   });
-  let direct: Promise<NaverItem[]> | null = null, googleStopped = false, blogError: NaverError | null = null;
+  let direct: Promise<NaverItem[]> | null = null, googleStopped = false, naverError: Error | null = null;
   const warn = (scope: string, message: string) => { if (!warnings.some(w => w.scope === scope)) warnings.push({ scope, message }); };
   async function directItems() {
     direct ??= (async () => {
@@ -110,17 +110,23 @@ export function createNewsSearch(opts: { now?: Date; loadXml?: RssLoader; feeds?
   const search: SearchFunction = async (query, endpoint, display, counter) => {
     currentGenerationSignal()?.throwIfAborted();
     if (searchCalls(counter) >= counter.limit) throw new NaverError("이번 실행의 검색 한도 도달", "rate_limit");
-    if (endpoint === "blog") {
-      if (blogError) { counts.blogSkipped++; throw blogError; }
-      try { return await (opts.naver ?? naverSearch)(query, endpoint, display, counter); }
+    if (endpoint !== "news" || opts.preferNaver !== false) {
+      try {
+        if (naverError) { if (endpoint === "blog") counts.blogSkipped++; throw naverError; }
+        counts.naverQueries++;
+        // A successful empty result is not an outage; do not fan out to Google.
+        return await (opts.naver ?? naverSearch)(query, endpoint, display, counter);
+      }
       catch (e) {
-        if (e instanceof NaverError && ["auth", "not_configured", "rate_limit"].includes(e.kind)) {
-          blogError = e;
-          warn("naver_blog", "네이버 블로그 검색이 연결되지 않아 블로그 결과를 생략했습니다. 공개 뉴스 수집은 계속됩니다.");
+        if (!naverError && (!(e instanceof NaverError) || e.kind !== "bad_request")) {
+          naverError = e instanceof Error ? e : new Error("네이버 응답 오류");
+          counts.naverFailed++;
+          warn("naver", `네이버 검색: ${naverError.message}. 이번 실행의 네이버 추가 요청을 중단합니다. 뉴스는 공개 RSS로 보완하고 웹문서·블로그는 확인하지 못한 것으로 기록합니다.`);
         }
-        throw e;
+        if (endpoint !== "news") throw e;
       }
     }
+    if (searchCalls(counter) >= counter.limit) throw new NaverError("이번 실행의 검색 호출 한도 도달", "rate_limit");
     counter.rss = (counter.rss ?? 0) + 1;
     const matches = (await directItems()).filter(item => matchesNewsQuery(item, query));
     currentGenerationSignal()?.throwIfAborted();

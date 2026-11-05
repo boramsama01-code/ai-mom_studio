@@ -1,5 +1,5 @@
 /**
- * 네이버 검색 API (뉴스/블로그)
+ * 네이버 검색 API (뉴스/블로그/웹문서)
  * - query는 단순 텍스트. OR/AND 불리언 문법을 삽입하지 않는다.
  * - 429/일시적 5xx는 제한된 백오프, 인증·권한 오류는 재시도하지 않는다.
  * 2026-07-31부터 네이버 개발자센터 신규 등록이 중단되고 NAVER API HUB(네이버 클라우드)로 이관됨.
@@ -12,7 +12,7 @@ import { env } from "../env";
 import { stripHtml } from "./text";
 import { parseBlogPostDate, parseNewsPubDate, type ParsedDate } from "./dates";
 
-export type NaverEndpoint = "news" | "blog";
+export type NaverEndpoint = "news" | "blog" | "webkr";
 
 export type NaverItem = {
   provider?: "google_news_rss" | "rss_direct";
@@ -72,7 +72,7 @@ export function mapNaverItem(endpoint: NaverEndpoint, it: Record<string, string>
     originallink: endpoint === "news" ? it.originallink || undefined : undefined,
     bloggername: endpoint === "blog" ? it.bloggername : undefined,
     bloggerlink: endpoint === "blog" ? it.bloggerlink : undefined,
-    published: endpoint === "news" ? parseNewsPubDate(it.pubDate) : parseBlogPostDate(it.postdate),
+    published: endpoint === "news" ? parseNewsPubDate(it.pubDate) : endpoint === "blog" ? parseBlogPostDate(it.postdate) : { raw: null, iso: null, precision: "unknown" },
     raw: it,
   };
 }
@@ -118,7 +118,7 @@ async function searchWith(
   url.searchParams.set("query", query);
   url.searchParams.set("display", String(Math.min(Math.max(display, 1), 100)));
   url.searchParams.set("start", "1");
-  url.searchParams.set("sort", "date");
+  if (endpoint !== "webkr") url.searchParams.set("sort", "date");
 
   const delays = [0, 1500, 4000];
   let lastErr: NaverError | null = null;

@@ -32,6 +32,7 @@ async function main() {
       if (uncertain) console.log(`게시물 ID가 없는 이전 완료 기록 ${uncertain}건을 결과 확인 대상으로 표시했습니다.`);
       const s = await loadStoredSecrets(getDb());
       if (s.loaded) console.log(`화면에서 입력한 연결 키 ${s.loaded}개를 불러왔습니다.`);
+      console.log("수집 경로 준비: 학교·기관/청소년 목록 우선, 네이버 보완", { naverConfigured: !!env.naverClientId && !!env.naverClientSecret });
       kickInlineStudio(getDb());
       startInlinePublish(getDb());
       startCanvaJobs(getDb());

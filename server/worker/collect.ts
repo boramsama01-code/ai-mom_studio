@@ -4,7 +4,7 @@ import { validSubcategory } from "../../shared/channelCategories";
  * 1) 설정 스냅샷 → 2) 공식 게시판 → 3) 공개 뉴스 검색·저장 → 4) 원문 확보 → 5) 선택적 구조화 추출
  * 실패를 "정상 0건"으로 숨기지 않는다. 처리하지 못한 자료는 사유와 함께 보존한다.
  */
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { DB } from "../db";
 import {
   channels,
@@ -42,10 +42,11 @@ import { generateDialogueDraft } from "./generate";
 import { persistSourceFetchAttempt } from "../services/sourceFetchPersistence";
 import { assertGenerationActive, completeGenerationResult, currentGenerationSignal } from "../services/generationContext";
 import type { NoticePayload } from "../../shared/payloads";
-import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
+import { nonYouthAudienceReason, isYouthOpportunity, classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { itemPrimarySource } from "../services/itemSources";
 import { preserveCardCopy } from "../../shared/cardCopy";
 import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
+import { boardMatchesCategory, officialCategory, officialConfig, officialFirstSearchLimit } from "../services/officialCatalog";
 import { generateFamilySourceDraft } from "../services/familySourceDraft";
 import type { AiExecutionPlan } from "../../shared/aiProvenance";
 
@@ -90,14 +91,16 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
 
   const budget = channel.budget;
   const plannedNaver = rules.length; // 규칙 1개 = 호출 1회 (news/blog 각각 별도 규칙)
-  const selected = rules.slice(0, budget.naverCallsPerRun);
+  let selected = rules.slice(0, budget.naverCallsPerRun);
   const skippedRules = rules.slice(budget.naverCallsPerRun);
 
-  const officials = await db.select().from(officialSources).where(eq(officialSources.channelId, channelId));
+  const officials = await db.select().from(officialSources).where(eq(officialSources.channelId, channelId)).orderBy(sql`${officialSources.lastCheckedAt} asc nulls first`, asc(officialSources.id));
   const unconnected = officials.filter((o) => o.enabled && !o.adapter).map((o) => o.name);
-  const boards = officials.filter((o) => !opts.subcategory && o.enabled && o.adapter === "generic_board" && o.verifiedAt && o.domain && o.boardUrl);
+  const boards = officials.filter((o) => o.enabled && o.adapter === "generic_board" && o.verifiedAt && o.domain && o.boardUrl && boardMatchesCategory(channel.slug, o, opts.subcategory, channel.categories));
 
   const snapshot = {
+    sourcePolicy: "official_first",
+    officialSources: boards.map(o => ({ id: o.id, name: o.name, url: o.boardUrl, config: officialConfig(o) })),
     subcategory: opts.subcategory ?? null,
     channel: { id: channel.id, slug: channel.slug, budget, cardTemplate: channel.cardTemplate },
     ai,
@@ -121,59 +124,125 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const errors: Array<{ scope: string; message: string }> = [];
   const counter: CallCounter = { naver: 0, limit: budget.naverCallsPerRun };
   const newItemIds: number[] = [];
-  const publicSearch = createNewsSearch({ now, loadXml: opts.rssLoad, recruitment: channel.contentType === "notice" });
-  // Existing Naver fixtures exercise the same storage pipeline; production uses public RSS.
-  const selectedSearch = opts.naverFetch ? ((q: string, e: "news" | "blog", d: number, c: CallCounter) => naverSearch(q, e, d, c, opts.naverFetch)) : publicSearch.search;
+  const publicSearch = createNewsSearch({ now, loadXml: opts.rssLoad, preferNaver: !opts.rssLoad, recruitment: channel.contentType === "notice" });
+  // Existing Naver fixtures exercise the same storage pipeline; production prefers Naver with public RSS fallback.
+  const selectedSearch = opts.naverFetch ? ((q: string, e: "news" | "blog" | "webkr", d: number, c: CallCounter) => naverSearch(q, e, d, c, opts.naverFetch)) : publicSearch.search;
   const search: typeof publicSearch.search = (...args) => { currentGenerationSignal()?.throwIfAborted(); return selectedSearch(...args); };
   const llmBudget = new LlmBudget(budget.llmCallsPerRun);
   let fetchCalls = 0;
 
   try {
-  /* 1-2) 자동 화제 발굴(과학·시사 채널) — 사용자 검색어보다 먼저 */
-  currentGenerationSignal()?.throwIfAborted();
-  const disc = opts.subcategory ? null : await runDiscovery(db, channel, run.id, counter, llmBudget, now, search, opts.collectionOnly);
-  if (disc) {
-    Object.assign(counts, disc.counts);
-    errors.push(...disc.errors);
-    counts.newItems += disc.itemIds.length;
-    newItemIds.push(...disc.itemIds);
-    await opts.heartbeat?.();
-  }
-
-  /* 2) 공식 게시판 우선 — 목록 조회도 원문 호출 예산에 포함 */
+  /* 1) 공식 목록 우선. 목록에 전체 예산을 소진하지 않도록 본문 조회 예산을 남긴다. */
   counts.officialBoards = boards.length;
+  counts.officialChecked = 0;
+  counts.officialSucceeded = 0;
+  counts.officialFailed = 0;
   counts.officialNew = 0;
+  counts.officialDuplicates = 0;
+  const boardLimit = Math.min(boards.length, (budget.fetchCallsPerRun ? Math.max(1, Math.floor(budget.fetchCallsPerRun / 2)) : 0));
+  const hasSupplement = budget.naverCallsPerRun > 0 && (rules.length > 0 || (!opts.subcategory && budget.discovery?.enabled));
+  const officialResultLimit = hasSupplement ? Math.ceil(budget.resultsPerRun * 2 / 3) : budget.resultsPerRun;
+  const officialTargets: number[][] = [];
   for (const o of boards) {
     currentGenerationSignal()?.throwIfAborted();
-    if (fetchCalls >= budget.fetchCallsPerRun) {
-      errors.push({ scope: `official:${o.id}`, message: `${o.name}: 원문 호출 한도 도달 — 게시판 건너뜀` });
+    if (counts.officialChecked >= boardLimit || fetchCalls >= Math.max(boardLimit, Math.floor(budget.fetchCallsPerRun / 2)) || counts.results >= budget.resultsPerRun) {
+      counts.officialDeferred = (counts.officialDeferred ?? 0) + 1;
       continue;
     }
+    counts.officialChecked++;
     fetchCalls++;
-    const r = await (opts.fetchBoard ?? fetchBoardList)(o.boardUrl!, o.domain!, o.adapterConfig as BoardConfig);
-    if (!r.ok) {
-      errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판 조회 실패: ${r.error}` });
+    const config = officialConfig(o);
+    let r: Awaited<ReturnType<typeof fetchBoardList>>;
+    try { r = await (opts.fetchBoard ?? fetchBoardList)(o.boardUrl!, o.domain!, config, undefined, { takeExtraCall: () => { currentGenerationSignal()?.throwIfAborted(); if (fetchCalls >= Math.floor(budget.fetchCallsPerRun / 2)) return false; fetchCalls++; counts.officialExtraPages = (counts.officialExtraPages ?? 0) + 1; return true; } }); }
+    catch (error) { currentGenerationSignal()?.throwIfAborted(); r = { ok: false, error: error instanceof Error ? error.message : "게시판 조회 실패" }; }
+    if (!r.ok || !r.entries.length) {
+      const message = r.ok ? "목록을 찾지 못했습니다. 게시판 구조·접근 상태를 확인하세요." : r.error;
+      counts.officialFailed++;
+      errors.push({ scope: `official:${o.id}`, message: `${o.name}: ${message} · 직접 확인: ${o.boardUrl}` });
+      await db.update(officialSources).set({ lastCheckedAt: now, lastStatus: "failed", lastError: message, lastNewCount: 0 }).where(eq(officialSources.id, o.id));
+      await opts.heartbeat?.();
       continue;
     }
-    if (!r.entries.length) errors.push({ scope: `official:${o.id}`, message: `${o.name} 게시판에서 목록을 찾지 못함(선택자 확인 필요)` });
-    for (const e of r.entries) {
+    if (r.warnings?.length) errors.push(...r.warnings.map(message => ({ scope: `official:${o.id}`, message: `${o.name}: ${message}` })));
+    counts.officialSucceeded++;
+    const entries = r.entries.flatMap(e => { try { return [{ ...e, normalized: normalizeUrl(e.url) }]; } catch { return []; } });
+    const urls = entries.map(e => e.normalized);
+    const known = urls.length ? await db.select({ url: sourceDocuments.normalizedUrl, status: sourceDocuments.fetchStatus, text: sourceDocuments.fetchedText }).from(sourceDocuments)
+      .innerJoin(contentItems, eq(contentItems.primarySourceId, sourceDocuments.id))
+      .where(and(eq(contentItems.channelId, channel.id), inArray(sourceDocuments.normalizedUrl, urls))) : [];
+    const priority = new Map(known.map(r => [r.url, !r.text && r.status === "not_fetched" ? 1 : 2]));
+    // New notices, then deferred bodies, before previously completed pinned posts.
+    const ordered = entries.sort((a, b) => (priority.get(a.normalized) ?? 0) - (priority.get(b.normalized) ?? 0));
+    let sourceNew = 0;
+    const targets: number[] = [];
+    // Reserve diversity even when a single feed has hundreds of entries.
+    const sourceLimit = Math.max(1, Math.ceil(officialResultLimit / Math.max(2, boardLimit)));
+    let accepted = 0, deferred = 0;
+    for (const e of ordered) {
       currentGenerationSignal()?.throwIfAborted();
+      const category = officialCategory(channel.slug, o, e.title, channel.categories);
+      if (opts.subcategory && category !== opts.subcategory) continue;
+      const day = parseBoardDate(e.dateText);
+      if (day && config.maxAgeDays && now.getTime() - Date.parse(`${day}T00:00:00+09:00`) > config.maxAgeDays * 86400_000) {
+        counts.officialOldSkipped = (counts.officialOldSkipped ?? 0) + 1;
+        continue;
+      }
       if (channel.contentType === "notice") {
         const intent = classifyNotice(e.title);
-        if (intent === "retrospective" || intent === "off_topic") {
+        if ((config.youthOnly && !isYouthOpportunity(e.title, e.audience)) || intent === "retrospective" || intent === "off_topic" || (config.recruitmentOnly && intent !== "candidate")) {
           counts.noticeReportsSkipped = (counts.noticeReportsSkipped ?? 0) + 1;
           continue;
         }
       }
-      const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e);
+      if (counts.results >= officialResultLimit || accepted >= sourceLimit) {
+        if ((priority.get(e.normalized) ?? 0) < 2) deferred++;
+        continue;
+      }
+      counts.results++;
+      accepted++;
+      const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e, category, config.sourceRole);
       if (saved?.isNew) {
+        sourceNew++;
         counts.officialNew++;
         counts.newItems++;
-        newItemIds.push(saved.itemId);
-      }
+      } else if (saved) { counts.officialDuplicates++; counts.duplicates++; }
+      if (saved && (saved.isNew || saved.needsFetch)) targets.push(saved.itemId);
     }
+    if (deferred) {
+      counts.officialResultsDeferred = (counts.officialResultsDeferred ?? 0) + deferred;
+      (r.warnings ??= []).push(`처리 한도로 새 공고·미확보 본문 ${deferred}건을 남겼습니다. 다음 조회에서도 목록에 남아 있는 자료부터 이어서 확인합니다.`);
+      errors.push({ scope: `official:${o.id}`, message: `${o.name}: ${r.warnings[r.warnings.length - 1]}` });
+    }
+    officialTargets.push(targets);
+    await db.update(officialSources).set({ lastCheckedAt: now, lastStatus: r.warnings?.length ? "partial" : "ok", lastError: r.warnings?.join(" · ") ?? null, lastNewCount: sourceNew }).where(eq(officialSources.id, o.id));
+    await opts.heartbeat?.();
+  }
+  if (counts.officialDeferred) errors.push({ scope: "official_budget", message: `공식 출처 ${counts.officialDeferred}곳은 호출·결과 한도로 다음 실행에서 먼저 확인합니다.` });
+  // Round robin gives every board a first body fetch before one board gets a second.
+  while (officialTargets.some(ids => ids.length)) for (const ids of officialTargets) {
+    const id = ids.shift(); if (id && !newItemIds.includes(id)) newItemIds.push(id);
   }
 
+  /* 2) 뉴스는 보완. 공식 경로가 모두 실패하면 기존 검색 한도로 복원한다. */
+  counter.limit = officialFirstSearchLimit(channel.contentType, budget.naverCallsPerRun, counts.officialSucceeded);
+  selected = selected.slice(0, counter.limit);
+  counts.supplementSearchLimit = counter.limit;
+  counts.rules = selected.length;
+  counts.rulesSkippedByPolicy = Math.max(0, Math.min(rules.length, budget.naverCallsPerRun) - selected.length);
+  // Keep at least half the search budget for operator keywords when discovery is enabled.
+  const discoveryCounter = counter;
+  const searchLimit = counter.limit;
+  if (rules.length && counts.officialSucceeded > 0) counter.limit = Math.floor(searchLimit / 2);
+  const disc = opts.subcategory || counts.results >= budget.resultsPerRun ? null : await runDiscovery(db, channel, run.id, discoveryCounter, llmBudget, now, search, opts.collectionOnly, budget.resultsPerRun - counts.results);
+  counter.limit = searchLimit;
+  if (disc) {
+    Object.assign(counts, disc.counts);
+    errors.push(...disc.errors);
+    counts.newItems += disc.itemIds.length;
+    counts.results += disc.itemIds.length;
+    newItemIds.push(...disc.itemIds);
+    await opts.heartbeat?.();
+  }
 
   /* 3) 검색 → 저장 */
   counts.rulesProcessed = 0;
@@ -189,7 +258,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     let ruleNew = 0;
     counts.rulesProcessed++;
     try {
-      items = await search(rule.query, rule.endpoint as "news" | "blog", rule.display, counter);
+      items = await search(rule.query, rule.endpoint as "news" | "blog" | "webkr", rule.display, counter);
       counts.rulesSucceeded++;
     } catch (e) {
       currentGenerationSignal()?.throwIfAborted();
@@ -204,7 +273,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       counts.results++;
       if (channel.contentType === "notice") {
         const intent = classifyNotice(it.title, it.description);
-        if (intent === "retrospective" || intent === "off_topic") {
+        if (!isYouthOpportunity(it.title) || intent === "retrospective" || intent === "off_topic") {
           counts.noticeReportsSkipped = (counts.noticeReportsSkipped ?? 0) + 1;
           continue;
         }
@@ -246,6 +315,15 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       continue;
     }
     counts.fetchedOk++;
+    if (channel.contentType === "notice" && ["pending", "review_required"].includes(item.reviewStatus)) {
+      const [doc] = await db.select({ text: sourceDocuments.fetchedText }).from(sourceDocuments).where(eq(sourceDocuments.id, item.primarySourceId!));
+      const reason = nonYouthAudienceReason(doc?.text ?? "");
+      if (reason) {
+        // Preserve the source and allow review; never overwrite a concurrent edit.
+        const updated = await db.update(contentItems).set({ excluded: true, excludedReason: reason, updatedAt: now }).where(and(eq(contentItems.id, itemId), eq(contentItems.version, item.version))).returning({ id: contentItems.id });
+        if (updated.length) { counts.excluded++; counts.audienceExcluded = (counts.audienceExcluded ?? 0) + 1; continue; }
+      }
+    }
     fetchedOk.push(itemId);
     await opts.heartbeat?.();
   }
@@ -328,7 +406,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   Object.assign(counts, publicSearch.counts);
   errors.push(...publicSearch.warnings);
   const discoveryRan = !!disc && disc.counts.discoveryQueries + disc.errors.length > 0;
-  const status = (counts.rulesSucceeded + (disc?.counts.discoveryQueries ?? 0) === 0 && counts.officialNew === 0 && (selected.length > 0 || discoveryRan) && errors.length)
+  const status = (counts.rulesSucceeded + (disc?.counts.discoveryQueries ?? 0) + counts.officialSucceeded === 0 && (boards.length > 0 || selected.length > 0 || discoveryRan) && errors.length)
     ? "failed"
     : errors.length
       ? "partial"
@@ -408,7 +486,7 @@ async function saveSearchItem(db: DB, channel: Channel, rule: SearchRule, runId:
   return { itemId: existing.id, isNew: false, excluded: false };
 }
 
-async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, schoolType: string | null, runId: number, e: { url: string; title: string; dateText: string | null }) {
+async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, schoolType: string | null, runId: number, e: { url: string; title: string; dateText: string | null }, subcategory: string | null, sourceRole?: string) {
   let normalized: string;
   try {
     normalized = normalizeUrl(e.url);
@@ -421,7 +499,7 @@ async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, s
     .values({
       normalizedUrl: normalized,
       originalUrl: e.url,
-      kind: "official",
+      kind: sourceRole === "discovery" ? "opportunity_listing" : "official",
       title: e.title,
       meta: { officialSourceId: officialId, fetchUrl: e.url, boardDateText: e.dateText },
       publishedRaw: e.dateText,
@@ -432,10 +510,12 @@ async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, s
   const [doc] = await db.select().from(sourceDocuments).where(and(eq(sourceDocuments.normalizedUrl, normalized), eq(sourceDocuments.isSample, false)));
   const inserted = await db
     .insert(contentItems)
-    .values({ channelId: channel.id, kind: channel.contentType, origin: "collected", primarySourceId: doc.id, runId, title: e.title, category: schoolType ? categoryForSchoolType(schoolType) : null, scheduleStatus: "unknown" })
+    .values({ channelId: channel.id, kind: channel.contentType, origin: "collected", primarySourceId: doc.id, runId, title: e.title, category: schoolType ? categoryForSchoolType(schoolType) : null, subcategory, scheduleStatus: channel.contentType === "notice" ? "unknown" : "not_applicable" })
     .onConflictDoNothing()
     .returning({ id: contentItems.id });
-  return inserted.length ? { itemId: inserted[0].id, isNew: true } : { itemId: 0, isNew: false };
+  if (inserted.length) return { itemId: inserted[0].id, isNew: true, needsFetch: true };
+  const [existing] = await db.select({ id: contentItems.id }).from(contentItems).where(and(eq(contentItems.channelId, channel.id), eq(contentItems.primarySourceId, doc.id)));
+  return existing ? { itemId: existing.id, isNew: false, needsFetch: !doc.fetchedText && doc.fetchStatus === "not_fetched" } : null;
 }
 
 /** 한 항목 구조화 추출 — 운영자 편집값·기존 승인을 덮어쓰지 않는다 */

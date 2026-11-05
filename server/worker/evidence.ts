@@ -10,7 +10,7 @@ export function matchOfficialSource(url: string, sources: OfficialSource[]): Off
     return null;
   }
   for (const s of sources) {
-    if (!s.domain || !s.verifiedAt) continue; // 확인되지 않은 도메인으로 공식 판정하지 않음
+    if (!s.domain || !s.verifiedAt || s.adapterConfig?.sourceRole === "discovery") continue; // 확인되지 않은 도메인으로 공식 판정하지 않음
     const d = s.domain.toLowerCase().replace(/^www\./, "");
     if (host === d || host.endsWith(`.${d}`) || host === `www.${d}`) return s;
   }

@@ -1,0 +1,25 @@
+name: Official source check
+on:
+  pull_request:
+    paths:
+      - 'server/services/officialCatalog.ts'
+      - 'server/services/boardAdapter.ts'
+      - 'scripts/check-official-sources.ts'
+      - 'scripts/inspect-public-source-candidates.ts'
+      - '.github/workflows/official-source-check.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-lists:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Check public official lists without application credentials
+        run: node --import tsx scripts/check-official-sources.ts

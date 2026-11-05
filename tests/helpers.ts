@@ -38,7 +38,8 @@ export async function resetDb() {
   const { runMigrations } = await import("../server/migrate");
   await runMigrations();
   const { seedIfNeeded } = await import("../server/seed");
-  await seedIfNeeded(getDb());
+  // Network collectors use explicit fixtures. Catalog installation has its own integration test.
+  await seedIfNeeded(getDb(), { officialCatalog: false });
 }
 
 export async function login(app: import("express").Express) {

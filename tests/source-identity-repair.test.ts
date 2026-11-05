@@ -74,7 +74,7 @@ it("decodes the initial publisher RSS before matching Korean search terms", asyn
   // Independent EUC-KR fixture for '한글 기사'; no encoder under test is used to prepare it.
   const bytes = Buffer.concat(xml.split(korean).flatMap((part, index) => index ? [Buffer.from("c7d1b1db20b1e2bbe7", "hex"), Buffer.from(part)] : [Buffer.from(part)]));
   const fetcher = vi.spyOn(transport, "safeFetch").mockImplementation(async url => ({ finalUrl: url, status: 200, contentType: "application/rss+xml", body: url.includes("news.google.com") ? Buffer.from("<rss><channel/></rss>") : bytes }));
-  const search = createNewsSearch({ now, feeds: [{ name: "신문", site: home, url: `${home}feed.xml` }] });
+  const search = createNewsSearch({ preferNaver: false, now, feeds: [{ name: "신문", site: home, url: `${home}feed.xml` }] });
   const items = await search.search("한글", "news", 10, { naver: 0, limit: 2 });
   expect(items).toHaveLength(1);
   expect(items[0]).toMatchObject({ title: korean, provider: "rss_direct" });

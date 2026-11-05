@@ -16,6 +16,7 @@ import { audit } from "../audit";
 import { enqueueJob } from "../worker/queue";
 import { kickInlineCollect } from "../worker/inline";
 import { orderedChannels } from "../services/channelOrder";
+import { boardMatchesCategory } from "../services/officialCatalog";
 import { PUBLIC_NEWS_FEEDS } from "../services/newsSearch";
 
 export const collectionRoutes = Router();
@@ -56,7 +57,7 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
       jobs: pendingJobs.map(j => ({ id: j.id, status: j.status, createdAt: j.createdAt, stale: j.status === "queued" ? now.getTime() - j.createdAt.getTime() > 120_000 : !j.leaseExpiresAt || j.leaseExpiresAt < now })),
       lastRun: lastRun ? { subcategory: typeof lastRun.snapshot.subcategory === "string" ? lastRun.snapshot.subcategory : null, id: lastRun.id, status: lastRun.status, startedAt: lastRun.startedAt, finishedAt: lastRun.finishedAt, counts: lastRun.counts, errors: lastRun.errors } : null };
   }));
-  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "public_rss", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
+  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "official_naver", collectionStrategy: "official_first", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
 }));
 
 collectionRoutes.post("/channels/:cid/collection-profile", ah(async (req, res) => {
@@ -89,16 +90,17 @@ collectionRoutes.post("/collection/collect", ah(async (req, res) => {
   for (const ch of chs) {
     if (!validSubcategory(ch.slug, subcategory, ch.categories)) throw new HttpError(400, "이 채널의 소분류를 선택해 주세요.");
     const [rule] = await db.select({ id: searchRules.id }).from(searchRules).where(and(eq(searchRules.channelId, ch.id), eq(searchRules.enabled, true), isNull(searchRules.deletedAt), subcategory ? eq(searchRules.subcategory, subcategory) : undefined)).limit(1);
-    const [board] = await db.select({ id: officialSources.id }).from(officialSources).where(and(eq(officialSources.channelId, ch.id), eq(officialSources.enabled, true), sql`${officialSources.adapter} is not null and ${officialSources.verifiedAt} is not null`)).limit(1);
+    const boardRows = await db.select().from(officialSources).where(and(eq(officialSources.channelId, ch.id), eq(officialSources.enabled, true), sql`${officialSources.adapter} is not null and ${officialSources.verifiedAt} is not null`));
+    const board = boardRows.find(o => o.domain && o.boardUrl && boardMatchesCategory(ch.slug, o, subcategory, ch.categories));
     const d = resolveDiscovery(ch.contentType, ch.budget.discovery);
-    if (subcategory && (!rule || !ch.budget.naverCallsPerRun)) continue;
+    if (subcategory && (!rule || !ch.budget.naverCallsPerRun) && (!board || !ch.budget.fetchCallsPerRun)) continue;
     if ((!rule && !board && !(d?.enabled && d.queries.length && d.picksPerRun)) || (!ch.budget.naverCallsPerRun && !board)) continue;
     const r = await enqueueJob(db, { type: "collect", channelId: ch.id, dedupeKey: subcategory ? `collect:${ch.id}:category:${subcategory}` : `collect:${ch.id}`, requestedBy: actorOf(req), maxAttempts: 2, payload: { collectionOnly: true, ...(subcategory ? { subcategory } : {}) } });
     // 오래 대기한 요청도 같은 안전한 수집 경로로 재개한다.
     await db.update(jobs).set({ payload: { ...r.job.payload, collectionOnly: true } }).where(and(eq(jobs.id, r.job.id), eq(jobs.status, "queued")));
     requested.push({ channelId: ch.id, jobId: r.job.id, duplicate: r.duplicate });
   }
-  if (!requested.length) throw new HttpError(400, subcategory ? "선택한 소분류에 활성 키워드를 추가하고 수집 한도를 설정해 주세요." : "활성 검색어 또는 연결된 공식 게시판을 먼저 설정하세요.");
+  if (!requested.length) throw new HttpError(400, subcategory ? "선택한 소분류에 활성 키워드나 공식 출처를 연결하고 수집 한도를 설정해 주세요." : "활성 검색어 또는 연결된 공식 게시판을 먼저 설정하세요.");
   const inline = kickInlineCollect(db);
   await audit(db, { actor: actorOf(req), action: "collect_channels", entity: "job", detail: { requested, inline } });
   res.status(202).json({ requested, inline });

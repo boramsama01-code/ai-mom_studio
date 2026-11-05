@@ -129,7 +129,7 @@ describe("실제 수집 설정·브리핑", () => {
       const list = await agent.get("/api/items?channelId=1&q=공개%20RSS");
       expect(list.body.items[0].source).toMatchObject({ kind: "rss_direct", publisher: "테스트신문" });
       const overview = await agent.get("/api/collection/overview?channelId=all");
-      expect(overview.body).toMatchObject({ searchReady: true, naverReady: false, sourceMode: "public_rss" });
+      expect(overview.body).toMatchObject({ searchReady: true, naverReady: false, sourceMode: "official_naver" });
     } finally {
       process.env.NAVER_CLIENT_ID = "test-id"; process.env.NAVER_CLIENT_SECRET = "test-secret";
     }

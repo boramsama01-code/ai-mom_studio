@@ -40,6 +40,7 @@ export async function runDiscovery(
   now: Date,
   search: SearchFunction = createNewsSearch({ now }).search,
   collectionOnly = false,
+  maxItems = Number.MAX_SAFE_INTEGER,
 ): Promise<DiscoveryResult | null> {
   const settings = channelDiscovery(channel);
   if (!settings) return null;
@@ -112,7 +113,7 @@ export async function runDiscovery(
   }
 
   /* 4) 저장 */
-  for (const { cluster, pick } of chosen) {
+  for (const { cluster, pick } of chosen.slice(0, Math.max(0, maxItems))) {
     const saved = await saveCluster(db, channel, runId, cluster, pick, now);
     if (!saved) continue;
     result.itemIds.push(saved.itemId);
@@ -155,7 +156,7 @@ export async function upsertNaverDoc(db: DB, it: NaverItem): Promise<{ id: numbe
     .values({
       normalizedUrl: normalized,
       originalUrl: identityUrl,
-      kind: it.provider ?? (it.endpoint === "news" ? "naver_news" : "naver_blog"),
+      kind: it.provider ?? (it.endpoint === "news" ? "naver_news" : it.endpoint === "webkr" ? "naver_web" : "naver_blog"),
       title: it.title,
       snippet: it.description,
       meta: { naverLink: it.provider ? null : it.link, originallink: it.originallink ?? null, bloggername: it.bloggername ?? null, bloggerlink: it.bloggerlink ?? null, publisher: it.publisher ?? null, publisherUrl: it.publisherUrl ?? null, feedUrl: it.feedUrl ?? null, fetchUrl, raw: it.raw },
