@@ -160,7 +160,7 @@ function selectedPage(copy: CardCopy | CardCopyV2, pageId: CardPageId, pageDesig
     const design = resolvedReadingPageDesigns(copy, pageDesigns ?? defaultPageDesigns())[page.id];
     const values = profile ? familyReadingTextValues(copy) : null;
     return { title: familyPageTitle(page), subtitle: "", body: values && profile ? profile.pages[page.page - 1].textBoxes.map(box => values[box.field]).filter(Boolean).join("\n") : familyPageText(page).join("\n"), role: page.id,
-      ...(profile ? { photoComposition: readingArtworkComposition(profile, page.id) } : {}),
+      ...(profile ? { photoComposition: readingArtworkComposition(profile, page.id, design) } : {}),
       background: design.background.kind === "image" && design.background.assetId ? { assetId: design.background.assetId } : undefined,
     };
   }
@@ -234,6 +234,7 @@ export async function readCardPageImagePrompt(db: DB, input: { channelId: number
     basedOnRevisionId: saved?.basedOnRevisionId ?? null,
     stale: !!(saved?.prompt || saved?.instruction) && saved?.basedOnRevisionId !== snapshot.revision.id,
     model: selected.model, referenceAssetId: background?.assetId ?? null,
+    compositionPrompt: "photoComposition" in snapshot.page && snapshot.page.photoComposition ? readingArtworkPrompt(snapshot.page.photoComposition) : undefined,
     lastGeneration: saved?.lastGeneration ?? null };
 }
 
@@ -290,9 +291,10 @@ export async function createCardPageArtwork(db: DB, input: CardPageArtworkInput)
       const previous = background ? await loadCardPageArtworkAsset(db, input.itemId, input.channelId, background.assetId) : null;
       try {
         const prompt = requestedPrompt ?? defaultPageImagePrompt(snapshot);
-        submittedPrompt = studioImagePrompt({ purpose: "cover", prompt, instruction });
+        const compositionPrompt = "photoComposition" in snapshot.page && snapshot.page.photoComposition ? readingArtworkPrompt(snapshot.page.photoComposition) : undefined;
+        submittedPrompt = studioImagePrompt({ purpose: "cover", prompt, instruction, compositionPrompt });
         const generated = await generateStudioImage({ provider: "openai", model: imageSelection!.model, purpose: "cover",
-          prompt, instruction: instruction.trim(),
+          prompt, instruction: instruction.trim(), compositionPrompt,
           referenceImages: previous ? [`data:image/jpeg;base64,${previous.bytes.toString("base64")}`] : undefined,
           signal: currentGenerationSignal(),
         });

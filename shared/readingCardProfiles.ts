@@ -2,6 +2,7 @@ import layout from './readingCardLayout.json';
 import cardnews14 from './cardnews14Layout.json';
 import type { CardCopyV2, FamilyPageId, PageDesigns } from './familyDialogue';
 import { familyDisplayDescriptors, type FamilyDisplayDescriptor } from './familyDisplay';
+import { readingCoverSafety, READING_COVER_LAYOUT_REVISION } from './readingCoverSafety';
 
 /** Preview/layout contracts only. A profile does not imply a registered, live Canva master. */
 export const CARDNEWS14_STYLE_IDS = ['cinematic','monochrome-coral','amber-cream','cobalt-paper','ink-lime','swiss-modernism','studio-2am','ichestyime','sharp-serif','bang-bang','hello','ekiden-pack','you-and-me','ott-recommendation'] as const;
@@ -24,8 +25,8 @@ const legacyIds:Record<string,typeof LEGACY_READING_PROFILE_IDS[number]> = {'ink
 const legacyProfiles:ReadingCardProfile[] = layout.styles.map(style => {
   const id=legacyIds[style.id];
   if(!id)throw new Error(`Unknown legacy reading style: ${style.id}`);
-  const pages=style.pages.map(page => ({ ...page, shapes:page.shapes as ReadingShape[], textBoxes:page.textBoxes as ReadingTextBox[], imageBoxes:page.imageBoxes.map(box => ({...box,fit:box.fit as 'cover'|'contain',pageId:pageIds[page.page-1],kind:page.page===8?'profile' as const:'artwork' as const})) }));
-  return { id,templateKey:id,templateVersion:id+'-20261104',mappingVersion:READING_MAPPING_VERSION,label:style.name,pages,images:pages.flatMap(page=>page.imageBoxes),profileImagePath:READING_PROFILE_LOGO_PATH,profileImageSha256:READING_PROFILE_LOGO_SHA256,profileImageAssetId:'MAHZ7ZCRRbs' };
+  const pages=style.pages.map(page => readingCoverSafety(style.id.replace('_','-'),{ ...page, shapes:page.shapes as ReadingShape[], textBoxes:page.textBoxes as ReadingTextBox[], imageBoxes:page.imageBoxes.map(box => ({...box,fit:box.fit as 'cover'|'contain',pageId:pageIds[page.page-1],kind:page.page===8?'profile' as const:'artwork' as const})) }));
+  return { id,templateKey:id,templateVersion:id+'-20261104-'+READING_COVER_LAYOUT_REVISION,mappingVersion:READING_MAPPING_VERSION,label:style.name,pages,images:pages.flatMap(page=>page.imageBoxes),profileImagePath:READING_PROFILE_LOGO_PATH,profileImageSha256:READING_PROFILE_LOGO_SHA256,profileImageAssetId:'MAHZ7ZCRRbs' };
 });
 const newProfiles:ReadingCardProfile[] = CARDNEWS14_STYLE_IDS.map(styleId=>{
   const style=cardnews14.styles.find(value=>value.id===styleId);
@@ -40,13 +41,13 @@ const newProfiles:ReadingCardProfile[] = CARDNEWS14_STYLE_IDS.map(styleId=>{
       if(rules.length!==1)throw new Error(`Amber Cream source rule changed on page ${page.page}; verify the derived layout before rendering.`);
       elements=elements.map((element,index)=>index===rules[0]?{...element,y:1290}:element);
     }
-    return {page:page.page,background:page.background,elements,
+    return readingCoverSafety(styleId,{page:page.page,background:page.background,elements,
       shapes:elements.filter((e):e is Extract<ReadingElement,{kind:'rect'}>=>e.kind==='rect').map(({kind,...shape})=>({type:'rect' as const,...shape})),
       textBoxes:elements.filter((e):e is Extract<ReadingElement,{kind:'text'}>=>e.kind==='text'),
       imageBoxes:elements.filter((e):e is Extract<ReadingElement,{kind:'image'}>=>e.kind==='image').map(({kind,...box})=>({...box,kind:page.page===8?'profile' as const:'artwork' as const})),
-    };
+    });
   });
-  return {id,templateKey:id,templateVersion:id+'-20261104'+(styleId==='amber-cream'?'-r2':''),mappingVersion:READING_MAPPING_VERSION,label:style.name,pages,images:pages.flatMap(page=>page.imageBoxes),profileImagePath:READING_PROFILE_LOGO_PATH,profileImageSha256:READING_PROFILE_LOGO_SHA256,profileImageAssetId:'MAHZ7ZCRRbs',sourceStyleId:styleId,sourceLayoutSha256:style.sourceLayoutSha256,sourceAssetsSha256:style.sourceAssetsSha256,previewUrl:`/cardnews14/${styleId}.webp`};
+  return {id,templateKey:id,templateVersion:id+'-20261104'+(styleId==='amber-cream'?'-r2':'')+'-'+READING_COVER_LAYOUT_REVISION,mappingVersion:READING_MAPPING_VERSION,label:style.name,pages,images:pages.flatMap(page=>page.imageBoxes),profileImagePath:READING_PROFILE_LOGO_PATH,profileImageSha256:READING_PROFILE_LOGO_SHA256,profileImageAssetId:'MAHZ7ZCRRbs',sourceStyleId:styleId,sourceLayoutSha256:style.sourceLayoutSha256,sourceAssetsSha256:style.sourceAssetsSha256,previewUrl:`/cardnews14/${styleId}.webp`};
 });
 /** Existing IDs/versioned snapshots remain stable; new styles have their own identity. */
 export const READING_CARD_PROFILES:ReadingCardProfile[]=[...legacyProfiles,...newProfiles];
@@ -79,11 +80,12 @@ export function readingProfileDesigns(profile:ReadingCardProfile,current:PageDes
     const previousAssetIds=[...new Set([...(previous.previousAssetIds??[]),...(background.assetId?[background.assetId]:[])])].slice(-20);
     // A style without this photo window only hides inheritance; it is not a
     // user opt-out. Keep the preference through sparse and legacy styles.
-    const inheritCover=profile.sourceStyleId&&(id==='cover'||id==='outro')?false
+    const inheritCover=(profile.sourceStyleId&&(id==='cover'||id==='outro')||id==='cover'&&slot?.fit==='contain')?false
       :profile.sourceStyleId&&slot?.kind==='artwork'?!useImage&&background.inheritCover!==false
       :background.inheritCover;
     const overlay=background.color?.toUpperCase()===profile.pages[index].background.toUpperCase()?background.overlay:0;
-    const defaults=profile.sourceStyleId&&slot?.kind==='artwork'&&!background.assetId&&background.inheritCover===undefined&&background.focalX===50&&background.focalY===50?{...sourceFocalPoint(slot.position),fit:slot.fit??background.fit}:{};
+    const newEmptySlot=slot?.kind==='artwork'&&!background.assetId&&background.inheritCover===undefined&&background.focalX===50&&background.focalY===50;
+    const defaults=newEmptySlot&&(profile.sourceStyleId||id==='cover'&&slot.fit==='contain')?{...sourceFocalPoint(slot.position),fit:slot.fit??background.fit}:{};
     return [id,{ ...previous,alignment:'left',background:{...background,...defaults,kind:useImage?'image':'brand',color:profile.pages[index].background,...(!useImage?{assetId:undefined}:{}),overlay,...(inheritCover!==undefined?{inheritCover}: {})},previousAssetIds }];
   })) as PageDesigns;
 }

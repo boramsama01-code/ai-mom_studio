@@ -20,7 +20,7 @@ describe('14-style handoff identity and actual read-only Canva contracts',()=>{
    const p=profiles.find(p=>p.sourceStyleId===styleId)!,source=cardnews14Source(styleId);
    // Keep the original handoff evidence when the editor link points to its saved derivative.
    const verified=live.designs.find(d=>d.sourceId===source.originalSourceId)!;
-   expect(p.id).toBe(`cardnews14-${styleId}-v1`);expect(p.templateVersion).toBe(`${p.id}-20261104${styleId==='amber-cream'?'-r2':''}`);
+   expect(p.id).toBe(`cardnews14-${styleId}-v1`);expect(p.templateVersion).toBe(`${p.id}-20261104${styleId==='amber-cream'?'-r2':''}-crop-safe-20261105`);
    expect(verified.pageCount).toBe(8);expect(verified.fields).toEqual(expectedCanvaDataset({conceptMode:'value_definition',hasExternalActivity:false},p));
    expect(source.productionEnabled).toBe(false);expect(readingMasterSourceApproved(p,source.sourceId)).toBe(false);
    expect(p.pages.map(p=>p.page)).toEqual([1,2,3,4,5,6,7,8]);
@@ -28,17 +28,18 @@ describe('14-style handoff identity and actual read-only Canva contracts',()=>{
    expect(p.images.filter(slot=>slot.kind==='profile')).toHaveLength(1);
   }
  });
- it('changes only the three versioned Amber Cream rules while retaining source geometry, text, images and hashes',()=>{
+ it('keeps the versioned inner-page geometry and source hashes when the first page adopts crop-safe placement',()=>{
   const changed:Array<{styleId:string;page:number;from:number;to:number}>=[];
   const pageIds=['cover','news_summary','implication','discussion','perspectives','concept','activity','outro'];
   for(const profile of READING_CARD_PROFILES){
-   if(!profile.sourceStyleId){expect(profile.templateVersion).toBe(`${profile.id}-20261104`);continue;}
+   if(!profile.sourceStyleId){expect(profile.templateVersion).toBe(`${profile.id}-20261104-crop-safe-20261105`);continue;}
    const source=runtime.styles.find(style=>style.id===profile.sourceStyleId)!;
    expect(profile.sourceLayoutSha256).toBe(source.sourceLayoutSha256);
    expect(profile.sourceAssetsSha256).toBe(source.sourceAssetsSha256);
    for(const [index,page] of profile.pages.entries()){
     const originals=source.pages[index].elements.map(element=>element.kind==='image'?{...element,pageId:pageIds[index]}:element);
     expect(page.elements).toHaveLength(originals.length);
+    if(page.page===1)continue; // Cover margins have their own complete geometry/readability regression.
     for(const [elementIndex,element] of page.elements!.entries()){
      const original=originals[elementIndex];
      if(profile.sourceStyleId==='amber-cream'&&[1,4,7].includes(page.page)&&original.kind==='rect'&&original.x===72&&original.y===1258&&original.width===720&&original.height===2){
@@ -52,7 +53,7 @@ describe('14-style handoff identity and actual read-only Canva contracts',()=>{
     }
    }
   }
-  expect(changed).toEqual([1,4,7].map(page=>({styleId:'amber-cream',page,from:1258,to:1290})));
+  expect(changed).toEqual([4,7].map(page=>({styleId:'amber-cream',page,from:1258,to:1290})));
  });
  it('pins the exact source layout and selected source assets and does not ship example article text as runtime defaults',()=>{
   for(const style of runtime.styles){

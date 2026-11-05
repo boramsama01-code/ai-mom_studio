@@ -33,7 +33,7 @@ describe('cardnews14 fixed source geometry and text',()=>{
       expect(profile.pages).toHaveLength(8);
       expect(profile.sourceLayoutSha256).toBe(createHash('sha256').update(source.bytes).digest('hex'));
       expect(profile.mappingVersion).toBe(READING_MAPPING_VERSION);
-      expect(profile.templateVersion).toBe(`${profile.id}-20261104${profile.sourceStyleId==='amber-cream'?'-r2':''}`);
+      expect(profile.templateVersion).toBe(`${profile.id}-20261104${profile.sourceStyleId==='amber-cream'?'-r2':''}-crop-safe-20261105`);
       for(const [index,page] of profile.pages.entries())expect(page.elements?.map(element=>element.kind)).toEqual(source.layout.pages[index].elements.map(element=>element.kind));
     }
   });
