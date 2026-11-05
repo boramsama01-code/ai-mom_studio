@@ -18,7 +18,10 @@ const jobSchema = z.object({
   if (!job.outputAssetId || !job.outputRevisionId || job.phase !== "complete" || pages?.length !== 8 || originals?.length !== 8 || pages[0]?.id !== job.outputAssetId || new Set(pages.map(value => value.id)).size !== 8 || new Set(originals.map(value => value.id)).size !== 8 || originals.some((value, index) => value.page !== index + 1)) context.addIssue({ code: "custom", message: "완료된 Canva 출력 8장과 원본 목록이 필요합니다." });
 });
 const masterSchema = z.object({ id, conceptMode: z.enum(["value_definition", "scientific_explanation"]), hasExternalActivity: z.boolean(), templateVersion: z.string().min(1).max(80), sourceType: z.enum(["design", "brand_template"]), sourceId: z.string().min(1).max(200), status: z.string().min(1).max(80), editUrl: canvaUrl.nullable(), validatedAt: z.string().datetime() });
-export const canvaRequestBodySchema = z.object({ version: id, requestId: z.string().uuid(), masterId: id.optional(), importFromJobId: id.optional() }).strict();
+export const canvaRequestBodySchema = z.object({ version: id, requestId: z.string().uuid(), masterId: id.optional(), importFromJobId: id.optional(), libraryDesignId: z.string().regex(/^D[A-Za-z0-9_-]{3,199}$/).optional(), expectedLibraryUpdatedAt: z.number().int().nonnegative().optional() }).strict().superRefine((request, context) => {
+  if (request.libraryDesignId && (request.masterId || request.importFromJobId)) context.addIssue({ code: "custom", message: "Canva 폴더 템플릿과 기존 마스터·가져오기 요청을 함께 선택할 수 없습니다." });
+  if (request.expectedLibraryUpdatedAt !== undefined && !request.libraryDesignId) context.addIssue({ code: "custom", message: "Canva 폴더 템플릿의 수정 시각은 해당 디자인과 함께 보내야 합니다." });
+});
 export type CanvaRequestBody = z.infer<typeof canvaRequestBodySchema>;
 function parsed<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);

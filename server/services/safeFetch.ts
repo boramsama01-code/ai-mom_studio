@@ -85,8 +85,21 @@ export async function safeFetch(url: string, opts: SafeFetchOptions = {}): Promi
   for (let hop = 0; hop <= maxRedirects; hop++) {
     if (opts.allowedHosts && !opts.allowedHosts.includes(new URL(current).hostname.toLowerCase()))
       throw new FetchFailure("허용한 언론사 외부로 이동하여 요청을 중단했습니다.", "blocked");
-    try { await assertPublicHttpUrl(current); }
-    catch (e) { throw new FetchFailure(e instanceof BlockedUrlError ? e.message : "URL 검사 실패", "blocked"); }
+    const validationRemaining = deadline - Date.now();
+    if (validationRemaining <= 0) throw new FetchFailure("시간 초과", "timeout");
+    let validationTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // DNS is part of the same request budget. Only race the read-only URL
+      // check: after timeout this function exits, so a late DNS answer cannot
+      // start an HTTP request after an image-memory admission slot is released.
+      await Promise.race([
+        assertPublicHttpUrl(current),
+        new Promise<never>((_, reject) => { validationTimer = setTimeout(() => reject(new FetchFailure("시간 초과", "timeout")), validationRemaining); }),
+      ]);
+    } catch (e) {
+      if (e instanceof FetchFailure) throw e;
+      throw new FetchFailure(e instanceof BlockedUrlError ? e.message : "URL 검사 실패", "blocked");
+    } finally { if (validationTimer) clearTimeout(validationTimer); }
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new FetchFailure("시간 초과", "timeout");
     const ctrl = new AbortController();

@@ -6,6 +6,7 @@ import type { DB } from "../db";
 import { canvaRenderJobs, contentItems, contentRevisions, mediaAssets } from "../../shared/schema";
 import { captionPackageSchema, familyCardCopySchema, pageDesignsSchema } from "../../shared/familyDialogue";
 import type { CanvaProfileSnapshot } from "../../shared/canvaEditorial";
+import { CANVA_LIBRARY_MAPPING_VERSION, canvaFolderSnapshotSchema } from "../../shared/canvaTemplateLibrary";
 import { HttpError } from "../routes/util";
 import { familyMetadataFromPayload } from "./familyEditorial";
 import { assertFamilyEvidenceForCopy } from "./familyEditorialPersistence";
@@ -17,7 +18,7 @@ type Revision = Pick<typeof contentRevisions.$inferSelect, "id" | "contentItemId
 type Asset = typeof mediaAssets.$inferSelect;
 const id = z.number().int().positive(), hash = z.string().regex(/^[a-f0-9]{64}$/);
 const imageIdentity = z.object({ id, sha256: hash });
-const profileTraceShape = { profileId: z.string().min(1).optional(), profileTemplateVersion: z.string().min(1).optional(), profileImageSha256: hash.optional(), sourceLayoutSha256: hash.optional(), sourceAssetsSha256: hash.optional() };
+const profileTraceShape = { profileId: z.string().min(1).optional(), profileTemplateVersion: z.string().min(1).optional(), profileImageSha256: hash.optional(), sourceLayoutSha256: hash.optional(), sourceAssetsSha256: hash.optional(), folderTemplate:canvaFolderSnapshotSchema.optional() };
 const exportMetadata = z.object({ ...profileTraceShape, rendererProvider: z.literal("canva"), canvaDesignId: z.string().min(1), templateVersion: z.string().min(1), sourceDesignId: z.string().min(1), dataFieldMappingVersion: z.string().min(1), datasetHash: hash, contentRevision: id, evidenceSetId: z.string().min(1), requestHash: hash, autofillJobId: z.string().nullable(), exportJobId: z.string().min(1), designUpdatedAt: z.string().min(1), exportedAt: z.string().datetime() });
 const exportResult = z.object({ ...profileTraceShape, pages: z.array(imageIdentity).length(8), originals: z.array(imageIdentity.extend({ page: z.number().int().min(1).max(8) })).length(8), templateVersion: z.string().min(1), datasetHash: hash, mappingVersion: z.string().min(1), exportedAt: z.string().datetime(), contentRevision: id, evidenceSetId: z.string().min(1) });
 const exportInput = z.object({ ...profileTraceShape, payload: z.record(z.string(), z.unknown()), copy: familyCardCopySchema, pageDesigns: pageDesignsSchema, evidenceSetId: z.string().min(1), mappingVersion: z.string().min(1), datasetHash: hash });
@@ -69,6 +70,10 @@ async function checkCanvaArtifact(db: DB, input: ArtifactInput, requireCurrentCa
   // Compare the saved intent to its exported bytes, not the current catalog.
   // Retiring a profile must not invalidate an already verified immutable export.
   const binding = profileBinding(source);
+  if(!isDeepStrictEqual(source.folderTemplate,trace.folderTemplate)||!isDeepStrictEqual(source.folderTemplate,artifacts.folderTemplate)
+    ||source.mappingVersion===CANVA_LIBRARY_MAPPING_VERSION&&!source.folderTemplate
+    ||source.folderTemplate&&(source.mappingVersion!==CANVA_LIBRARY_MAPPING_VERSION||source.profileId!==undefined||source.folderTemplate.designId!==trace.sourceDesignId||source.folderTemplate.datasetHash!==source.datasetHash))
+    invalid('Canva 폴더 원본의 고정 버전·페이지·필드 기록이 출력과 다릅니다. 기존 이미지를 유지하고 승인은 중단했습니다.');
   if (!isDeepStrictEqual(binding, profileBinding(trace)) || !isDeepStrictEqual(binding, profileBinding(artifacts))
       || source.profileId !== undefined && (!source.profileTemplateVersion || !source.profileImageSha256)
       || source.profileTemplateVersion !== undefined && source.profileTemplateVersion !== trace.templateVersion

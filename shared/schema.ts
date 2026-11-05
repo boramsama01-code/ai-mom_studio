@@ -653,3 +653,35 @@ export const canvaAssetUploads = pgTable("canva_asset_uploads", {
   errorCode: text("error_code"),
   updatedAt: updatedAt(),
 }, t => [uniqueIndex("canva_asset_principal_hash").on(t.principal, t.sha256)]);
+
+/* Canva folder catalog. Content revisions and published assets remain immutable. */
+export type CanvaLibraryStoredPage = { id: string | null; pageNumber: number; width: number | null; height: number | null };
+export const canvaLibraryDesigns = pgTable('canva_library_designs', {
+  id: serial('id').primaryKey(), principal: text('principal').notNull(),
+  folderId: text('folder_id').notNull(), sourceType: text('source_type').notNull(), sourceId: text('source_id').notNull(),
+  title: text('title').notNull(), sourceUpdatedAt: text('source_updated_at'), metadataVersion: text('metadata_version'),
+  editUrl: text('edit_url'), pageCount: integer('page_count'),
+  pages: jsonb('pages').$type<CanvaLibraryStoredPage[]>().notNull().default([]),
+  dataset: jsonb('dataset').$type<Record<string, { type: string }>>().notNull().default({}),
+  datasetHash: text('dataset_hash'), status: text('status').notNull().default('unavailable'), reason: text('reason'),
+  seenAt: ts('seen_at').notNull(), syncedAt: ts('synced_at'),
+  previewVersion: text('preview_version'), previewStatus: text('preview_status').notNull().default('pending'),
+  previewUpdatedAt: ts('preview_updated_at'), previewErrorCode: text('preview_error_code'), previewErrorMessage: text('preview_error_message'),
+  createdAt: createdAt(), updatedAt: updatedAt(),
+}, t => [uniqueIndex('canva_library_design_source').on(t.principal, t.sourceType, t.sourceId), index('canva_library_folder').on(t.principal, t.folderId)]);
+
+export const canvaLibraryPreviewJobs = pgTable('canva_library_preview_jobs', {
+  id: serial('id').primaryKey(), designId: integer('design_id').notNull().references(() => canvaLibraryDesigns.id),
+  sourceVersion: text('source_version').notNull(), pages: jsonb('pages').$type<CanvaLibraryStoredPage[]>().notNull(),
+  status: text('status').notNull().default('queued'), phase: text('phase').notNull().default('prepare'),
+  exportJobId: text('export_job_id'), previousExportJobIds: jsonb('previous_export_job_ids').$type<string[]>().notNull().default([]), leaseOwner: text('lease_owner'), leaseUntil: ts('lease_until'),
+  nextRunAt: ts('next_run_at').notNull().defaultNow(), errorCode: text('error_code'), errorMessage: text('error_message'),
+  attempts: integer('attempts').notNull().default(0), createdAt: createdAt(), updatedAt: updatedAt(),
+}, t => [uniqueIndex('canva_library_preview_version').on(t.designId, t.sourceVersion), index('canva_library_preview_queue').on(t.status, t.nextRunAt)]);
+
+export const canvaLibraryPreviews = pgTable('canva_library_previews', {
+  id: serial('id').primaryKey(), designId: integer('design_id').notNull().references(() => canvaLibraryDesigns.id),
+  page: integer('page').notNull(), sourceVersion: text('source_version').notNull(), mime: text('mime').notNull(),
+  width: integer('width').notNull(), height: integer('height').notNull(), sha256: text('sha256').notNull(),
+  bytes: bytea('bytes').notNull(), updatedAt: updatedAt(),
+}, t => [uniqueIndex('canva_library_preview_page').on(t.designId, t.page)]);

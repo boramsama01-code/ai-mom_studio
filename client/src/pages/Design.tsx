@@ -1,4 +1,5 @@
 import { CanvaMasterSettings } from "../CanvaEditorial";
+import { CanvaTemplateLibrary } from "../CanvaTemplateLibrary";
 /**
  * 카드 디자인 — 템플릿 고르기, 내 배경 템플릿 올리기, Canva 자동 채우기, 대량 제작·망고보드용 글자 내보내기
  */
@@ -123,6 +124,7 @@ export function DesignPage() {
     return (
       <>
         <h1>수집 카드 디자인</h1>
+        <CanvaTemplateLibrary />
         <Empty>수집함에서 만드는 카드의 디자인입니다. 오른쪽 위 ‘보기 채널’에서 설정할 채널을 선택해 주세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>
       </>
     );
@@ -136,10 +138,11 @@ export function DesignPage() {
           </p>
         </div>
       </div>
+      <CanvaTemplateLibrary />
       <DefaultTemplate cid={current.id} accent={current.accentColor} />
       <UploadTemplate cid={current.id} />
       <CanvaSection cid={current.id} brandTemplateId={current.canvaBrandTemplateId ?? null} />
-      <CanvaMasterSettings key={current.id} channelId={current.id} showPreparedMasters={/al+igodang|알리고당/i.test(`${current.slug} ${current.name}`)} />
+      <details className="content-options"><summary>기본 8장 샘플·기존 Canva 마스터 설정</summary><CanvaMasterSettings key={current.id} channelId={current.id} showPreparedMasters={/al+igodang|알리고당/i.test(`${current.slug} ${current.name}`)} /></details>
       <BulkSection cid={current.id} kind={current.contentType} />
     </>
   );
@@ -161,7 +164,7 @@ function DefaultTemplate({ cid, accent }: { cid: number; accent: string }) {
   return (
     <section className="panel stack">
       <div className="row between">
-        <h2 style={{ margin: 0 }}>카드 디자인 컬렉션</h2>
+        <h2 style={{ margin: 0 }}>Studio 기본 디자인 컬렉션</h2>
         <span className="small muted">{q.data ? `디자인 ${q.data.items.length}종 · 8장 풀세트 ${q.data.items.filter(item => item.cardCopyVersion === 2).length}종` : "표지부터 본문까지 한 세트로"}</span>
       </div>
       {q.isLoading ? <Loading lines={1} /> : q.error ? <ErrorBox error={q.error} /> : <TemplatePicker cid={cid} value={q.data!.current} disabled={set.isPending} onChange={(k) => set.mutate(k)} items={q.data!.items} version={accent} />}

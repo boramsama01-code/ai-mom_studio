@@ -8,6 +8,7 @@ import { emptyPayload } from "../shared/payloads";
 import { aiProviderLabels } from "../shared/aiProviders";
 import { activateDraftRecoveryScope, readDraftRecovery, writeDraftRecovery } from "../client/src/draftRecovery";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "./fixtures/familyDialogueCard";
+import { canvaLibraryStateFixture } from "./fixtures/canvaTemplateLibrary";
 import { ApiError } from "../client/src/api";
 import type { FamilyDialogueMetadata } from "../shared/familyDialogue";
 
@@ -79,6 +80,7 @@ beforeEach(() => {
     if (path === "/studio/ai-status") return { defaultProvider: "anthropic", text: { gemini: true, openai: true, anthropic: true }, image: true };
     if (path === "/canva/status") return { connected: false };
     if (path === "/canva/editorial/status") return { configured: false, connected: false, autofill: false, capabilities: [] };
+    if (path === "/canva/template-library") return canvaLibraryStateFixture({ configured: false, connected: false, autofill: false, syncStatus: "not_configured" });
     if (path === "/channels/2/canva/masters" || path === `${itemPath}/canva/jobs`) return { items: [] };
     if (path === itemPath) return structuredClone(detail);
     if (path === `${itemPath}/generate`) return generate(options?.body);

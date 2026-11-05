@@ -1,6 +1,6 @@
 import {describe,expect,it,vi} from 'vitest';
 import sharp from 'sharp';
-import {rasterizeReadingSvg,readingRasterState} from '../server/services/readingCardRaster';
+import {rasterizeReadingSvg,readingRasterState,tryBackgroundImageWork} from '../server/services/readingCardRaster';
 
 const svg='<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#226655"/></svg>';
 describe('bounded reading-card page preparation and native lifetime',()=>{
@@ -36,5 +36,33 @@ describe('bounded reading-card page preparation and native lifetime',()=>{
       expect(queuedPreparation).not.toHaveBeenCalled();
       expect(readingRasterState()).toMatchObject({pendingPages:0,activeWorkers:0});
     }finally{clock.mockRestore();}
+  });
+
+  it('defers background image work before fetching when a foreground page is queued',async()=>{
+    let release!:()=>void;const wait=new Promise<void>(resolve=>{release=resolve;});
+    const foreground=rasterizeReadingSvg(async()=>{await wait;return svg;});
+    const download=vi.fn(async()=>Buffer.from('cache'));
+    try{expect(await tryBackgroundImageWork(download)).toEqual({accepted:false});expect(download).not.toHaveBeenCalled();}
+    finally{release();await foreground;}
+    expect(readingRasterState()).toMatchObject({activeBackgroundWork:0,pendingPages:0,maxObservedHeavyWork:1});
+  });
+
+  it('holds the shared slot before background allocation so a newly arriving foreground page waits',async()=>{
+    let release!:()=>void;const wait=new Promise<void>(resolve=>{release=resolve;});
+    const background=tryBackgroundImageWork(async()=>{await wait;return 'small cached image';});
+    const prepare=vi.fn(()=>svg),foreground=rasterizeReadingSvg(prepare);
+    try{
+      await Promise.resolve();expect(prepare).not.toHaveBeenCalled();
+      expect(readingRasterState()).toMatchObject({activeBackgroundWork:1,activeWorkers:0,pendingPages:1});
+      const otherDownload=vi.fn(async()=>undefined);expect(await tryBackgroundImageWork(otherDownload)).toEqual({accepted:false});expect(otherDownload).not.toHaveBeenCalled();
+    }finally{release();}
+    expect(await background).toEqual({accepted:true,value:'small cached image'});expect((await foreground).byteLength).toBeGreaterThan(0);
+    expect(readingRasterState()).toMatchObject({activeBackgroundWork:0,activeWorkers:0,pendingPages:0,maxObservedHeavyWork:1});
+  });
+
+  it('releases the shared slot after a failed background download',async()=>{
+    await expect(tryBackgroundImageWork(async()=>{throw new Error('preview deadline');})).rejects.toThrow('preview deadline');
+    expect((await rasterizeReadingSvg(()=>svg)).byteLength).toBeGreaterThan(0);
+    expect(readingRasterState()).toMatchObject({activeBackgroundWork:0,activeWorkers:0,pendingPages:0,maxObservedHeavyWork:1});
   });
 });

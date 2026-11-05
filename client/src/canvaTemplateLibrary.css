@@ -1,0 +1,70 @@
+.canva-library { scroll-margin-top: 20px; }
+.canva-library h2, .canva-library h3, .canva-library-panel p { margin: 0; }
+.canva-library > div > .small { margin-top: 8px; }
+.canva-library-panel { min-width: 0; }
+.canva-library-panel .btn { min-width: 0; white-space: normal; overflow-wrap: anywhere; text-align: center; padding-top: 8px; padding-bottom: 8px; }
+.canva-library-panel .notice { overflow-wrap: anywhere; }
+.canva-library-panel .notice p { line-height: 1.7; }
+.canva-library-sync-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-sunken); }
+.canva-library-sync-bar > div { min-width: 0; }
+.canva-library-sync-bar strong { overflow-wrap: anywhere; }
+.canva-library-sync-bar p { margin-top: 5px; }
+.canva-library-toolbar { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin: 16px 0; }
+.canva-library-toolbar .field { flex: 1 1 250px; margin: 0; }
+.canva-library-toolbar > span { padding-bottom: 12px; }
+.canva-library-settings { padding-top: 12px; }
+.canva-library-settings input { max-width: 100%; }
+.canva-library-feedback { color: var(--accent); }
+.canva-library-empty { padding: 24px 16px; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); line-height: 1.7; }
+.canva-library-workspace { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); align-items: start; gap: 20px; }
+.canva-library-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); align-content: start; gap: 14px; min-width: 0; max-height: 820px; overflow-y: auto; padding: 3px; }
+.canva-library-card { min-width: 0; text-align: left; padding: 7px 7px 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 12px; font: inherit; cursor: pointer; }
+.canva-library-card[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.canva-library-card:hover { border-color: var(--accent); }
+.canva-library-card > strong { display: block; font-size: 13px; line-height: 1.55; margin: 9px 3px 4px; overflow-wrap: anywhere; }
+.canva-library-item-status { display: block; font-size: 11px; line-height: 1.6; color: var(--muted); margin: 0 3px; }
+.canva-library-item-status.is-ready { color: var(--accent); }
+.canva-library-cover { position: relative; overflow: hidden; border-radius: 7px; background: var(--bg-sunken); }
+.canva-library-cover > img { display: block; width: 100%; height: auto; aspect-ratio: 4/5; object-fit: contain; }
+.canva-library-page-count, .canva-library-selected { position: absolute; left: 6px; bottom: 6px; color: #fff; background: #172532e6; border-radius: 4px; padding: 3px 6px; font-size: 10px; line-height: 1.5; }
+.canva-library-selected { left: auto; right: 6px; top: 6px; bottom: auto; background: var(--accent); }
+.canva-library-detail { position: sticky; top: 20px; min-width: 0; display: grid; gap: 12px; padding: 15px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.canva-library-detail h3 { font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; }
+.canva-library-detail p { line-height: 1.65; }
+.canva-library-large { display: block; width: 100%; border-radius: 8px; overflow: hidden; background: var(--bg-sunken); }
+.canva-library-large > img { display: block; width: 100%; height: auto; object-fit: contain; }
+.canva-library-placeholder { width: 100%; aspect-ratio: 4/5; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; background: var(--bg-sunken); color: var(--muted); }
+.canva-library-placeholder > span { font-size: 40px; font-weight: 700; opacity: .3; }
+.canva-library-placeholder small { font-size: 12px; }
+.canva-library-placeholder.is-small { gap: 7px; }
+.canva-library-placeholder.is-small > span { font-size: 28px; }
+.canva-library-placeholder.is-small small { font-size: 10px; }
+.canva-library-pages { display: flex; flex-wrap: wrap; gap: 5px; }
+.canva-library-pages button { border: 1px solid var(--border); border-radius: 6px; min-width: 34px; min-height: 36px; padding: 6px; color: var(--muted); background: var(--surface); font: inherit; font-size: 12px; cursor: pointer; }
+.canva-library-pages button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--bg-sunken); }
+.canva-library-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.canva-library-actions .btn { flex: 1 1 140px; }
+.canva-library-field-help { min-width: 0; border-top: 1px solid var(--border); padding-top: 12px; }
+.canva-library-field-help > summary { cursor: pointer; font-size: 13px; font-weight: 600; line-height: 1.7; }
+.canva-library-field-help > .stack { padding-top: 12px; }
+.canva-library-field-pages { min-width: 0; display: grid; gap: 8px; }
+.canva-library-field-page { min-width: 0; padding: 9px; border: 1px solid var(--border); border-radius: 8px; }
+.canva-library-field-page > summary { cursor: pointer; font-size: 12px; line-height: 1.7; }
+.canva-library-field-page > summary span { margin-left: 5px; }
+.canva-library-field-page textarea { display: block; width: 100%; min-width: 0; max-width: 100%; margin: 10px 0; padding: 8px; font-family: ui-monospace, monospace; font-size: 11px; line-height: 1.7; resize: vertical; }
+.canva-library-field-page .btn { width: 100%; }
+.canva-library-choice { border-left: 3px solid var(--accent); padding: 12px 14px; background: var(--bg-sunken); border-radius: 0 10px 10px 0; overflow-wrap: anywhere; }
+.canva-library-choice p { margin: 6px 0 0; line-height: 1.65; }
+.canva-library-entry { border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
+.canva-library-entry > summary { font-weight: 600; cursor: pointer; line-height: 1.6; overflow-wrap: anywhere; }
+.canva-library-entry[open] > summary { margin-bottom: 16px; }
+@media (max-width: 760px) {
+  .canva-library-workspace { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .canva-library-grid { max-height: none; grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 150px; overflow-x: auto; overflow-y: hidden; padding: 3px 3px 12px; scroll-snap-type: x proximity; }
+  .canva-library-card { scroll-snap-align: start; }
+  .canva-library-detail { position: static; }
+  .canva-library-large { max-width: 350px; margin: auto; }
+  .canva-library-sync-bar { padding: 12px; }
+  .canva-library-panel input, .canva-library-panel select { font-size: 16px; }
+  .canva-library-pages button { min-height: 42px; }
+}

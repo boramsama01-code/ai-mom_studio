@@ -14,7 +14,7 @@ import { saveSecret, deleteSecret } from "../secretStore";
 
 export const CANVA_AUTH_URL = "https://www.canva.com/api/oauth/authorize";
 export const CANVA_API = "https://api.canva.com/rest/v1";
-export const CANVA_SCOPES = ["design:content:read", "design:content:write", "design:meta:read", "brandtemplate:meta:read", "brandtemplate:content:read", "profile:read", "asset:read", "asset:write"];
+export const CANVA_SCOPES = ["design:content:read", "design:content:write", "design:meta:read", "brandtemplate:meta:read", "brandtemplate:content:read", "profile:read", "asset:read", "asset:write", "folder:read"];
 
 export class CanvaError extends Error {
   constructor(message: string, public status?: number, public code?: string) {
