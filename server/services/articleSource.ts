@@ -87,6 +87,7 @@ function officialDetailHeadlines(html: string, pageUrl?: string): string[] {
     : ["pen.go.kr", "ice.go.kr", "goe.go.kr", "cbe.go.kr"].includes(host) && /\/na\/ntt\/selectNttInfo\.do$/.test(u.pathname) && u.searchParams.has("nttSn") ? ".bbs_ViewA h3"
     : host === "dje.go.kr" && u.pathname === "/boardCnts/view.do" && u.searchParams.has("boardSeq") ? "h2.tit"
     : host === "linkareer.com" && /^\/activity\/\d+$/.test(u.pathname) ? ".activity-detail-content h1"
+    : host === "wevity.com" && u.pathname === "/index.php" && u.searchParams.has("ix") ? ".tit-area h6.tit"
     : host === "contestkorea.com" && u.pathname === "/sub/view.php" && u.searchParams.has("str_no") ? ".view_top_area h1"
     : host === "koi.or.kr" && /^\/notice\/\d{4}\/\d{2}\/\d{2}\//.test(u.pathname) ? "td.subject > b[aria-current='page']"
     : host === "mcst.go.kr" && /\/s_notice\/press\/pressView\.jsp$/.test(u.pathname) && u.searchParams.has("pSeq") ? "h3.view_title"

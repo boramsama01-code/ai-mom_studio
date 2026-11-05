@@ -71,7 +71,14 @@ export function extractHtml(html: string, baseUrl: string, context: ArticleConte
       if (!attachments.some(x => x.url === url.href)) attachments.push({ url: url.href, name, kind: "pdf", status: "pending" });
     });
   }
-  $("script,style,noscript,iframe,svg,header,footer,nav,form,aside,button,[hidden],[aria-hidden='true'],.related-news,.related-articles,.article-tools,.share-buttons,.advertisement").remove();
+  // Education CMSs wrap the public article in a navigation/submission form.
+  // Preserve the verified content node before removing form controls/chrome.
+  const host = base.hostname.replace(/^www\./, "");
+  const formBody = ["pen.go.kr", "ice.go.kr", "goe.go.kr", "cbe.go.kr"].includes(host) && /\/na\/ntt\/selectNttInfo\.do$/.test(base.pathname) ? ".bbsV_cont"
+    : host === "dje.go.kr" && base.pathname === "/boardCnts/view.do" ? ".viewBox"
+    : host === "sen.go.kr" && base.pathname === "/user/bbs/BD_selectBbs.do" ? ".bd-view__vcontent" : null;
+  if (formBody) $(formBody).each((_, node) => { if ($(node).parents("form").length) $(node).appendTo("body"); });
+  $("script,style,noscript,iframe,svg,header,footer,nav,form,aside,button,input,select,textarea,[hidden],[aria-hidden='true'],.related-news,.related-articles,.article-tools,.share-buttons,.advertisement").remove();
   $("br").replaceWith("\n");
   $("p,div,section,li,h1,h2,h3,h4,tr").append("\n");
   const selectors = [".bd-view__vcontent", ".bbsV_cont", ".viewBox", ".activity-detail-content [class*='ActivityDetailTabContent__StyledWrapper']", ".view_detail_area", ".prog_bord_view > .prog_contents", ".prog_bord_view .prog_contents", ".board_view.bd_noti", ".board_view > .view_body", "#dic_area", "#newsct_article", "#harmonyContainer", "#articletxt", "#cont_newstext", "#news_body_id", "#CmAdContent", ".se-main-container", "#postViewArea", "[itemprop='articleBody']",

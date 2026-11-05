@@ -12,6 +12,7 @@ import { decodePublicText } from "./publicTextResponse";
 export type BoardConfig = {
   linkSelector: string; // 예: "table.board_list td.subject a"
   titleSelector?: string | null; // 링크 안에서 제목을 찾을 선택자(없으면 링크 텍스트)
+  titleExcludeSelector?: string; // Badges such as 신규/SPECIAL are not part of a title.
   dateSelector?: string | null; // 같은 행(tr/li) 안의 날짜 선택자
   maxItems?: number;
   format?: "links" | "ged_selection" | "rss" | "school_ntt" | "linkareer" | "dje_board";
@@ -120,7 +121,9 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
     if (!resolved) return;
     const abs = new URL(resolved);
     if (seen.has(abs.toString())) return;
-    const title = (cfg.useTitleAttribute && $(el).attr("title") ? $(el).attr("title")! : cfg.titleSelector ? $(el).find(cfg.titleSelector).first().text() : $(el).text()).replace(/\s+/g, " ").trim().slice(0, 500);
+    const titleNode = $(el).clone();
+    if (cfg.titleExcludeSelector) titleNode.find(cfg.titleExcludeSelector).remove();
+    const title = (cfg.useTitleAttribute && $(el).attr("title") ? $(el).attr("title")! : cfg.titleSelector ? titleNode.find(cfg.titleSelector).first().text() : titleNode.text()).replace(/\s+/g, " ").trim().slice(0, 500);
     const row = $(el).closest("tr, li, .item, article");
     const dateText = cfg.dateSelector ? row.find(cfg.dateSelector).first().text().replace(/\s+/g, " ").trim() || null : null;
     if (title && !/^(D[-+]\s*\d+|접수\s*(중|예정|마감)|더보기)$/i.test(title)) { seen.add(abs.toString()); out.push({ url: abs.toString(), title, dateText }); }

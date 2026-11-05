@@ -38,7 +38,7 @@ export function RulesPage() {
           [
             ["rules", "검색어"],
             ["bulk", "대량 추가·후보 생성"],
-            ["official", "공식 출처"],
+            ["official", "수집 출처"],
             ["deleted", "삭제된 검색어"],
           ] as const
         ).map(([k, l]) => (
@@ -491,7 +491,7 @@ function OfficialTab({ cid }: { cid: number }) {
         게시판·공모전 목록 수집기가 연결된 곳: {connected}/{rows.length}. 새 검색어를 추가해도 공식 게시판 수집기가 생기지는 않습니다. 공모전 사이트는 발굴용이며, 주최기관 공고의 대상·마감일을 별도로 확인합니다.
       </div>
       {!rows.length ? (
-        <Empty>등록된 공식 출처가 없습니다.</Empty>
+        <Empty>등록된 수집 출처가 없습니다.</Empty>
       ) : (
         <ul className="list">
           {rows.map((r) => (
@@ -553,14 +553,14 @@ function OfficialForm({ cid, src, onClose }: { cid: number; src: OfficialSource;
   });
   const test = useMutation({ mutationFn: () => api<{ entries: Array<{ url: string; title: string; dateText: string | null }>; warnings?: string[] }>(`/channels/${cid}/official-sources/${src.id}/test-board`, { method: "POST", body: {} }) });
   return (
-    <Modal title={`공식 출처: ${src.name}`} onClose={onClose}>
+    <Modal title={`수집 출처: ${src.name}`} onClose={onClose}>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); m.mutate(); }}>
         <label className="field">
           별칭 (한 줄에 하나)
           <textarea rows={3} value={aliases} onChange={(e) => setAliases(e.target.value)} />
         </label>
         <label className="field">
-          공식 도메인
+          출처 도메인
           <span className="hint">학교·기관 누리집에서 직접 확인한 도메인만 입력하세요. 예: school.hs.kr</span>
           <input value={domain} onChange={(e) => setDomain(e.target.value)} />
         </label>

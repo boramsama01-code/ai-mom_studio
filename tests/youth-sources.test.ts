@@ -60,3 +60,15 @@ it("isolates the activity's title and body from Linkareer navigation and unrelat
   if (result.ok) expect(result.text).toBe(body.trim());
   expect((await fetchAndExtract(url, fetcher, { title: "다른 공모전" })).ok).toBe(false);
 });
+it("keeps education article text nested inside a public CMS form", async () => {
+  const text = "중학생 신청 자격과 참가 일정 안내입니다. ".repeat(8);
+  const url = "https://goe.go.kr/goe/na/ntt/selectNttInfo.do?nttSn=123";
+  const markup = `<h1>교육청</h1><form><div class="bbs_ViewA"><h3>과학캠프 모집</h3><div class="bbsV_cont"><p>${text}</p><input value="not article text"/></div></div></form>`;
+  const r = await fetchAndExtract(url, async () => ({ finalUrl: url, body: Buffer.from(markup), status: 200, contentType: "text/html" }), { title: "과학캠프 모집" });
+  expect(r.ok).toBe(true); if (r.ok) expect(r.text).toBe(text.trim());
+});
+it("does not include sidebar advertisements or listing badges in contest titles", () => {
+  const markup = '<a href="?gbn=view&ix=1">광고</a><div class="ms-list"><ul class="list"><li><div class="tit"><a href="?gbn=view&ix=2">청소년 영상 공모전 <span class="stat">SPECIAL</span></a></div></li></ul></div>';
+  const rows = parseBoardList(markup, "https://www.wevity.com/index.php?c=find", "wevity.com", { linkSelector: '.ms-list .list .tit > a[href*="gbn=view"][href*="ix="]', titleExcludeSelector: ".stat" });
+  expect(rows).toHaveLength(1); expect(rows[0].title).toBe("청소년 영상 공모전");
+});

@@ -10,7 +10,12 @@ import { classifyNotice } from "../shared/noticeIntent";
 let succeeded = 0;
 const sources = OFFICIAL_CATALOG.filter(s => s.enabled !== false);
 for (const source of sources) {
-  const result = await fetchBoardList(source.boardUrl, source.domain, source.config, undefined, { takeExtraCall: () => true });
+  let result = await fetchBoardList(source.boardUrl, source.domain, source.config, undefined, { takeExtraCall: () => true });
+  // One bounded maintenance retry for transport failures, never login/403/empty markup.
+  if (!result.ok && /시간 초과|네트워크 오류/.test(result.error)) {
+    console.log(JSON.stringify({name: source.name, transientFailure: result.error}));
+    result = await fetchBoardList(source.boardUrl, source.domain, source.config, undefined, { takeExtraCall: () => true });
+  }
   if (result.ok) succeeded++;
   console.log(JSON.stringify({ name: source.name, url: source.boardUrl, ...result, ...(result.ok ? { total: result.entries.length, entries: result.entries.slice(0, 2) } : {}) }, null, 2));
   if (result.ok) {

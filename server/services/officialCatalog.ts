@@ -52,8 +52,8 @@ export const OFFICIAL_CATALOG: Array<{ channel: string; name: string; domain: st
       : "2026-11-06 직접 목록 수집 미검증·접속 오류로 비활성. 지역별 네이버 웹문서 검색으로 보완합니다. 도메인 이전 또는 게시판 구조를 확인한 뒤 시험 읽기를 거쳐 연결하세요.",
   })),
   { channel: "opportunities", name: "링커리어 청소년 활동·공모전", schoolType: "org", domain: "linkareer.com", boardUrl: "https://linkareer.com/search?direction=DESC&page=1&q=%EC%B2%AD%EC%86%8C%EB%85%84&sort=RELEVANCE&tab=open-activity", config: { format: "linkareer", linkSelector: 'a[href^="/activity/"]', maxItems: 40, sourceRole: "discovery", youthOnly: true } },
-  { channel: "opportunities", name: "위비티 청소년 공모전", schoolType: "org", domain: "wevity.com", boardUrl: "https://www.wevity.com/index.php?c=find&s=1&gub=2&cidx=30", config: { linkSelector: 'a[href*="gbn=view"][href*="ix="]', maxItems: 30, sourceRole: "discovery", youthOnly: true, subcategory: "전국대회" } },
-  { channel: "opportunities", name: "콘테스트코리아 청소년 공모전", schoolType: "org", domain: "contestkorea.com", boardUrl: "https://www.contestkorea.com/sub/list.php?int_gbn=1&Txt_code1[0]=28&Txt_code1[1]=29", config: { linkSelector: '.title a[href*="view.php"][href*="str_no="]', titleSelector: ".txt", maxItems: 30, sourceRole: "discovery", youthOnly: true, subcategory: "전국대회" } },
+  { channel: "opportunities", name: "위비티 청소년 공모전", schoolType: "org", domain: "wevity.com", boardUrl: "https://www.wevity.com/index.php?c=find&s=1&gub=2&cidx=30", config: { linkSelector: '.ms-list .list .tit > a[href*="gbn=view"][href*="ix="]', titleExcludeSelector: ".stat", maxItems: 30, sourceRole: "discovery", youthOnly: true, subcategory: "전국대회" } },
+  { channel: "opportunities", name: "콘테스트코리아 청소년 공모전", schoolType: "org", domain: "contestkorea.com", boardUrl: "https://www.contestkorea.com/sub/list.php?int_gbn=1&Txt_code1[0]=28&Txt_code1[1]=29", config: { linkSelector: '.list_style_2 .title a[href*="view.php"][href*="str_no="]', titleSelector: ".txt", maxItems: 30, sourceRole: "discovery", youthOnly: true, subcategory: "전국대회" } },
 
 ];
 
