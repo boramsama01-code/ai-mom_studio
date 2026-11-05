@@ -153,7 +153,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
       </div>
       {(g.id === "gemini" || g.id === "openai") && <AiUsageGuide provider={g.id} setup />}
       {g.id === "openai" && <p className="connection-help">아래 API 키 칸에 붙여 넣고 <strong>키 저장 → 연결 확인</strong> 순서로 누르세요.</p>}
-      {g.id === "naver" && <p className="connection-help">공개 뉴스 RSS 수집은 키 없이 사용할 수 있습니다. 네이버 블로그 검색을 추가하려면 NAVER API HUB → Application → 인증 정보에서 발급된 두 값을 입력한 뒤 <strong>키 저장 → 연결 확인</strong>을 누르세요.</p>}
+      {g.id === "naver" && <p className="connection-help">네이버 뉴스·웹문서·블로그 검색에는 키가 필요합니다. NAVER API HUB → Application → 인증 정보에서 발급된 두 값을 입력한 뒤 <strong>키 저장 → 연결 확인</strong>을 누르세요. 키가 없어도 학교·기관 공지는 직접 수집하고 뉴스는 공개 RSS로 보완합니다.</p>}
       {last && <div className={`notice small ${last.ok ? "ok" : "err"}`} role="status"><strong>{last.ok ? "최근 연결 확인 성공" : "연결 확인 실패"}</strong><p style={{ margin: "6px 0" }}>{last.message}</p><span className="muted">{fmtDate(last.at)}</span></div>}
       {g.fields.filter(f => !f.key.endsWith("_MODEL")).map(input)}
       {!!modelFields.length && <details className="settings-details"><summary>모델 설정 · 선택 사항</summary><div className="stack" style={{ marginTop: 12 }}>{modelFields.map(input)}</div></details>}
@@ -167,7 +167,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
           </button>
         )}
       </div>
-      {g.id === "canva" && <div className="notice stack small"><p>Client ID는 Canva 개발자 앱에서 발급한 값입니다. 앱 이름이나 Canva 계정 이름을 넣으면 연결되지 않습니다. 앱의 인증 리디렉션 주소는 <code>{window.location.origin}/api/canva/callback</code>로 설정해 주세요.</p><div className="row"><a className="btn sm" href="https://www.canva.dev/docs/apps/rest-apis/authentication/" target="_blank" rel="noopener noreferrer">Canva 앱 연결 안내 ↗</a><GuardedLink className="btn" href="/design">Canva 계정 연결·디자인 관리 →</GuardedLink></div></div>}
+      {g.id === "canva" && <GuardedLink className="btn" href="/design">Canva 계정 연결·디자인 관리 →</GuardedLink>}
       {g.id === "instagram" && <GuardedLink href="/settings">채널별 게시 계정·토큰 관리 →</GuardedLink>}
       {sendsMessage && <p className="small muted">검토 알림 채팅방에 메시지 1건을 보냅니다.</p>}
       {paidTest && <p className="small muted">짧은 글 생성 요청 1회를 보내며 API 사용료가 발생합니다.</p>}
@@ -184,7 +184,7 @@ const SERVICE_INFO: Record<string, { title: string; use: string; mark: string; k
   openai: { title: "OpenAI", use: "GPT 글쓰기 · 웹툰 이미지", mark: "O", keys: ["OPENAI_API_KEY"] },
   anthropic: { title: "Claude", use: "글쓰기 · 원고 다듬기", mark: "A", keys: ["ANTHROPIC_API_KEY"] },
   canva: { title: "Canva", use: "브랜드 템플릿 · 디자인", mark: "C", keys: ["CANVA_CLIENT_ID", "CANVA_CLIENT_SECRET"] },
-  naver: { title: "네이버", use: "뉴스 · 블로그 검색", mark: "N", keys: ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"] },
+  naver: { title: "네이버", use: "뉴스 · 웹문서 · 블로그 검색", mark: "N", keys: ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"] },
   telegram: { title: "텔레그램", use: "검토 알림 · 채널 전송", mark: "T", keys: ["TELEGRAM_BOT_TOKEN"] },
   cloudinary: { title: "Cloudinary", use: "게시용 이미지 주소", mark: "C", keys: ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"] },
   instagram: { title: "Instagram", use: "게시 API 버전", mark: "I", keys: ["INSTAGRAM_API_VERSION"] },

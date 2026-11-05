@@ -34,6 +34,9 @@ it("excludes staff recruitment and college-only mentors while preserving mixed-a
   for (const title of ["청소년 AI 페스티벌 서포터즈 대학생 모집", "청소년 마케터 대학생 멘토 모집", "교육청 평가위원 공개 모집", "고등학교 입찰 공고", "중등 교사 임용후보자 선발 공고", "직장어린이집 원아 모집"]) expect(isYouthOpportunity(title), title).toBe(false);
   expect(isYouthOpportunity("청소년 봉사자 모집", "대학생 및 대학원생")).toBe(false);
   expect(isYouthOpportunity("과학 공모전", "중학생·고등학생·대학생 및 일반인")).toBe(true);
+  expect(isYouthOpportunity("청소년·대학생 과학 공모전")).toBe(true);
+  expect(isYouthOpportunity("대학생 및 청소년 영상 공모전")).toBe(true);
+  expect(isYouthOpportunity("청소년 AI 페스티벌 대학생 모집")).toBe(false);
   expect(classifyNotice("고등학생 과학캠프 참가자 모집")).toBe("candidate");
 });
 
@@ -48,6 +51,8 @@ it("checks explicit body audience fields without inferring eligibility from a ke
   expect(nonYouthAudienceReason("청소년 지원 봉사\n모집 대상: 대학생 및 대학원생\n신청: 폼")).toContain("대학생");
   expect(nonYouthAudienceReason("대상: 초등학생\n중학생과 고등학생\n신청방법: 온라인")).toBeNull();
   expect(nonYouthAudienceReason("교육대상: 초·중·고등학생과 대학생")).toBeNull();
+  expect(nonYouthAudienceReason("대상: 초등 5학년~중1")).toBeNull();
+  expect(nonYouthAudienceReason("대상: 초등 5~6학년")).toContain("초등");
   expect(nonYouthAudienceReason("대학생 멘토와 함께하는 중학생 실험교실입니다.")).toBeNull();
 });
 it("isolates the activity's title and body from Linkareer navigation and unrelated resumes", async () => {

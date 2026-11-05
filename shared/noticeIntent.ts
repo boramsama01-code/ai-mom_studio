@@ -37,7 +37,8 @@ export function isYouthOpportunity(title: string, audience = ""): boolean {
   if (classifyNotice(title) === "off_topic") return false;
   const eligibleYouth = /중학생|고등학생|중고등|중·고|중등|고등|청소년|대상\s*(제한|무관)|누구나|제한\s*없/.test(audience);
   if (/대학생|대학원생|성인|일반인\s*전용/.test(audience) && !eligibleYouth) return false;
-  if (/대학생|대학원생|청년인턴|청소년지도사|청소년배치지도사/.test(title) && !/중학생|고등학생|중고등|중·고|대상\s*제한\s*없/.test(title)) return false;
+  const explicitlyMixedYouth = /(?:청소년\s*(?:[·ㆍ,/]|및|과|와)\s*(?:대학생|대학원생)|(?:대학생|대학원생)\s*(?:[·ㆍ,/]|및|과|와)\s*청소년)/.test(title);
+  if (/대학생|대학원생|청년인턴|청소년지도사|청소년배치지도사/.test(title) && !explicitlyMixedYouth && !/중학생|고등학생|중고등|중·고|대상\s*제한\s*없/.test(title)) return false;
   return true;
 }
 
@@ -49,7 +50,7 @@ export function nonYouthAudienceReason(text: string): string | null {
     const next = text.slice(match.index! + match[0].length).match(/^\n\s*(?:[·•-]\s*)?((?:중학|고등|중등|초등|대학|누구나)[^\n]{0,140})/);
     if (next) audience += ` ${next[1]}`;
     if (/[,·ㆍ및]$/.test(audience) || audience.length > 120) continue;
-    if (/초등|유아|유치원|대학생|대학원생|직장인|성인/.test(audience) && !/중등|중학|고등|고교|중[·ㆍ,]?고|청소년|누구나|제한\s*없|전\s*국민|연령\s*무관/.test(audience))
+    if (/초등|유아|유치원|대학생|대학원생|직장인|성인/.test(audience) && !/중등|중학|고등|고교|중[1-3]|고[1-3]|중[·ㆍ,]?고|청소년|누구나|제한\s*없|전\s*국민|연령\s*무관/.test(audience))
       return `본문의 참가 대상: ${audience} · 중·고등학생 대상이 아닌 자료`;
   }
   return null;

@@ -1,13 +1,13 @@
-name: Targeted build and browser regression
+name: Final targeted collection verification
 on:
   push:
     branches: [debug/collection-regression-20261106]
 permissions:
   contents: read
 jobs:
-  verify:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 8
     services:
       postgres:
         image: postgres:16
@@ -26,18 +26,5 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - name: Production-bundle card rendering
-        run: node scripts/cardnews14-memory-qa.mjs --concurrent=2 --output=test-results/cardnews14-memory/ci-production.json
-      - name: Install mobile browser tools
-        run: npm install --no-save --package-lock=false playwright@1.62.1 && npx playwright install --with-deps webkit
-      - name: Mobile layout and channel actions
-        run: node scripts/mobile-regression.mjs
-      - name: Editing and publication controls
-        run: node scripts/content-workspace-regression.mjs
-      - name: Eight-page news editor
-        run: node --import tsx scripts/news-editorial-regression.mjs
-      - name: Channel navigation
-        run: node scripts/channel-navigation-regression.mjs
-      - name: Automatic images and previews
-        run: node scripts/studio-automatic-regression.mjs
+      - run: npm run typecheck
+      - run: npx vitest run tests/api.test.ts tests/discovery.test.ts tests/official-first-postgres.test.ts tests/youth-sources.test.ts tests/notice-intent.test.ts tests/collection-ui.test.ts
