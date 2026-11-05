@@ -211,7 +211,11 @@ describe("공식 게시판 수집", () => {
 describe("추출·운영자 편집 보존·채널 격리", () => {
   it("운영자 편집본은 재추출로 덮어쓰지 않고, 일정 변경은 재검토로", async () => {
     const db = getDb();
-    const [item] = await db.select().from(schema.contentItems).where(sql`${schema.contentItems.excluded} = false and ${schema.contentItems.channelId} = 1`).limit(1);
+    // Select the secondary-source fixture explicitly: a preceding test also
+    // creates an official notice, and PostgreSQL does not promise row order.
+    const [doc] = await db.select().from(schema.sourceDocuments).where(eq(schema.sourceDocuments.normalizedUrl, "https://press.example/article/1"));
+    expect(doc.kind).toBe("naver_news");
+    const [item] = await db.select().from(schema.contentItems).where(eq(schema.contentItems.primarySourceId, doc.id));
     const summarySelection = await resolveChannelAiSettings(db, item.channelId, "summary"), copySelection = await resolveChannelAiSettings(db, item.channelId, "copy");
     fakeExtract.mockResolvedValueOnce({ ok: true, data: payload(), model: "gemini-summary-fixture", usage: { inputTokens: 10, outputTokens: 5 }, droppedEvidence: 0 });
     const r = await extractForItem(db, item.id, new LlmBudget(2), NOW);

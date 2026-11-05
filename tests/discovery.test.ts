@@ -314,7 +314,12 @@ describe("수집 실행 안의 자동 발굴", () => {
       await waitInlineIdle();
       const [job] = await getDb().select().from(schema.jobs).where(eq(schema.jobs.id, r.body.job.id));
       expect(job.status).toBe("succeeded");
-      expect(job.result?.status).toBe("ok_zero");
+      // RSS can complete without a key, but the missing preferred provider is
+      // a real gap in coverage and must not be reported as a clean zero.
+      expect(job.result?.status).toBe("partial");
+      const [run] = await getDb().select().from(schema.runs).where(eq(schema.runs.id, job.result?.runId as number));
+      expect(run.counts.newItems).toBe(0);
+      expect(run.errors).toEqual(expect.arrayContaining([expect.objectContaining({ scope: "naver", message: expect.stringContaining("네이버 API 키 미연결") })]));
     } finally {
       process.env.INLINE_WORKER = "false";
       process.env.NAVER_CLIENT_ID = "test-id";
