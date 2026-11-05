@@ -205,6 +205,24 @@ try {
     try {
       await page.goto(`${origin}/studio/2828`); await title(page).waitFor(); await previewReady(page);
       assert.equal(await pageButtons(page).count(), 5); assert.equal(state.writes.filter(write => !write.path.endsWith('/preview')).length, 0);
+      // The three crop views reuse the same real cover and do not save, publish,
+      // regenerate or modify its pixels. Check actual CSS geometry on mobile too.
+      const cropPreview = page.locator('.card-copy-editor .cover-crop-preview').first();
+      const originalSource = await cropPreview.locator('img').getAttribute('src');
+      const writesBeforeCrop = state.writes.length;
+      for (const [label, expectedRatio] of [['정방형 1:1', 1], ['프로필 3:4', .75], ['전체 4:5', .8]]) {
+        await cropPreview.getByRole('button', {name:label,exact:true}).click();
+        const frame = await cropPreview.locator('figure').boundingBox();
+        assert(frame && Math.abs(frame.width / frame.height - expectedRatio) < .01, `${label} must use real crop geometry`);
+        assert.equal(await cropPreview.locator('img').getAttribute('src'), originalSource);
+        assert.equal(await cropPreview.locator('img').evaluate(image => getComputedStyle(image).objectFit), 'cover');
+      }
+      await cropPreview.getByLabel('안전영역 표시', {exact:true}).check();
+      assert.equal(await cropPreview.locator('.cover-crop-guide').count(), 1);
+      await layoutFits(page, `cover crop ${width}`);
+      await cropPreview.screenshot({path:`${outputDir}/cover-crop-${width}.png`});
+      await cropPreview.getByLabel('안전영역 표시', {exact:true}).uncheck();
+      assert.equal(state.writes.length, writesBeforeCrop, 'crop controls must not mutate content or call AI');
       const sourceModels = await page.locator('[data-testid="source-role-models"]').textContent();
       for (const selection of Object.values(roles)) assert(sourceModels?.includes(selection.model), `source editor must use the channel's resolved ${selection.model} model`);
       await page.locator('details.card-copy-legacy-tools > summary').click();

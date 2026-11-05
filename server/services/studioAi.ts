@@ -123,7 +123,7 @@ export async function generateStudioPanel(opts: StudioTextInput & { panelIndex: 
 }
 
 /** Images are server-read data URLs only. No remote/user URL is fetched here. */
-export async function generateStudioImage(opts: { prompt: string; instruction?: string; referenceImages?: string[]; provider?: "openai"; model?: string; purpose?: "cover"; signal?: AbortSignal }) {
+export async function generateStudioImage(opts: { prompt: string; instruction?: string; referenceImages?: string[]; provider?: "openai"; model?: string; purpose?: "cover"; compositionPrompt?: string; signal?: AbortSignal }) {
   if (!opts.prompt.trim() || opts.prompt.length > 25000) throw new AiServiceError("그림 지시는 1~25,000자로 입력하세요.", "parse");
   const revision = opts.instruction?.trim();
   if (revision && revision.length > 2000) throw new AiServiceError("표지 수정 지시는 2,000자 이내로 입력하세요.", "parse");

@@ -4,22 +4,23 @@ import { CARDNEWS14_STYLE_IDS, LEGACY_READING_PROFILE_IDS, readingProfileForTemp
 import { READING_CANVA_MASTER_BINDINGS, readingMasterSourceApproved } from '../shared/readingCanvaMasters';
 
 // Pin independently from the production catalog so an unreviewed version bump
-// still fails. Amber Cream alone includes the reviewed credit-line correction.
+// still fails. All covers include the reviewed crop adapter; Amber Cream also
+// retains the earlier correction to its inner-page image-credit rules.
 const expectedTemplateVersions = {
-  cinematic: 'cardnews14-cinematic-v1-20261104',
-  'monochrome-coral': 'cardnews14-monochrome-coral-v1-20261104',
-  'amber-cream': 'cardnews14-amber-cream-v1-20261104-r2',
-  'cobalt-paper': 'cardnews14-cobalt-paper-v1-20261104',
-  'ink-lime': 'cardnews14-ink-lime-v1-20261104',
-  'swiss-modernism': 'cardnews14-swiss-modernism-v1-20261104',
-  'studio-2am': 'cardnews14-studio-2am-v1-20261104',
-  ichestyime: 'cardnews14-ichestyime-v1-20261104',
-  'sharp-serif': 'cardnews14-sharp-serif-v1-20261104',
-  'bang-bang': 'cardnews14-bang-bang-v1-20261104',
-  hello: 'cardnews14-hello-v1-20261104',
-  'ekiden-pack': 'cardnews14-ekiden-pack-v1-20261104',
-  'you-and-me': 'cardnews14-you-and-me-v1-20261104',
-  'ott-recommendation': 'cardnews14-ott-recommendation-v1-20261104',
+  cinematic: 'cardnews14-cinematic-v1-20261104-crop-safe-20261105',
+  'monochrome-coral': 'cardnews14-monochrome-coral-v1-20261104-crop-safe-20261105',
+  'amber-cream': 'cardnews14-amber-cream-v1-20261104-r2-crop-safe-20261105',
+  'cobalt-paper': 'cardnews14-cobalt-paper-v1-20261104-crop-safe-20261105',
+  'ink-lime': 'cardnews14-ink-lime-v1-20261104-crop-safe-20261105',
+  'swiss-modernism': 'cardnews14-swiss-modernism-v1-20261104-crop-safe-20261105',
+  'studio-2am': 'cardnews14-studio-2am-v1-20261104-crop-safe-20261105',
+  ichestyime: 'cardnews14-ichestyime-v1-20261104-crop-safe-20261105',
+  'sharp-serif': 'cardnews14-sharp-serif-v1-20261104-crop-safe-20261105',
+  'bang-bang': 'cardnews14-bang-bang-v1-20261104-crop-safe-20261105',
+  hello: 'cardnews14-hello-v1-20261104-crop-safe-20261105',
+  'ekiden-pack': 'cardnews14-ekiden-pack-v1-20261104-crop-safe-20261105',
+  'you-and-me': 'cardnews14-you-and-me-v1-20261104-crop-safe-20261105',
+  'ott-recommendation': 'cardnews14-ott-recommendation-v1-20261104-crop-safe-20261105',
 } satisfies Record<(typeof CARDNEWS14_STYLE_IDS)[number], string>;
 
 describe('Canva source fingerprints and historical snapshots', () => {

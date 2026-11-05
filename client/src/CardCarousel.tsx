@@ -1,3 +1,4 @@
+import { CoverCropPreview } from "./CoverCropPreview";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, apiBlob, ApiError } from "./api";
@@ -37,7 +38,7 @@ export function CardCarousel({ channelId, assetId, pages, credit = "", onDirtyCh
     <div className="row between"><strong>완성된 카드뉴스 <span className="muted">{pages.length}장</span></strong><button className="btn sm" disabled={downloadDisabled||download.isPending||dirty||!!recovery.pending||invalidAltIndex>=0} onClick={() => download.mutate()}>{download.isPending ? "준비 중…" : `${pages.length}장 ZIP 다운로드`}</button></div>
     {downloadDisabled && <p className="notice small">카드 문구를 저장하고 이미지를 다시 만든 뒤 다운로드할 수 있습니다.</p>}
     <div className="card-carousel-stage">
-      {failed ? <div role="alert" className="notice err">이미지를 불러오지 못했습니다.<button className="btn sm" onClick={() => setFailed(false)}>다시 보기</button></div> : <img key={page.id} src={`/api/channels/${channelId}/media/${page.id}`} alt={values[index]||`${index + 1} / ${pages.length} · ${page.title}`} onError={() => setFailed(true)} />}
+      {failed ? <div role="alert" className="notice err">이미지를 불러오지 못했습니다.<button className="btn sm" onClick={() => setFailed(false)}>다시 보기</button></div> : index === 0 ? <CoverCropPreview key={page.id} src={`/api/channels/${channelId}/media/${page.id}`} alt={values[index]||`${index + 1} / ${pages.length} · ${page.title}`} onError={() => setFailed(true)} /> : <img key={page.id} src={`/api/channels/${channelId}/media/${page.id}`} alt={values[index]||`${index + 1} / ${pages.length} · ${page.title}`} onError={() => setFailed(true)} />}
     </div>
     <div className="row between card-carousel-controls"><button className="btn sm" aria-label="이전 페이지" disabled={index === 0} onClick={() => select(index - 1)}>← 이전</button><div className="page-dots" role="group" aria-label="페이지 선택">{pages.map((p, i) => <button key={p.id} className={i <= index ? "filled" : ""} aria-label={`${i + 1}페이지`} aria-current={i === index ? "step" : undefined} onClick={() => select(i)}>{i <= index ? "●" : "○"}</button>)}</div><button className="btn sm" aria-label="다음 페이지" disabled={index >= pages.length - 1} onClick={() => select(index + 1)}>다음 →</button></div>
     <div className="card-carousel-thumbs" role="group" aria-label="페이지 선택">{pages.map((p, i) => <button key={p.id} aria-label={`${i + 1}페이지 · ${p.title}`} aria-pressed={i === index} onClick={() => select(i)}><img src={`/api/channels/${channelId}/media/${p.id}`} loading="lazy" alt="" /><span aria-hidden="true">{i <= index ? "●" : "○"}</span></button>)}</div>

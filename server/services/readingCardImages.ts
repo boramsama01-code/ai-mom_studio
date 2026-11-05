@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import type { PageDesign } from '../../shared/familyDialogue';
 import type { ReadingImageBox } from '../../shared/readingCardProfiles';
+import {readingContainedImageBounds} from '../../shared/readingImageGeometry';
 
 type ArtworkSlot = Pick<ReadingImageBox, 'width' | 'height'> & Partial<Pick<ReadingImageBox, 'radius' | 'treatment'>>;
 
@@ -17,7 +18,11 @@ export async function prepareReadingArtwork(bytes:Buffer|null,design:PageDesign,
     const normalized=await sharp(bytes,{limitInputPixels:40_000_000,failOn:'error'}).rotate().toBuffer();
     const meta=await sharp(normalized).metadata();
     if(!meta.width||!meta.height) throw new Error('사진 크기를 확인할 수 없습니다.');
-    if(settings.fit==='contain') output=await sharp(normalized).resize(width,height,{fit:'contain',background}).png().toBuffer();
+    if(settings.fit==='contain') {
+      const placed=readingContainedImageBounds(slot,{width:meta.width,height:meta.height});
+      output=await sharp(normalized).resize(placed.width,placed.height,{fit:'fill'})
+        .extend({left:placed.x,top:placed.y,right:width-placed.x-placed.width,bottom:height-placed.y-placed.height,background}).png().toBuffer();
+    }
     else {
       const scale=Math.max(width/meta.width,height/meta.height),rw=Math.max(width,Math.round(meta.width*scale)),rh=Math.max(height,Math.round(meta.height*scale));
       const left=Math.round((rw-width)*settings.focalX/100),top=Math.round((rh-height)*settings.focalY/100);

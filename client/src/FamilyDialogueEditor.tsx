@@ -1,3 +1,4 @@
+import { CoverCropPreview } from "./CoverCropPreview";
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { defaultPageDesigns, familyCardCopySchema, familyDialogueMetadataSchema, familyFieldDescriptors, familyFieldValue, FAMILY_PAGE_LABELS, type CardCopyV2, type ClaimRef, type FamilyDialogueMetadata, type FamilyFieldDescriptor, type FamilyPage, type FamilyPageId, type PageDesign, type ReviewFlag } from "@shared/familyDialogue";
@@ -503,10 +504,10 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
       </div>
       <div className="card-copy-preview-column">
         <div className="row between"><strong>문구 배치 미리보기</strong><span className="badge">스튜디오 초안</span></div>
-        <figure className={`card-copy-preview ${previewCurrent ? "" : "is-stale"}`} aria-busy={previewBusy}>
+        {page.id === "cover" ? <CoverCropPreview src={preview?.url} alt={`${page.page}페이지 ${FAMILY_PAGE_LABELS[page.id]} 문구 배치`} busy={previewBusy} stale={!previewCurrent} placeholder={invalid ? "필수 칸을 입력하면 배치를 확인할 수 있습니다." : "선택한 장의 실제 배치를 준비하고 있습니다."} status={!previewCurrent && preview ? previewBusy ? "현재 입력으로 배치 갱신 중…" : "이전 입력의 미리보기입니다." : undefined} /> : <figure className={`card-copy-preview ${previewCurrent ? "" : "is-stale"}`} aria-busy={previewBusy}>
           {preview ? <img src={preview.url} alt={`${page.page}페이지 ${FAMILY_PAGE_LABELS[page.id]} 문구 배치`} /> : <div className="card-copy-placeholder">{invalid ? "필수 칸을 입력하면 배치를 확인할 수 있습니다." : "선택한 장의 실제 배치를 준비하고 있습니다."}</div>}
           {!previewCurrent && preview && <figcaption>{previewBusy ? "현재 입력으로 배치 갱신 중…" : "이전 입력의 미리보기입니다."}</figcaption>}
-        </figure>
+        </figure>}
         <p className="hint">{readingProfile?.sourceStyleId ? "현재 입력의 배치 미리보기입니다. 저장한 뒤 ‘8장 디자인 완성’에서 이미지를 만들고 완성된 8장을 확인하세요. 이 미리보기는 유료 이미지 생성을 요청하지 않습니다." : "현재 입력의 자체 렌더입니다. 게시할 완성본은 Canva 내보내기 미리보기에서 확인하세요. 미리보기는 유료 이미지 생성을 요청하지 않습니다."}</p>
         {previewError && <ErrorBox error={previewError} retry={() => setPreviewRetry(value => value + 1)} />}
         {selectedEnding?<div className="notice small"><strong>{selectedEnding.label}</strong><p>{selectedEnding.revision==='latest'?'최근 수정안':'이전 수정안'} · 원본 전체 이미지. 직접 작성한 문구는 보관합니다.</p><a href={selectedEnding.publicUrl} target="_blank" rel="noopener noreferrer">엔딩 원본 보기 ↗</a></div>:page.id === "outro" && readingProfile ? <div className="notice small stack" data-testid="family-reading-outro-design"><strong>공통 마무리 · 선택한 프로필</strong><p>선택한 스타일의 배치와 프로필창을 사용합니다. 프로필은 이 장에만 표시하며 마지막 문구·행동 안내·계정은 왼쪽 입력칸에서 수정할 수 있습니다.</p></div> : page.id === "outro" ? <div className="notice small stack" data-testid="family-outro-fixed-design">

@@ -248,10 +248,10 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
     if (pageId === "outro") flags.push(flag("visualBriefs.outro", "approved_logo_only", "닫는 표지는 승인된 로고 자산을 사용합니다. 새 로고·마스코트를 생성하지 않았습니다."));
     else if (readingProfile && slot?.kind !== "artwork") flags.push(flag(`visualBriefs.${pageId}`, "reading_photo_slot_missing", `이 스타일의 사진은 ${readingArtworkPagesLabel(readingProfile)}에 배치합니다. 선택한 장은 글과 색으로 구성하므로 이미지를 요청하지 않았습니다.`));
     else {
-      const photoComposition = readingProfile && readingArtworkComposition(readingProfile, pageId);
+      const photoComposition = readingProfile && readingArtworkComposition(readingProfile, pageId, metadata.pageDesigns[pageId]);
       const visualDirection = photoComposition
         ? readingArtworkPrompt(photoComposition)
-        : "알리고당의 기존 시각 방향: full-bleed 사진 감각의 절제된 conceptual art, 차콜·딥그린 바탕과 버터옐로(#F4D66A)의 작은 강조. 자연스러운 빛과 미세한 grain, 주 피사체는 하단 또는 측면에 두고 상단·중앙의 제목 안전 영역을 비운다. 과한 3D 스티커와 알록달록한 면분할을 피한다. 기존 사용자가 저장한 색·이미지 취향과 명시 지시가 우선한다. 실제 뉴스 현장 사진처럼 증거를 꾸미지 않으며 글자·로고를 이미지에 굽지 않는다.";
+        : "알리고당의 기존 시각 방향: full-bleed 사진 감각의 절제된 conceptual art, 차콜·딥그린 바탕과 버터옐로(#F4D66A)의 작은 강조. 자연스러운 빛과 미세한 grain, 주 피사체의 얼굴·손·소품 전체는 중앙 정방형 안쪽에 두고 실제 제목 영역은 비운다. 배경만 가장자리까지 확장한다. 과한 3D 스티커와 알록달록한 면분할을 피한다. 기존 사용자가 저장한 색·이미지 취향과 명시 지시가 우선한다. 실제 뉴스 현장 사진처럼 증거를 꾸미지 않으며 글자·로고를 이미지에 굽지 않는다.";
       const visual = await runFamilyEditorialStage(context, { stage: "image_brief", role: "image_brief", schema: visualBriefSchema, prompt: `${FAMILY_EDITORIAL_PROMPTS.visual}\n${visualDirection}`,
         data: { editorialPlan: metadata.editorialPlan, cardCopy: copy, page: copy.pages.find(page => page.id === pageId), pageId, pageDesign: metadata.pageDesigns[pageId], ...(photoComposition ? { photoComposition } : {}), referenceAssetIds: metadata.pageDesigns[pageId].background.assetId ? [String(metadata.pageDesigns[pageId].background.assetId)] : [], instructions: input.scope === "image_brief" ? input.instructions ?? "" : "" }, force: input.scope === "image_brief", validate: brief => brief.pageId === pageId ? [] : [flag("visualBriefs", "wrong_page", "선택한 페이지와 이미지 브리프의 페이지가 다릅니다.")] });
       if (visual.status === "ready" && visual.data) { metadata.visualBriefs = { ...metadata.visualBriefs, [pageId]: visual.data }; metadata.dependencies.visuals = "current"; }
@@ -267,7 +267,9 @@ export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: 
     else flags.push(...reviewed.reviewFlags);
   }
   if (input.scope === "all" && metadata.pageDesigns.cover.background.kind !== "image" && metadata.visualBriefs.cover) {
-    const artwork = await generateFamilyCoverArtwork(context, { version: input.version, brief: metadata.visualBriefs.cover });
+    const coverProfile = readingProfileForTemplateKey(copy.templateKey);
+    const coverComposition = coverProfile && readingArtworkComposition(coverProfile, "cover", metadata.pageDesigns.cover);
+    const artwork = await generateFamilyCoverArtwork(context, { version: input.version, brief: metadata.visualBriefs.cover, compositionPrompt: coverComposition ? readingArtworkPrompt(coverComposition) : undefined });
     if (artwork.assetId) metadata.pageDesigns = { ...metadata.pageDesigns, cover: { ...metadata.pageDesigns.cover, background: { ...metadata.pageDesigns.cover.background, kind: "image", assetId: artwork.assetId } } };
     else if (artwork.reviewFlag) flags.push(artwork.reviewFlag);
   }

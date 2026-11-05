@@ -63,7 +63,7 @@ describe('reading profiles with fixed typography and photo windows',()=>{
     const red=await sharp({create:{width:1200,height:600,channels:3,background:'#E62020'}}).png().toBuffer();
     const blue=await sharp({create:{width:1200,height:600,channels:3,background:'#2040E6'}}).png().toBuffer();
     const crop=await prepareReadingArtwork(red,design,slot,profile.pages[0].background);
-    expect(await sharp(crop).metadata()).toMatchObject({width:936,height:480,format:'png'});
+    expect(await sharp(crop).metadata()).toMatchObject({width:900,height:462,format:'png'});
     const first=await renderReadingCard(copy,copy.pages[0],design,context,red,'AI 이미지');
     const second=await renderReadingCard(copy,copy.pages[0],design,context,blue,'AI 이미지');
     const top=async(bytes:Buffer)=>sharp(bytes).extract({left:0,top:0,width:1080,height:646}).raw().toBuffer();

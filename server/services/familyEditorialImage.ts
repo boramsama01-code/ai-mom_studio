@@ -17,18 +17,21 @@ import { HttpError } from "../routes/util";
 import type { DB } from "../db";
 
 /** One paid cover stage inside the already admitted editorial job. It never saves card text. */
-export async function generateFamilyCoverArtwork(context: FamilyStageContext, input: { version: number; brief: VisualBrief }): Promise<{ assetId: number | null; reviewFlag?: ReviewFlag }> {
+export async function generateFamilyCoverArtwork(context: FamilyStageContext, input: { version: number; brief: VisualBrief; compositionPrompt?: string }): Promise<{ assetId: number | null; reviewFlag?: ReviewFlag }> {
   const selected = context.plan.roles.image_generation;
   const promptWhere = and(eq(cardImagePrompts.channelId, context.channelId), eq(cardImagePrompts.contentItemId, context.itemId), eq(cardImagePrompts.pageId, "cover"));
   const [savedPrompt] = await context.db.select().from(cardImagePrompts).where(promptWhere);
   const promptVersion = savedPrompt?.version ?? 0;
   const prompt = savedPrompt?.prompt ?? JSON.stringify({ visualSubject: input.brief.visualSubject, composition: input.brief.composition, mood: input.brief.mood, palette: input.brief.palette, textSafeArea: input.brief.textSafeArea, avoidElements: input.brief.avoidElements, imagePrompt: input.brief.imagePrompt, outputRule: "No lettering, logo, mascot redesign or counterfeit documentary news photograph. The Korean card text is rendered separately." });
-  const instruction = savedPrompt?.instruction.trim() ?? "", submittedPrompt = studioImagePrompt({ purpose: "cover", prompt, instruction });
+  const instruction = savedPrompt?.instruction.trim() ?? "", submittedPrompt = studioImagePrompt({ purpose: "cover", prompt, instruction, compositionPrompt: input.compositionPrompt });
   const cacheInput = { stage: "image_generation", sourceSnapshotId: context.plan.sourceSnapshotId, contentRevision: context.baseRevision, selection: selected, brief: input.brief };
-  const inputHash = familyHash({ ...cacheInput, prompt, instruction, promptVersion });
-  // Historical default-brief stages remain reusable. An operator edit/version
-  // can only reuse a stage generated with that exact choice.
-  const compatibleHashes = promptVersion === 0 && savedPrompt?.prompt == null && !instruction ? [inputHash, familyHash(cacheInput)] : [inputHash];
+  const priorInputHash = familyHash({ ...cacheInput, prompt, instruction, promptVersion });
+  const inputHash = familyHash({ ...cacheInput, prompt, instruction, promptVersion, submittedPrompt });
+  // The complete provider prompt includes trusted template/crop geometry. Keep
+  // old keys visible for unknown-paid-outcome protection, but reuse an older
+  // successful image only when its recorded provider prompt is identical.
+  const compatibleHashes = promptVersion === 0 && savedPrompt?.prompt == null && !instruction ? [inputHash, priorInputHash, familyHash(cacheInput)] : [inputHash, priorInputHash];
+  const matchesCurrentPrompt = (row: typeof familyEditorialStages.$inferSelect) => row.inputHash === inputHash || row.result.prompt === submittedPrompt;
   const recovery = (message: string) => ({ assetId: null, reviewFlag: { path: "pageDesigns.cover.background", code: "cover_image_incomplete", message: `${message} 카드 문구는 보존했습니다. 표지에서 '배경 자동 만들기'를 직접 다시 요청하거나 이미지를 붙여넣어 주세요.` } });
   const lockPromptState = async (tx: DB) => {
     const [item] = await tx.select({ version: contentItems.version, currentRevisionId: contentItems.currentRevisionId }).from(contentItems).where(and(eq(contentItems.id, context.itemId), eq(contentItems.channelId, context.channelId))).for("update");
@@ -43,14 +46,16 @@ export async function generateFamilyCoverArtwork(context: FamilyStageContext, in
     return asset;
   });
   const rows = await context.db.select().from(familyEditorialStages).where(and(eq(familyEditorialStages.channelId, context.channelId), eq(familyEditorialStages.contentItemId, context.itemId), eq(familyEditorialStages.stage, "image_generation"), inArray(familyEditorialStages.inputHash, compatibleHashes))).orderBy(desc(familyEditorialStages.finishedAt));
-  const prior = rows.find(row => row.status === "ready" && typeof row.result.assetId === "number");
+  const prior = rows.find(row => row.status === "ready" && typeof row.result.assetId === "number" && matchesCurrentPrompt(row));
   if (prior) {
     try {
       const asset = await cachedAsset(Number(prior.result.assetId));
       if (asset) { context.runs.push({ id: prior.id, stage: "image_generation", status: "ready", baseRevision: prior.baseRevision, inputHash: prior.inputHash, startedAt: prior.startedAt.toISOString(), finishedAt: prior.finishedAt.toISOString(), provenance: prior.provenance as GenerationRun["provenance"], error: null }); return { assetId: asset.id }; }
     } catch (error) { if (error instanceof HttpError && error.extra?.code === "image_prompt_changed") return recovery(error.message); throw error; }
   }
-  if (rows.length && context.allowPaidRetry === false) return recovery("이전 표지 요청의 결과가 확정되지 않아 수집 워커가 유료 요청을 반복하지 않았습니다.");
+  if (rows.length && context.allowPaidRetry === false) return recovery(rows.some(row => row.status === "ready" && typeof row.result.assetId === "number" && !matchesCurrentPrompt(row))
+    ? "저장된 표지와 현재 구도 지시가 달라 수집 워커가 새 유료 요청을 시작하지 않았습니다."
+    : "이전 표지 요청의 결과가 확정되지 않아 수집 워커가 유료 요청을 반복하지 않았습니다.");
   const abandoned = rows.filter(row => row.status === "running" && row.requestId !== context.requestId && row.startedAt.getTime() < Date.now() - 180_000);
   if (abandoned.length) await context.db.update(familyEditorialStages).set({ status: "failed", result: { error: "이전 이미지 요청의 결과·사용량을 확인하지 못했습니다. 운영자가 새 요청을 시작했습니다." }, finishedAt: new Date() }).where(and(inArray(familyEditorialStages.id, abandoned.map(row => row.id)), eq(familyEditorialStages.status, "running")));
   const remainingMs = 160_000 - (Date.now() - (context.startedAt ?? Date.now()));
@@ -70,7 +75,7 @@ export async function generateFamilyCoverArtwork(context: FamilyStageContext, in
   try {
     const admitted = await context.db.insert(familyEditorialStages).values({ id, channelId: context.channelId, contentItemId: context.itemId, stage: "image_generation", inputHash, requestId: context.requestId, baseRevision: context.baseRevision, status: "running", result: { status: "running" }, provenance: initialProvenance, startedAt, finishedAt: startedAt }).onConflictDoNothing().returning({ id: familyEditorialStages.id });
     if (!admitted.length) return recovery("같은 표지를 다른 실행이 처리 중이어서 유료 요청을 중복 실행하지 않았습니다.");
-    const [completed] = await context.db.select().from(familyEditorialStages).where(and(eq(familyEditorialStages.channelId, context.channelId), eq(familyEditorialStages.contentItemId, context.itemId), eq(familyEditorialStages.stage, "image_generation"), inArray(familyEditorialStages.inputHash, compatibleHashes), eq(familyEditorialStages.status, "ready"))).orderBy(desc(familyEditorialStages.finishedAt)).limit(1);
+    const [completed] = await context.db.select().from(familyEditorialStages).where(and(eq(familyEditorialStages.channelId, context.channelId), eq(familyEditorialStages.contentItemId, context.itemId), eq(familyEditorialStages.stage, "image_generation"), eq(familyEditorialStages.inputHash, inputHash), eq(familyEditorialStages.status, "ready"))).orderBy(desc(familyEditorialStages.finishedAt)).limit(1);
     if (completed && typeof completed.result.assetId === "number") {
       const asset = await cachedAsset(completed.result.assetId);
       if (asset) {
@@ -83,7 +88,7 @@ export async function generateFamilyCoverArtwork(context: FamilyStageContext, in
       await context.db.update(familyEditorialStages).set({ status: "cancelled", result: { notStarted: "budget" }, provenance: { ...initialProvenance, usageStatus: "known", inputTokens: 0, outputTokens: 0, status: "not_started" }, finishedAt: new Date() }).where(eq(familyEditorialStages.id, id));
       return recovery("이번 실행의 호출 예산을 사용해 표지를 시작하지 않았습니다.");
     }
-    const generated = await generateStudioImage({ provider: "openai", model: selected.model, purpose: "cover", signal: controller.signal, prompt, instruction });
+    const generated = await generateStudioImage({ provider: "openai", model: selected.model, purpose: "cover", signal: controller.signal, prompt, instruction, compositionPrompt: input.compositionPrompt });
     context.budget.inputTokens += generated.usage.inputTokens; context.budget.outputTokens += generated.usage.outputTokens;
     if (generated.usageStatus === "usage_unknown") context.budget.usageUnknown = true;
     const normalized = await normalizeCardPageArtwork(generated.bytes, generated.mimeType), hash = sha256(normalized.bytes), finishedAt = new Date();

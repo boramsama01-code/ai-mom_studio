@@ -63,7 +63,7 @@ describe("reading image prompts from actual slot geometry", () => {
     const cinematic = readingProfileForTemplateKey("cardnews14-cinematic-v1")!, swiss = readingProfileForTemplateKey("cardnews14-swiss-modernism-v1")!;
     expect(readingArtworkComposition(cinematic, "cover")).toMatchObject({ textPlacement: "over_image", slot: { width: 1080, height: 1350 } });
     expect(readingArtworkComposition(cinematic, "news_summary")?.textSafeAreas).toContainEqual({ field: "P02_READING_BODY", x: 72, y: 438, width: 910, height: 700 });
-    expect(readingArtworkComposition(swiss, "cover")).toMatchObject({ textPlacement: "outside_image", slot: { width: 888, height: 444, aspectRatio: 2 } });
+    expect(readingArtworkComposition(swiss, "cover")).toMatchObject({ textPlacement: "outside_image", slot: { x: 110, y: 662, width: 860, height: 430, aspectRatio: 2 } });
     expect(readingArtworkComposition(swiss, "implication")).toMatchObject({ textPlacement: "over_image", slot: { width: 1080, height: 236 }, textSafeAreas: [{ field: "P03_KICKER", x: 72, y: 84, width: 800, height: 42 }] });
     expect(readingArtworkComposition(swiss, "discussion")).toMatchObject({ textPlacement: "outside_image", slot: { width: 384, height: 904 } });
     expect(readingArtworkComposition(swiss, "activity")).toMatchObject({ textPlacement: "outside_image", slot: { width: 936, height: 290 } });
