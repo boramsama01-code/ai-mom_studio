@@ -42,7 +42,7 @@ import { generateDialogueDraft } from "./generate";
 import { persistSourceFetchAttempt } from "../services/sourceFetchPersistence";
 import { assertGenerationActive, completeGenerationResult, currentGenerationSignal } from "../services/generationContext";
 import type { NoticePayload } from "../../shared/payloads";
-import { classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
+import { isYouthOpportunity, classifyNotice, noticeSearchQuery } from "../../shared/noticeIntent";
 import { itemPrimarySource } from "../services/itemSources";
 import { preserveCardCopy } from "../../shared/cardCopy";
 import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
@@ -124,9 +124,9 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
   const errors: Array<{ scope: string; message: string }> = [];
   const counter: CallCounter = { naver: 0, limit: budget.naverCallsPerRun };
   const newItemIds: number[] = [];
-  const publicSearch = createNewsSearch({ now, loadXml: opts.rssLoad, recruitment: channel.contentType === "notice" });
-  // Existing Naver fixtures exercise the same storage pipeline; production uses public RSS.
-  const selectedSearch = opts.naverFetch ? ((q: string, e: "news" | "blog", d: number, c: CallCounter) => naverSearch(q, e, d, c, opts.naverFetch)) : publicSearch.search;
+  const publicSearch = createNewsSearch({ now, loadXml: opts.rssLoad, preferNaver: !opts.rssLoad, recruitment: channel.contentType === "notice" });
+  // Existing Naver fixtures exercise the same storage pipeline; production prefers Naver with public RSS fallback.
+  const selectedSearch = opts.naverFetch ? ((q: string, e: "news" | "blog" | "webkr", d: number, c: CallCounter) => naverSearch(q, e, d, c, opts.naverFetch)) : publicSearch.search;
   const search: typeof publicSearch.search = (...args) => { currentGenerationSignal()?.throwIfAborted(); return selectedSearch(...args); };
   const llmBudget = new LlmBudget(budget.llmCallsPerRun);
   let fetchCalls = 0;
@@ -189,7 +189,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       }
       if (channel.contentType === "notice") {
         const intent = classifyNotice(e.title);
-        if (intent === "retrospective" || intent === "off_topic" || (config.recruitmentOnly && intent !== "candidate")) {
+        if ((config.youthOnly && !isYouthOpportunity(e.title, e.audience)) || intent === "retrospective" || intent === "off_topic" || (config.recruitmentOnly && intent !== "candidate")) {
           counts.noticeReportsSkipped = (counts.noticeReportsSkipped ?? 0) + 1;
           continue;
         }
@@ -200,7 +200,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
       }
       counts.results++;
       accepted++;
-      const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e, category);
+      const saved = await saveOfficialEntry(db, channel, o.id, o.schoolType, run.id, e, category, config.sourceRole);
       if (saved?.isNew) {
         sourceNew++;
         counts.officialNew++;
@@ -258,7 +258,7 @@ export async function runCollect(db: DB, channelId: number, opts: CollectOptions
     let ruleNew = 0;
     counts.rulesProcessed++;
     try {
-      items = await search(rule.query, rule.endpoint as "news" | "blog", rule.display, counter);
+      items = await search(rule.query, rule.endpoint as "news" | "blog" | "webkr", rule.display, counter);
       counts.rulesSucceeded++;
     } catch (e) {
       currentGenerationSignal()?.throwIfAborted();
@@ -477,7 +477,7 @@ async function saveSearchItem(db: DB, channel: Channel, rule: SearchRule, runId:
   return { itemId: existing.id, isNew: false, excluded: false };
 }
 
-async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, schoolType: string | null, runId: number, e: { url: string; title: string; dateText: string | null }, subcategory: string | null) {
+async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, schoolType: string | null, runId: number, e: { url: string; title: string; dateText: string | null }, subcategory: string | null, sourceRole?: string) {
   let normalized: string;
   try {
     normalized = normalizeUrl(e.url);
@@ -490,7 +490,7 @@ async function saveOfficialEntry(db: DB, channel: Channel, officialId: number, s
     .values({
       normalizedUrl: normalized,
       originalUrl: e.url,
-      kind: "official",
+      kind: sourceRole === "discovery" ? "opportunity_listing" : "official",
       title: e.title,
       meta: { officialSourceId: officialId, fetchUrl: e.url, boardDateText: e.dateText },
       publishedRaw: e.dateText,

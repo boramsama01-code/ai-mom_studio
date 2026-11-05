@@ -82,7 +82,7 @@ export const searchRules = pgTable(
     channelId: integer("channel_id").notNull().references(() => channels.id),
     query: text("query").notNull(),
     normalizedQuery: text("normalized_query").notNull(),
-    endpoint: text("endpoint").notNull(), // news | blog
+    endpoint: text("endpoint").notNull(), // news | blog | webkr
     categoryHint: text("category_hint"),
     subcategory: text("subcategory"),
     enabled: boolean("enabled").notNull().default(true),
@@ -142,7 +142,7 @@ export const sourceDocuments = pgTable(
     id: serial("id").primaryKey(),
     normalizedUrl: text("normalized_url").notNull(),
     originalUrl: text("original_url").notNull(),
-    kind: text("kind").notNull(), // naver_news | naver_blog | official | manual
+    kind: text("kind").notNull(), // naver_news | naver_blog | naver_web | opportunity_listing | official | manual
     title: text("title").notNull().default(""),
     snippet: text("snippet").notNull().default(""),
     meta: jsonb("meta").$type<Record<string, unknown>>().notNull().default({}),

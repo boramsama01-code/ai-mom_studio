@@ -9,7 +9,7 @@ import { DiscoveryPanel } from "../discovery";
 import type { OfficialSource, SearchRule } from "@shared/schema";
 
 type RulesResp = { items: SearchRule[]; discovery: DiscoverySettings | null; estimate: { activeRules: number; discoveryCalls: number; callsPerRun: number; cappedByBudget: boolean; budget: number } };
-type TrialItem = { endpoint: "news" | "blog"; title: string; description: string; link: string; originallink?: string; bloggername?: string; published: { raw: string | null; iso: string | null; precision: "datetime" | "date" | "unknown" }; excludedReason: string | null };
+type TrialItem = { endpoint: "news" | "blog" | "webkr"; title: string; description: string; link: string; originallink?: string; bloggername?: string; published: { raw: string | null; iso: string | null; precision: "datetime" | "date" | "unknown" }; excludedReason: string | null };
 
 export function RulesPage() {
   const { selected, current } = useChannel();
@@ -63,7 +63,7 @@ function RulesTab({ cid, kind }: { cid: number; kind: string }) {
   const qc = useQueryClient();
   const rules = useRules(cid);
   const [editing, setEditing] = useState<SearchRule | "new" | null>(null);
-  const [trial, setTrial] = useState<{ query: string; endpoint: "news" | "blog"; excludeTerms: string[]; excludeScope: string; categoryHint: string | null } | null>(null);
+  const [trial, setTrial] = useState<{ query: string; endpoint: "news" | "blog" | "webkr"; excludeTerms: string[]; excludeScope: string; categoryHint: string | null } | null>(null);
   const toggle = useMutation({
     mutationFn: (r: SearchRule) => api(`/channels/${cid}/rules/${r.id}`, { method: "PATCH", body: { version: r.version, enabled: !r.enabled } }),
     onSettled: () => qc.invalidateQueries({ queryKey: ["ch", cid, "rules"] }),
@@ -83,7 +83,7 @@ function RulesTab({ cid, kind }: { cid: number; kind: string }) {
           <strong>한 번 실행할 때 예상 검색 요청: {estimate.callsPerRun}회</strong>
           <div className="small muted">
             {estimate.discoveryCalls > 0 && `자동 발굴 ${estimate.discoveryCalls}회 + `}
-            활성 검색어 {estimate.activeRules}개 (뉴스·블로그는 각각 1회) · 실행당 한도 {estimate.budget}회
+            활성 검색어 {estimate.activeRules}개 (뉴스·웹문서·블로그는 각각 1회) · 실행당 한도 {estimate.budget}회
             {estimate.cappedByBudget && " — 이번에 처리하지 못한 검색어는 다음 실행에서 먼저 처리합니다"}
           </div>
         </div>
@@ -101,12 +101,12 @@ function RulesTab({ cid, kind }: { cid: number; kind: string }) {
               <div className="row between">
                 <div className="row" style={{ minWidth: 0 }}>
                   <strong style={{ overflowWrap: "anywhere" }}>{r.query}</strong>
-                  <Badge>{r.endpoint === "news" ? "뉴스" : "블로그"}</Badge>
+                  <Badge>{r.endpoint === "news" ? "뉴스" : r.endpoint === "webkr" ? "웹문서" : "블로그"}</Badge>
                   <Badge kind={r.enabled ? "ok" : ""}>{r.enabled ? "사용 중" : "일시정지"}</Badge>
                   {r.categoryHint && <span className="small muted">{r.categoryHint}</span>}
                 </div>
                 <div className="row">
-                  <button className="btn sm" onClick={() => setTrial({ query: r.query, endpoint: r.endpoint as "news" | "blog", excludeTerms: r.excludeTerms, excludeScope: r.excludeScope, categoryHint: r.categoryHint })}>
+                  <button className="btn sm" onClick={() => setTrial({ query: r.query, endpoint: r.endpoint as "news" | "blog" | "webkr", excludeTerms: r.excludeTerms, excludeScope: r.excludeScope, categoryHint: r.categoryHint })}>
                     시험 검색
                   </button>
                   <button className="btn sm" onClick={() => toggle.mutate(r)} disabled={toggle.isPending}>
@@ -144,7 +144,7 @@ function RulesTab({ cid, kind }: { cid: number; kind: string }) {
 export function RuleForm({ cid, rule, onClose, initialSubcategory = "" }: { cid: number; rule: SearchRule | null; onClose: () => void; initialSubcategory?: string }) {
   const qc = useQueryClient();
   const [query, setQuery] = useState(rule?.query ?? "");
-  const [endpoints, setEndpoints] = useState<Array<"news" | "blog">>(rule ? [rule.endpoint as "news" | "blog"] : ["news"]);
+  const [endpoints, setEndpoints] = useState<Array<"news" | "blog" | "webkr">>(rule ? [rule.endpoint as "news" | "blog" | "webkr"] : ["news"]);
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const [categoryHint, setCat] = useState(rule?.categoryHint ?? "");
   const [subcategory, setSubcategory] = useState(rule?.subcategory ?? initialSubcategory);
@@ -178,7 +178,7 @@ export function RuleForm({ cid, rule, onClose, initialSubcategory = "" }: { cid:
       onClose();
     },
   });
-  const flip = (e: "news" | "blog") => setEndpoints((a) => (rule ? [e] : a.includes(e) ? a.filter((x) => x !== e) : [...a, e]));
+  const flip = (e: "news" | "blog" | "webkr") => setEndpoints((a) => (rule ? [e] : a.includes(e) ? a.filter((x) => x !== e) : [...a, e]));
   return (
     <Modal title={rule ? "수집 키워드 수정" : "수집 키워드 추가"} onClose={() => !m.isPending && onClose()}>
       <form
@@ -203,8 +203,9 @@ export function RuleForm({ cid, rule, onClose, initialSubcategory = "" }: { cid:
           <label className="check">
             <input type={rule ? "radio" : "checkbox"} name="ep" checked={endpoints.includes("blog")} onChange={() => flip("blog")} /> 블로그
           </label>
+          <label className="check"><input type={rule ? "radio" : "checkbox"} name="ep" checked={endpoints.includes("webkr")} onChange={() => flip("webkr")} /> 네이버 웹문서</label>
         </fieldset>
-        {endpoints.length === 2 && <p className="small muted">뉴스와 블로그를 각각 수집합니다. 블로그 검색에는 네이버 연결이 필요합니다.</p>}
+        {endpoints.length > 1 && <p className="small muted">선택한 대상을 각각 검색합니다. 네이버를 우선 사용하며, 웹문서·블로그는 네이버 연결이 필요합니다.</p>}
         <label className="check">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> 사용
         </label>
@@ -262,7 +263,7 @@ export function RuleForm({ cid, rule, onClose, initialSubcategory = "" }: { cid:
   );
 }
 
-function TrialModal({ cid, query, endpoint, excludeTerms, excludeScope, categoryHint, onClose }: { cid: number; query: string; endpoint: "news" | "blog"; excludeTerms: string[]; excludeScope: string; categoryHint: string | null; onClose: () => void }) {
+function TrialModal({ cid, query, endpoint, excludeTerms, excludeScope, categoryHint, onClose }: { cid: number; query: string; endpoint: "news" | "blog" | "webkr"; excludeTerms: string[]; excludeScope: string; categoryHint: string | null; onClose: () => void }) {
   const qc = useQueryClient();
   const [picked, setPicked] = useState<Set<number>>(new Set());
   const run = useQuery({
@@ -276,8 +277,8 @@ function TrialModal({ cid, query, endpoint, excludeTerms, excludeScope, category
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ch", cid] }),
   });
   return (
-    <Modal title={`시험 검색: ${query} (${endpoint === "news" ? "뉴스" : "블로그"})`} onClose={onClose}>
-      <p className="small muted">최대 5건 · {endpoint === "news" ? "공개 뉴스 RSS · API 키 불필요" : "네이버 블로그 · 연결 키 필요"}. 선택한 자료만 저장합니다.</p>
+    <Modal title={`시험 검색: ${query} (${endpoint === "news" ? "뉴스" : endpoint === "webkr" ? "웹문서" : "블로그"})`} onClose={onClose}>
+      <p className="small muted">최대 5건 · {endpoint === "news" ? "네이버 우선 · 미연결 시 공개 RSS" : endpoint === "webkr" ? "네이버 웹문서 · 연결 키 필요" : "네이버 블로그 · 연결 키 필요"}. 선택한 자료만 저장합니다.</p>
       {!!run.data?.warnings?.length && <div className="notice warn small">일부 수집 경로를 확인하지 못했습니다.<ul>{run.data.warnings.map(w => <li key={w}>{w}</li>)}</ul></div>}
       {run.isLoading ? (
         <Loading lines={3} />
@@ -322,7 +323,7 @@ function TrialModal({ cid, query, endpoint, excludeTerms, excludeScope, category
 function BulkTab({ cid, isNotice }: { cid: number; isNotice: boolean }) {
   const qc = useQueryClient();
   const [text, setText] = useState("");
-  const [endpoints, setEndpoints] = useState<Array<"news" | "blog">>(["news"]);
+  const [endpoints, setEndpoints] = useState<Array<"news" | "blog" | "webkr">>(["news"]);
   const [enabled, setEnabled] = useState(false);
   const [cat, setCat] = useState("");
   const [types, setTypes] = useState<string[]>(["gifted"]);
@@ -392,6 +393,7 @@ function BulkTab({ cid, isNotice }: { cid: number; isNotice: boolean }) {
           <label className="check">
             <input type="checkbox" checked={endpoints.includes("blog")} onChange={() => setEndpoints(flip(endpoints, "blog"))} /> 블로그
           </label>
+          <label className="check"><input type="checkbox" checked={endpoints.includes("webkr")} onChange={() => setEndpoints(flip(endpoints, "webkr"))} /> 네이버 웹문서</label>
         </fieldset>
         <div className="grid grid-2">
           <label className="field">
@@ -425,7 +427,7 @@ function BulkTab({ cid, isNotice }: { cid: number; isNotice: boolean }) {
                 {preview.data.rows.slice(0, 100).map((r, i) => (
                   <tr key={i}>
                     <td>{r.query}</td>
-                    <td>{r.endpoint === "news" ? "뉴스" : "블로그"}</td>
+                    <td>{r.endpoint === "news" ? "뉴스" : r.endpoint === "webkr" ? "웹문서" : "블로그"}</td>
                     <td>{r.duplicate ? <Badge>이미 있음</Badge> : <Badge kind="ok">새로 추가</Badge>}</td>
                   </tr>
                 ))}
@@ -461,7 +463,7 @@ function DeletedTab({ cid }: { cid: number }) {
             <li key={r.id} className="list-item">
               <div className="row between">
                 <span>
-                  <strong>{r.query}</strong> <Badge>{r.endpoint === "news" ? "뉴스" : "블로그"}</Badge>
+                  <strong>{r.query}</strong> <Badge>{r.endpoint === "news" ? "뉴스" : r.endpoint === "webkr" ? "웹문서" : "블로그"}</Badge>
                 </span>
                 <button className="btn sm" onClick={() => restore.mutate(r)} disabled={restore.isPending}>
                   복구
@@ -486,7 +488,7 @@ function OfficialTab({ cid }: { cid: number }) {
   return (
     <div className="stack">
       <div className="notice warn small">
-        공식 게시판 자동 수집기(어댑터)가 연결된 곳: {connected}/{rows.length}. 새 검색어를 추가해도 공식 게시판 수집기가 생기지는 않습니다. 도메인을 확인해 두면, 그 도메인의 원문은 ‘공식 원문 확인’으로 판정됩니다.
+        게시판·공모전 목록 수집기가 연결된 곳: {connected}/{rows.length}. 새 검색어를 추가해도 공식 게시판 수집기가 생기지는 않습니다. 공모전 사이트는 발굴용이며, 주최기관 공고의 대상·마감일을 별도로 확인합니다.
       </div>
       {!rows.length ? (
         <Empty>등록된 공식 출처가 없습니다.</Empty>
@@ -497,6 +499,7 @@ function OfficialTab({ cid }: { cid: number }) {
               <div className="row between">
                 <div className="row">
                   <strong>{r.name}</strong>
+                  <Badge>{r.adapterConfig.sourceRole === "discovery" ? "발굴 사이트" : "학교·기관"}</Badge>
                   <span className="small muted">{r.aliases.join(", ")}</span>
                   {r.schoolType && <Badge>{SCHOOL_TYPE_LABEL[r.schoolType] ?? r.schoolType}</Badge>}
                 </div>

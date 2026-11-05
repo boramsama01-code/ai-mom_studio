@@ -12,7 +12,7 @@ describe("노들섬 방식의 독립적인 공개 뉴스 수집", () => {
     const xml = `<rss><channel>${rss("과학캠프 성료", "https://science.example/report").match(/<item>.*<\/item>/)![0]}${rss("과학캠프 참가자 모집", "https://science.example/invite", "2026-10-25T00:00:00Z").match(/<item>.*<\/item>/)![0]}</channel></rss>`;
     for (const recruitment of [true, false]) {
       const urls: string[] = [];
-      const session = createNewsSearch({ now, recruitment, feeds: [], loadXml: async url => { urls.push(url); return xml; } });
+      const session = createNewsSearch({ preferNaver: false, now, recruitment, feeds: [], loadXml: async url => { urls.push(url); return xml; } });
       const result = await session.search("과학캠프", "news", 1, { naver: 0, limit: 5 });
       expect(result[0].title).toBe(recruitment ? "과학캠프 참가자 모집" : "과학캠프 성료");
       expect(new URL(urls[0]).searchParams.get("q")!.includes("모집 OR 접수")).toBe(recruitment);
@@ -29,7 +29,7 @@ describe("노들섬 방식의 독립적인 공개 뉴스 수집", () => {
   });
   it("네이버 인증이 실패해도 공개 뉴스는 저장할 결과를 반환하고 같은 블로그 인증을 반복하지 않는다", async () => {
     const naver = vi.fn(async () => { throw new NaverError("인증/권한 오류 (HTTP 401)", "auth", 401); });
-    const session = createNewsSearch({ now, feeds: [feed], naver, loadXml: async () => rss() });
+    const session = createNewsSearch({ preferNaver: false, now, feeds: [feed], naver, loadXml: async () => rss() });
     const counter = { naver: 0, limit: 20 };
     await expect(session.search("감자튀김", "blog", 5, counter)).rejects.toMatchObject({ kind: "auth" });
     await expect(session.search("소스", "blog", 5, counter)).rejects.toMatchObject({ kind: "auth" });
@@ -38,7 +38,7 @@ describe("노들섬 방식의 독립적인 공개 뉴스 수집", () => {
   });
   it("Google 제한 응답 뒤에는 추가 요청 없이 직접 RSS를 계속 검색한다", async () => {
     const loadXml = vi.fn(async (url: string) => { if (url.includes("news.google.com")) throw new Error("HTTP 429"); return rss(); });
-    const session = createNewsSearch({ now, feeds: [feed], loadXml });
+    const session = createNewsSearch({ preferNaver: false, now, feeds: [feed], loadXml });
     const counter = { naver: 0, limit: 20 };
     expect(await session.search("과학고", "news", 5, counter)).toHaveLength(1);
     expect(await session.search("입학설명회", "news", 5, counter)).toHaveLength(1);
@@ -48,10 +48,10 @@ describe("노들섬 방식의 독립적인 공개 뉴스 수집", () => {
   });
   it("출처 하나의 실패는 다른 출처를 막지 않고 모두 실패하면 정상 0건으로 처리하지 않는다", async () => {
     const bad = { ...feed, name: "오류신문", url: "https://broken.example/rss" };
-    const session = createNewsSearch({ now, feeds: [bad, feed], loadXml: async url => { if (url !== feed.url) throw new Error("HTTP 503"); return rss(); } });
+    const session = createNewsSearch({ preferNaver: false, now, feeds: [bad, feed], loadXml: async url => { if (url !== feed.url) throw new Error("HTTP 503"); return rss(); } });
     expect(await session.search("과학고", "news", 5, { naver: 0, limit: 5 })).toHaveLength(1);
     expect(session.counts.rssFeedFailed).toBe(1);
-    const allFailed = createNewsSearch({ now, feeds: [feed], loadXml: async () => { throw new Error("HTTP 503"); } });
+    const allFailed = createNewsSearch({ preferNaver: false, now, feeds: [feed], loadXml: async () => { throw new Error("HTTP 503"); } });
     await expect(allFailed.search("과학고", "news", 5, { naver: 0, limit: 5 })).rejects.toThrow("모두 응답하지");
   });
 });

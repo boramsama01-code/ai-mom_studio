@@ -18,10 +18,13 @@ export type BoardConfig = {
   subcategory?: string;
   maxAgeDays?: number;
   recruitmentOnly?: boolean;
+  sourceRole?: "official" | "discovery";
+  youthOnly?: boolean;
+  useTitleAttribute?: boolean;
   articleBaseUrl?: string; // Explicit same-domain base for relative links in official feeds.
 };
 
-export type BoardEntry = { url: string; title: string; dateText: string | null };
+export type BoardEntry = { url: string; title: string; dateText: string | null; audience?: string };
 
 export function officialHostMatches(host: string, domain: string): boolean {
   const d = domain.toLowerCase().replace(/^www\./, "");
@@ -85,11 +88,10 @@ export function parseBoardList(html: string, pageUrl: string, domain: string, cf
     if (!resolved) return;
     const abs = new URL(resolved);
     if (seen.has(abs.toString())) return;
-    seen.add(abs.toString());
-    const title = (cfg.titleSelector ? $(el).find(cfg.titleSelector).first().text() : $(el).text()).replace(/\s+/g, " ").trim().slice(0, 500);
+    const title = (cfg.useTitleAttribute && $(el).attr("title") ? $(el).attr("title")! : cfg.titleSelector ? $(el).find(cfg.titleSelector).first().text() : $(el).text()).replace(/\s+/g, " ").trim().slice(0, 500);
     const row = $(el).closest("tr, li, .item, article");
     const dateText = cfg.dateSelector ? row.find(cfg.dateSelector).first().text().replace(/\s+/g, " ").trim() || null : null;
-    if (title) out.push({ url: abs.toString(), title, dateText });
+    if (title) { seen.add(abs.toString()); out.push({ url: abs.toString(), title, dateText }); }
   });
   return out;
 }

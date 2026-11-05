@@ -148,6 +148,9 @@ const officialPatch = z.object({
       subcategory: z.string().max(40).optional(),
       maxAgeDays: z.number().int().min(1).max(730).optional(),
       recruitmentOnly: z.boolean().optional(),
+      sourceRole: z.enum(["official", "discovery"]).optional(),
+      youthOnly: z.boolean().optional(),
+      useTitleAttribute: z.boolean().optional(),
       format: z.enum(["links", "ged_selection", "rss"]).optional(),
     })
     .optional(),
