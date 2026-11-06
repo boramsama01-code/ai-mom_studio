@@ -1,0 +1,37 @@
+사이트 허용 표시와 브라우저 도구의 접근 거부 불일치
+
+확인일: 2026-11-06, Asia/Seoul
+문제가 발생하는 사이트: https://spacepenguin.onrender.com
+실행 환경: 현재 채팅이 열린 Windows 데스크톱 앱의 내장 브라우저
+
+관측한 사실
+1. 사용자가 앱 설정 → Browser → Agent permissions에서 해당 사이트의 Browse가 ‘Always allow / 항상 허용’이라고 확인했습니다.
+2. 로컬 사용자 설정의 정확한 origin에도 access = "allow"가 저장돼 있습니다.
+3. 이번 ‘계속’ 재개 후 기존 내장 브라우저 탭을 처음 선택하는 단계부터 아래 오류가 발생했습니다. 로그인 폼이나 서비스 화면을 읽기 전의 거부입니다.
+
+Browser Use rejected this action due to browser security policy.
+A saved user permission setting blocks this action.
+Browser use could not acquire authority to observe page content.
+The origin approval gate did not grant access for https://spacepenguin.onrender.com.
+A saved permission or managed policy denies access.
+
+현재 실행에서 거부 후 같은 화면 접근을 재시도하거나 다른 브라우저·개발자 명령·로그인 세션 추출로 우회하지 않았습니다. 설정 변경도 하지 않았습니다.
+
+별도로 확인한 운영 서비스는 정상입니다. 16:34:54 KST의 기존 Render/DB 연결 점검에서 배포 버전과 health가 일치하고 DB 연결도 정상입니다. 이 점검은 브라우저 접근 성공을 뜻하지 않습니다.
+
+아직 확인하지 못한 원인
+- 실제로 거부한 권한 저장소 또는 관리 정책의 출처
+- 계정/조직 정책이 적용된 것인지, 앱의 권한 판정에 문제가 있는지
+로그인 오류나 특정 관리 정책, 확정된 앱 결함으로 단정하지 않았습니다.
+
+확인을 요청할 내용
+해당 origin의 실효 Browse 권한과 거부 정책의 출처를 확인해 주세요. 화면에는 항상 허용인데 도구가 저장된 차단으로 판정하는 이유와 정상적인 권한 적용 방법이 필요합니다.
+
+공식 OpenAI 문서 확인
+설정 화면은 Browse/Download/Upload를 각각 관리하며 조직이 제한할 수 있습니다.
+https://learn.chatgpt.com/docs/app/settings
+
+config의 access=allow는 일반 승인·정책 검사를 계속하도록 허용하는 값이며, 그 자체가 사이트 승인 생성이나 관리 정책 해제를 뜻하지 않습니다.
+https://learn.chatgpt.com/docs/config-file/config-reference
+
+이 자료에는 비밀번호·토큰·쿠키·API 키·비공개 소스가 포함돼 있지 않습니다. 아직 외부 지원처에 전송하지 않았습니다.

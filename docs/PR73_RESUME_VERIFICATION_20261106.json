@@ -1,0 +1,235 @@
+{
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-11-06T07:46:22.014Z",
+  "repository": "boramsama01-code/ai-mom_studio",
+  "pr": 73,
+  "overallProjectComplete": false,
+  "production": {
+    "checkedAtKst": "2026-11-06 16:34:54 KST",
+    "main": {
+      "sha": "3e0d583a42a34402c11aacdad2dd6daebb3cbcec",
+      "tree": "8bea6ea1e3c25c54cce59f565debde54781a438e"
+    },
+    "deployment": {
+      "id": "dep-dbmn4vtg1s2s73d5jsgg",
+      "status": "live",
+      "commit": "3e0d583a42a34402c11aacdad2dd6daebb3cbcec",
+      "finishedAt": "2026-11-06T06:25:27.085579Z",
+      "serviceId": "srv-dbjep0ou01pc73f8rf80"
+    },
+    "health": {
+      "ok": true,
+      "db": "connected",
+      "auth": "configured",
+      "revision": "3e0d583a42a34402c11aacdad2dd6daebb3cbcec"
+    },
+    "qaDeliveries": [
+      {
+        "approval_id": 7,
+        "approval_status": "completed",
+        "delivery_id": 2,
+        "status": "succeeded",
+        "phase": "finished",
+        "attempts": 1,
+        "external_url": "https://www.instagram.com/p/DfYlxqIE-4p/",
+        "outcome_source": "provider_verified",
+        "needs_reconciliation": false,
+        "list_state": "active",
+        "list_version": 4,
+        "request_started_at": "2026-11-06T02:59:39.952Z",
+        "dispatch_started_at": "2026-11-06T02:59:56.886Z"
+      },
+      {
+        "approval_id": 8,
+        "approval_status": "cancelled",
+        "delivery_id": 3,
+        "status": "cancelled",
+        "phase": "finished",
+        "attempts": 0,
+        "external_url": null,
+        "outcome_source": null,
+        "needs_reconciliation": false,
+        "list_state": "active",
+        "list_version": 4,
+        "request_started_at": null,
+        "dispatch_started_at": null
+      }
+    ],
+    "approval9": {
+      "approval9_exists": false,
+      "approval9_delivery_count": "0"
+    },
+    "method": "GitHub main branch GET, Render deploy list GET, public /api/health GET, explicit READ ONLY PostgreSQL transaction"
+  },
+  "scheduledRecovery": {
+    "checkedAtKst": "2026-11-06 16:35:52 KST",
+    "cron": "17 * * * *",
+    "latestObservedProcessScheduledRun": 42136446759,
+    "latestObservedProcessScheduledAtKst": "2026-11-06 09:23:19 KST",
+    "latestObservedProcessScheduledConclusion": "success",
+    "newMainScheduledProcessProof": false,
+    "currentWorkflowEnabledState": "unknown",
+    "settingsEndpointOrDispatchUsed": false
+  },
+  "canvaReadOnly": {
+    "checkedAtUtc": "2026-11-06T07:42:58.454Z",
+    "designId": "DAHaG4kocvw",
+    "pageCount": 8,
+    "rawTextExactMatches": 8,
+    "expectedVisibleFieldValues": 46,
+    "presentVisibleFieldValues": 46,
+    "manuscriptExactVisibleValues": 45,
+    "lineBreakOnlyDifferences": [
+      {
+        "field": "P02_READING_BODY",
+        "explanation": "Manuscript keeps two summary facts separated by two newline characters; Canva richtext concatenates them without that paragraph break. No other whitespace or wording normalization was applied."
+      }
+    ],
+    "wordingMismatches": 0,
+    "perPage": [
+      {
+        "page": 1,
+        "rawTextExactMatch": true,
+        "textSha256": "65c901b2a1ad062d711653f8bf74c407fcfd68545299374c44511128894069c3",
+        "characterCount": 71,
+        "expectedVisibleFieldValues": 5,
+        "fieldValuesPresent": 5,
+        "missingFieldValues": []
+      },
+      {
+        "page": 2,
+        "rawTextExactMatch": true,
+        "textSha256": "28a65e08c4e8492e845c21b23c4a242c8a24a71bdb75d072adaf38d58d7cf998",
+        "characterCount": 205,
+        "expectedVisibleFieldValues": 5,
+        "fieldValuesPresent": 5,
+        "missingFieldValues": []
+      },
+      {
+        "page": 3,
+        "rawTextExactMatch": true,
+        "textSha256": "9ae19bccbd178ac3b8f3264a758637c23a833f46e62291a2532a76c643429913",
+        "characterCount": 174,
+        "expectedVisibleFieldValues": 4,
+        "fieldValuesPresent": 4,
+        "missingFieldValues": []
+      },
+      {
+        "page": 4,
+        "rawTextExactMatch": true,
+        "textSha256": "b33c110e0b00decf95fbdb6cafa0ed46a1874692757de7c021623d103a9aad50",
+        "characterCount": 82,
+        "expectedVisibleFieldValues": 5,
+        "fieldValuesPresent": 5,
+        "missingFieldValues": []
+      },
+      {
+        "page": 5,
+        "rawTextExactMatch": true,
+        "textSha256": "3314a6fc4758d655a71e15217a4494fb6e2a12bd93ec996bb453591bd1b364e5",
+        "characterCount": 121,
+        "expectedVisibleFieldValues": 6,
+        "fieldValuesPresent": 6,
+        "missingFieldValues": []
+      },
+      {
+        "page": 6,
+        "rawTextExactMatch": true,
+        "textSha256": "8fcb8fe79ed68286848bdd836f535ab912ebcb95dd55dee6a031a577a4c0239c",
+        "characterCount": 128,
+        "expectedVisibleFieldValues": 9,
+        "fieldValuesPresent": 9,
+        "missingFieldValues": []
+      },
+      {
+        "page": 7,
+        "rawTextExactMatch": true,
+        "textSha256": "62a29c68482b8b40d609b9a650409b125b619586f570b323a7dbcd0fdcf243b4",
+        "characterCount": 125,
+        "expectedVisibleFieldValues": 7,
+        "fieldValuesPresent": 7,
+        "missingFieldValues": []
+      },
+      {
+        "page": 8,
+        "rawTextExactMatch": true,
+        "textSha256": "4e74f929be485b40591a5a0a820349d8f48557be72ca85944d9564d245d12bf8",
+        "characterCount": 75,
+        "expectedVisibleFieldValues": 5,
+        "fieldValuesPresent": 5,
+        "missingFieldValues": []
+      }
+    ],
+    "checklist": {
+      "semanticFieldsCompared": 30,
+      "semanticMatches": 30,
+      "semanticMismatches": [],
+      "displayFieldsCompared": 24,
+      "displayMatches": 24,
+      "displayMismatches": []
+    },
+    "handleExactMatch": true,
+    "studioExportOrAdoptionComplete": false,
+    "limits": [
+      "Richtexts do not verify fonts, visual line wrapping, image/ALL-logo pixels, geometry, crops or all eight rendered pages.",
+      "Provider field-name/dataset binding is not proved by matching text-value presence.",
+      "The supplied text is a template/example, not independently verified news.",
+      "No Studio first manual save, actual Studio-triggered Canva export, eight-image visual review, adoption or QA2 posting was performed.",
+      "No signed URLs or account/private owner IDs are retained in this summary."
+    ]
+  },
+  "browserAccess": {
+    "browserProbeObservedBeforeKst": "2026-11-06T16:32:13+09:00",
+    "timestampPrecision": "Browser probe preceded the first clock reading of this resumed turn. Exact probe and user setting reply timestamps were not independently recorded.",
+    "origin": "https://spacepenguin.onrender.com",
+    "resumedUserRequest": "계속",
+    "firstBrowserGetTabAfterResume": "denied",
+    "toolReason": "A saved user permission setting blocks this action. Browser use could not acquire authority to observe page content. A saved permission or managed policy denies access.",
+    "localOriginRestriction": "access=allow",
+    "userReportedCurrentBrowseSetting": "Always allow / 항상 허용",
+    "configAllowIsSavedApproval": false,
+    "causeConfirmed": "Browser tool authority gate denied access despite reported Always allow setting. Exact denying policy source is not observable through available tools.",
+    "causeNotEstablished": [
+      "Login failure",
+      "Production outage",
+      "Specific organization policy",
+      "Definite application defect"
+    ],
+    "additionalBrowserAttemptsAfterDeny": 0,
+    "policyChangedByAgent": false,
+    "policyBypass": false,
+    "officialDocs": [
+      "https://learn.chatgpt.com/docs/app/settings",
+      "https://learn.chatgpt.com/docs/config-file/config-reference"
+    ],
+    "independentChecks": "Existing GitHub, Render and read-only Neon connectors remained usable. Independent Canva connector metadata read confirmed reserved8page QA copy; no Studio UI operation was performed."
+  },
+  "resources": {
+    "localPostgres": "stopped",
+    "temporaryKeepalive": {
+      "pid": 10420,
+      "startedAtKst": "2026-11-06 16:33:49 KST",
+      "expiresAtKst": "2026-11-06 18:33:49 KST",
+      "intervalMinutes": 5
+    }
+  },
+  "notDone": [
+    "Live deployed UI save/reconnect, Assets and mobile/PC continuation",
+    "First manual eight-page save and actual Studio-triggered Canva export/eight-image visual review/explicit adoption",
+    "New QA2 schedule, actual restart persistence and second actual SNS post",
+    "Current scheduled recovery enabled status and new main scheduled execution"
+  ],
+  "operations": {
+    "codeChanges": 0,
+    "deployments": 0,
+    "restarts": 0,
+    "studioWritesByAgent": 0,
+    "newJobsByAgent": 0,
+    "aiCalls": 0,
+    "posts": 0,
+    "canvaMutations": 0,
+    "canvaExports": 0,
+    "policyBypass": false
+  },
+  "userActionPending": "User selected personally operating the normal UI. Prepared QA manuscript import and first manual8 save steps were provided; awaiting saved content URL or an error report. No human save result is recorded in this snapshot."
+}
