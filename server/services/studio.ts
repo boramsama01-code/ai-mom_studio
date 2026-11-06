@@ -122,6 +122,7 @@ export async function validateStudioChannel(db: DB, key: string, requireActive =
 }
 export async function createStudioCard(db: DB, content: StudioContent, actor: string, sourceItemId?: number, requestId?: string) {
   validateStudioMode(content);
+  if (content.videoProject && [content.videoProject.coverMediaId, content.videoProject.outputMediaId, ...content.videoProject.scenes.map(scene => scene.mediaId)].some(id => id !== null)) throw new HttpError(400, "새 영상 작업을 만든 뒤 이 콘텐츠의 촬영 자료를 선택해 주세요.");
   if (content.experience && (content.experience.media.length || content.experience.coverId || content.experience.pages.some(p=>p.mediaId))) throw new HttpError(400, "새 작업을 만든 뒤 사진·영상을 올려 주세요.");
   if (content.finishedDeck?.pages.length || content.panels.some(p => p.imageId)) throw new HttpError(400, "새 콘텐츠에는 기존 이미지 ID를 넣을 수 없습니다.");
   const receiptKey = requestId ? `studio-create:${actor}:${requestId}` : null;
@@ -171,6 +172,8 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
         content = { ...content, sourceLabel: content.sourceLabel || (document?.originalUrl ? new URL(document.originalUrl).hostname : ""), memo: JSON.stringify({ sourceTitle: source.title, sourceUrl: document?.originalUrl ?? null, facts: source.edited ?? source.extracted ?? {} }, null, 2).slice(0, 12000) };
       }
     }
+    validateStudioMode(content);
+    if (!creativeProfileFor(ch).formats.includes(content.format)) throw new HttpError(400, "이 채널에서 허용하지 않은 콘텐츠 형식입니다. 채널 제작 설정을 확인해 주세요.");
     const [card] = await tx.insert(studioCards).values({ content, sourceItemId: sourceItemId ?? null }).onConflictDoNothing().returning();
     if (!card && sourceItemId) {
       const [existing] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, sourceItemId));

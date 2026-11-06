@@ -79,6 +79,31 @@ function reconciled(source: CanvaJobDto, body: any, status: string = 'needs_revi
 }
 
 describe("Canva editorial request and import UI", () => {
+  it("keeps the manuscript unchanged after external return, clipboard denial and an import failure", async () => {
+    jobs = [job(11, "ready")];
+    const savedCopy = structuredClone(props.copy), clipboard = vi.fn().mockRejectedValue(new Error("Permission denied"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboard } });
+    await render(); await click("편집 링크 복사");
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Canva 편집 주소"]')?.value).toBe("https://www.canva.com/design/design_11/edit");
+    const link = host.querySelector<HTMLAnchorElement>('.external-design-context a')!;
+    await act(async () => { const event = new MouseEvent("click", { bubbles: true, cancelable: true }); link.addEventListener("click", e => e.preventDefault(), { once: true }); link.dispatchEvent(event); window.dispatchEvent(new Event("focus")); });
+    expect(host.textContent).toContain("변경 사항은 자동으로 반영되지 않습니다");
+    expect(writes()).toHaveLength(0);
+    enqueue = async () => { throw new ApiError(404, "Canva 디자인이 삭제되었거나 접근할 수 없습니다.", { code: "not_found" }); };
+    await click("최신 디자인 가져오기");
+    expect(host.textContent).toContain("Canva 디자인이 삭제되었거나 접근할 수 없습니다.");
+    expect(props.copy).toEqual(savedCopy); expect(jobs[0].outputAssetId).toBe(1100);
+    expect(writes()).toHaveLength(1);
+  });
+  it("blocks external editing until the current manuscript is saved", async () => {
+    jobs = [job(11, "ready")]; await render({ disabled: true });
+    const link = host.querySelector<HTMLAnchorElement>('.external-design-context a')!;
+    expect(link.getAttribute("aria-disabled")).toBe("true");
+    expect(link.hasAttribute("href")).toBe(false);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    await act(async () => { link.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true); expect(sessionStorage.getItem("spacepenguin.canva-away:design_11")).toBeNull(); expect(writes()).toHaveLength(0);
+  });
   it("creates from a synchronized folder design while preserving the local authoring template and saved copy", async () => {
     masters = []; library.items = [canvaLibraryItemFixture()];
     const savedCopy = structuredClone(props.copy);

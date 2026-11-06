@@ -244,6 +244,25 @@ describe("홈과 단계별 제작 화면", () => {
     expect(title.value).toBe("직접 수정한 제목");
     expect(mocks.api.mock.calls.some(([path]) => String(path).includes("generate"))).toBe(false);
   });
+  it("원고를 바로 편집하고 미리보기에서 고른 컷과 대사 편집을 일치시킨다", async () => {
+    await render(createElement(StudioPage, { cardId: 1 }));
+    const manuscript = [...host.querySelectorAll<HTMLTextAreaElement>("textarea")].find(node => node.closest("label")?.textContent === "전체 원고")!;
+    expect(manuscript.closest("details")).toBeNull();
+    await input(manuscript, "내가 직접 쓴 원고");
+    await openDetails("컷 미리보기");
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="2컷 미리보기"]')!.click());
+    await click("이 컷 장면·문구 편집");
+    expect(host.querySelector('.studio-comic-panel:not([hidden]) textarea[aria-label="2컷 대사"]')).not.toBeNull();
+    const dialogue = host.querySelector<HTMLTextAreaElement>('[aria-label="2컷 대사"]')!;
+    await input(dialogue, "두 번째 컷에만 쓴 대사");
+    expect(host.querySelector(".working-preview-dialogue")?.textContent).toBe("두 번째 컷에만 쓴 대사");
+    await act(async () => host.querySelectorAll<HTMLButtonElement>('.studio-panel-selector button')[0]!.click());
+    expect(host.querySelector('[aria-label="1컷 미리보기"]')?.getAttribute("aria-pressed")).toBe("true");
+    expect(host.querySelector(".working-preview-dialogue")?.textContent).not.toBe("두 번째 컷에만 쓴 대사");
+    await act(async () => host.querySelector<HTMLButtonElement>('.page-head button.btn.primary')!.click()); await settle();
+    expect(cards[0].script).toBe("내가 직접 쓴 원고"); expect(cards[0].panels[1].dialogue).toBe("두 번째 컷에만 쓴 대사");
+    expect(mocks.api.mock.calls.some(([path]) => /generate|publish/.test(String(path)))).toBe(false);
+  });
   it("캐릭터 설정을 접어 두고 명시적으로 연 포즈를 해당 컷에만 저장한다", async () => {
     cards[0] = { ...cards[0], characters: ["pengpeng"] };
     await render(createElement(StudioPage, { cardId: 1 }));

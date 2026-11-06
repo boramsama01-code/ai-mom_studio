@@ -1,6 +1,7 @@
 // Real built React screens, synthetic API responses, existing approved artwork.
 // No production credentials, external requests, paid generation or SNS writes.
 import assert from "node:assert/strict";
+import { browserLayout } from "./browser-layout.mjs";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -10,7 +11,9 @@ const require=createRequire(import.meta.url);
 let pw; try{pw=require("playwright");}catch{pw=require(require.resolve("playwright",{paths:[process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES??"/nonexistent"]}));}
 const output="test-results/creative-workspace";await mkdir(output,{recursive:true});
 const image=await readFile("client/public/cardnews14/cinematic-cover.webp");
-const familyImage=await sharp(await readFile("client/public/studio-assets/poses-v2/family-v2.png")).webp({quality:85}).toBuffer();
+const familyImage=await sharp(await readFile("assets/studio-final-v14/restored/MODEL_FAMILY.png")).webp({quality:85}).toBuffer();
+const webtoonArt=await Promise.all(["PP001","PM012","KG022","KK030"].map(async id=>sharp(await readFile(`assets/studio-final-v14/restored/${id}.png`)).webp({quality:85}).toBuffer()));
+const channelArt=await Promise.all(["cobalt-paper","amber-cream","bang-bang"].map(id=>readFile(`client/public/cardnews14/${id}-cover.webp`)));
 const stamp="2026-11-06T00:00:00Z", clone=value=>structuredClone(value);
 const ai={defaultProvider:"openai",text:{openai:false,anthropic:false,gemini:false},image:false};
 const channels=[
@@ -53,24 +56,27 @@ async function intercept(route,origin,errors,writes){
   if(method==="PATCH"){
    if(body.version!==current.version)return route.fulfill({status:409,json:{error:"다른 기기에서 새 버전을 저장했습니다. 현재 입력은 유지했습니다.",current}});
    const saved={...current,...clone(body),version:current.version+1};cards.set(id,saved);data=saved;
-  }else data={card:current,revisions:[],jobs:[],images:[]};
+  }else data={card:current,revisions:id===20?[{id:200,cardId:20,version:1,snapshot:clone(current),instruction:"촬영 자료와 장면 구성 저장",createdAt:stamp}]:[],jobs:[],images:[]};
  }else if(p==="/api/studio/ai-status")data=ai;
+ else if(p==="/api/studio/instagram/oauth/config")data={configured:false,missing:["INSTAGRAM_APP_ID"],appId:null,redirectUri:origin+"/api/studio/instagram/oauth/callback"};
  else if(p==="/api/studio/export-check")data={errors:[],warnings:[],pageCount:1};
  else if(/\/studio\/cards\/\d+\/media$/.test(p))data=[];
  else if(p==="/api/canva/status")data={connected:false};
  else if(/\/studio\/cards\/\d+\/publication$/.test(p))data={channelId:1,channelName:"우주펭귄상회",expectedUsername:"spacepenguin.co",ready:false,blockers:["검증용 환경 · 외부 게시 차단"],dailyLimit:0,dryRun:true,autoPublish:false,destinations:[],deliveries:[],publicationDraft:{version:0,options:{destinationIds:[],timing:"now",scheduledAtKst:""}}};
- else if(/^\/api\/studio\/(images\/|characters\/)/.test(p)||/export\.png$/.test(p))return route.fulfill({contentType:"image/webp",body:/\/images\/10[1-4]$|\/characters\//.test(p)?familyImage:image});
+ else if(/^\/api\/studio\/(images\/|characters\/)/.test(p)||/export\.png$/.test(p)){
+  const id=Number(p.split("/").at(-1)),body=p.includes("/characters/")?familyImage:id>=101&&id<=104?webtoonArt[id-101]:id>=91&&id<=94?channelArt[0]:id>=81&&id<=84?channelArt[1]:id>=71&&id<=74?channelArt[2]:image;
+  return route.fulfill({contentType:"image/webp",body});
+ }
  else if(/\/channels\/\d+\/capture$/.test(p)&&method==="POST"){
   const saved=card(31,body.title||"이동 중 저장한 링크","highscoop","writing");cards.set(31,saved);data={studioCardId:31,itemId:100,duplicate:false,bodyStatus:"not_fetched"};
  }else{errors.push(method+" "+p);return route.fulfill({status:404,json:{error:"Unmocked fixture API: "+p}});}
  return route.fulfill({json:data});
 }
 async function noOverflow(page,label){
- await page.evaluate(async()=>{await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
- const value=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth,scrollX,body:document.body.scrollWidth,offenders:[...document.querySelectorAll("body *")].filter(node=>{const r=node.getBoundingClientRect();return r.width&&r.right>innerWidth+1;}).slice(0,12).map(n=>({tag:n.tagName,cls:n.className,rect:n.getBoundingClientRect().toJSON(),overflow:getComputedStyle(n).overflowX}))}));
+ const value=await browserLayout(page);
  assert(value.scroll<=value.width+1,label+": "+JSON.stringify(value));
 }
-async function shot(page,label){await page.evaluate(()=>document.fonts.ready);await page.screenshot({path:output+"/"+label+".png"});}
+async function shot(page,label){await page.evaluate(async()=>{await document.fonts.ready;scrollTo(0,0);await new Promise(resolve=>requestAnimationFrame(resolve));});await page.screenshot({path:output+"/"+label+".png"});}
 async function run(root,label,port){
  const server=await preview({configFile:path.resolve(root,"vite.config.ts"),root:path.resolve(root,"client"),build:{outDir:path.resolve(root,"dist/public")},preview:{host:"127.0.0.1",port,strictPort:true}});
  const origin="http://127.0.0.1:"+port;
@@ -124,6 +130,7 @@ async function run(root,label,port){
    await page.locator(".video-savebar").getByRole("button",{name:"저장",exact:true}).click();
    await page.getByText("서버 저장 완료",{exact:true}).waitFor();
    await page.reload();await page.locator(".video-workspace").waitFor();assert.equal(await page.getByLabel("화면 자막",{exact:true}).inputValue(),"기기에 임시 보관할 자막");
+   await page.locator(".video-history > summary").click();await page.locator(".video-history details > summary").click();await noOverflow(page,"expanded video history "+width);
    const navVisible=await page.locator(".mobile-nav").isVisible();assert.equal(navVisible,false,"editing must have one bottom action region");
    // Leave by full navigation; local recovery remains available on return.
    await page.goto(origin+"/assets?tab=brands");await page.locator(".asset-brand").first().waitFor();

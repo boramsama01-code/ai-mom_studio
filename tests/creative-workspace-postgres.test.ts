@@ -25,6 +25,8 @@ async function fixture() {
 describe("creative workspace on real PostgreSQL", () => {
   it("keeps uploaded video-project media owned by its content and rejects a photo as final video", async () => {
     const f = await fixture();
+    const unowned = await f.agent.post("/api/studio/cards").set(f.H).send({ title: "다른 작업의 자료", channel: f.slug, format: "릴스", experience: emptyExperience(), videoProject: { ...emptyVideoProject(), coverMediaId: 100001 } });
+    expect(unowned.status).toBe(400);
     const created = await f.agent.post("/api/studio/cards").set(f.H).send({ title: "영상 장면 구성", channel: f.slug, format: "릴스", experience: emptyExperience(), videoProject: emptyVideoProject() });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const photo = await sharp({ create: { width: 120, height: 80, channels: 3, background: "#73957c" } }).jpeg().toBuffer();
