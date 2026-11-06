@@ -1,7 +1,3 @@
-# 검증 진행 중 · 작업 재개 체크포인트
-
-현재 구현은 `ac95665a4ed1a9fad296eb01d13b8246bcdf4c30`, PR #73입니다. 최종 CI 42149151773의 실제 결과를 확인하기 전이며 아래 본문은 검토용 기록입니다. 이미지 메모리 442.79MiB는 직전 0ef1880 측정입니다. 최종 완료 보고는 최신 커밋의 타입·테스트·빌드·브라우저·448MiB 검사와 실제 캡처를 다시 확인한 뒤 이 파일을 갱신합니다. 운영 서비스는 7b2bf40이며 이번 개편은 배포하지 않았습니다.
-
 # 우주펭귄상회 작업 공간 개편 · 구현과 검증
 
 ## 반영 상태
@@ -48,7 +44,7 @@ Buffer Create의 자료 포착→아이디어 정리→제작 연결과 썸네�
 | 서체 | Pretendard·한국어 시스템 대체 서체. 제목 PC 26px/모바일 24px, 주요 입력 모바일 16px |
 | 간격·형태 | 4/8/12/16/24/32px, 버튼 8px·패널 12px 모서리, 제한된 그림자 |
 | 조작 | 모바일 주요 버튼 48px, 선택 테두리·밑줄·아이콘, 키보드 포커스, 160ms 전환·reduced motion |
-| 저장 | 저장 중/서버 저장/미저장/기기 임시 보관/실패를 문구와 아이콘으로 구분 |
+| 저장 | 저장 중/서버 저장/미저장/기기 임시 보관/결과 미확인/실패를 문구와 아이콘으로 구분 |
 
 실제 렌더링에서 발견해 수정한 문제는 다음과 같습니다.
 
@@ -59,6 +55,7 @@ Buffer Create의 자료 포착→아이디어 정리→제작 연결과 썸네�
 | 모바일 조회 실패의 복구 버튼이 아래로 밀림 | 첫 목록 조회 실패, 첫 화면에 다시 시도 버튼 없음 | 실패를 빈 작업 안내와 함께 배치 | 오류와 복구 행동을 개요 위치에 표시. 스크롤 없이 보이는지 검사 |
 | 기존 파란색이 새 토큰을 덮음 | 제작 공간 버튼만 파란색 | 예전 `.studio` 색상 변수 | 공통 토큰 상속, 실제 화면 비교 |
 | 선택한 컷과 미리보기 비교가 번거로움 | 원고·그림 편집 왕복 | 함께 보는 영역 부재 | 하나의 선택 상태와 초안으로 원고·편집기·미리보기 연결 |
+| 저장 결과를 잘못 완료로 판단할 가능성 | 성공 응답 헤더 후 본문 수신 중단 | JSON 오류를 빈 객체로 삼킴 | 결과 미확인 오류와 입력 보존. GET/PATCH·파일 수신·업로드 응답 유실 검사 |
 | 로고가 오기 전에 캡처 | 자산 화면 진입 직후 | 글꼴만 기다리고 이미지 디코딩을 기다리지 않음 | 현재 화면의 이미지 로드와 안정된 두 프레임을 확인한 뒤 캡처. 교체된 이미지의 디코딩 약속은 재사용하지 않음 |
 
 기존 HighScoop·ALLligodang·우주펭귄 원본 로고를 등록 자산 ID로 선택할 수 있게 연결했습니다. 흰색 ALLligodang 원본은 어두운 검수 배경을 사용하며 이미지 필터·원본 변환을 적용하지 않습니다. 로고 읽기 API는 인증과 등록 목록·원본 해시를 확인하며, 임의 파일 경로를 받지 않습니다. 구현은 [BrandAssetPreview.tsx](https://github.com/boramsama01-code/ai-mom_studio/blob/ac95665a4ed1a9fad296eb01d13b8246bcdf4c30/client/src/BrandAssetPreview.tsx), [등록 자산 스키마](https://github.com/boramsama01-code/ai-mom_studio/blob/ac95665a4ed1a9fad296eb01d13b8246bcdf4c30/shared/creativeProfile.ts), [보호된 읽기 API](https://github.com/boramsama01-code/ai-mom_studio/blob/ac95665a4ed1a9fad296eb01d13b8246bcdf4c30/server/routes/studio.ts)에 있습니다. 새 채널은 등록 자산 또는 HTTPS 주소로 로고를 지정합니다. fryday에는 저장소에서 확인한 승인 로고가 없어 채널 이름을 표시하며 임의 로고를 만들지 않았습니다.
@@ -92,7 +89,7 @@ CI가 비교 PNG·개별 화면·결과 JSON을 생성합니다. 아래 최종 �
 
 최종 후보는 기존 단일 네이티브 작업·대기 제한을 유지하고, 서버 시작 전에 `MALLOC_ARENA_MAX=2`를 지정하며 Sharp 캐시를 끄고 픽셀 동시 처리를 하나로 제한합니다. 별도 Render 서비스·유료 워커·폰트 교체·출력 축소·강제 GC·힙 상한은 추가하지 않았습니다. 캐시·병렬성보다 메모리 여유를 우선한 설정입니다.
 
-최신 측정은 **442.79MiB**로 기준을 통과했습니다. 선택 페이지·연속 3회 전체 출력·동시 요청 2건·Canva ZIP 복호화와 전경 작업 대기를 포함한 7개 요청을 수행했고, 매번 출력 해시가 일치하는지 확인했습니다. 이 수치는 CI 오프라인 작업의 결과이며 운영 서버의 기동 시간이나 모든 작업의 메모리를 보장하는 수치가 아닙니다.
+같은 설정의 두 CI 측정은 **442.79MiB / 434.27MiB**로 모두 448MiB 기준을 통과했습니다. 최종 커밋의 측정은 434.27MiB입니다. 선택 페이지·연속 3회 전체 출력·동시 요청 2건·Canva ZIP 복호화와 전경 작업 대기를 포함한 7개 요청을 수행했고, 매번 출력 해시가 일치하는지 확인했습니다. 이 수치는 CI 오프라인 작업의 결과이며 운영 서버의 기동 시간이나 모든 작업의 메모리를 보장하는 수치가 아닙니다.
 
 코드: [시작 설정](https://github.com/boramsama01-code/ai-mom_studio/blob/ac95665a4ed1a9fad296eb01d13b8246bcdf4c30/package.json), [공통 이미지 설정](https://github.com/boramsama01-code/ai-mom_studio/blob/ac95665a4ed1a9fad296eb01d13b8246bcdf4c30/server/services/card.ts), [네이티브 작업](https://github.com/boramsama01-code/ai-mom_studio/blob/ac95665a4ed1a9fad296eb01d13b8246bcdf4c30/server/services/readingCardRasterWorker.mjs), [메모리 검사](https://github.com/boramsama01-code/ai-mom_studio/blob/ac95665a4ed1a9fad296eb01d13b8246bcdf4c30/scripts/cardnews14-memory-qa.mjs), [CI](https://github.com/boramsama01-code/ai-mom_studio/blob/ac95665a4ed1a9fad296eb01d13b8246bcdf4c30/.github/workflows/ci.yml). Linux 메모리 할당과 캐시 설정은 [Sharp 공식 성능 문서](https://sharp.pixelplumbing.com/performance/)를 참고했습니다. 별도 프로세스 실험은 합계 RSS가 586.70MiB로 증가해 최종 코드에서 제거했습니다.
 
@@ -109,3 +106,49 @@ CI가 비교 PNG·개별 화면·결과 JSON을 생성합니다. 아래 최종 �
 - 최신 main과 이 PR의 변경을 구분해 단계적으로 배포하고 실제 계정 연결·중단/복귀를 확인하는 것이 다음 순서입니다.
 
 
+
+
+## 최종 실행 결과
+
+확인한 구현은 `ac95665a4ed1a9fad296eb01d13b8246bcdf4c30`이며, [CI #259](https://github.com/boramsama01-code/ai-mom_studio/actions/runs/42149151773)의 test·memory·browser 세 작업이 모두 성공했습니다. 실패한 이전 실행을 최종 통과 수치에 포함하지 않습니다.
+
+| 실행 | 실제 결과 |
+|---|---|
+| `npm run typecheck` | 통과 |
+| 변경 계약 우선 검사 | 4파일·28테스트 통과. 전체 테스트에도 포함되는 검사 |
+| `npm test -- --bail=1` | **210파일·2,156테스트 통과** |
+| `npm run build` | 통과 |
+| 실제 WebKit 빌드 검사 | 핵심 360/393/430/768/1440px, 채널 393/1280px, 기존 320/393/430/768px 모바일 및 320/393/430/1280px 원고·발행 제어 통과 |
+| 기존 8장 뉴스·자동 제작 회귀 | 통과 |
+| 이미지 메모리 | Node v22.23.4, 7개 요청, **434.27MiB ≤ 448MiB** |
+| 렌더링 출력 | 반복 출력 해시 일치·기존 JPEG 레시피와 바이트 일치 검사 통과 |
+| 시각 검수 | A/B·전후 PC/모바일·편집기·영상·템플릿·브랜드·빈/오류 화면 확인. 최종 PNG는 앞서 검수한 화면과 바이트도 일치 |
+
+이 최종 브라우저 검증은 실서비스의 OAuth나 SNS에 연결하지 않습니다. 테스트의 API는 합성이며 실제 React 빌드·WebKit·원본 자산을 렌더링합니다. PostgreSQL 계약 검사는 격리된 실제 PostgreSQL에서 실행했습니다. 운영 Neon 점검은 읽기 전용으로 수행했습니다.
+
+[개별 원본 캡처·실패 진단 ZIP](https://github.com/boramsama01-code/ai-mom_studio/actions/runs/42149151773/artifacts/13471893111), [핵심 비교 캡처 ZIP](https://github.com/boramsama01-code/ai-mom_studio/actions/runs/42149151773/artifacts/13471477422), [메모리 JSON](https://github.com/boramsama01-code/ai-mom_studio/actions/runs/42149151773/artifacts/13470999734)이 남아 있습니다. GitHub Actions 캡처는 2027-02-04 만료 예정이며, 아래 비교 PNG와 이 보고서는 저장소에 별도 보존합니다.
+
+## 실제 구현 화면
+
+아래는 2,976 × 4,680px의 실제 브라우저 캡처 모음입니다. 같은 승인 캐릭터·템플릿과 검증용 내용을 사용했습니다. 원본 이미지를 다시 그리거나 화면 결함을 지우지 않았습니다.
+
+![PC·모바일 개선 전후, A/B 방향, 제작·자산·복구 화면](artifacts/creative-workspace-review-20261106.png)
+
+## 운영 반영과 재개 위치
+
+최종 조회: **2026-11-06T02:29:45.557Z** (2026-11-06 11:29 KST).
+
+| 구분 | 확인 결과 |
+|---|---|
+| 운영 서비스 | [spacepenguin](https://spacepenguin.onrender.com), `srv-dbjep0ou01pc73f8rf80` |
+| 운영 배포 | `dep-dbmib4navr4c73enlqqg` · live |
+| 실제 운영 SHA | `7b2bf40c7bff473bcb1f5d91cb328ed4713f7bca` |
+| Health | `ok:true`, `db:connected`, `auth:configured`, 같은 SHA |
+| 이번 구현 SHA | `ac95665a4ed1a9fad296eb01d13b8246bcdf4c30` · PR #73, **운영 미배포** |
+| 삭제 확인 | 구 웹 서비스 `ai-mom-studio` / `srv-dat0vbg473hc73e9l5r0`만 삭제, 서비스 목록에서도 부재 |
+| 보존 | spacepenguin·가계부·nodeul-news·DB·공유 환경 그룹·저장소·공개 범위 |
+| 새 비용/외부 실행 | 유료 서비스 추가·플랜 변경·실제 SNS 게시·유료 생성 없음 |
+
+다음 작업은 검증한 이 PR을 기준으로 운영 반영과 실계정 Canva 연결을 단계적으로 확인하는 것입니다. 원본 사진 보관·영상 합성·정확한 예약 실행은 위 한계와 비용을 먼저 검토해야 합니다. 앱 계정의 OAuth·SNS 실제 전송은 이번 완료 범위로 표시하지 않습니다.
+
+작업 중단 후에는 PR #73의 최신 head와 기본 브랜치를 다시 비교하고, 이 문서와 [작업 기록](CREATIVE_WORKSPACE_20261106.md), 해당 CI 결과를 읽고 재개합니다. 이전 실패 실행·임시 로컬 상태를 완료 상태로 가정하지 않습니다.
