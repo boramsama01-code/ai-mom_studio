@@ -185,8 +185,13 @@ async function previewReady(page) {
   });
 }
 async function settleEditorPreviews(page, lifecycle) {
+  const expectedCopyVersion = lifecycle.expectedCopyVersion;
+  if (expectedCopyVersion === 2) await page.locator('.family-dialogue-editor').waitFor({ state: 'visible' });
   await previewReady(page);
-  if (await page.locator('.family-dialogue-editor').count()) {
+  const familyCount = await page.locator('.family-dialogue-editor').count();
+  lifecycle.diagnostics.push({ kind: 'family-thumbnail-guard', stage: lifecycle.stage, at: Date.now(), expectedCopyVersion, familyCount, pendingPreviewRoutes: [...lifecycle.previewRoutes] });
+  await lifecycle.inspect('after-thumbnail-guard');
+  if (expectedCopyVersion === 2) {
     // The saved editor starts seven serial thumbnails after its selected page.
     // A saved badge, or the selected image alone, does not mean those bodies
     // have finished. Assert all eight CURRENT results before replacing a doc.
@@ -206,11 +211,12 @@ async function settleEditorPreviews(page, lifecycle) {
   await page.waitForLoadState('networkidle');
   await previewReady(page);
   lifecycle.diagnostics.push({ kind: 'previews-settled', at: Date.now(), url: page.url(), pendingPreviewRoutes: lifecycle.previewRoutes.size });
+  await lifecycle.inspect('previews-settled');
 }
 async function reloadEditor(page, lifecycle, label) {
   lifecycle.mark(`${label}: settling previews`); await settleEditorPreviews(page, lifecycle);
   lifecycle.mark(`${label}: reload`); await page.reload(); await previewReady(page);
-  await settleEditorPreviews(page, lifecycle); lifecycle.mark(`${label}: ready`);
+  await settleEditorPreviews(page, lifecycle); lifecycle.mark(`${label}: ready`); await lifecycle.inspect('reload-ready');
 }
 async function saveCopy(page) {
   await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === copyPath && response.request().method() === "PATCH" && response.ok()), saveButton(page).click()]);
@@ -306,7 +312,49 @@ try {
     context.setDefaultTimeout(20_000); await context.addInitScript(() => localStorage.setItem('spacepenguin.channel', '3'));
     const page = await context.newPage(), { state, api } = fixture(), errors = [], external = [], requestFailures = [], diagnostics = [];
     let stage = 'news-editorial';
-    const lifecycle = { previewRoutes: new Set(), diagnostics, mark: value => { stage = value; diagnostics.push({ kind: 'stage', stage, at: Date.now() }); } };
+    const lifecycle = { previewRoutes: new Set(), diagnostics, get stage() { return stage; }, get expectedCopyVersion() { return state.saved.copy.version; }, mark: value => { stage = value; diagnostics.push({ kind: 'stage', stage, at: Date.now() }); },
+      inspect: async label => {
+        const requestedAt = Date.now(), pendingAtRequest = [...lifecycle.previewRoutes];
+        const dom = await page.evaluate(() => window.__familySelectionSnapshot?.() ?? { url: location.href, diagnosticSnapshotUnavailable: true }).catch(error => ({ diagnosticError: String(error.message) }));
+        diagnostics.push({ kind: 'editor-readiness-snapshot', label, stage, at: Date.now(), requestedAt, expectedVersion: state.saved.version, expectedCopyVersion: state.saved.copy.version, expectedRevision: state.saved.revisionId, pendingAtRequest, pendingAtReceipt: [...lifecycle.previewRoutes], dom });
+      },
+    };
+    await page.exposeBinding('__recordFamilySelection', (_source, event) => { diagnostics.push({ kind: 'family-dom', stage, at: Date.now(), ...event }); });
+    await page.addInitScript(() => {
+      const documentId = crypto.randomUUID(), identities = new WeakMap(); let nextId = 1, lastState = '', count = 0;
+      const identity = node => { if (!node) return null; if (!identities.has(node)) identities.set(node, nextId++); return identities.get(node); };
+      const rect = node => { if (!node) return null; const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; };
+      const describe = node => node instanceof Element ? { nodeId: identity(node), tag: node.tagName, id: node.id, className: String(node.className), label: node.getAttribute('aria-label'), text: node.textContent?.slice(0, 100), connected: node.isConnected, rect: rect(node) } : null;
+      const snapshot = () => {
+        const editor = document.querySelector('.family-dialogue-editor'), strip = editor?.querySelector('.family-page-strip');
+        const page5 = strip?.querySelector('button[aria-label="5페이지 · 두 가지 시선"]'), field = editor?.querySelector('textarea[id$="-fields.viewA.body"]');
+        const thumbs = [...(strip?.querySelectorAll('.family-page-thumb img') ?? [])], image = document.querySelector('.card-copy-preview img');
+        return { documentId, browserAt: Date.now(), url: location.href, readyState: document.readyState, editorId: identity(editor), editorConnected: !!editor?.isConnected,
+          familyCount: document.querySelectorAll('.family-dialogue-editor').length, copyEditorCount: document.querySelectorAll('.card-copy-editor').length, savedBadge: editor?.querySelector('.card-copy-heading .badge')?.textContent ?? null,
+          thumbnailCount: thumbs.length, currentLoadedThumbnailCount: thumbs.filter(node => !node.classList.contains('is-stale') && node.complete && node.naturalWidth === 1080 && node.naturalHeight === 1350).length,
+          selectedPreview: image ? { nodeId: identity(image), src: image.currentSrc || image.src, complete: image.complete, width: image.naturalWidth, height: image.naturalHeight, stale: !!image.closest('.is-stale'), busy: image.closest('[aria-busy]')?.getAttribute('aria-busy') } : null,
+          selected: strip?.querySelector('[aria-current="step"]')?.getAttribute('aria-label') ?? null,
+          heading: editor?.querySelector('.card-copy-fields h4')?.textContent ?? null, scrollX, scrollY, scrollLeft: strip?.scrollLeft ?? null, stripRect: rect(strip), page5: describe(page5), viewA: field ? { nodeId: identity(field), id: field.id, connected: field.isConnected, rect: rect(field) } : null };
+      };
+      window.__familySelectionSnapshot = snapshot;
+      const record = (eventType, detail = {}) => {
+        if (++count > 2000) return;
+        const event = { eventType, browserAt: Date.now(), ...snapshot(), ...detail };
+        // A document may close while this diagnostic-only bridge is in flight.
+        // Product event handlers and their errors are never intercepted.
+        void window.__recordFamilySelection(event).catch(() => {});
+      };
+      for (const name of ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'touchstart', 'touchend', 'focusin']) document.addEventListener(name, event => {
+        if (!document.querySelector('.family-dialogue-editor')) return;
+        const point = 'clientX' in event ? { x: event.clientX, y: event.clientY } : event.changedTouches?.[0] ? { x: event.changedTouches[0].clientX, y: event.changedTouches[0].clientY } : null;
+        record(name, { target: describe(event.target), button: describe(event.target instanceof Element ? event.target.closest('button') : null), eventPath: event.composedPath().slice(0, 8).map(describe).filter(Boolean), point, hit: point ? describe(document.elementFromPoint(point.x, point.y)) : null, trusted: event.isTrusted });
+      }, { capture: true, passive: true });
+      document.addEventListener('scroll', event => { if (event.target instanceof Element && event.target.matches('.family-page-strip')) record('strip-scroll'); }, { capture: true, passive: true });
+      new MutationObserver(() => {
+        const state = snapshot(), signature = JSON.stringify({ editorId: state.editorId, selected: state.selected, heading: state.heading, page5Id: state.page5?.nodeId, viewAId: state.viewA?.nodeId });
+        if (signature !== lastState) { lastState = signature; record('selection-or-mount-mutation'); }
+      }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-current'] });
+    });
     page.on('pageerror', error => { errors.push(error.message); diagnostics.push({ kind: 'pageerror', stage, at: Date.now(), url: page.url(), message: error.message, stack: error.stack }); });
     page.on('framenavigated', frame => { if (frame === page.mainFrame()) diagnostics.push({ kind: 'document-navigation', stage, at: Date.now(), url: frame.url() }); });
     page.on('requestfailed', request => requestFailures.push({ stage, at: Date.now(), method: request.method(), path: new URL(request.url()).pathname, error: request.failure()?.errorText ?? 'unknown' }));
@@ -428,7 +476,7 @@ try {
       await family.locator('.card-copy-heading .badge', { hasText: '저장됨' }).waitFor();
       assert.equal(state.saved.copy.pages[4].fields.viewA.body, '내가 덧붙인 판단 기준도 저장하고 다시 확인할 수 있어요.');
       assert.equal(state.saved.copy.pages[4].layout, 'stacked');
-      await reloadEditor(page, lifecycle, 'family comparison reopen'); await family.waitFor(); await family.getByRole('button', { name: '5페이지 · 두 가지 시선', exact: true }).click();
+      await reloadEditor(page, lifecycle, 'family comparison reopen'); await family.waitFor(); lifecycle.mark('family comparison reopen: before page5 click'); await family.getByRole('button', { name: '5페이지 · 두 가지 시선', exact: true }).click(); lifecycle.mark('family comparison reopen: page5 click completed');
       assert.equal(await viewA.inputValue(), '내가 덧붙인 판단 기준도 저장하고 다시 확인할 수 있어요.');
       await previewReady(page); await layoutFits(page, `v2 views ${width}`);
       await page.screenshot({ path: `${outputDir}/v2-perspectives-${width}.png` });
