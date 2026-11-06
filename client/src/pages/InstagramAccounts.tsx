@@ -64,10 +64,9 @@ function InstagramConnectForm({ channelId, defaultUsername, onConnected }: Insta
   const [authMode, setAuthMode] = useState<"facebook" | "instagram">("facebook");
   const [showToken, setShowToken] = useState<boolean | null>(null);
   const tokenFormOpen = showToken ?? (config.data?.configured === false || !!token.trim());
-  const [dailyLimit, setDailyLimit] = useState(3);
-  const connect = useMutation({ mutationFn: () => api<{ username?: string }>(`/studio/instagram/${channelId}/connect`, { method: "POST", body: { username, token, dailyLimit, authMode } }), onSuccess: result => { setToken(""); onConnected(result); } });
+  const connect = useMutation({ mutationFn: () => api<{ username?: string }>(`/studio/instagram/${channelId}/connect`, { method: "POST", body: { username, token, authMode } }), onSuccess: result => { setToken(""); onConnected(result); } });
   const oauth = useMutation({ mutationFn: () => api<{ url: string }>(`/studio/instagram/${channelId}/oauth/start`, { method: "POST", body: !defaultUsername && username.trim() ? { username: username.trim().replace(/^@/, "") } : {} }), onSuccess: data => { window.location.assign(data.url); } });
-  useEffect(() => { guard.setDirty(`instagram-token-${channelId}`, !!token.trim(), async () => { if (!token.trim() || !username || dailyLimit < 1 || dailyLimit > 25) return false; try { await connect.mutateAsync(); return true; } catch { return false; } }); return () => guard.setDirty(`instagram-token-${channelId}`, false); }, [token, username, dailyLimit, authMode, channelId, guard]);
+  useEffect(() => { guard.setDirty(`instagram-token-${channelId}`, !!token.trim(), async () => { if (!token.trim() || !username) return false; try { await connect.mutateAsync(); return true; } catch { return false; } }); return () => guard.setDirty(`instagram-token-${channelId}`, false); }, [token, username, authMode, channelId, guard]);
   return <div className="studio-instagram-connect stack">
     <div className="instagram-connect-target"><span className="small muted">연결할 계정</span><strong>{defaultUsername || username ? `@${defaultUsername || username.replace(/^@/, "")}` : "로그인할 때 선택"}</strong></div>
     {!defaultUsername && <label className="field">연결할 인스타그램 계정<input value={username} autoComplete="off" placeholder="my.brand" disabled={connect.isPending || oauth.isPending} onChange={event => setUsername(event.target.value)} /><span className="hint">Meta에 연결된 계정이 여러 개라면 게시할 사용자 이름을 입력하세요. 로그인할 때 선택할 계정이 하나라면 비워 두어도 됩니다.</span></label>}
@@ -78,8 +77,7 @@ function InstagramConnectForm({ channelId, defaultUsername, onConnected }: Insta
       {defaultUsername && <label className="field">게시할 계정<input readOnly value={username} autoComplete="off" placeholder={defaultUsername} disabled={connect.isPending} /></label>}
       <label className="field">토큰 발급 방식<select value={authMode} disabled={connect.isPending} onChange={e => setAuthMode(e.target.value as typeof authMode)}><option value="facebook">Meta 통합 로그인</option><option value="instagram">Instagram 로그인 (이전 API)</option></select><span className="hint">{authMode === "facebook" ? "Meta 개발자 화면의 ‘통합된 로그인이 포함된 API 설정’에서 발급한 토큰에 사용합니다." : "Meta 개발자 화면의 ‘Instagram 로그인이 포함된 API 설정’에서 발급한 토큰에 사용합니다."}</span></label>
       <label className="field">Instagram 액세스 토큰<input type="password" value={token} autoComplete="off" spellCheck={false} disabled={connect.isPending} onChange={e => setToken(e.target.value)} /><span className="hint">토큰은 여기에만 입력하세요. 실제 계정과 게시 권한을 확인한 뒤 암호화해 저장합니다.</span></label>
-      <label className="field">하루 발행 한도<input type="number" min={1} max={25} value={dailyLimit} disabled={connect.isPending} onChange={e => setDailyLimit(Number(e.target.value))} /></label>
-      <button className="btn" disabled={connect.isPending || !username || !token.trim() || dailyLimit < 1 || dailyLimit > 25}>{connect.isPending ? "계정 확인 중…" : "계정 확인하고 연결"}</button>
+      <button className="btn" disabled={connect.isPending || !username || !token.trim()}>{connect.isPending ? "계정 확인 중…" : "계정 확인하고 연결"}</button>
       {connect.error && <ErrorBox error={connect.error} />}
     </form>}
   </div>;

@@ -101,17 +101,21 @@ describe("완성 이미지 → 제작보드 → 인스타그램", () => {
     expect((await agent.post(`/api/studio/cards/${card.id}/publication/approve`).set(headers).send({ version: card.version, assetId: p.assetId, destinationId: dest.id, scheduledAt: new Date().toISOString() })).status).toBe(409);
     expect((await getDb().select().from(approvals).where(eq(approvals.contentItemId, p.itemId)))).toHaveLength(0);
   });
-  it("does not store a mismatched account; a verified connection saves encrypted credentials and enables its destination", async () => {
+  it.each([undefined, 0, 3])("ignores deprecated cap%s while a verified connection saves encrypted credentials and enables its destination", async dailyLimit => {
     const { agent, headers, ch } = await setup(0);
     __setOriginalEnvForTest([]);
     const token = "this-is-a-test-only-credential";
+    await getDb().update(channels).set({ budget: { ...ch.budget, dailyPublishLimit: 0 } }).where(eq(channels.id, ch.id));
+    const legacyInput = dailyLimit === undefined ? {} : { dailyLimit };
     const endpoint = `/api/studio/instagram/${ch.id}/connect`;
-    const wrong = await agent.post(endpoint).set(headers).send({ token, username: "someone.else", dailyLimit: 3 });
+    const wrong = await agent.post(endpoint).set(headers).send({ token, username: "someone.else", ...legacyInput });
     expect(wrong.status).toBe(400); expect(JSON.stringify(wrong.body)).not.toContain(token);
-    const result = await agent.post(endpoint).set(headers).send({ token, username: "spacepenguin.co", dailyLimit: 3 });
+    const result = await agent.post(endpoint).set(headers).send({ token, username: "spacepenguin.co", ...legacyInput });
     expect(result.status).toBe(200); expect(JSON.stringify(result.body)).not.toContain(token);
     const [secret] = await getDb().select().from(storedSecrets).where(eq(storedSecrets.key, "IG_PENGUIN_ACCESS_TOKEN"));
     expect(secret.ciphertext).not.toContain(token);
+    const [connectedChannel] = await getDb().select().from(channels).where(eq(channels.id, ch.id));
+    expect(connectedChannel.budget.dailyPublishLimit).toBe(0);
     const check = await agent.post(`/api/studio/instagram/${ch.id}/check`).set(headers).send({ destinationId: (await getDb().select().from(destinations).where(eq(destinations.label, "@spacepenguin.co")))[0].id });
     expect(check.body).toMatchObject({ ok: true, username: "spacepenguin.co" });
   });

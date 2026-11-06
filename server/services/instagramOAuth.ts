@@ -5,7 +5,7 @@ import { instagramProviderDiagnostic, type InstagramDiagnostic } from "../../sha
 /** Meta Unified Login uses the configured system-user flow, not Instagram's legacy OAuth scopes. */
 export const INSTAGRAM_OAUTH_TTL_MS = 10 * 60_000;
 export type PendingInstagramOAuth = {
-  state: string; createdAt: number; channelId: number; username: string; dailyLimit: number;
+  state: string; createdAt: number; channelId: number; username: string; /** Older sessions may contain this ignored value. */ dailyLimit?: number;
   redirectUri: string; appId: string; configId: string;
 };
 
@@ -26,10 +26,10 @@ export function instagramOAuthConfig() {
   return { configured: missing.length === 0, missing, appId: /^\d+$/.test(appId) ? appId : null, redirectUri, authMode: "facebook" as const };
 }
 
-export function newInstagramOAuth(input: { channelId: number; username: string; dailyLimit: number }, now = Date.now()): PendingInstagramOAuth {
+export function newInstagramOAuth(input: { channelId: number; username: string; dailyLimit?: number }, now = Date.now()): PendingInstagramOAuth {
   const config = instagramOAuthConfig();
   if (!config.configured || !config.appId) throw new Error("instagram_oauth_not_configured");
-  return { ...input, state: crypto.randomBytes(32).toString("base64url"), createdAt: now, redirectUri: config.redirectUri, appId: config.appId, configId: process.env.META_INSTAGRAM_CONFIG_ID!.trim() };
+  return { channelId: input.channelId, username: input.username, state: crypto.randomBytes(32).toString("base64url"), createdAt: now, redirectUri: config.redirectUri, appId: config.appId, configId: process.env.META_INSTAGRAM_CONFIG_ID!.trim() };
 }
 
 export function instagramAuthorizationUrl(pending: PendingInstagramOAuth) {

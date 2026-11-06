@@ -24,6 +24,21 @@ it("한국 날짜 경계와 아침·저녁 예약 시각을 계산한다", () =>
   expect(nextCollectionAt(new Date("2026-10-26T10:14:00Z"))).toBe("2026-10-26T20:13:00.000Z");
 });
 describe("실제 수집 설정·브리핑", () => {
+  it('zero legacy collection limits do not reject an explicit collection-only request or let client fields enable AI', async () => {
+    const db = getDb(), { agent, csrf } = await login(app);
+    const [before] = await db.select().from(channels).where(eq(channels.id, 1));
+    const budget = { ...before.budget, naverCallsPerRun: 0, resultsPerRun: 0, fetchTargetsPerRun: 0, fetchCallsPerRun: 0 };
+    await db.update(channels).set({ budget }).where(eq(channels.id, 1));
+    try {
+      const response = await agent.post('/api/collection/collect').set('x-csrf-token', csrf).send({ channelId: 1, manualWorkload: false, collectionOnly: false });
+      expect(response.status).toBe(202);
+      const [job] = await db.select().from(jobs).where(eq(jobs.id, response.body.requested[0].jobId));
+      expect(job.payload).toMatchObject({ collectionOnly: true, manualWorkload: true });
+      expect((await db.select().from(channels).where(eq(channels.id, 1)))[0].budget).toEqual(budget);
+      const overview = await agent.get('/api/collection/overview?channelId=1');
+      expect(overview.body.nextAt).toBeNull();
+    } finally { await db.update(channels).set({ budget: before.budget }).where(eq(channels.id, 1)); }
+  });
   it("연결 검사 안전 메타데이터를 제공하고 이전 수집 실패는 보존한다", async () => {
     const db = getDb(), { agent } = await login(app);
     const errors = [{ scope: "naver", message: "인증/권한 오류 (HTTP 401)" }];

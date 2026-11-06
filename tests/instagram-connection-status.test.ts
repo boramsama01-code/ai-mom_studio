@@ -11,7 +11,7 @@ vi.mock("../server/secretStore", () => ({ isFromEnvironment: vi.fn(), saveSecret
 vi.mock("../server/audit", () => ({ audit: mocks.audit }));
 
 const { checkInstagramConnection, connectInstagram } = await import("../server/services/instagramConnection");
-const { destinations } = await import("../shared/schema");
+const { channels, destinations } = await import("../shared/schema");
 
 function database(active = true) {
   const where = vi.fn()
@@ -33,17 +33,31 @@ function connectionDatabase(failCommit = false, existingCount = 1, custom = fals
   const channel = { id: 1, slug: custom ? "local-atelier" : "penguin", active: true, budget: { dailyPublishLimit: 3 }, version: 1 };
   const existing = { id: 4, label: custom ? "ATELIER.ACCOUNT" : "SPACEPENGUIN.CO", version: 2 };
   let reads = 0;
+  const writes: Array<{ table: unknown; patch: Record<string, unknown> }> = [];
   const tx = {
     select: () => ({ from: () => ({ where: () => ++reads === 1 ? { for: async () => [channel] } : Promise.resolve(Array.from({ length: existingCount }, (_, index) => ({ ...existing, id: existing.id + index }))) }) }),
     insert: vi.fn(() => ({ values: () => ({ onConflictDoUpdate: async () => undefined }) })),
-    update: vi.fn(() => ({ set: () => ({ where: async () => undefined }) })),
+    update: vi.fn((table: unknown) => ({ set: (patch: Record<string, unknown>) => { writes.push({ table, patch }); return { where: async () => undefined }; } })),
   };
   const db = {
     select: () => ({ from: () => ({ where: async () => [channel] }) }),
     transaction: async (callback: (transaction: typeof tx) => Promise<void>) => { await callback(tx); if (failCommit) throw new Error("commit failed"); },
   } as unknown as DB;
-  return { db, tx };
+  return { db, tx, channel, writes };
 }
+
+it.each([undefined, 0, 3])("ignores obsolete daily cap %s while verifying and saving the exact account", async dailyLimit => {
+  const { db, channel, writes } = connectionDatabase();
+  const connected = await connectInstagram(db, 1, { token: "test-only-token", username: "spacepenguin.co", authMode: "facebook", ...(dailyLimit === undefined ? {} : { dailyLimit }) }, "operator");
+  expect(connected.username).toBe("spacepenguin.co");
+  expect(mocks.identity).toHaveBeenCalledWith("test-only-token", "facebook", "spacepenguin.co");
+  expect(mocks.quota).toHaveBeenCalledWith("12345", "test-only-token", "facebook");
+  const channelWrite = writes.find(write => write.table === channels)?.patch;
+  expect(channelWrite).toMatchObject({ version: 2 });
+  expect(channelWrite).not.toHaveProperty("budget");
+  expect(channel.budget.dailyPublishLimit).toBe(3);
+  expect(mocks.audit.mock.calls[0][1].detail).not.toHaveProperty("dailyLimit");
+});
 
 it("reuses the existing destination ID when its label differs only in casing or @", async () => {
   const { db, tx } = connectionDatabase();

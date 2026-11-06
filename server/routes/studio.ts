@@ -223,7 +223,7 @@ studioRoutes.post("/studio/cards/:id/publication/approve", ah(async (req, res) =
   res.status(201).json({ ...result, workerStarted });
 }));
 studioRoutes.post("/studio/instagram/:cid/connect", ah(async (req, res) => {
-  const input = parse(z.object({ token: z.string().trim().min(20).max(4000).regex(/^[^\r\n\s]+$/), username: z.string().trim().regex(/^@?[a-zA-Z0-9._]{1,30}$/), dailyLimit: z.number().int().min(1).max(25), authMode: z.enum(["instagram", "facebook"]).default("instagram") }).strict(), req.body);
+  const input = parse(z.object({ token: z.string().trim().min(20).max(4000).regex(/^[^\r\n\s]+$/), username: z.string().trim().regex(/^@?[a-zA-Z0-9._]{1,30}$/), dailyLimit: z.number().int().optional(), authMode: z.enum(["instagram", "facebook"]).default("instagram") }).strict(), req.body);
   res.json(await connectInstagram(getDb(), intParam(req.params.cid), input, actorOf(req)));
 }));
 studioRoutes.post("/studio/instagram/:cid/check", ah(async (req, res) => {

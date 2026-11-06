@@ -4,7 +4,6 @@ import { approvals, channels, contentItems, contentRevisions, deliveries, delive
 import type { DB } from "../db";
 import { env } from "../env";
 import { getSetting } from "../seed";
-import { kstToday, KST_OFFSET_MIN } from "./dates";
 import { publicationDestinationError } from "./publicationDestination";
 import { lockDeliveryPublication, publicationEligibilityError, publicationMessage, recomputePublicationStatus } from "./publicationState";
 
@@ -13,7 +12,7 @@ const MAX_ATTEMPT_MS = 10 * 60_000;
 const nextLease = () => new Date(Date.now() + PUBLICATION_LEASE_MS);
 export type AttemptResult = "succeeded" | "failed" | "unknown" | "dryRun" | "skipped";
 
-/** The daily admission check and claim are serialized across all web/cron processes. */
+/** Claims are serialized across web/cron processes; saved daily caps are obsolete. */
 export async function claimPublicationDelivery(db: DB, deliveryId: number, actor: string, now: Date) {
   return db.transaction(async tx => {
     const dbtx = tx as unknown as DB;
@@ -22,16 +21,6 @@ export async function claimPublicationDelivery(db: DB, deliveryId: number, actor
     const { delivery: d, approval: ap } = locked;
     if (d.status !== "scheduled" || d.needsReconciliation || ap.status !== "active" || ap.scheduledAt > now) return null;
     await tx.execute(sql`select pg_advisory_xact_lock(7193203, ${d.channelId})`);
-    const [ch] = await tx.select().from(channels).where(eq(channels.id, d.channelId));
-    if (ch && !d.externalContainerId) {
-      const dayStart = new Date(Date.parse(`${kstToday(now)}T00:00:00Z`) - KST_OFFSET_MIN * 60_000);
-      const [{ c }] = (await tx.execute(sql`select count(*)::int as c from deliveries where channel_id = ${d.channelId} and id <> ${d.id}
-        and status in ('succeeded','processing','unknown') and request_started_at >= ${dayStart.toISOString()}`)).rows as Array<{ c: number }>;
-      if (Number(c) >= ch.budget.dailyPublishLimit) {
-        await tx.update(deliveries).set({ lastError: "오늘 게시 한도 도달 — 다음 실행에서 처리", updatedAt: new Date() }).where(eq(deliveries.id, d.id));
-        return null;
-      }
-    }
     const attemptId = randomUUID(), leaseToken = randomUUID(), stamp = new Date();
     await tx.insert(deliveryAttempts).values({ id: attemptId, deliveryId: d.id, attemptNo: d.attempts + 1, actor });
     const [claimed] = await tx.update(deliveries).set({ status: "processing", phase: d.externalContainerId ? "container_wait" : "preparing", attempts: d.attempts + 1, lastAttemptId: attemptId,

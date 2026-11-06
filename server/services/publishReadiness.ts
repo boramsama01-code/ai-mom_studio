@@ -14,12 +14,10 @@ type Destination = typeof destinations.$inferSelect;
 /** Local prerequisites only. A page refresh must never contact a social API. */
 export function publicationReadinessFor(channel: Channel | undefined, selected: Destination[], globalStop: boolean): PublicationReadiness {
   const blockers: string[] = [];
-  const dailyLimit = channel?.budget.dailyPublishLimit ?? 0;
   const expectedUsername = channel ? expectedInstagramUsername(channel.slug) : null;
   if (!channel?.active) blockers.push("사용 중인 채널을 선택하세요.");
   if (globalStop) blockers.push("전체 작업이 일시 정지돼 있습니다. 정지를 해제한 뒤 승인하세요.");
   if (!selected.length) blockers.push("게시할 계정이 연결되지 않았습니다. 인스타그램 연결에서 계정을 먼저 연결하세요.");
-  if (dailyLimit < 1) blockers.push("채널의 하루 발행 한도를 1건 이상으로 설정하세요.");
   if (env.dryRun) blockers.push("현재 모의 실행 상태라 실제 게시할 수 없습니다. 실제 게시 모드로 변경한 뒤 승인하세요.");
   if (!env.autoPublish) blockers.push("서버의 실제 게시가 중지돼 있습니다. 게시를 켠 뒤 승인하세요.");
   if (env.canonicalRedirectUrl) blockers.push("이전 서버에서는 발행하지 않습니다. 현재 Studio에서 승인하세요.");
@@ -37,7 +35,7 @@ export function publicationReadinessFor(channel: Channel | undefined, selected: 
     if (!/^v\d+\.\d+$/.test(env.instagramApiVersion)) blockers.push("API 키 관리에서 올바른 Instagram API 버전을 입력하세요.");
     if (selected.filter(destination => destination.platform === "instagram").length > 1) blockers.push("이 채널에 활성 인스타그램 목적지가 여러 개 있습니다. 사용할 계정 하나를 확인하세요.");
   }
-  return { ready: blockers.length === 0, blockers: [...new Set(blockers)], dryRun: env.dryRun, autoPublish: env.autoPublish, dailyLimit, expectedUsername, destinations: choices };
+  return { ready: blockers.length === 0, blockers: [...new Set(blockers)], dryRun: env.dryRun, autoPublish: env.autoPublish, expectedUsername, destinations: choices };
 }
 
 export async function loadPublicationReadiness(db: DB, channelId: number, destinationIds?: number[]) {

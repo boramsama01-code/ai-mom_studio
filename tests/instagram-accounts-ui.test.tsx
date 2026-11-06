@@ -222,9 +222,16 @@ describe("Instagram account connection states", () => {
     await render(); await openTokenForm(); await fillToken();
     await act(async () => [...host.querySelectorAll<HTMLAnchorElement>("a")].find(link => link.textContent === "다른 작업으로")!.click());
     await click("저장하고 이동");
-    expect(mocks.api).toHaveBeenCalledWith("/studio/instagram/1/connect", { method: "POST", body: { username: "spacepenguin.co", token: "synthetic-ui-test-token", authMode: "facebook", dailyLimit: 3 } });
+    expect(mocks.api).toHaveBeenCalledWith("/studio/instagram/1/connect", { method: "POST", body: { username: "spacepenguin.co", token: "synthetic-ui-test-token", authMode: "facebook" } });
     expect(mocks.navigate).toHaveBeenCalledWith("/");
     expect(host.querySelector('input[type="password"]')).toBeNull();
+  });
+  it("connects without asking for an application daily cap", async () => {
+    await render(); await openTokenForm(); await fillToken();
+    expect(account().textContent).not.toContain("하루 발행 한도");
+    expect(account().querySelector('input[type="number"]')).toBeNull();
+    await click("계정 확인하고 연결", account());
+    expect(mocks.api).toHaveBeenCalledWith("/studio/instagram/1/connect", { method: "POST", body: { username: "spacepenguin.co", token: "synthetic-ui-test-token", authMode: "facebook" } });
   });
 
   it("removes a previous success badge while rechecking and when that recheck fails", async () => {

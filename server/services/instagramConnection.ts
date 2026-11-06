@@ -12,7 +12,7 @@ import { instagramDiagnostic, sanitizeInstagramDiagnostic } from "../../shared/i
 import { channelSlug } from "../../shared/channelKeys";
 import { orderedChannels } from "./channelOrder";
 
-export async function connectInstagram(db: DB, channelId: number, input: { token: string; username: string; dailyLimit: number; authMode?: InstagramAuthMode; expiresAt?: string | null }, actor: string) {
+export async function connectInstagram(db: DB, channelId: number, input: { token: string; username: string; /** Deprecated input accepted for older clients; never applies a cap. */ dailyLimit?: number; authMode?: InstagramAuthMode; expiresAt?: string | null }, actor: string) {
   const [ch] = await db.select().from(channels).where(eq(channels.id, channelId));
   if (!ch?.active) throw new HttpError(409, "사용 중인 채널을 선택하세요.", { diagnostic: { stage: "connection_validation" } });
   const intended = instagramAccountMismatch(ch.slug, input.username);
@@ -48,11 +48,11 @@ export async function connectInstagram(db: DB, channelId: number, input: { token
       await tx.insert(destinations).values({ channelId: ch.id, platform: "instagram", label: `@${identity.username}`, secretRefs: refs, enabled: true })
         .onConflictDoUpdate({ target: [destinations.channelId, destinations.platform, destinations.label], set: { secretRefs: refs, enabled: true, updatedAt: new Date() } });
     }
-    await tx.update(channels).set({ budget: { ...fresh.budget, dailyPublishLimit: input.dailyLimit }, version: fresh.version + 1, updatedAt: new Date() }).where(eq(channels.id, ch.id));
+    await tx.update(channels).set({ version: fresh.version + 1, updatedAt: new Date() }).where(eq(channels.id, ch.id));
     await tx.insert(appSettings).values({ key: `conn_test:instagram:${refs.accessToken}`, value: { ok: true, message: `@${identity.username} 계정 및 게시 API 접근 확인` } }).onConflictDoUpdate({ target: appSettings.key, set: { value: { ok: true, message: `@${identity.username} 계정 및 게시 API 접근 확인` }, updatedAt: new Date() } });
     const metadata = { authMode, username: identity.username, verifiedAt: new Date().toISOString(), expiresAt: input.expiresAt ?? null };
     await tx.insert(appSettings).values({ key: `instagram_connection:${ch.id}`, value: metadata }).onConflictDoUpdate({ target: appSettings.key, set: { value: metadata, updatedAt: new Date() } });
-    await audit(tx, { actor, action: "connect_instagram", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { username: identity.username, dailyLimit: input.dailyLimit, authMode } });
+    await audit(tx, { actor, action: "connect_instagram", entity: "channel", entityId: ch.id, channelId: ch.id, detail: { username: identity.username, authMode } });
   }).catch((error: unknown) => {
     // Keep validation/conflict messages and status codes unchanged for manual
     // connections. Unexpected save failures must not carry SQL, values or causes.

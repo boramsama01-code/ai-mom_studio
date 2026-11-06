@@ -49,7 +49,8 @@ describe("operator-bound Meta Unified Login", () => {
     const { agent, state } = await start(hint ? { username: hint } : {});
     const done = await agent.get("/api/studio/instagram/oauth/callback").query({ state, code: "test-custom-code", username: "other.account", channelId: 999 });
     expect(done.headers.location).toBe("/instagram?instagram=connected");
-    expect(mocks.connect).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ username: hint ? "atelier.account" : "", dailyLimit: 0, authMode: "facebook" }), "admin");
+    expect(mocks.connect).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ username: hint ? "atelier.account" : "", authMode: "facebook" }), "admin");
+    expect(mocks.connect.mock.calls[0][2]).not.toHaveProperty("dailyLimit");
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
@@ -68,7 +69,7 @@ describe("operator-bound Meta Unified Login", () => {
     expect(instagramOAuthConfig()).toMatchObject({ configured: false, missing: ["META_INSTAGRAM_CONFIG_ID"] });
   });
 
-  it("requires login and CSRF to start, and retains the current daily limit", async () => {
+  it("requires login and CSRF to start without carrying an obsolete daily cap into connection", async () => {
     const application = app();
     expect((await request(application).post("/api/studio/instagram/1/oauth/start").send({})).status).toBe(401);
     const agent = request.agent(application); await agent.post("/test-login");
@@ -80,7 +81,8 @@ describe("operator-bound Meta Unified Login", () => {
     expect(url.searchParams.has("scope")).toBe(false);
     const done = await connected.get("/api/studio/instagram/oauth/callback").query({ state, code: "test-auth-code" });
     expect(done.headers.location).toBe("/instagram?instagram=connected");
-    expect(mocks.connect).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ username: "spacepenguin.co", dailyLimit: 7, authMode: "facebook", expiresAt: null }), "admin");
+    expect(mocks.connect).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ username: "spacepenguin.co", authMode: "facebook", expiresAt: null }), "admin");
+    expect(mocks.connect.mock.calls[0][2]).not.toHaveProperty("dailyLimit");
     expect(done.text).not.toContain("test-only-system-user-token");
     expect(fetcher).toHaveBeenCalledOnce();
   });

@@ -18,7 +18,8 @@ import {
 import { sourceAnalysisSchema, type FamilyEvidenceBundle, type FamilyEvidenceView, type SourceAnalysis, type SourceSnapshot, type VerifiedResource } from "../../shared/familyEvidence";
 import { channelAiExecutionPlan } from "./channelAi";
 import type { AiExecutionPlan } from "../../shared/aiProvenance";
-import { LlmBudget } from "./llm";
+import type { LlmBudget } from "./llm";
+import { createManualFamilyBudget } from "./manualAiBudget";
 import { HttpError } from "../routes/util";
 import { captureFamilySourceSnapshot, createFamilyEvidenceSet, familyEvidenceView, familyHash, familyPublicSourceUrl, loadFamilyEvidence, putFamilyEvidence, validateFamilyEvidenceReferences, validateFamilySourceAnalysis } from "./familyEvidence";
 import { runFamilyEditorialStage, type FamilyStageContext } from "./familyEditorialStages";
@@ -164,7 +165,7 @@ function failure(input: FamilyGenerateInput, revisionId: number, status: FamilyP
 export async function proposeFamilyDialogue(db: DB, item: ContentItem, channel: Channel, revision: { id: number; payload: Record<string, unknown> }, input: FamilyGenerateInput, executionPlan: AiExecutionPlan, options: { budget?: LlmBudget; allowPaidRetry?: boolean } = {}): Promise<FamilyProposal> {
   if (revision.id !== input.baseRevision) throw new HttpError(409, "요청한 편집 버전과 현재 원고가 다릅니다. 기존 문구를 유지했습니다.");
   const existing = copyOf(revision.payload), savedMetadata = familyMetadataFromPayload(revision.payload), legacyCopy = existing ? null : legacyFamilyCopy(revision.payload);
-  const runs: GenerationRun[] = [], context: FamilyStageContext = { db, itemId: item.id, channelId: channel.id, baseRevision: revision.id, requestId: input.requestId, plan: executionPlan, budget: options.budget ?? new LlmBudget(Math.min(12, Math.max(0, channel.budget.llmCallsPerRun))), runs, allowPaidRetry: options.allowPaidRetry, startedAt: Date.now() };
+  const runs: GenerationRun[] = [], context: FamilyStageContext = { db, itemId: item.id, channelId: channel.id, baseRevision: revision.id, requestId: input.requestId, plan: executionPlan, budget: options.budget ?? createManualFamilyBudget(input.scope, executionPlan, input), runs, allowPaidRetry: options.allowPaidRetry, startedAt: Date.now() };
   let copy: CardCopyV2, metadata: FamilyDialogueMetadata, bundle: FamilyEvidenceBundle;
   const flags: ReviewFlag[] = [];
   if (input.scope === "all") {

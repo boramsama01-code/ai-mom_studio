@@ -23,6 +23,14 @@ beforeEach(async () => {
   await act(async () => { await new Promise(r => setTimeout(r, 30)); });
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); });
+it("구형 자동 수집 허용 값만으로 존재하지 않는 실행 시각을 표시하지 않는다", () => {
+  expect(host.querySelector(".collection-next")?.textContent).toBe("예약 실행 설정 필요");
+  expect(host.textContent).not.toContain("05:13");
+  expect(host.textContent).not.toContain("07:13");
+  expect(host.textContent).not.toContain("19:13");
+  expect(host.textContent).toContain("별도 예약 실행 설정이 필요");
+  expect(mocks.api.mock.calls.every(([path]) => String(path).startsWith("/collection/overview?"))).toBe(true);
+});
 it("몇 주 지난 대기 작업 때문에 버튼을 막지 않고 재개한다", async () => {
   const b = [...host.querySelectorAll("button")].find(b => b.textContent === "대기 수집 재개")!;
   expect(b.disabled).toBe(false);

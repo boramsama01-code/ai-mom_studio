@@ -11,7 +11,7 @@ vi.mock("../server/worker/publish", () => ({ publishDue: vi.fn() }));
 vi.mock("../server/worker/studio", () => ({ processStudioJob: vi.fn() }));
 vi.mock("../server/worker/discovery", () => ({ channelDiscovery: vi.fn() }));
 vi.mock("../server/worker/queue", async original => ({ ...await original<object>(), claimJob: mocks.claim, recoverExpired: async () => 0, newWorkerId: () => "test-owner" }));
-const { processCollectJob, jobsOnce } = await import("../server/worker/run");
+const { processCollectJob, jobsOnce, collectOnce } = await import("../server/worker/run");
 
 function fixture(payload: Record<string, unknown> = {}, casAccepted = true) {
   const job = { id: 7, channelId: 2, type: "collect", payload, status: "running", attempts: 1, maxAttempts: 2,
@@ -46,6 +46,19 @@ beforeEach(() => {
 afterEach(() => { expect(fetch).not.toHaveBeenCalled(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("collect retry admission without a database or paid provider", () => {
+  it('carries only the server-admitted manual workload flag and excludes AI even if an old payload lacked collectionOnly', async () => {
+    const { db, job } = fixture({ manualWorkload: true });
+    mocks.collect.mockResolvedValue({ runId: 1, status: 'ok_zero', counts: {}, errors: [] });
+    expect(await processCollectJob(db, job, 'test-owner')).toBe(true);
+    expect(mocks.collect).toHaveBeenCalledWith(db, 2, expect.objectContaining({ manualWorkload: true, collectionOnly: true }));
+    expect(job.maxAttempts).toBe(2);
+  });
+
+  it('does not start scheduled collection when automatic collection is off', async () => {
+    fixture(); vi.stubEnv('AUTO_COLLECT', 'false');
+    expect(await collectOnce({ isSchedule: true })).toMatchObject({ results: [], skipped: expect.stringContaining('자동 수집 꺼짐') });
+    expect(mocks.collect).not.toHaveBeenCalled();
+  });
   it("fixes both persisted and caller-owned attempt limits before work begins", async () => {
     const { db, job, stored } = fixture();
     mocks.collect.mockImplementation(async () => {
