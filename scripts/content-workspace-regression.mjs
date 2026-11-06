@@ -217,8 +217,14 @@ try {
     await context.addInitScript(() => localStorage.setItem("spacepenguin.channel", "3"));
     let page = await context.newPage();
     const fixtureData = fixture(), { state } = fixtureData;
-    const errors = [], blocked = [];
-    page.on("pageerror", error => errors.push(error.message));
+    const errors = [], blocked = [], diagnostics = [];
+    const trackPage = current => {
+      current.on("pageerror", error => { errors.push(error.message); diagnostics.push({ kind: "pageerror", at: Date.now(), name: error.name, message: error.message, stack: error.stack, url: current.url(), closed: current.isClosed() }); });
+      current.on("requestfailed", request => { if (new URL(request.url()).pathname === copyPath+"/preview") diagnostics.push({ kind: "preview-request-failed", at: Date.now(), url: request.url(), failure: request.failure()?.errorText }); });
+      current.on("framenavigated", frame => { if (frame === current.mainFrame()) diagnostics.push({ kind: "navigation", at: Date.now(), url: frame.url() }); });
+      current.on("close", () => diagnostics.push({ kind: "page-close", at: Date.now() }));
+    };
+    trackPage(page);
     await context.route("**/*", async route => {
       const url = new URL(route.request().url());
       if (url.origin !== origin) { blocked.push(url.href); return route.abort("blockedbyclient"); }
@@ -301,7 +307,7 @@ try {
       await page.locator(".card-copy-editor .draft-recovery").getByText(/이 기기에 임시 보관됨/).waitFor();
       assert.equal(state.saved.copy.pages[1].title, secondTitle);
       await page.close({ runBeforeUnload: false });
-      page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
+      page = await context.newPage(); trackPage(page);
       await page.goto(`${origin}/studio/25`); await ready(page);
       await page.getByRole("button", { name: "복구본을 편집기에 불러오기", exact: true }).click();
       await page.getByRole("button", { name: /^2번째 본문 문구 편집/ }).click();
@@ -354,7 +360,7 @@ try {
       const recoveryBeforeClose = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("spacepenguin.draft-recovery"))));
       await writeFile(`${outputDir}/recovery-before-${width}.json`, JSON.stringify(recoveryBeforeClose, null, 2));
       await page.close({ runBeforeUnload: false });
-      page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
+      page = await context.newPage(); trackPage(page);
       await page.goto(`${origin}/items/3/9790`); await ready(page);
       const recoveryAfterOpen = await page.evaluate(() => ({ storage: Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("spacepenguin.draft-recovery"))), notices: [...document.querySelectorAll(".draft-recovery")].map(node => node.textContent), drawerOpen: document.querySelector("#publish-options")?.open }));
       await writeFile(`${outputDir}/recovery-after-${width}.json`, JSON.stringify(recoveryAfterOpen, null, 2));
@@ -422,7 +428,7 @@ try {
       results.push({ engine, width, result: "passed", savedPages: 2, aiRecovery: true, publicationModes: ["now", "later"], cancelAndConfirmedRetry: true, captionPersistence: true, deviceRecovery: true, publicationOptionsPersistence: true, historyGuard: true, channelPreservation: true, actionHitTests: true });
       console.log(`${engine} ${width}px: canonical workspace, two-page save/reload, unsaved navigation, AI recovery, now/later and cancel/retry passed`);
     } catch (error) {
-      console.error(JSON.stringify({ width, errors, blocked, writes: mutations(state), url: page.url() }));
+      console.error(JSON.stringify({ width, errors, blocked, diagnostics, writes: mutations(state), url: page.url() }));
       await page.screenshot({ path: `${outputDir}/failure-${width}.png`, fullPage: true });
       throw error;
     } finally { await context.close(); }

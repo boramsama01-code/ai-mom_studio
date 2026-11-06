@@ -51,7 +51,14 @@ export async function apiBlob(path: string, expectedType: string, opts: { method
     throw new ApiError(res.status, body.error || `파일 요청 실패 (HTTP ${res.status})`, body);
   }
   if (type !== expectedType) throw new ApiError(502, "파일 응답을 확인할 수 없습니다. 로그인 상태를 확인한 뒤 다시 시도하세요.");
-  return res.blob();
+  try {
+    const blob = await res.blob();
+    opts.signal?.throwIfAborted();
+    return blob;
+  } catch (error) {
+    if (opts.signal?.aborted) throw error;
+    throw new ApiError(0, "파일을 끝까지 받지 못했습니다. 현재 작업을 유지한 채 다시 확인해 주세요.", { code: "download_interrupted" });
+  }
 }
 
 /** 파일 그대로 올리기(이미지 업로드 등) */
