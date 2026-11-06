@@ -143,3 +143,8 @@ Review found apiBlob returned the body promise without the cancellation-after-bo
 
 
 The feature ref advanced concurrently to 71a3f93b0135bc4288d5d07bb19d8433fbfc929c, which adds a one-day authenticated tracked-source artifact to the test job. It changes only CI and is preserved. The blob/body correction and diagnostics are applied to that latest tree with an exact expected SHA; no force update is used. The prior 0ef1880 database job finished successfully with 210 files / 2,149 tests and build, while its browser failure remains recorded above.
+
+
+## Do not turn interrupted successful JSON into fake saved state
+
+The same response review found api() and apiUpload() swallowed a successful JSON body-read failure into `{}`. They now reject incomplete successful receipts without retrying: writes expose resultUnknown and keep input; upload errors direct users to stored media before retrying. HTTP error status is preserved if its optional JSON error body is unreadable. SaveState distinguishes an unconfirmed result from a confirmed server save failure. Added tests cover GET/PATCH incomplete receipts, unreadable 401 bodies and a lost 201 upload result. This prevents a header-only response from being reported as saved. These are client receipt changes; no production content, provider or SNS operation is executed by validation.

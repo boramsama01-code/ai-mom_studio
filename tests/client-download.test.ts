@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiBlob, setCsrf } from "../client/src/api";
+import { apiBlob, apiUpload, setCsrf } from "../client/src/api";
 
 afterEach(() => { vi.unstubAllGlobals(); setCsrf(null); });
 describe("Studio PNG download", () => {
@@ -49,4 +49,11 @@ describe("Studio PNG download", () => {
     expect(await (await apiBlob("/channels/1/items/9/card-copy/preview", "image/jpeg", { method: "POST", body, signal: controller.signal })).text()).toBe("JPEG");
     expect(fetch).toHaveBeenCalledWith("/api/channels/1/items/9/card-copy/preview", expect.objectContaining({ method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-csrf-token": "preview-fixture-csrf" }, body: JSON.stringify(body), signal: controller.signal }));
   });
+});
+
+it("marks an interrupted accepted upload result unknown and never repeats it", async () => {
+  const fetcher = vi.fn(async () => ({ ok: true, status: 201, headers: new Headers({ "content-type": "application/json" }), json: async () => { throw new TypeError("upload response body lost"); } }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(apiUpload("/studio/cards/1/media", new File(["photo"], "photo.jpg", { type: "image/jpeg" }))).rejects.toMatchObject({ status: 0, body: { code: "upload_result_unknown", resultUnknown: true } });
+  expect(fetcher).toHaveBeenCalledOnce();
 });

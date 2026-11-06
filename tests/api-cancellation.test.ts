@@ -30,3 +30,21 @@ it("still reports an actual network failure through the existing recoverable API
   await expect(api("/auth/me")).rejects.toBeInstanceOf(ApiError);
   await expect(api("/auth/me")).rejects.toMatchObject({ status: 0 });
 });
+
+it.each(["GET", "PATCH"])("does not accept an interrupted successful %s JSON body as an empty success", async method => {
+  const fetcher = vi.fn(async () => ({ ok: true, headers: new Headers({ "content-type": "application/json" }), json: async () => { throw new TypeError("connection interrupted after headers"); } }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(api("/studio/cards/1", { method })).rejects.toMatchObject({ status: 0, body: { code: "response_incomplete", resultUnknown: method !== "GET" } });
+  expect(fetcher).toHaveBeenCalledOnce();
+});
+it("preserves an HTTP authentication failure when its optional JSON error body is incomplete", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, headers: new Headers({ "content-type": "application/json" }), json: async () => { throw new Error("truncated error"); } })));
+  await expect(api("/auth/me")).rejects.toMatchObject({ status: 401 });
+});
+
+it("marks a lost write response unknown without repeating the mutation", async () => {
+  const fetcher = vi.fn(async () => { throw new TypeError("write response lost"); });
+  vi.stubGlobal("fetch", fetcher);
+  await expect(api("/studio/cards/1", { method: "PATCH", body: { version: 2, script: "입력 유지" } })).rejects.toMatchObject({ status: 0, body: { code: "request_result_unknown", resultUnknown: true } });
+  expect(fetcher).toHaveBeenCalledOnce();
+});
