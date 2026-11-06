@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import sharp from 'sharp';
 import { preview } from 'vite';
@@ -12,8 +13,49 @@ import { cardCopyFixture } from '../tests/fixtures/cardCopy.ts';
 const require = createRequire(import.meta.url); let playwright;
 try { playwright = require('playwright'); } catch { playwright = require(require.resolve('playwright', { paths: [process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES ?? '/nonexistent'] })); }
 const output = path.resolve('test-results/asset-library-browser'); await mkdir(output, { recursive: true }); await writeFile(`${output}/results.json`, '[]');
-const server = await preview({ preview: { host: '127.0.0.1', port: 4179, strictPort: true } });
 const origin = 'http://127.0.0.1:4179', stamp = '2026-11-06T03:00:00.000Z';
+const videoFixturePath = '/api/studio/media/60?download=1';
+// Offline-generated #32756b, silent64x64/0.2s/5-frame baseline H264. This is
+// synthetic test footage, not an app-generated output or a publication receipt.
+const syntheticMp4 = Buffer.from('AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAM6bW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAAMgAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAmR0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAAMgAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAEAAAABAAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAADIAAAAAAABAAAAAAHcbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAyAAAACgBVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABh21pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAUdzdGJsAAAAu3N0c2QAAAAAAAAAAQAAAKthdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAEAAQABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAAMWF2Y0MBQsAe/+EAGGdCwB6mERCbARAAAAMAEAAAAwMg8WLhGAEABmjIQgksgAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAG5QAABuUAAAABhzdHRzAAAAAAAAAAEAAAAFAAACAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAAFAAAAAQAAAChzdHN6AAAAAAAAAAAAAAAFAAACmQAAAAoAAAAKAAAACgAAAAsAAAAUc3RjbwAAAAAAAAABAAADagAAAGJ1ZHRhAAAAWm1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALWlsc3QAAAAlqXRvbwAAAB1kYXRhAAAAAQAAAABMYXZmNjAuMTYuMTAwAAAACGZyZWUAAALKbWRhdAAAAnMGBf//b9xF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjQgcjMxNzIgYzFjOTkzMSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjMgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0wIHJlZj0xNiBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgxOjB4MTMxIG1lPXVtaCBzdWJtZT0xMCBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTI0IGNocm9tYV9tZT0xIHRyZWxsaXM9MiA4eDhkY3Q9MCBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0wIHdlaWdodHA9MCBrZXlpbnQ9MjUwIGtleWludF9taW49MjUgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD02MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTI4LjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAeZYiCBniMUAAQz44ABqOAAINt999dddddddddddeAAAAABkGaHAzwjAAAAAZBmioC/CMAAAAGQZo7AvwjAAAAB0GaSQCvCMA=', 'base64');
+const syntheticMp4Sha256 = 'c7ed4bf464ac52c6f0916ee8ab92c01c33080c29ce528a78ed2945a97cf7ab09';
+assert.equal(syntheticMp4.length, 1580); assert.equal(createHash('sha256').update(syntheticMp4).digest('hex'), syntheticMp4Sha256);
+function syntheticVideoResponse(request, response, next) {
+  if (request.url !== videoFixturePath || !['GET', 'HEAD'].includes(request.method)) return next();
+  const size = syntheticMp4.length;
+  response.setHeader('Content-Type', 'video/mp4'); response.setHeader('Accept-Ranges', 'bytes'); response.setHeader('Cache-Control', 'no-store');
+  let start = 0, end = size - 1;
+  if (request.method === 'GET' && request.headers.range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range);
+    let valid = !!match && (match[1] !== '' || match[2] !== '');
+    if (valid) {
+      if (match[1] === '') { const suffix = Number(match[2]); valid = Number.isSafeInteger(suffix) && suffix > 0; start = Math.max(0, size - suffix); }
+      else { start = Number(match[1]); end = match[2] === '' ? size - 1 : Number(match[2]); valid = Number.isSafeInteger(start) && Number.isSafeInteger(end) && start < size && end >= start; end = Math.min(end, size - 1); }
+    }
+    if (!valid) { response.statusCode = 416; response.setHeader('Content-Range', `bytes */${size}`); response.setHeader('Content-Length', '0'); return response.end(); }
+    response.statusCode = 206; response.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+  }
+  const bytes = syntheticMp4.subarray(start, end + 1);
+  response.setHeader('Content-Length', String(bytes.length)); response.end(request.method === 'HEAD' ? undefined : bytes);
+}
+// configurePreviewServer runs before Vite's proxy middleware. Native WebKit
+// media requests can bypass Playwright's route interception, so use real local
+// HTTP for this single known synthetic file; every other API stays isolated.
+const server = await preview({ plugins: [{ name: 'asset-library-synthetic-video', configurePreviewServer(server) { server.middlewares.use(syntheticVideoResponse); } }], preview: { host: '127.0.0.1', port: 4179, strictPort: true } });
+async function verifySyntheticVideoHttp() {
+  const url = `${origin}${videoFixturePath}`;
+  for (const [range, start, end] of [[null, 0, 1579], ['bytes=0-31', 0, 31], ['bytes=1500-', 1500, 1579], ['bytes=-16', 1564, 1579]]) {
+    const response = await fetch(url, range ? { headers: { range } } : {});
+    assert.equal(response.status, range ? 206 : 200); assert.equal(response.headers.get('content-type'), 'video/mp4'); assert.equal(response.headers.get('accept-ranges'), 'bytes');
+    assert.equal(response.headers.get('content-length'), String(end - start + 1));
+    if (range) assert.equal(response.headers.get('content-range'), `bytes ${start}-${end}/1580`);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), syntheticMp4.subarray(start, end + 1));
+  }
+  const head = await fetch(url, { method: 'HEAD' }); assert.equal(head.status, 200); assert.equal(head.headers.get('content-length'), '1580'); assert.equal((await head.arrayBuffer()).byteLength, 0);
+  for (const range of ['bytes=1580-', 'bytes=12-3', 'bytes=0-1,4-5', 'bytes=-0']) {
+    const response = await fetch(url, { headers: { range } }); assert.equal(response.status, 416); assert.equal(response.headers.get('content-range'), 'bytes */1580'); assert.equal((await response.arrayBuffer()).byteLength, 0);
+  }
+}
 const ai = { defaultProvider: 'gemini', text: { gemini: false, openai: false, anthropic: false }, image: false };
 const channels = [{ id: 1, slug: 'current-dialogue', name: '대화 채널', active: true, version: 1, contentType: 'current_dialogue', accentColor: '#32756b', categories: [] }, { id: 2, slug: 'space-penguin', name: '펭귄 채널', active: true, version: 1, contentType: 'science_dialogue', accentColor: '#426b91', categories: [] }];
 const pictures = await Promise.all(['#d8e9e4', '#e9dcbb'].map(async (color, index) => sharp(Buffer.from(`<svg width="1080" height="1350" xmlns="http://www.w3.org/2000/svg"><rect width="1080" height="1350" fill="${color}"/><text x="100" y="300" font-size="100">SAVED ${index + 1}</text></svg>`)).jpeg().toBuffer()));
@@ -59,31 +101,56 @@ async function hit(page, locator, width) { await locator.scrollIntoViewIfNeeded(
 async function noOverflow(page) { assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'no horizontal overflow'); }
 let browser, engine = 'WebKit'; const results = [];
 try {
+  await verifySyntheticVideoHttp();
   try { browser = await playwright.webkit.launch(); } catch (error) { if (process.env.CI) throw error; engine = 'Chromium'; browser = await playwright.chromium.launch({ ...(process.env.WORKSPACE_BROWSER_EXECUTABLE ? { executablePath: process.env.WORKSPACE_BROWSER_EXECUTABLE } : {}) }); }
   for (const width of (process.env.ASSET_LIBRARY_WIDTHS ? process.env.ASSET_LIBRARY_WIDTHS.split(',').map(Number) : [320, 393, 1280])) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 768, hasTouch: width < 768, locale: 'ko-KR', timezoneId: 'Asia/Seoul', serviceWorkers: 'block', reducedMotion: 'reduce' });
     await context.addInitScript(() => localStorage.setItem('spacepenguin.channel', '1')); context.setDefaultTimeout(20_000);
-    const page = await context.newPage(), fixtureState = fixture(), errors = [], external = [], requests = [];
-    page.on('pageerror', error => errors.push(error.message)); page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-    await context.route('**/*', async route => { const url = new URL(route.request().url()); if (url.origin !== origin) { external.push(url.href); return route.abort('blockedbyclient'); } if (!url.pathname.startsWith('/api/')) return route.continue(); requests.push({ path: url.pathname, method: route.request().method() }); try { if (await fixtureState.route(route, url) !== false) return; errors.push(`Unmocked API ${url.pathname}`); return route.fulfill({ status: 404, json: { error: 'Isolated asset fixture' } }); } catch (error) { errors.push(`${url.pathname}: ${error.message}`); return route.fulfill({ status: 500, json: { error: error.message } }); } });
+    const page = await context.newPage(), fixtureState = fixture(), errors = [], external = [], requests = [], diagnostics = [];
+    const startedAt = Date.now(), requestStarts = new WeakMap(); let stage = 'opening';
+    const record = (kind, detail = {}) => diagnostics.push({ kind, stage, at: new Date().toISOString(), elapsedMs: Date.now() - startedAt, ...detail });
+    const mark = name => { stage = name; record('stage'); };
+    const tracedRequest = request => request.url().includes('/api/') || ['image', 'media', 'fetch'].includes(request.resourceType());
+    // Native media loaders can reach the local preview server without emitting
+    // Playwright request events. Observe only; do not serve or alter a response.
+    const observePreviewRequest = (request, response) => {
+      if (!request.url?.startsWith('/api/')) return;
+      const detail = { url: new URL(request.url, origin).href, method: request.method, resourceType: 'preview-http', range: request.headers.range ?? null, startedStage: stage, startedElapsedMs: Date.now() - startedAt };
+      record('preview-http-request', detail);
+      response.once('finish', () => record('preview-http-response', { ...detail, status: response.statusCode }));
+      request.once('aborted', () => record('preview-http-aborted', detail));
+    };
+    server.httpServer.on('request', observePreviewRequest);
+    page.on('request', request => {
+      const detail = { url: request.url(), method: request.method(), resourceType: request.resourceType(), startedStage: stage, startedElapsedMs: Date.now() - startedAt };
+      requestStarts.set(request, detail); if (tracedRequest(request)) record('request', detail);
+    });
+    page.on('requestfinished', request => { if (tracedRequest(request)) record('requestfinished', requestStarts.get(request)); });
+    page.on('requestfailed', request => record('requestfailed', { ...requestStarts.get(request), url: request.url(), method: request.method(), resourceType: request.resourceType(), error: request.failure()?.errorText ?? null }));
+    page.on('response', response => { if (response.status() >= 400) record('http-error', { ...requestStarts.get(response.request()), url: response.url(), status: response.status() }); });
+    page.on('pageerror', error => { errors.push(error.message); record('pageerror', { message: error.message }); });
+    page.on('console', message => { if (message.type() === 'error') { errors.push(message.text()); record('console-error', { message: message.text(), location: message.location() }); } });
+    await context.route('**/*', async route => { const url = new URL(route.request().url()); if (url.origin !== origin) { external.push(url.href); return route.abort('blockedbyclient'); } if (!url.pathname.startsWith('/api/')) return route.continue(); requests.push({ path: url.pathname, method: route.request().method() }); if (`${url.pathname}${url.search}` === videoFixturePath && ['GET', 'HEAD'].includes(route.request().method())) return route.continue(); try { if (await fixtureState.route(route, url) !== false) return; errors.push(`Unmocked API ${url.pathname}`); return route.fulfill({ status: 404, json: { error: 'Isolated asset fixture' } }); } catch (error) { errors.push(`${url.pathname}: ${error.message}`); return route.fulfill({ status: 500, json: { error: error.message } }); } });
     try {
-      await page.goto(`${origin}/assets?tab=results`); const gallery = page.locator('.asset-results'); await gallery.getByRole('heading', { name: '승인 이미지·저장 영상', exact: true }).waitFor();
+      mark('initial gallery'); await page.goto(`${origin}/assets?tab=results`); const gallery = page.locator('.asset-results'); await gallery.getByRole('heading', { name: '승인 이미지·저장 영상', exact: true }).waitFor();
       for (const label of ['채널', '결과 종류', '기록 범위', '콘텐츠·파일 이름']) await hit(page, gallery.getByLabel(label, { exact: true }), width);
-      await gallery.getByLabel('채널', { exact: true }).selectOption('2'); await gallery.getByRole('button', { name: '대조할 승인 이미지 2 · 승인 이미지 비교', exact: true }).waitFor(); assert(new URL(page.url()).pathname === '/assets', 'channel switch must retain Assets');
-      await gallery.getByLabel('채널', { exact: true }).selectOption('1');
+      mark('switch to channel 2'); await gallery.getByLabel('채널', { exact: true }).selectOption('2'); await gallery.getByRole('button', { name: '대조할 승인 이미지 2 · 승인 이미지 비교', exact: true }).waitFor(); assert(new URL(page.url()).pathname === '/assets', 'channel switch must retain Assets');
+      mark('switch to channel 1'); await gallery.getByLabel('채널', { exact: true }).selectOption('1');
+      mark('filter historical images');
       await gallery.getByLabel('결과 종류', { exact: true }).selectOption('image'); await gallery.getByLabel('기록 범위', { exact: true }).selectOption('history'); await gallery.getByLabel('콘텐츠·파일 이름', { exact: true }).fill('과거'); await gallery.getByRole('button', { name: '결과 찾기', exact: true }).click();
       await gallery.getByRole('button', { name: '다음 결과', exact: true }).click(); const card = gallery.getByRole('button', { name: '과거 작업 승인 이미지 · 승인 이미지 비교', exact: true }); await card.waitFor(); await hit(page, card, width); await card.click();
-      const detail = gallery.getByRole('region', { name: '선택한 결과 비교', exact: true }); await detail.waitFor(); await page.waitForFunction(() => [...document.querySelectorAll('.asset-result-comparison img')].length === 2 && [...document.querySelectorAll('.asset-result-comparison img')].every(image => image.complete && image.naturalWidth === 1080)); await noOverflow(page);
+      mark('selected image comparison'); const detail = gallery.getByRole('region', { name: '선택한 결과 비교', exact: true }); await detail.waitFor(); await page.waitForFunction(() => [...document.querySelectorAll('.asset-result-comparison img')].length === 2 && [...document.querySelectorAll('.asset-result-comparison img')].every(image => image.complete && image.naturalWidth === 1080)); await noOverflow(page);
       await detail.screenshot({ path: `${output}/${width}-selected-current.png` });
-      const history = detail.getByRole('link', { name: '저장 작업 버전 비교', exact: true }); await hit(page, history, width); await history.click(); await page.getByRole('heading', { name: '저장 작업 버전 비교', exact: true }).waitFor(); await page.getByText('과거 완성 이미지 작업', { exact: true }).waitFor();
+      mark('open Studio version history'); const history = detail.getByRole('link', { name: '저장 작업 버전 비교', exact: true }); await hit(page, history, width); await history.click(); await page.getByRole('heading', { name: '저장 작업 버전 비교', exact: true }).waitFor(); await page.getByText('과거 완성 이미지 작업', { exact: true }).waitFor();
       assert.equal(fixtureState.writes.length, 0, 'history URL entry must not write');
-      const title = page.getByRole('textbox', { name: '게시물 제목', exact: true }); await title.fill('보존할 임시 제목'); const restore = page.getByRole('button', { name: '이 작업을 새 초안으로 복원', exact: true }); await hit(page, restore, width); await restore.click(); await page.getByRole('button', { name: '머무르기', exact: true }).click(); assert.equal(await title.inputValue(), '보존할 임시 제목'); assert.equal(fixtureState.writes.length, 0);
+      mark('dirty restore cancellation'); const title = page.getByRole('textbox', { name: '게시물 제목', exact: true }); await title.fill('보존할 임시 제목'); const restore = page.getByRole('button', { name: '이 작업을 새 초안으로 복원', exact: true }); await hit(page, restore, width); await restore.click(); await page.getByRole('button', { name: '머무르기', exact: true }).click(); assert.equal(await title.inputValue(), '보존할 임시 제목'); assert.equal(fixtureState.writes.length, 0);
+      mark('explicit Studio restore');
       await restore.click(); await page.getByRole('button', { name: '버리고 이동', exact: true }).click(); const confirm = page.getByRole('button', { name: '확인 후 새 초안으로 복원', exact: true }); await confirm.waitFor(); assert.equal(fixtureState.writes.length, 0); await hit(page, confirm, width); await confirm.click(); await page.getByText('작업 v1을 새 초안 v71으로 복원했습니다. 다시 검토하고 승인해 주세요.', { exact: true }).waitFor(); assert.equal(fixtureState.card().finishedDeck.pages[0].imageId, 20); assert.equal(fixtureState.card().sourceItemId, 90); assert.deepEqual(fixtureState.writes.map(row => row.path), ['/api/studio/cards/8/restore']);
-      await page.goBack(); await gallery.waitFor(); assert.equal(await gallery.getByLabel('결과 종류', { exact: true }).inputValue(), 'image'); assert.equal(await gallery.getByLabel('기록 범위', { exact: true }).inputValue(), 'history'); assert.equal(await gallery.getByLabel('콘텐츠·파일 이름', { exact: true }).inputValue(), '과거'); await gallery.getByText('2페이지', { exact: true }).waitFor(); await gallery.getByRole('region', { name: '선택한 결과 비교', exact: true }).waitFor();
-      await gallery.getByRole('button', { name: '이전 결과', exact: true }).click(); await gallery.getByRole('button', { name: '대조할 승인 이미지 1 · 승인 이미지 비교', exact: true }).click(); await gallery.getByRole('link', { name: '원고 버전 비교', exact: true }).click(); await page.getByRole('heading', { name: '원고 버전 비교', exact: true }).waitFor(); await page.getByText('과거 원고 질문', { exact: true }).waitFor(); assert(await page.locator('.source-revision-history').evaluate(node => node.closest('details').open), 'source deep link opens history drawer'); assert.equal(fixtureState.writes.filter(row => !row.path.endsWith('/card-copy/preview')).length, 1, 'source URL cannot restore');
+      mark('return from Studio history'); await page.goBack(); await gallery.waitFor(); assert.equal(await gallery.getByLabel('결과 종류', { exact: true }).inputValue(), 'image'); assert.equal(await gallery.getByLabel('기록 범위', { exact: true }).inputValue(), 'history'); assert.equal(await gallery.getByLabel('콘텐츠·파일 이름', { exact: true }).inputValue(), '과거'); await gallery.getByText('2페이지', { exact: true }).waitFor(); await gallery.getByRole('region', { name: '선택한 결과 비교', exact: true }).waitFor();
+      mark('open source revision history'); await gallery.getByRole('button', { name: '이전 결과', exact: true }).click(); await gallery.getByRole('button', { name: '대조할 승인 이미지 1 · 승인 이미지 비교', exact: true }).click(); await gallery.getByRole('link', { name: '원고 버전 비교', exact: true }).click(); await page.getByRole('heading', { name: '원고 버전 비교', exact: true }).waitFor(); await page.getByText('과거 원고 질문', { exact: true }).waitFor(); assert(await page.locator('.source-revision-history').evaluate(node => node.closest('details').open), 'source deep link opens history drawer'); assert.equal(fixtureState.writes.filter(row => !row.path.endsWith('/card-copy/preview')).length, 1, 'source URL cannot restore');
       // The editor starts its local preview after a debounce. A missing image
       // cannot prove settlement; require the current decoded output first.
-      await page.locator('.card-copy-editor .card-copy-preview').first().scrollIntoViewIfNeeded();
+      mark('wait for current source preview'); await page.locator('.card-copy-editor .card-copy-preview').first().scrollIntoViewIfNeeded();
       await page.waitForFunction(async () => {
         const selector = '.card-copy-editor .card-copy-preview:not(.is-stale)[aria-busy="false"] img';
         const image = document.querySelector(selector);
@@ -93,13 +160,28 @@ try {
         return image === document.querySelector(selector) && (image.currentSrc || image.src) === source
           && image.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
       });
-      await page.waitForLoadState('networkidle'); await page.goBack(); await gallery.waitFor();
-      await gallery.getByLabel('결과 종류', { exact: true }).selectOption('video'); await gallery.getByRole('button', { name: '저장한 원본 장면 영상 · 저장 영상 비교', exact: true }).waitFor(); assert.equal(await gallery.locator('video').count(), 0, 'gallery video thumbnails never fetch video bodies'); assert.equal(requests.filter(row => row.path === '/api/studio/media/60').length, 0);
-      await gallery.getByRole('button', { name: '저장한 원본 장면 영상 · 저장 영상 비교', exact: true }).click(); const player = gallery.getByRole('region', { name: '선택한 결과 비교', exact: true }).locator('video'); await player.waitFor(); assert.equal(await player.getAttribute('preload'), 'none'); assert.equal(await player.getAttribute('autoplay'), null); assert.equal(await player.getAttribute('src'), '/api/studio/media/60?download=1'); await gallery.getByText('현재 버전에는 연결된 완성 결과가 없습니다. 이전 파일로 대신 표시하지 않습니다.', { exact: true }).waitFor();
+      await page.waitForLoadState('networkidle'); mark('return from source history'); await page.goBack(); await gallery.waitFor();
+      mark('filter saved videos'); await gallery.getByLabel('결과 종류', { exact: true }).selectOption('video'); await gallery.getByRole('button', { name: '저장한 원본 장면 영상 · 저장 영상 비교', exact: true }).waitFor(); assert.equal(await gallery.locator('video').count(), 0, 'gallery video thumbnails never fetch video bodies'); assert.equal(requests.filter(row => row.path === '/api/studio/media/60').length, 0);
+      assert.equal(diagnostics.filter(event => event.kind === 'preview-http-request' && event.url === `${origin}${videoFixturePath}`).length, 0, 'gallery must not fetch the video body through a native media loader');
+      mark('select saved video'); await gallery.getByRole('button', { name: '저장한 원본 장면 영상 · 저장 영상 비교', exact: true }).click(); const player = gallery.getByRole('region', { name: '선택한 결과 비교', exact: true }).locator('video'); await player.waitFor(); assert.equal(await player.getAttribute('preload'), 'none'); assert.equal(await player.getAttribute('autoplay'), null); assert.equal(await player.getAttribute('src'), '/api/studio/media/60?download=1'); await gallery.getByText('현재 버전에는 연결된 완성 결과가 없습니다. 이전 파일로 대신 표시하지 않습니다.', { exact: true }).waitFor();
       await noOverflow(page); await gallery.screenshot({ path: `${output}/${width}-saved-video-poster.png` }); assert.deepEqual(errors, []); assert.deepEqual(external, []);
-      results.push({ width, engine, result: 'pass', channelStaysInAssets: true, contextRestored: true, exactOldRevisionGet: true, guardedExplicitRestoreOnly: true, sourceHistoryReadOnly: true, videoPosterOnly: true, writes: fixtureState.writes, screenshots: [`${output}/${width}-selected-current.png`, `${output}/${width}-saved-video-poster.png`] });
-    } catch (error) { await page.screenshot({ path: `${output}/${width}-failure.png`, fullPage: true }); await writeFile(`${output}/${width}-failure.html`, await page.content()); results.push({ width, engine, result: 'fail', error: error.message, errors, external, requests, writes: fixtureState.writes, queries: fixtureState.queries }); throw error; }
-    finally { await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)); await context.close(); }
+      results.push({ width, engine, result: 'pass', channelStaysInAssets: true, contextRestored: true, exactOldRevisionGet: true, guardedExplicitRestoreOnly: true, sourceHistoryReadOnly: true, videoPosterOnly: true, writes: fixtureState.writes, diagnostics, screenshots: [`${output}/${width}-selected-current.png`, `${output}/${width}-saved-video-poster.png`] });
+    } catch (error) { await page.screenshot({ path: `${output}/${width}-failure.png`, fullPage: true }); await writeFile(`${output}/${width}-failure.html`, await page.content()); results.push({ width, engine, result: 'fail', error: error.message, errors, external, requests, writes: fixtureState.writes, queries: fixtureState.queries, diagnostics }); throw error; }
+    finally {
+      mark('closing browser context');
+      await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)); await context.close();
+      server.httpServer.off('request', observePreviewRequest);
+      const result = results.at(-1), httpErrors = diagnostics.filter(event => event.kind === 'http-error' || event.kind === 'preview-http-response' && event.status >= 400);
+      if (result?.result === 'pass') {
+        result.videoHttpFixture = { synthetic: true, bytes: 1580, sha256: syntheticMp4Sha256, rangeContractVerified: true, nativeRequests: diagnostics.filter(event => event.kind === 'preview-http-request' && event.url === `${origin}${videoFixturePath}`), nativeResponses: diagnostics.filter(event => event.kind === 'preview-http-response' && event.url === `${origin}${videoFixturePath}`) };
+        if (httpErrors.length || errors.length || external.length) {
+          result.result = 'fail'; result.error = 'Unexpected HTTP, console or external error including context close'; result.errors = errors; result.external = external; result.httpErrors = httpErrors;
+          await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));
+          assert.deepEqual({ httpErrors, errors, external }, { httpErrors: [], errors: [], external: [] });
+        }
+      }
+      await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));
+    }
   }
   console.log(JSON.stringify(results));
 } finally { await browser?.close(); await server.httpServer.close(); }
