@@ -26,6 +26,13 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/spacepenguin_test
     steps:
       - uses: actions/checkout@v4
+      - name: Archive tracked source for authenticated workspace recovery
+        run: git archive --format=tar.gz --output="${{ runner.temp }}/verification-source.tar.gz" HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verification-source
+          path: ${{ runner.temp }}/verification-source.tar.gz
+          retention-days: 1
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
