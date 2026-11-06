@@ -56,11 +56,13 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   const pending=jobs.data?.items.find(j=>['queued','running'].includes(j.status)),unresolved=jobs.data?.items.find(j=>j.status==='result_unknown');
   const focused=jobs.data?.items.find(j=>j.id===focusedJobId),currentOutput=jobs.data?.items.find(j=>j.status==='ready'&&j.outputRevisionId===revisionId);
   const current=focused&&!(focused.status==='ready'&&focused.outputRevisionId!==revisionId&&currentOutput)?focused:pending??jobs.data?.items.find(j=>j.status==='needs_review'&&j.sourceVersion===version&&j.sourceRevisionId===revisionId)??currentOutput??jobs.data?.items[0];
-  const [confirmed,setConfirmed]=useState(false),[loaded,setLoaded]=useState<number[]>([]),[failedImages,setFailedImages]=useState<number[]>([]),[imageAttempt,setImageAttempt]=useState(0);
+  const [confirmed,setConfirmed]=useState(false),[loadedKeys,setLoadedKeys]=useState<string[]>([]),[failedKeys,setFailedKeys]=useState<string[]>([]),[imageAttempt,setImageAttempt]=useState(0);
   const changed=useRef(new Set<string>()),busy=useRef(false);
   const requestKey=`canva-request:${channelId}:${itemId}`;
   const [lostRequest,setLostRequest]=useState<RequestBody|null>(()=>readCanvaRequest(requestKey));
-  useEffect(()=>{setConfirmed(false);setLoaded([]);setFailedImages([]);setImageAttempt(0);},[current?.id,current?.outputRevisionId]);
+  // Adopting an output revision changes comparison consent, not the identity
+  // of the JPEGs that the browser has already loaded.
+  useEffect(()=>{setConfirmed(false);},[current?.id,current?.outputRevisionId]);
   useEffect(()=>{setConfirmed(false);},[version,revisionId]);
   useEffect(()=>{
     if(!current||!['ready','needs_review','superseded'].includes(current.status))return;
@@ -96,6 +98,24 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   },onSuccess:()=>{void qc.invalidateQueries({queryKey:key});void qc.invalidateQueries({queryKey:['ch',channelId,'item',itemId]});},onError:()=>{void qc.invalidateQueries({queryKey:key});}});
   const pages=Array.isArray(current?.result?.pages)?current!.result!.pages as Array<{id:number;title:string;sha256:string}>:[];
   const originals=Array.isArray(current?.result?.originals)?current!.result!.originals as Array<{id:number;page:number}>:[];
+  const imageUrl=(page:{id:number})=>`/api/channels/${channelId}/media/${page.id}${imageAttempt?`?previewRetry=${imageAttempt}`:''}`;
+  const imageKey=(page:{id:number;sha256:string})=>JSON.stringify([imageUrl(page),page.sha256]);
+  const imageKeys=pages.map(imageKey),imageSet=JSON.stringify(imageKeys),currentImageKeys=useRef(new Set<string>());
+  currentImageKeys.current=new Set(imageKeys);
+  const loaded=imageKeys.filter(key=>loadedKeys.includes(key)),failedImages=imageKeys.filter(key=>failedKeys.includes(key));
+  useEffect(()=>{
+    setConfirmed(false);
+    // Preserve genuine load evidence for unchanged assets in a partial output.
+    // Removed assets and prior retry URLs cannot contribute to the new count.
+    setLoadedKeys(old=>{const kept=old.filter(key=>currentImageKeys.current.has(key));return kept.length===old.length?old:kept;});
+    setFailedKeys(old=>{const kept=old.filter(key=>currentImageKeys.current.has(key));return kept.length===old.length?old:kept;});
+  },[imageSet]);
+  const imageResult=(key:string,ok:boolean)=>{
+    if(!currentImageKeys.current.has(key))return;
+    if(!ok)setConfirmed(false);
+    setLoadedKeys(old=>!currentImageKeys.current.has(key)?old:ok?old.includes(key)?old:[...old,key]:old.filter(value=>value!==key));
+    setFailedKeys(old=>!currentImageKeys.current.has(key)?old:ok?old.filter(value=>value!==key):old.includes(key)?old:[...old,key]);
+  };
   const automaticDrawing=pending||start.isPending||action.isPending;
   const drawing=automaticDrawing||manualBlocking;
   const nativeReady=library.isSuccess&&library.data.enabled&&library.data.connected&&library.data.autofill&&library.data.syncStatus!=='needs_reconnect'&&selectedLibrary?.status==='ready'&&selectedLibrary.canCreate&&selectedLibrary.previewStatus==='ready'&&selectedLibrary.updatedAt!==null;
@@ -146,9 +166,9 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
       {manualOutput&&<p className="notice">직접 편집한 Canva 사본에서 가져온 8장입니다. 자동 채우기나 문구 동기화 결과가 아니므로 현재 저장본과 모든 문구를 대조해 주세요.</p>}
       {current?.result?.reconciled===true&&<p className="notice warn">결과 미확정 작업에 기존 디자인을 연결해 가져온 8장입니다. 제목·템플릿 필드가 같아도 원고 일치를 자동으로 보장하지 않으므로 현재 저장본과 모든 문구를 대조해 주세요.</p>}
       {current?.result?.reuseReason==='caption_only'&&<p className="notice">카드 내용은 같고 캡션만 바뀌어, 기존 8장 이미지와 원본 PNG를 그대로 재사용했습니다. Canva에 다시 생성·내보내기를 요청하지 않았습니다.</p>}
-      <div className="canva-export-grid">{pages.map((page,i)=><figure key={`${page.id}:${imageAttempt}`}><a href={`/api/channels/${channelId}/media/${page.id}`} target="_blank" rel="noopener noreferrer"><img src={`/api/channels/${channelId}/media/${page.id}${imageAttempt?`?previewRetry=${imageAttempt}`:''}`} alt={`${i+1}장 ${page.title}`} onLoad={()=>{setLoaded(old=>old.includes(page.id)?old:[...old,page.id]);setFailedImages(old=>old.filter(id=>id!==page.id));}} onError={()=>{setLoaded(old=>old.filter(id=>id!==page.id));setConfirmed(false);setFailedImages(old=>old.includes(page.id)?old:[...old,page.id]);}}/></a><figcaption>{i+1} / 8{originals[i]&&<> · <a href={`/api/channels/${channelId}/media/${originals[i].id}?download=1`}>원본 PNG</a></>}</figcaption></figure>)}</div>
+      <div className="canva-export-grid">{pages.map((page,i)=>{const identity=imageKey(page);return <figure key={identity}><a href={`/api/channels/${channelId}/media/${page.id}`} target="_blank" rel="noopener noreferrer"><img src={imageUrl(page)} alt={`${i+1}장 ${page.title}`} onLoad={()=>imageResult(identity,true)} onError={()=>imageResult(identity,false)}/></a><figcaption>{i+1} / 8{originals[i]&&<> · <a href={`/api/channels/${channelId}/media/${originals[i].id}?download=1`}>원본 PNG</a></>}</figcaption></figure>;})}</div>
       <p className="small muted" role="status">이미지 {loaded.length} / 8장 불러옴</p>
-      {failedImages.length>0&&<div className="notice warn"><p>{failedImages.length}장의 이미지를 불러오지 못했습니다. 모두 표시된 뒤 문구 대조를 완료해 주세요.</p><button className="btn sm" onClick={()=>{setLoaded([]);setFailedImages([]);setConfirmed(false);setImageAttempt(value=>value+1);}}>이미지 다시 불러오기</button></div>}
+      {failedImages.length>0&&<div className="notice warn"><p>{failedImages.length}장의 이미지를 불러오지 못했습니다. 모두 표시된 뒤 문구 대조를 완료해 주세요.</p><button className="btn sm" onClick={()=>{setLoadedKeys([]);setFailedKeys([]);setConfirmed(false);setImageAttempt(value=>value+1);}}>이미지 다시 불러오기</button></div>}
       <p className="small muted">Canva에서 내보낸 원본 PNG를 보관합니다. 게시 미리보기와 전송은 같은 게시용 JPEG 8장을 사용합니다.</p>
       {current?.status==='needs_review'&&<div className="notice stack"><strong>Canva에서 바꾼 문구를 대조해 주세요.</strong><p>Canva 편집 내용은 자동으로 원고에 동기화되지 않습니다. 글을 바꿨다면 스튜디오의 해당 칸도 수정·저장한 뒤 다시 가져와 주세요.</p>{!reviewMatchesCurrent&&<p className="notice warn">가져온 뒤 원고 버전이 바뀌었습니다. 최신 디자인 가져오기로 다시 대조해 주세요.</p>}<label className="check"><input type="checkbox" checked={confirmed} disabled={loaded.length!==8||disabled||action.isPending||!reviewMatchesCurrent} onChange={e=>setConfirmed(e.target.checked)}/><span>8장의 모든 문구가 현재 스튜디오 원고와 같은지 확인했습니다.</span></label><button className="btn primary" disabled={!confirmed||loaded.length!==8||disabled||action.isPending||!reviewMatchesCurrent} onClick={()=>action.mutate({name:'accept',id:current.id})}>확인한 8장을 새 버전으로 저장</button><p className="small muted">저장 후 검토·승인을 다시 진행합니다.</p></div>}
     </div></details>}
