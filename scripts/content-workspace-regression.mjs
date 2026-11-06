@@ -179,10 +179,10 @@ const nav = (page, name) => page.getByRole("navigation", { name: "현재 콘텐�
 const mutations = state => state.writes.filter(write => !write.path.endsWith("/preview"));
 const pageApiLifecycles = new WeakMap();
 function createApiLifecycle(diagnostics) {
-  const requests = new Map(), producers = new Map(), waiters = new Set(); let sequence = 0;
+  const requests = new Map(), producers = new Map(), waiters = new Set(); let sequence = 0, generation = 0, editor = null;
   const describe = request => ({ id: ++sequence, method: request.method(), path: new URL(request.url()).pathname });
   const snapshot = () => ({ requests: [...requests.values()], producers: [...producers.values()] });
-  const changed = () => { for (const notify of [...waiters]) notify(); };
+  const changed = () => { generation++; for (const notify of [...waiters]) notify(); };
   return {
     startRequest(request) { const detail = describe(request); requests.set(request, detail); diagnostics.push({ kind: "api-request-start", at: Date.now(), ...detail }); changed(); },
     finishRequest(request, error = null) {
@@ -191,6 +191,8 @@ function createApiLifecycle(diagnostics) {
     },
     startProducer(request) { const detail = requests.get(request) ?? describe(request); producers.set(request, detail); diagnostics.push({ kind: "api-producer-start", at: Date.now(), ...detail }); changed(); },
     finishProducer(request) { const detail = producers.get(request); if (!detail) return; producers.delete(request); diagnostics.push({ kind: "api-producer-finished", at: Date.now(), ...detail }); changed(); },
+    editorChanged(detail) { editor = detail; diagnostics.push({ kind: "workspace-editor-activity", at: Date.now(), ...detail }); changed(); },
+    generation: () => generation,
     snapshot,
     empty: () => requests.size === 0 && producers.size === 0,
     waitForEmpty(timeout) {
@@ -201,7 +203,23 @@ function createApiLifecycle(diagnostics) {
         waiters.add(finish); finish();
       });
     },
-    recordBoundary(label) { diagnostics.push({ kind: "api-document-boundary-settled", at: Date.now(), label, ...snapshot() }); },
+    waitForQuiet(deadline, quietMs = 500) {
+      return new Promise((resolve, reject) => {
+        let quietTimer, done = false;
+        const finish = error => { if (done) return; done = true; clearTimeout(deadlineTimer); clearTimeout(quietTimer); waiters.delete(activity); if (error) reject(error); else resolve({ generation, editor }); };
+        const activity = () => {
+          if (done) return;
+          clearTimeout(quietTimer);
+          if (requests.size || producers.size) return;
+          // A fresh interval starts after each actual API or scoped editor event.
+          // The existing 450ms preview debounce can start work after an old idle latch.
+          quietTimer = setTimeout(() => { if (!requests.size && !producers.size) finish(); }, quietMs);
+        };
+        const deadlineTimer = setTimeout(() => finish(new Error(`Workspace did not remain ready before its document replacement: ${JSON.stringify(snapshot())}`)), Math.max(0, deadline - Date.now()));
+        waiters.add(activity); activity();
+      });
+    },
+    recordBoundary(label, detail = {}) { diagnostics.push({ kind: "api-document-boundary-settled", at: Date.now(), label, ...snapshot(), ...detail }); },
   };
 }
 const settlementRemaining = (deadline, label) => { const value = deadline - Date.now(); assert(value > 0, `${label}: local API settlement deadline`); return value; };
@@ -211,8 +229,16 @@ async function settleLocalApiRequests(page, label, deadline = Date.now() + 20_00
   // Observe the real follow-up transport and fixture producer completion.
   await page.waitForLoadState("networkidle", { timeout: settlementRemaining(deadline, label) });
   await lifecycle.waitForEmpty(settlementRemaining(deadline, label));
-  assert(lifecycle.empty(), `${label}: no local API transport or fixture producer may cross this document replacement`);
-  lifecycle.recordBoundary(label);
+  for (;;) {
+    settlementRemaining(deadline, label);
+    const before = await page.evaluate(() => window.__workspaceEditorActivity), quiet = await lifecycle.waitForQuiet(deadline);
+    const current = await page.evaluate(() => window.__workspaceEditorActivity);
+    if (!lifecycle.empty() || lifecycle.generation() !== quiet.generation || !before || !current || before.documentId !== current.documentId || before.generation !== current.generation) continue;
+    settlementRemaining(deadline, label);
+    assert(lifecycle.empty(), `${label}: no local API transport or fixture producer may cross this document replacement`);
+    lifecycle.recordBoundary(label, { freshQuietMs: 500, activityGeneration: quiet.generation, editorBefore: before, editor: current, readiness: "local API and producer quiet; current workspace DOM checked by caller" });
+    return;
+  }
 }
 async function settleWorkspaceDocument(page, label) {
   const deadline = Date.now() + 20_000;
@@ -225,9 +251,37 @@ async function settleWorkspaceDocument(page, label) {
   }, undefined, { timeout: settlementRemaining(deadline, label) });
   await previewReady(page, deadline);
   const lifecycle = pageApiLifecycles.get(page);
-  await lifecycle.waitForEmpty(settlementRemaining(deadline, label));
-  assert(lifecycle.empty(), `${label}: the current preview and visible refresh must leave no API work behind`);
-  lifecycle.recordBoundary(`${label}: current preview and refresh`);
+  for (;;) {
+    settlementRemaining(deadline, label);
+    const before = await page.evaluate(() => window.__workspaceEditorActivity);
+    const quiet = await lifecycle.waitForQuiet(deadline);
+    // Re-read the current DOM, rather than retaining a previous image or an idle
+    // event. A changed predicate restarts settlement, never a user interaction.
+    await page.waitForFunction(() => {
+      const refresh = document.querySelector("#delivery-panel > .row > button"), image = document.querySelector('.card-copy-editor .card-copy-preview:not(.is-stale)[aria-busy="false"] img');
+      return refresh instanceof HTMLButtonElement && !refresh.disabled && refresh.textContent === "상태 새로고침" && image instanceof HTMLImageElement && image.complete && image.naturalWidth >= 200 && image.naturalHeight >= 250;
+    }, undefined, { timeout: settlementRemaining(deadline, label) });
+    const current = await page.evaluate(() => window.__workspaceEditorActivity);
+    if (!lifecycle.empty() || lifecycle.generation() !== quiet.generation || !before || !current || current.documentId !== before.documentId || current.generation !== before.generation) continue;
+    settlementRemaining(deadline, label);
+    assert(lifecycle.empty(), `${label}: the current preview and visible refresh must leave no API work behind`);
+    lifecycle.recordBoundary(`${label}: current preview and refresh`, { freshQuietMs: 500, activityGeneration: quiet.generation, editorBefore: before, editor: current });
+    return;
+  }
+}
+async function settleListContextClose(page) {
+  const deadline = Date.now() + 20_000, label = "close final publication list context", lifecycle = pageApiLifecycles.get(page);
+  assert.equal(new URL(page.url()).pathname, "/publish", "the successful scenario closes on its verified publication list");
+  for (;;) {
+    await page.getByText("2 / 3 페이지 · 총 90건", { exact: true }).waitFor({ timeout: settlementRemaining(deadline, label) });
+    const before = await page.evaluate(() => window.__workspaceEditorActivity), quiet = await lifecycle.waitForQuiet(deadline);
+    await page.getByText("2 / 3 페이지 · 총 90건", { exact: true }).waitFor({ timeout: settlementRemaining(deadline, label) });
+    const current = await page.evaluate(() => window.__workspaceEditorActivity);
+    if (!lifecycle.empty() || lifecycle.generation() !== quiet.generation || !before || !current || before.documentId !== current.documentId || before.generation !== current.generation) continue;
+    settlementRemaining(deadline, label);
+    lifecycle.recordBoundary(label, { freshQuietMs: 500, activityGeneration: quiet.generation, editorBefore: before, editor: current, readiness: "verified publication list; editor absent" });
+    return;
+  }
 }
 async function waitValue(page, suffix, value) {
   await page.waitForFunction(({ suffix, value }) => document.querySelector(`.card-copy-editor textarea[id$="-${suffix}"]`)?.value === value, { suffix, value });
@@ -239,11 +293,11 @@ async function ready(page) {
 }
 async function previewReady(page, deadline) {
   const options = () => deadline === undefined ? {} : { timeout: settlementRemaining(deadline, "current workspace preview") };
-  await page.locator('.card-copy-preview:not(.is-stale)[aria-busy="false"] img').waitFor(options());
+  await page.locator('.card-copy-editor .card-copy-preview:not(.is-stale)[aria-busy="false"] img').waitFor(options());
   // Sample the current DOM: React may revoke an older blob while replacing it.
   // A retained decode() promise can reject even when the latest image is ready.
   await page.waitForFunction(() => {
-    const image = document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img');
+    const image = document.querySelector('.card-copy-editor .card-copy-preview:not(.is-stale)[aria-busy="false"] img');
     return image instanceof HTMLImageElement && image.complete && image.naturalWidth >= 200 && image.naturalHeight >= 250;
   }, undefined, options());
 }
@@ -386,8 +440,32 @@ try {
     let page = await context.newPage();
     const fixtureData = fixture(), { state } = fixtureData;
     const errors = [], blocked = [], diagnostics = [];
-    const trackPage = current => {
+    let scenarioError = null;
+    const trackPage = async current => {
       const lifecycle = createApiLifecycle(diagnostics); pageApiLifecycles.set(current, lifecycle);
+      await current.exposeBinding("__workspaceEditorChanged", (_source, detail) => lifecycle.editorChanged(detail));
+      await current.addInitScript(() => {
+        const state = { documentId: crypto.randomUUID(), generation: 0 }; window.__workspaceEditorActivity = state;
+        const changed = type => {
+          state.generation++;
+          // This observation bridge can be cancelled by closing its document;
+          // production pageerror/API/external failures remain fatal below.
+          void window.__workspaceEditorChanged({ ...state, type }).catch(() => {});
+        };
+        const preview = element => element instanceof Element && !!element.closest(".card-copy-preview")?.closest(".card-copy-editor");
+        const editorTree = node => node instanceof Element && (node.matches(".card-copy-editor") || !!node.querySelector(".card-copy-editor"));
+        const previewTree = node => node instanceof Element && (node.matches(".card-copy-preview") || !!node.querySelector(".card-copy-preview"));
+        const affectsPreview = record => {
+          if (preview(record.target)) return true;
+          if (record.type !== "childList") return false;
+          const nodes = [...record.addedNodes, ...record.removedNodes];
+          return nodes.some(editorTree) || record.target instanceof Element && !!record.target.closest(".card-copy-editor") && nodes.some(previewTree);
+        };
+        new MutationObserver(records => {
+          if (records.some(affectsPreview)) changed("preview-mutation");
+        }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "aria-busy", "src"] });
+        for (const type of ["load", "error"]) document.addEventListener(type, event => { if (event.target instanceof HTMLImageElement && preview(event.target)) changed(`preview-${type}`); }, true);
+      });
       const localApi = request => { const url = new URL(request.url()); return url.origin === origin && url.pathname.startsWith("/api/"); };
       current.on("request", request => { if (localApi(request)) lifecycle.startRequest(request); });
       current.on("requestfinished", request => { if (localApi(request)) lifecycle.finishRequest(request); });
@@ -399,7 +477,7 @@ try {
       current.on("framenavigated", frame => { if (frame === current.mainFrame()) diagnostics.push({ kind: "navigation", at: Date.now(), url: frame.url() }); });
       current.on("close", () => diagnostics.push({ kind: "page-close", at: Date.now() }));
     };
-    trackPage(page);
+    await trackPage(page);
     await context.route("**/*", async route => {
       const url = new URL(route.request().url());
       if (url.origin !== origin) { blocked.push(url.href); return route.abort("blockedbyclient"); }
@@ -498,7 +576,7 @@ try {
       assert.equal(state.saved.copy.pages[1].title, secondTitle);
       await settleWorkspaceDocument(page, "close page with recovered manuscript draft");
       await page.close({ runBeforeUnload: false });
-      page = await context.newPage(); trackPage(page);
+      page = await context.newPage(); await trackPage(page);
       await page.goto(`${origin}/studio/25`); await ready(page);
       await page.getByRole("button", { name: "복구본을 편집기에 불러오기", exact: true }).click();
       await page.getByRole("button", { name: /^2번째 본문 문구 편집/ }).click();
@@ -552,7 +630,7 @@ try {
       await writeFile(`${outputDir}/recovery-before-${width}.json`, JSON.stringify(recoveryBeforeClose, null, 2));
       await settleWorkspaceDocument(page, "close page with recovered publication draft");
       await page.close({ runBeforeUnload: false });
-      page = await context.newPage(); trackPage(page);
+      page = await context.newPage(); await trackPage(page);
       await page.goto(`${origin}/items/3/9790`); await ready(page);
       const recoveryAfterOpen = await page.evaluate(() => ({ storage: Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("spacepenguin.draft-recovery"))), notices: [...document.querySelectorAll(".draft-recovery")].map(node => node.textContent), drawerOpen: document.querySelector("#publish-options")?.open }));
       await writeFile(`${outputDir}/recovery-after-${width}.json`, JSON.stringify(recoveryAfterOpen, null, 2));
@@ -617,14 +695,29 @@ try {
       assert.equal(state.writes.filter(write => /\/cancel$/.test(write.path)).length, 1);
       assert.equal(state.saved.copy.pages[0].body, firstBody); assert.equal(state.saved.copy.pages[1].body, secondBody);
       await verifyListReturnContext(page, width, state);
+      await settleListContextClose(page);
       assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
       results.push({ engine, width, result: "passed", savedPages: 2, aiRecovery: true, publicationModes: ["now", "later"], cancelAndConfirmedRetry: true, captionPersistence: true, deviceRecovery: true, publicationOptionsPersistence: true, historyGuard: true, channelPreservation: true, actionHitTests: true, listReturnContext: true, selectionPaddingHitTests: true, documentReplacementsSettled: true, diagnostics });
-      console.log(`${engine} ${width}px: canonical workspace, two-page save/reload, unsaved navigation, AI recovery, now/later and cancel/retry passed`);
     } catch (error) {
+      scenarioError = error;
       console.error(JSON.stringify({ width, errors, blocked, diagnostics, writes: mutations(state), url: page.url() }));
-      await page.screenshot({ path: `${outputDir}/failure-${width}.png`, fullPage: true });
+      if (!page.isClosed()) await page.screenshot({ path: `${outputDir}/failure-${width}.png`, fullPage: true }).catch(captureError => diagnostics.push({ kind: "failure-capture-error", message: captureError.message }));
       throw error;
-    } finally { await context.close(); }
+    } finally {
+      if (scenarioError) {
+        // Preserve the already-fatal scenario error if its cleanup also fails.
+        await context.close().catch(closeError => diagnostics.push({ kind: "context-close-error-during-failure", message: closeError.message }));
+      } else {
+        await context.close();
+        if (errors.length || blocked.length) {
+          Object.assign(results.at(-1), { result: "failed", error: "Unexpected errors including context close", errors, blocked });
+          await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
+        }
+        assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
+        results.at(-1).contextCloseErrorsChecked = true;
+        console.log(`${engine} ${width}px: canonical workspace, two-page save/reload, unsaved navigation, AI recovery, now/later and cancel/retry passed`);
+      }
+    }
   }
   await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
 } finally {

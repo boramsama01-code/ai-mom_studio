@@ -96,27 +96,106 @@ async function hit(page, locator, width) {
   const r = await locator.boundingBox(); assert(r && r.width >= 48 && (width > 900 || r.height >= 48), 'primary action must have a 48px mobile hit area');
   assert(await locator.evaluate(node => { const r = node.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!hit && (hit === node || node.contains(hit)); }), 'primary action must be reachable');
 }
-async function previewReady(page) {
+const settlementRemaining = deadline => {
+  const remaining = deadline - Date.now();
+  assert(remaining > 0, 'manual editor images and local API completion must settle within 20 seconds');
+  return remaining;
+};
+function createApiLifecycle(diagnostics, stage) {
+  const requests = new Map(), producers = new Map(), waiters = new Set();
+  let sequence = 0, generation = 0;
+  const snapshot = () => ({ requests: [...requests.values()], producers: [...producers.values()] });
+  const changed = () => { generation++; for (const notify of [...waiters]) notify(); };
+  const describe = request => ({ id: ++sequence, stage: stage(), method: request.method(), path: new URL(request.url()).pathname });
+  const empty = () => requests.size === 0 && producers.size === 0;
+  return {
+    snapshot, empty, get generation() { return generation; },
+    domChanged: changed,
+    startRequest(request) { const detail = describe(request); requests.set(request, detail); diagnostics.push({ kind: 'api-transport-start', at: Date.now(), ...detail }); changed(); },
+    finishRequest(request, error = null) {
+      const detail = requests.get(request); if (!detail) return;
+      requests.delete(request); diagnostics.push({ kind: 'api-transport-finished', ...detail, finishedAt: Date.now(), finishedStage: stage(), error }); changed();
+    },
+    startProducer(request) { const detail = requests.get(request) ?? describe(request); producers.set(request, detail); diagnostics.push({ kind: 'api-producer-start', at: Date.now(), ...detail }); changed(); },
+    finishProducer(request) { const detail = producers.get(request); if (!detail) return; producers.delete(request); diagnostics.push({ kind: 'api-producer-finished', ...detail, finishedAt: Date.now(), finishedStage: stage() }); changed(); },
+    waitForEmpty(deadline) {
+      if (empty()) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const finish = () => { if (!empty()) return; clearTimeout(timer); waiters.delete(finish); resolve(); };
+        const timer = setTimeout(() => { waiters.delete(finish); reject(new Error('Local API work remains before manual document replacement: ' + JSON.stringify(snapshot()))); }, settlementRemaining(deadline));
+        waiters.add(finish); finish();
+      });
+    },
+    waitForQuiet(deadline) {
+      // A fresh window catches the editor's450ms preview effect even when an
+      // earlier networkidle was latched. API/producer/DOM events interrupt it.
+      return new Promise((resolve, reject) => {
+        const remaining = settlementRemaining(deadline);
+        const finish = quiet => { clearTimeout(timer); waiters.delete(interrupted); resolve(quiet); };
+        const interrupted = () => finish(false);
+        const timer = setTimeout(() => {
+          if (remaining < 500) { waiters.delete(interrupted); reject(new Error('Manual editor did not remain quiet within the shared20-second deadline')); }
+          else finish(true);
+        }, Math.min(500, remaining));
+        waiters.add(interrupted);
+      });
+    },
+  };
+}
+async function currentManualImagesReady() {
+  const editors = [...document.querySelectorAll('.card-copy-editor')];
+  if (editors.length !== 1 || !editors[0].matches('.family-dialogue-editor')) return false;
+  const editor = editors[0], figure = editor.querySelector('.card-copy-preview'), image = figure?.querySelector('img');
+  const buttons = [...editor.querySelectorAll('.family-page-strip > button')];
+  const thumbs = buttons.map(button => button.querySelector('.family-page-thumb img:not(.is-stale)'));
+  const current = () => editor.isConnected && figure?.isConnected && figure.matches(':not(.is-stale)[aria-busy="false"]')
+    && figure.querySelector('img') === image && image?.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
+  const thumbnailsCurrent = () => {
+    const actual = [...editor.querySelectorAll('.family-page-strip > button')];
+    return buttons.length === 8 && actual.length === 8 && thumbs.every((thumb, index) => actual[index] === buttons[index]
+      && thumb?.isConnected && buttons[index].querySelector('.family-page-thumb img:not(.is-stale)') === thumb
+      && thumb.complete && thumb.naturalWidth === 1080 && thumb.naturalHeight === 1350);
+  };
+  if (!current() || !thumbnailsCurrent()) return false;
+  const source = image.currentSrc || image.src;
+  try { await image.decode(); } catch { return false; }
+  return document.querySelector('.card-copy-editor') === editor && current() && thumbnailsCurrent() && (image.currentSrc || image.src) === source;
+}
+async function previewReady(page, deadline) {
   await page.waitForFunction(async () => {
     const image = document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img');
     if (!image?.complete || image.naturalWidth !== 1080 || image.naturalHeight !== 1350) return false;
     const src = image.src;
     try { await image.decode(); } catch { return false; }
     return document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img') === image && image.src === src;
-  });
+  }, undefined, deadline === undefined ? {} : { timeout: settlementRemaining(deadline) });
 }
-async function settleEditorPreviews(page, state) {
-  await previewReady(page);
+async function settleEditorPreviews(page, state, lifecycle) {
+  const deadline = Date.now() + 20_000;
+  await previewReady(page, deadline);
   await page.waitForFunction(() => {
     const images = [...document.querySelectorAll('.family-page-thumb img')];
     return images.length === 8 && images.every(image => !image.classList.contains('is-stale') && image.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350);
-  });
-  const deadline = Date.now() + 20_000;
-  while (state.pendingPreviews) {
-    assert(Date.now() < deadline, 'controlled save/reload must drain preview producers');
-    await page.waitForTimeout(25);
+  }, undefined, { timeout: settlementRemaining(deadline) });
+  await page.waitForLoadState('networkidle', { timeout: settlementRemaining(deadline) });
+  while (true) {
+    await lifecycle.api.waitForEmpty(deadline);
+    await page.waitForFunction(currentManualImagesReady, undefined, { timeout: settlementRemaining(deadline) });
+    if (!lifecycle.api.empty() || !await lifecycle.api.waitForQuiet(deadline)) continue;
+    const generation = lifecycle.api.generation;
+    await page.waitForFunction(currentManualImagesReady, undefined, { timeout: settlementRemaining(deadline) });
+    if (!lifecycle.api.empty() || generation !== lifecycle.api.generation) continue;
+    const dom = await page.evaluate(() => {
+      const editor = document.querySelector('.family-dialogue-editor'), figure = editor?.querySelector('.card-copy-preview');
+      return { editorCount: document.querySelectorAll('.card-copy-editor').length, stale: figure?.classList.contains('is-stale'), busy: figure?.getAttribute('aria-busy'), currentThumbnails: editor?.querySelectorAll('.family-page-thumb img:not(.is-stale)').length };
+    });
+    await page.waitForFunction(currentManualImagesReady, undefined, { timeout: settlementRemaining(deadline) });
+    if (!lifecycle.api.empty() || generation !== lifecycle.api.generation) continue;
+    settlementRemaining(deadline);
+    assert.equal(state.pendingPreviews, 0, 'controlled save/reload must drain preview producers');
+    lifecycle.boundaries.push({ stage: lifecycle.stage, at: Date.now(), quietWindowMs: 500, ...lifecycle.api.snapshot(), dom });
+    return;
   }
-  await previewReady(page);
 }
 async function assertCanonicalManualMode(page) {
   const workMode = page.locator('.content-workspace > .work-mode');
@@ -133,10 +212,35 @@ try {
   for (const width of widths) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 768, hasTouch: width < 768, locale: 'ko-KR', timezoneId: 'Asia/Seoul', serviceWorkers: 'block', reducedMotion: 'reduce' });
     await context.addInitScript(() => localStorage.setItem('spacepenguin.channel', '3')); context.setDefaultTimeout(20_000);
-    const page = await context.newPage(), { state, route } = fixture(), errors = [], external = [];
+    const page = await context.newPage(), { state, route } = fixture(), errors = [], external = [], diagnostics = [], requestFailures = [];
+    let stage = 'manual authoring', contextClosed = false, scenarioError = null;
+    const lifecycle = { api: createApiLifecycle(diagnostics, () => stage), boundaries: [], get stage() { return stage; }, mark(value) { stage = value; diagnostics.push({ kind: 'stage', stage, at: Date.now() }); } };
+    await page.exposeBinding('__manualEditorReadinessChanged', () => lifecycle.api.domChanged());
+    await page.addInitScript(() => {
+      const withinEditor = node => node instanceof Element && (node.matches('.card-copy-editor') || !!node.closest('.card-copy-editor') || !!node.querySelector('.card-copy-editor'));
+      // Only invalidate the harness quiet window; do not intercept product errors.
+      const changed = () => { void window.__manualEditorReadinessChanged().catch(() => {}); };
+      new MutationObserver(records => {
+        if (records.some(record => withinEditor(record.target) || [...record.addedNodes, ...record.removedNodes].some(withinEditor))) changed();
+      }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'src', 'aria-busy'] });
+      for (const event of ['load', 'error']) document.addEventListener(event, value => {
+        if (value.target instanceof HTMLImageElement && value.target.closest('.card-copy-editor')) changed();
+      }, { capture: true, passive: true });
+    });
+    page.on('request', request => { const url = new URL(request.url()); if (url.origin === origin && url.pathname.startsWith('/api/')) lifecycle.api.startRequest(request); });
+    page.on('requestfinished', request => lifecycle.api.finishRequest(request));
+    page.on('requestfailed', request => { const error = request.failure()?.errorText ?? 'unknown'; lifecycle.api.finishRequest(request, error); requestFailures.push({ stage, at: Date.now(), method: request.method(), path: new URL(request.url()).pathname, error }); });
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
-    await context.route('**/*', async request => { const url = new URL(request.request().url()); if (url.origin !== origin) { external.push(url.href); return request.abort('blockedbyclient'); } if (!url.pathname.startsWith('/api/')) return request.continue(); try { if (await route(request, url) !== false) return; errors.push(`Unmocked API ${url.pathname}`); await request.fulfill({ status: 404, json: { error: 'Isolated fixture' } }); } catch (error) { errors.push(`${url.pathname}: ${error.message}`); await request.fulfill({ status: 500, json: { error: error.message } }); } });
+    await context.route('**/*', async request => {
+      const url = new URL(request.request().url());
+      if (url.origin !== origin) { external.push(url.href); return request.abort('blockedbyclient'); }
+      if (!url.pathname.startsWith('/api/')) return request.continue();
+      const producer = request.request(); lifecycle.api.startProducer(producer);
+      try { if (await route(request, url) !== false) return; errors.push(`Unmocked API ${url.pathname}`); await request.fulfill({ status: 404, json: { error: 'Isolated fixture' } }); }
+      catch (error) { errors.push(`${url.pathname}: ${error.message}`); await request.fulfill({ status: 500, json: { error: error.message } }); }
+      finally { lifecycle.api.finishProducer(producer); }
+    });
     try {
       await page.goto(`${origin}/?start=free&channel=news&mode=manual`);
       const start = page.getByRole('button', { name: 'AI 없이 8장 원고 직접 작성', exact: true }); await start.waitFor(); await assertStudioStartLayout(page); await hit(page, start, width); await start.click();
@@ -173,30 +277,35 @@ try {
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'manual form must fit the viewport');
       await page.screenshot({ path: `${output}/provided-form-${width}.png` }); await save.click();
       await page.waitForURL('**/studio/88?mode=manual'); await page.getByRole('region', { name: '가족 대화 8장 카드 편집기' }).waitFor();
-      await assertCanonicalManualMode(page); await settleEditorPreviews(page, state);
+      await assertCanonicalManualMode(page); lifecycle.mark('created manual editor'); await settleEditorPreviews(page, state, lifecycle);
       assert.equal(await page.locator('.family-page-strip button').count(), 8); await page.getByRole('form', { name: 'Canva 사본 8장 가져오기' }).waitFor();
       const copySave = page.getByRole('button', { name: '문구·디자인 저장', exact: true }); await hit(page, copySave, width); await copySave.click();
       await page.locator('.card-copy-savebar [role="status"]').filter({ hasText: '변경 내용이 없어 이미 저장된 버전 2을 유지했습니다.' }).waitFor();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'no-op save feedback must fit the viewport');
       assert.equal(state.writes.filter(write => write.pathname === `${itemPath}/card-copy`).length, 0, 'unchanged save gives explicit feedback without another write');
-      await page.getByRole('button', { name: '7페이지 · 작은 활동', exact: true }).click(); await settleEditorPreviews(page, state);
+      await page.getByRole('button', { name: '7페이지 · 작은 활동', exact: true }).click(); lifecycle.mark('activity selected'); await settleEditorPreviews(page, state, lifecycle);
       const activityText = `${example.copy.pages[6].fields.homeActivity.action} 조건을 바꾼 뒤 생각을 한 번 더 나눕니다.`;
       await page.getByLabel('집에서 할 일', { exact: false }).fill(activityText); await previewReady(page);
       const drainDeadline = Date.now() + 20_000;
-      while (state.pendingPreviews) { assert(Date.now() < drainDeadline, 'activity preview must settle before the explicit save'); await page.waitForTimeout(25); }
+      lifecycle.mark('activity edited before save'); await settleEditorPreviews(page, state, lifecycle);
+      assert(Date.now() < drainDeadline, 'activity preview must settle before the explicit save');
       await hit(page, copySave, width); await copySave.click();
       await page.locator('.card-copy-savebar [role="status"]').filter({ hasText: '문구·디자인 저장 완료 · 버전 3' }).waitFor();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'save confirmation and controls must fit the viewport');
       assert.equal(state.saved.copy.pages[6].fields.homeActivity.action, activityText); assert.equal(state.saved.version, 3); assert.equal(state.saved.revisionId, 100);
-      await settleEditorPreviews(page, state); await page.screenshot({ path: `${output}/manual-save-${width}.png` });
-      await page.reload(); await page.getByRole('region', { name: '가족 대화 8장 카드 편집기' }).waitFor(); await assertCanonicalManualMode(page); await settleEditorPreviews(page, state);
-      await page.getByRole('button', { name: '7페이지 · 작은 활동', exact: true }).click(); await settleEditorPreviews(page, state);
+      lifecycle.mark('saved activity'); await settleEditorPreviews(page, state, lifecycle); await page.screenshot({ path: `${output}/manual-save-${width}.png` });
+      lifecycle.mark('before controlled reload'); await settleEditorPreviews(page, state, lifecycle);
+      await page.reload(); await page.getByRole('region', { name: '가족 대화 8장 카드 편집기' }).waitFor(); await assertCanonicalManualMode(page); lifecycle.mark('reopened manual editor'); await settleEditorPreviews(page, state, lifecycle);
+      await page.getByRole('button', { name: '7페이지 · 작은 활동', exact: true }).click(); lifecycle.mark('reopened activity selected'); await settleEditorPreviews(page, state, lifecycle);
       assert.equal(await page.getByLabel('집에서 할 일', { exact: false }).inputValue(), activityText, 'saved activity must reopen from the server receipt');
       assert.deepEqual(state.saved.generationRuns, []); assert.equal(state.payload.manualAuthoring.independentlyVerified, false); assert(state.evidence.facts.every(fact => fact.sourceScope === 'provided_document' && fact.verificationStatus === 'article_only'));
       assert.deepEqual(state.writes.filter(value => !value.pathname.endsWith('/preview')).map(value => value.pathname), ['/api/channels/3/items/manual-family', `${itemPath}/card-copy`]);
       assert.deepEqual(errors, []); assert.deepEqual(external, []); await page.screenshot({ path: `${output}/manual-editor-${width}.png` });
-      results.push({ width, engine, passed: true, example: 'exact preserved Canva template text, supplied example, not verified news', input: width === 1280 ? 'manuscript file plus explicit comparison' : 'ordinary eight-page fields plus source/excerpts', sourceScope: 'provided_document', newContentRequests: 1, manualSaveRequests: 1, noOpSaveFeedback: true, savedActivityReopened: true, aiCalls: 0, publicationRequests: 0, realRenderer: true, canonicalManualMode: true, automaticActionsHidden: true }); await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)); console.log(`Manual family regression passed at ${width}px (${engine}).`);
-    } catch (error) { results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, external }); await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)); await page.screenshot({ path: `${output}/failure-${width}.png`, fullPage: true }).catch(() => {}); throw error; }
-    finally { await context.close(); }
+      lifecycle.mark('before intentional context close'); await settleEditorPreviews(page, state, lifecycle);
+      await context.close(); contextClosed = true;
+      assert.deepEqual(errors, []); assert.deepEqual(external, []);
+      results.push({ width, engine, passed: true, example: 'exact preserved Canva template text, supplied example, not verified news', input: width === 1280 ? 'manuscript file plus explicit comparison' : 'ordinary eight-page fields plus source/excerpts', sourceScope: 'provided_document', newContentRequests: 1, manualSaveRequests: 1, noOpSaveFeedback: true, savedActivityReopened: true, aiCalls: 0, publicationRequests: 0, realRenderer: true, canonicalManualMode: true, automaticActionsHidden: true, boundaries: lifecycle.boundaries, requestFailures, diagnostics }); await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)); console.log(`Manual family regression passed at ${width}px (${engine}).`);
+    } catch (error) { scenarioError = error; results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, external, boundaries: lifecycle.boundaries, requestFailures, diagnostics }); await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)); if (!page.isClosed()) await page.screenshot({ path: `${output}/failure-${width}.png`, fullPage: true }).catch(() => {}); throw error; }
+    finally { if (!contextClosed) { try { await context.close(); } catch (closeError) { if (!scenarioError) throw closeError; } } }
   }
 } finally { await browser?.close(); await server.httpServer.close(); }
