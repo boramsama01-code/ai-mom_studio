@@ -1,5 +1,5 @@
 # 수집 워커 — 한 번 실행 후 종료
-# 예약: 매일 KST 05:13 / 07:13 / 19:13. 첫 아침 수집과 아침 재확인. GitHub 예약 실행은 지연될 수 있습니다.
+# 예약: 매일 KST 08:00에 하루 한 번(UTC 23:00). GitHub 예약 실행은 지연될 수 있습니다.
 # 실제 수집 여부는 앱 화면 '오늘의 작업'의 [자동 수집] 스위치(또는 Variables의 AUTO_COLLECT=true)로 정합니다.
 # 스위치가 꺼져 있으면 DB만 확인하고 바로 끝납니다. Secrets(APP_DATABASE_URL 등)가 없으면 아무것도 하지 않고 끝납니다.
 name: collect
@@ -15,7 +15,7 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: "13 10,20,22 * * *"
+    - cron: "0 23 * * *"
 permissions:
   contents: read
 concurrency:
