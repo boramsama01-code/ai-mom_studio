@@ -1,3 +1,4 @@
+import { creativeProfileSchema } from "./creativeProfile";
 import { z } from "zod";
 import { RESERVED_CHANNEL_KEYS } from "./channelKeys";
 import { UNCLASSIFIED } from "./channelCategories";
@@ -29,5 +30,6 @@ export const channelCreateSchema = z.object({
   accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).default("#51635A"),
   categories: channelCategoriesSchema.default([]),
   aiSettings: channelAiSettingsSchema.nullable().optional(),
+  creativeProfile: creativeProfileSchema.nullable().optional(),
 }).strict();
 export type ChannelCreateInput = z.input<typeof channelCreateSchema>;

@@ -16,6 +16,11 @@ import { TOKENS } from "../../shared/tokens";
 import { fitCardBody } from "./cardBodyFit";
 import type { CardCopyColumn, CardCopyResource, CardPageBackground, NewsEditorialRole } from "../../shared/cardCopy";
 
+// Keep image memory predictable on the existing 512 MiB service. Inputs and
+// finished images are stored separately; libvips need not retain prior work.
+sharp.cache(false);
+sharp.concurrency(1);
+
 export const CARD_W = 1080;
 export const CARD_H = 1350;
 const PAD = 84;

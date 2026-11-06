@@ -73,7 +73,7 @@ export function ChannelProvider({ children }: { children: ReactNode }) {
         } catch {
           /* 저장 불가 환경 무시 */
         }
-        if (!["/", "/inbox", "/publish", "/today", "/runs", "/rules", "/design"].includes(path)) navigate("/");
+        if (!["/", "/inbox", "/publish", "/today", "/runs", "/rules", "/design", "/assets"].includes(path)) navigate("/");
       };
       guard.confirmLeave(applySelection);
     },

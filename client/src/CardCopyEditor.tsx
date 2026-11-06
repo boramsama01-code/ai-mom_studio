@@ -1,4 +1,5 @@
 import { CoverCropPreview } from "./CoverCropPreview";
+import { ManualFamilyInitializer } from "./ManualFamilyInitializer";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProviders";
@@ -93,6 +94,7 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   const [base, setBase] = useState<CardCopyResponse | null>(null), baseRef = useRef<CardCopyResponse | null>(null);
   const [copy, setCopy] = useState<CardCopy | null>(null), copyRef = useRef<CardCopy | null>(null);
   const [selected, setSelected] = useState(0);
+  const [manualConversion, setManualConversion] = useState(false);
   const [saving, setSaving] = useState(false), [rendering, setRendering] = useState(false), [generating, setGenerating] = useState(false);
   const [backgroundBusy, setBackgroundBusy] = useState(false);
   const [saveError, setSaveError] = useState<Error | null>(null), [aiError, setAiError] = useState<Error | null>(null);
@@ -323,6 +325,10 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   return <section className="card-copy-editor stack" aria-labelledby={`${uid}-heading`}>
     <div className="card-copy-heading"><div><h3 id={`${uid}-heading`}>문구·미리보기</h3><p className="small muted">카드를 선택해서 글을 고치세요. 게시물 캡션과 별도로 저장합니다.</p></div><span className={`badge ${dirty ? "warn" : "ok"}`} role="status">{saving ? "문구 저장 중…" : dirty ? "저장하지 않은 수정" : base.hasSavedCopy ? "문구 저장됨" : "원고에서 가져온 문구"}</span></div>
     <RecoveryNotice recovery={recovery} formatValue={value => value ? copyText(value) : ""} />
+    {(base.recommendedStoryFormat === "family_dialogue_8" || pendingFamilyTemplate || copy.storyFormat === "discussion8") && <details className="content-options" open={manualConversion}>
+      <summary>AI 없이 8장 원고 직접 작성·전환</summary>
+      {manualConversion ? <ManualFamilyInitializer channelId={channelId} channelName={qc.getQueryData<Array<{id:number;name:string}>>(["channels"])?.find(value => value.id === channelId)?.name ?? "채널 이름"} initialTitle={copy.cover.title} templateKey={templateKey ?? copy.templateKey} existing={{itemId,version:base.version}} onBack={() => setManualConversion(false)} onSaved={() => { setManualConversion(false); void loaded.refetch(); }} /> : <div className="stack"><p className="small">제공 자료와 8장 문구를 직접 대조해 새 버전으로 전환합니다. 현재 원고와 이전 버전은 보존하며 AI는 호출하지 않습니다.</p><button type="button" className="btn" disabled={locked || dirty || !!conflicting} onClick={() => setManualConversion(true)}>제공 자료로 8장 직접 작성 시작</button>{dirty&&<p className="hint">지금 입력한 문구를 먼저 저장한 뒤 새 구성을 작성해 주세요.</p>}</div>}
+    </details>}
     {base.recoveryNotice && <p className="notice warn small" role="status">{base.recoveryNotice} 문구를 저장하기 전까지 기존 저장 내용은 바뀌지 않습니다.</p>}
     {pendingFamilyTemplate && <div className="notice small stack" role="status"><strong>{pendingFamilyTemplate.label} · 8장 전환 준비</strong><p>선택한 풀세트는 새 8장 편집 형식을 사용합니다. 지금 입력한 원고와 이미지는 유지하며, 아래에서 새 제안을 확인하고 적용하면 선택한 디자인으로 전환됩니다. 디자인 선택만으로 AI를 호출하지 않습니다.</p>{!showAi && <p>자동 작업으로 바꾼 뒤 8장 제안을 요청할 수 있습니다. 현재 원고는 계속 직접 수정하고 저장할 수 있어요.</p>}</div>}
     {showAi && (pendingFamilyTemplate || base.recommendedStoryFormat || copy.storyFormat === "discussion8") && <div className="card-copy-story-action"><div><strong>{base.hasSavedCopy ? "새 8장 편집기로 전환 제안" : "기사 한 편으로 8장 대화 만들기"}</strong><p className="hint">현재 입력을 먼저 저장하고 새 8장 구성을 제안합니다. 기존 원고는 새 제안을 확인하고 저장하기 전까지 유지됩니다. 요약·문구·이미지 등 채널에 설정한 AI의 API 요금과 한도가 적용됩니다.</p></div><button className="btn primary" disabled={locked || invalid || !!conflicting} onClick={() => void generateFamily()}>{familyApplying ? "새 버전 저장 중…" : generating ? "원문에서 새 구성 제안 중…" : base.hasSavedCopy ? "새 8장 형식 자동 제안" : "8장 카드뉴스 자동 만들기"}</button></div>}

@@ -79,6 +79,31 @@ function reconciled(source: CanvaJobDto, body: any, status: string = 'needs_revi
 }
 
 describe("Canva editorial request and import UI", () => {
+  it("keeps the manuscript unchanged after external return, clipboard denial and an import failure", async () => {
+    jobs = [job(11, "ready")];
+    const savedCopy = structuredClone(props.copy), clipboard = vi.fn().mockRejectedValue(new Error("Permission denied"));
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: clipboard } });
+    await render(); await click("편집 링크 복사");
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Canva 편집 주소"]')?.value).toBe("https://www.canva.com/design/design_11/edit");
+    const link = host.querySelector<HTMLAnchorElement>('.external-design-context a')!;
+    await act(async () => { const event = new MouseEvent("click", { bubbles: true, cancelable: true }); link.addEventListener("click", e => e.preventDefault(), { once: true }); link.dispatchEvent(event); window.dispatchEvent(new Event("focus")); });
+    expect(host.textContent).toContain("변경 사항은 자동으로 반영되지 않습니다");
+    expect(writes()).toHaveLength(0);
+    enqueue = async () => { throw new ApiError(404, "Canva 디자인이 삭제되었거나 접근할 수 없습니다.", { code: "not_found" }); };
+    await click("최신 디자인 가져오기");
+    expect(host.textContent).toContain("Canva 디자인이 삭제되었거나 접근할 수 없습니다.");
+    expect(props.copy).toEqual(savedCopy); expect(jobs[0].outputAssetId).toBe(1100);
+    expect(writes()).toHaveLength(1);
+  });
+  it("blocks external editing until the current manuscript is saved", async () => {
+    jobs = [job(11, "ready")]; await render({ disabled: true });
+    const link = host.querySelector<HTMLAnchorElement>('.external-design-context a')!;
+    expect(link.getAttribute("aria-disabled")).toBe("true");
+    expect(link.hasAttribute("href")).toBe(false);
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    await act(async () => { link.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(true); expect(sessionStorage.getItem("spacepenguin.canva-away:design_11")).toBeNull(); expect(writes()).toHaveLength(0);
+  });
   it("creates from a synchronized folder design while preserving the local authoring template and saved copy", async () => {
     masters = []; library.items = [canvaLibraryItemFixture()];
     const savedCopy = structuredClone(props.copy);
@@ -273,6 +298,59 @@ describe("Canva editorial request and import UI", () => {
     expect(confirmation().disabled).toBe(true); expect(host.textContent).toContain("1장의 이미지를 불러오지 못했습니다");
     await click("이미지 다시 불러오기"); expect(host.textContent).toContain("이미지 0 / 8장"); expect(host.querySelector(".canva-export-grid img")?.getAttribute("src")).toContain("previewRetry=1");
     await loadImages(); expect(confirmation().disabled).toBe(false); expect(writes()).toHaveLength(0);
+  });
+  it("keeps the same eight genuinely loaded images after accepting their new output revision",async()=>{
+    jobs=[job(41,"needs_review")];await render();await loadImages();
+    const images=[...host.querySelectorAll('.canva-export-grid img')];
+    await act(async()=>confirmation().click());await settle();
+    action=async()=>{jobs=jobs.map(value=>({...value,status:'ready',outputRevisionId:32}));return {ok:true};};
+    await click('확인한 8장을 새 버전으로 저장');await render({version:4,revisionId:32});
+    expect(host.textContent).toContain('이미지 8 / 8장 불러옴');
+    expect([...host.querySelectorAll('.canva-export-grid img')].every((image,index)=>image===images[index])).toBe(true);
+    const accepted=jobs[0];jobs=[job(42,'needs_review',{sourceVersion:4,sourceRevisionId:32,outputAssetId:accepted.outputAssetId,result:accepted.result})];
+    await act(async()=>{await client.invalidateQueries({queryKey:['canva-jobs',3,28]});});await settle();
+    expect(host.textContent).toContain('이미지 8 / 8장 불러옴');expect(confirmation().checked).toBe(false);expect(button('확인한 8장을 새 버전으로 저장').disabled).toBe(true);
+  });
+  it("preserves the seven unchanged loaded assets and waits for the one replacement without accepting late old events",async()=>{
+    jobs=[job(43,'needs_review')];await render();await loadImages();const previous=jobs[0],images=[...host.querySelectorAll('.canva-export-grid img')];
+    await act(async()=>confirmation().click());await settle();
+    const replacement=job(44,'needs_review');replacement.result={...replacement.result,pages:[...(previous.result!.pages as any[]).slice(0,7),(replacement.result!.pages as any[])[7]]};replacement.outputAssetId=previous.outputAssetId;jobs=[replacement];
+    await act(async()=>{await client.invalidateQueries({queryKey:['canva-jobs',3,28]});});await settle();
+    expect(host.textContent).toContain('이미지 7 / 8장 불러옴');expect(confirmation().checked).toBe(false);expect(confirmation().disabled).toBe(true);
+    const current=[...host.querySelectorAll('.canva-export-grid img')];expect(current.slice(0,7).every((image,index)=>image===images[index])).toBe(true);expect(current[7]).not.toBe(images[7]);
+    await act(async()=>images[7].dispatchEvent(new Event('load')));await settle();expect(host.textContent).toContain('이미지 7 / 8장 불러옴');
+    await act(async()=>current[7].dispatchEvent(new Event('load')));await settle();expect(host.textContent).toContain('이미지 8 / 8장 불러옴');expect(confirmation().disabled).toBe(false);
+    await act(async()=>confirmation().click());await settle();await act(async()=>images[7].dispatchEvent(new Event('error')));await settle();
+    expect(confirmation().checked).toBe(true);expect(host.textContent).toContain('이미지 8 / 8장 불러옴');expect(host.textContent).not.toContain('장의 이미지를 불러오지 못했습니다');
+  });
+  it("requires actual new image loads when all eight assets change",async()=>{
+    jobs=[job(45,'needs_review')];await render();await loadImages();const previous=[...host.querySelectorAll('.canva-export-grid img')];
+    await act(async()=>confirmation().click());await settle();jobs=[job(46,'needs_review')];await act(async()=>{await client.invalidateQueries({queryKey:['canva-jobs',3,28]});});await settle();
+    expect(host.textContent).toContain('이미지 0 / 8장 불러옴');expect(confirmation().checked).toBe(false);expect(confirmation().disabled).toBe(true);
+    await act(async()=>previous.forEach(image=>image.dispatchEvent(new Event('load'))));await settle();expect(host.textContent).toContain('이미지 0 / 8장 불러옴');
+    await loadImages(7);expect(host.textContent).toContain('이미지 7 / 8장 불러옴');expect(confirmation().disabled).toBe(true);await loadImages();expect(host.textContent).toContain('이미지 8 / 8장 불러옴');
+  });
+  it("retains loaded pixels when their order changes but resets the text comparison",async()=>{
+    jobs=[job(47,'needs_review')];await render();await loadImages();await act(async()=>confirmation().click());await settle();
+    const prior=jobs[0],pages=[...(prior.result!.pages as any[])].reverse();jobs=[{...prior,outputAssetId:pages[0].id,result:{...prior.result,pages}}];
+    await act(async()=>{await client.invalidateQueries({queryKey:['canva-jobs',3,28]});});await settle();
+    expect(host.textContent).toContain('이미지 8 / 8장 불러옴');expect(confirmation().checked).toBe(false);expect(button('확인한 8장을 새 버전으로 저장').disabled).toBe(true);
+  });
+  it("requires a new load when an asset digest changes even if its media ID stays the same",async()=>{
+    jobs=[job(48,'needs_review')];await render();await loadImages();const prior=jobs[0],previous=[...host.querySelectorAll('.canva-export-grid img')];
+    jobs=[{...prior,result:{...prior.result,pages:(prior.result!.pages as any[]).map((page,index)=>index===7?{...page,sha256:'f'.repeat(64)}:page)}}];
+    await act(async()=>{await client.invalidateQueries({queryKey:['canva-jobs',3,28]});});await settle();
+    expect(host.textContent).toContain('이미지 7 / 8장 불러옴');expect(host.querySelectorAll('.canva-export-grid img')[7]).not.toBe(previous[7]);
+    await act(async()=>previous[7].dispatchEvent(new Event('load')));await settle();expect(host.textContent).toContain('이미지 7 / 8장 불러옴');await loadImages();expect(host.textContent).toContain('이미지 8 / 8장 불러옴');
+  });
+  it("does not reuse loaded evidence across channel media URLs even with a prewarmed job and the same component",async()=>{
+    jobs=[job(49,'needs_review')];
+    const originalApi=mocks.api.getMockImplementation()!;mocks.api.mockImplementation((path:string,options?:any)=>originalApi(path.replace('/channels/4/','/channels/3/'),options));
+    const show=async()=>{await act(async()=>root.render(<QueryClientProvider client={client}><CanvaEditorial {...props}/></QueryClientProvider>));await settle();};
+    await show();await loadImages();await act(async()=>confirmation().click());await settle();const previous=[...host.querySelectorAll('.canva-export-grid img')];
+    client.setQueryData(['canva-jobs',4,28],{items:structuredClone(jobs)});props={...props,channelId:4};await show();
+    expect(host.textContent).toContain('이미지 0 / 8장 불러옴');expect(confirmation().checked).toBe(false);expect(confirmation().disabled).toBe(true);expect(host.querySelector('.canva-export-grid img')?.getAttribute('src')).toContain('/channels/4/media/');
+    await act(async()=>previous.forEach(image=>image.dispatchEvent(new Event('load'))));await settle();expect(host.textContent).toContain('이미지 0 / 8장 불러옴');await loadImages();expect(host.textContent).toContain('이미지 8 / 8장 불러옴');
   });
   it("invalidates import confirmation if the saved source revision changes", async () => {
     jobs = [job(27, "needs_review")]; await render(); await loadImages(); await act(async () => confirmation().click());

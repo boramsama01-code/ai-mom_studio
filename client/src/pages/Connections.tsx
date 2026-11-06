@@ -47,8 +47,12 @@ export function SecretInput({ k, label, hint, placeholder, options, secret, stat
             </select>
           ) : <input
             id={`sec-${k}`}
+            name={`integration-setting-${k.toLowerCase()}`}
             type={(secret ?? status?.secret) ? "password" : "text"}
-            autoComplete="off"
+            autoComplete={(secret ?? status?.secret) ? "new-password" : "off"}
+            autoCapitalize="off"
+            autoCorrect="off"
+            data-1p-ignore="true"
             spellCheck={false}
             style={{ flex: "1 1 220px", width: "auto" }}
             placeholder={has && status?.secret ? "저장됨 — 바꾸려면 새 값을 붙여 넣으세요" : placeholder ?? (status?.value ? "" : "값을 붙여 넣으세요")}
@@ -142,7 +146,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
   const input = (f: SecretField) => <SecretInput key={f.key} k={f.key} label={f.key === "OPENAI_API_KEY" ? "API 키 · Secret key" : f.label} hint={f.key === "OPENAI_API_KEY" ? "발급 시 표시된 Secret key 전체를 붙여 넣으세요. Tracking ID나 가려진 값(•••)은 사용할 수 없습니다." : f.hint} placeholder={f.placeholder} options={f.options} secret={f.secret} status={st(f.key)} value={vals[f.key] ?? ""} onChange={(v) => { save.reset(); setVals(prev => ({ ...prev, [f.key]: v })); }} />;
   const modelFields = g.fields.filter(f => f.key.endsWith("_MODEL"));
   return (
-    <form id={`connection-${g.id}`} tabIndex={-1} className="panel stack" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+    <form id={`connection-${g.id}`} autoComplete="off" tabIndex={-1} className="panel stack" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
       <div className="row between">
         <h2 style={{ margin: 0 }}>{info?.title ?? g.title} 키 설정</h2>
         {g.docs && (

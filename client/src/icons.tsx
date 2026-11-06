@@ -1,6 +1,8 @@
 import type { CSSProperties } from "react";
 
 const paths = {
+  alert: "M12 3 2 21h20L12 3z M12 9v5 M12 17h.01",
+  video: "M3 5h12v14H3z M15 10l6-4v12l-6-4",
   lock: "M5 10h14v11H5z M8 10V6a4 4 0 0 1 8 0v4 M12 14v3",
   trash: "M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7",
   undo: "M9 4 4 9l5 5 M4 9h10a6 6 0 0 1 0 12h-3",

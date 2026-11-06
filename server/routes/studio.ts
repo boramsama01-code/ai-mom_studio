@@ -30,11 +30,20 @@ import { instagramOAuthRoutes } from "./instagramOAuth";
 import { studioPublicationDraftSaveSchema } from "../../shared/publicationDraft";
 import { getStudioPublicationDraft, saveStudioPublicationDraft } from "../services/publicationDraft";
 
+import { registeredProfileAsset } from "../../shared/characterVariantAssets";
+import { readRegisteredCharacterAsset } from "../services/characterVariantAssets";
+
 export const studioRoutes = Router();
 studioRoutes.use("/studio", (_req, res, next) => { res.set("Cache-Control", "no-store"); next(); });
 studioRoutes.use(zipImportRoutes);
 studioRoutes.use(instagramOAuthRoutes);
 // Mounted behind the same operator-session middleware as all studio routes.
+studioRoutes.get("/studio/brand-assets/:asset", ah(async (req, res) => {
+  const asset = registeredProfileAsset(req.params.asset);
+  if (!asset) throw new HttpError(404, "등록된 로고 자산을 찾을 수 없습니다.");
+  const bytes = readRegisteredCharacterAsset(asset);
+  res.type("image/png").set("X-Content-Type-Options", "nosniff").set("Cache-Control", "private, max-age=300").send(bytes);
+}));
 studioRoutes.get("/studio/characters", (_req, res) => { res.json({ characters: STUDIO_CHARACTERS, poseCount: 100 }); });
 studioRoutes.get("/studio/characters/reference", ah(async (req, res) => {
   const version = parse(z.literal(FINAL_POSE_VERSION).optional(), req.query.version);
@@ -69,8 +78,8 @@ studioRoutes.get("/studio/cards", ah(async (req, res) => {
   res.json({ trashCount: total.count, cards: await studioCardsWithOutput(db, cards), ...await loadStudioNotes(db), ai: studioAiStatus() });
 }));
 studioRoutes.post("/studio/cards", ah(async (req, res) => {
-  const { sourceItemId, ...content } = parse(studioCreateSchema, req.body);
-  res.status(201).json(await createStudioCard(getDb(), content, actorOf(req), sourceItemId));
+  const { sourceItemId, requestId, ...content } = parse(studioCreateSchema, req.body);
+  res.status(201).json(await createStudioCard(getDb(), content, actorOf(req), sourceItemId, requestId));
 }));
 studioRoutes.post("/studio/export-check", ah(async (req, res) => {
   res.json(checkStudioExport(parse(studioContentSchema, req.body)));

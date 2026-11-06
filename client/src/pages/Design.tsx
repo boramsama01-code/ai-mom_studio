@@ -119,27 +119,27 @@ export function TemplatePicker({ cid, value, onChange, items, version, studioCha
   );
 }
 
-export function DesignPage() {
+export function DesignPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { current, selected } = useChannel();
   if (selected === "all" || !current)
     return (
       <>
-        <h1>수집 카드 디자인</h1>
+        {!embedded && <h1>수집 카드 디자인</h1>}
         <RegisteredCardDesigns />
         <CanvaTemplateLibrary />
-        <Empty>수집함에서 만드는 카드의 디자인입니다. 오른쪽 위 ‘보기 채널’에서 설정할 채널을 선택해 주세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>
+        {embedded ? <p className="small muted">표지와 세트 원본을 비교해 보세요. 수집 자료에 사용할 기본 카드는 ‘보기 채널’을 선택해 설정할 수 있습니다. 작업별 디자인은 콘텐츠 편집기에서 고릅니다.</p> : <Empty>수집함에서 만드는 카드의 디자인입니다. 오른쪽 위 ‘보기 채널’에서 설정할 채널을 선택해 주세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>}
       </>
     );
   return (
     <>
-      <div className="page-head">
+      {!embedded && <div className="page-head">
         <div>
           <h1>수집 카드 디자인</h1>
           <p className="small muted" style={{ margin: 0 }}>
             수집함 → 콘텐츠 초안 → 발행함의 카드에 적용됩니다. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.
           </p>
         </div>
-      </div>
+      </div>}
       <RegisteredCardDesigns />
       <CanvaTemplateLibrary />
       <DefaultTemplate cid={current.id} accent={current.accentColor} />

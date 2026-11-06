@@ -180,7 +180,7 @@ describe('explicit native Canva generation from a folder',()=>{
     version=124;await sync();await previewTick();await previewTick();await previewTick();
     await expect(checkedCanvaLibrarySelection(getDb(),sourceId,123)).rejects.toMatchObject({extra:{code:'library_source_changed'}});
     const next=await enqueueCanvaRender(getDb(),{channelId:2,itemId:second.item.id,version:second.item.version,requestId:randomUUID(),libraryDesignId:sourceId,expectedLibraryUpdatedAt:124,actor:'test'});
-    expect(next.masterId).not.toBe(old.masterId);const [prior]=await getDb().select().from(canvaMasters).where(eq(canvaMasters.id,old.masterId));expect(prior.sourceUpdatedAt).toBe('123');
+    expect(next.masterId).not.toBe(old.masterId);expect(old.masterId).not.toBeNull();const [prior]=await getDb().select().from(canvaMasters).where(eq(canvaMasters.id,old.masterId!));expect(prior.sourceUpdatedAt).toBe('123');
     expect((await jobTick(old.id)).status).toBe('failed');expect(api.autofill).not.toHaveBeenCalled();
   });
   it('retains the folder snapshot through unknown-result manual recovery without another Autofill',async()=>{

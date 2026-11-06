@@ -14,14 +14,16 @@
 .global-channel-select { display:flex; align-items:center; gap:10px; color:#637371; font-size:12px; font-weight:600; }
 .global-channel-wrap { min-width:0; display:flex; flex-direction:column; align-items:flex-end; gap:4px; }
 .global-channel-label { white-space:nowrap; }
-.global-channel-control { position:relative; display:flex; align-items:center; min-width:194px; max-width:280px; }
+.global-channel-control { position:relative; display:flex; align-items:center; min-width:194px; max-width:280px; overflow:clip; border-radius:11px; }
+.global-channel-control:focus-within { outline:2px solid #17665b; outline-offset:3px; }
 .global-channel-control select {
-  width:100%; margin:0; min-height:44px; padding:10px 35px 10px 32px;
+  width:100%; min-width:0; max-width:100%; margin:0; min-height:44px; padding:10px 35px 10px 32px;
   appearance:none; -webkit-appearance:none; border:1px solid #dce7e3; border-radius:11px;
   background:#f8fbf9; color:#244c47; font-size:13px; font-weight:650; cursor:pointer;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .global-channel-control select:hover { background:#f0f7f3; border-color:#bdd6ca; }
-.global-channel-control select:focus-visible { outline:3px solid #92c8bc; outline-offset:3px; }
+.global-channel-control select:focus-visible { outline:none; }
 .global-channel-control select:focus { border-color:#68a99a; box-shadow:0 0 0 3px #24766f12; }
 .global-channel-control select:disabled { cursor:wait; opacity:.7; }
 .global-channel-dot { position:absolute; left:13px; width:7px; height:7px; border-radius:50%; background:var(--scope-accent); pointer-events:none; z-index:1; }

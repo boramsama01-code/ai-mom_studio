@@ -6,7 +6,7 @@ import {readingProfileForTemplateKey,readingImageSlot,type ReadingTextBox,type R
 import {isRegisteredProfileAssetId,selectedFamilyEnding} from '../../shared/characterVariantAssets';
 import {registeredProfileDataUrl,renderRegisteredFamilyEnding} from './characterVariantAssets';
 import {CardOverflowError,loadFonts,wrapText} from './card';
-import {prepareReadingArtwork} from './readingCardImages';
+import {prepareReadingArtwork,readingArtworkInput} from './readingCardImages';
 import {loadReadingFont,wrapReadingText} from './readingCardFonts';
 import {rasterizeReadingSvg} from './readingCardRaster';
 import {HIGHSCOOP_PROFILE_ASSET_ID} from '../../shared/highscoopOutro';
@@ -191,12 +191,13 @@ export async function renderReadingCard(copy:CardCopyV2,page:FamilyPage,design:P
   if(ending)return renderRegisteredFamilyEnding(ending.id);
   const profile=readingProfileForTemplateKey(copy.templateKey)!;
   const slot=readingImageSlot(profile,page.id);
-  const makeSvg=async()=>{
-    const bytes=slot?.kind==='artwork'?await prepareReadingArtwork(image,design,slot,profile.pages[page.page-1].background):null;
-    return layoutReadingCard(copy,page,context,{imageDataUrl:bytes?`data:image/png;base64,${bytes.toString('base64')}`:undefined,imageCredit,profileDataUrl:page.id==='outro'?approvedReadingProfileLogo(copy):undefined}).svg;
+  const artwork=slot?.kind==='artwork'?readingArtworkInput(image,design,slot,profile.pages[page.page-1].background):undefined;
+  const makeSvg=async(preparedDataUrl?:string)=>{
+    const bytes=!preparedDataUrl&&artwork?await prepareReadingArtwork(image,design,slot!,artwork.background):null;
+    return layoutReadingCard(copy,page,context,{imageDataUrl:preparedDataUrl??(bytes?`data:image/png;base64,${bytes.toString('base64')}`:undefined),imageCredit,profileDataUrl:page.id==='outro'?approvedReadingProfileLogo(copy):undefined}).svg;
   };
   // Admit the complete page before decoding an image or constructing paths.
-  if(profile.sourceStyleId)return rasterizeReadingSvg(makeSvg);
+  if(profile.sourceStyleId)return rasterizeReadingSvg(makeSvg,artwork);
   const svg=await makeSvg();
   return sharp(new Resvg(svg,{font:{loadSystemFonts:false}}).render().asPng()).flatten({background:'#ffffff'}).toColorspace('srgb').removeAlpha().jpeg({quality:92,chromaSubsampling:'4:4:4'}).toBuffer();
 }

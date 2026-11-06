@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiBlob, setCsrf } from "../client/src/api";
+import { apiBlob, apiUpload, setCsrf } from "../client/src/api";
 
 afterEach(() => { vi.unstubAllGlobals(); setCsrf(null); });
 describe("Studio PNG download", () => {
@@ -23,6 +23,24 @@ describe("Studio PNG download", () => {
     await expect(apiBlob("/studio/cards/1/export.png", "image/png")).rejects.toThrow("네트워크");
     expect(fetch).toHaveBeenCalledOnce();
   });
+  it("keeps an interrupted response body recoverable without retrying the request", async () => {
+    const blob = vi.fn().mockRejectedValue(new TypeError("synthetic body connection lost"));
+    const fetch = vi.fn().mockResolvedValue({ ok: true, headers: new Headers({ "content-type": "image/png" }), blob });
+    vi.stubGlobal("fetch", fetch);
+    await expect(apiBlob("/studio/cards/1/export.png", "image/png")).rejects.toMatchObject({ status: 0, body: { code: "download_interrupted" } });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it("rejects a late blob after cancellation while its body was being read", async () => {
+    const controller = new AbortController(); let release!: (blob: Blob) => void, started!: () => void;
+    const reading = new Promise<void>(resolve => { started = resolve; });
+    const body = new Promise<Blob>(resolve => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, headers: new Headers({ "content-type": "image/png" }), blob: () => { started(); return body; } }));
+    const accept = vi.fn(), request = apiBlob("/studio/cards/1/export.png", "image/png", { signal: controller.signal }).then(accept);
+    await reading;
+    const rejected = expect(request).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort(); release(new Blob(["stale-image"], { type: "image/png" })); await rejected;
+    expect(accept).not.toHaveBeenCalled();
+  });
   it("sends editable preview JSON with CSRF protection and abort support", async () => {
     const fetch = vi.fn().mockResolvedValue(new Response("JPEG", { headers: { "content-type": "image/jpeg" } }));
     vi.stubGlobal("fetch", fetch); setCsrf("preview-fixture-csrf");
@@ -31,4 +49,11 @@ describe("Studio PNG download", () => {
     expect(await (await apiBlob("/channels/1/items/9/card-copy/preview", "image/jpeg", { method: "POST", body, signal: controller.signal })).text()).toBe("JPEG");
     expect(fetch).toHaveBeenCalledWith("/api/channels/1/items/9/card-copy/preview", expect.objectContaining({ method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", "x-csrf-token": "preview-fixture-csrf" }, body: JSON.stringify(body), signal: controller.signal }));
   });
+});
+
+it("marks an interrupted accepted upload result unknown and never repeats it", async () => {
+  const fetcher = vi.fn(async () => ({ ok: true, status: 201, headers: new Headers({ "content-type": "application/json" }), json: async () => { throw new TypeError("upload response body lost"); } }));
+  vi.stubGlobal("fetch", fetcher);
+  await expect(apiUpload("/studio/cards/1/media", new File(["photo"], "photo.jpg", { type: "image/jpeg" }))).rejects.toMatchObject({ status: 0, body: { code: "upload_result_unknown", resultUnknown: true } });
+  expect(fetcher).toHaveBeenCalledOnce();
 });

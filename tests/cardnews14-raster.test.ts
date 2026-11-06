@@ -1,8 +1,10 @@
 import type { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {defaultPageDesigns} from '../shared/familyDialogue';
 
 type RasterWorker = EventEmitter & {
   terminate: ReturnType<typeof vi.fn<() => Promise<number>>>;
+  postMessage: ReturnType<typeof vi.fn>;
   svg: string;
 };
 const control = vi.hoisted(() => ({ workers: [] as RasterWorker[], constructorError: null as Error | null }));
@@ -10,6 +12,7 @@ vi.mock('node:worker_threads', async () => {
   const { EventEmitter } = await import('node:events');
   return { Worker: class extends EventEmitter {
     terminate = vi.fn<() => Promise<number>>().mockResolvedValue(0);
+    postMessage = vi.fn();
     svg: string;
     constructor(_url: URL, options: { workerData: { svg: string } }) {
       super();
@@ -67,6 +70,25 @@ afterEach(() => {
 });
 
 describe('bounded reading-card preparation and raster worker lifecycle', () => {
+  it('keeps artwork and SVG in one admission and returns only after its native owner terminates',async()=>{
+    const makeSvg=vi.fn((imageDataUrl?:string)=>`<svg data-image="${imageDataUrl}"/>`);
+    const result=observe(rasterize(makeSvg,{bytes:Buffer.from('source'),design:defaultPageDesigns().cover,slot:{width:64,height:64},background:'#102D49'}));
+    await flush();expect(control.workers).toHaveLength(1);expect(makeSvg).not.toHaveBeenCalled();
+    const worker=control.workers[0],stopped=deferred<number>();worker.terminate.mockReturnValue(stopped.promise);
+    worker.emit('message',{imageDataUrl:'data:image/png;base64,AA=='});await flush();
+    expect(makeSvg).toHaveBeenCalledWith('data:image/png;base64,AA==');expect(worker.postMessage).toHaveBeenCalledWith({svg:'<svg data-image="data:image/png;base64,AA=="/>'});
+    let delivered=false;void result.then(()=>{delivered=true;});succeed(worker);await flush();expect(delivered).toBe(false);
+    stopped.resolve(0);await flush();expect((await result).ok).toBe(true);await expectAllAdmissionSlotsReusable();
+  });
+
+  it('counts artwork and outline preparation in the same deadline and ignores late outline results',async()=>{
+    const prepared=deferred<string>(),makeSvg=vi.fn(()=>prepared.promise);
+    const result=observe(rasterize(makeSvg,{bytes:null,design:defaultPageDesigns().cover,slot:{width:64,height:64},background:'#102D49'}));
+    await flush();const worker=control.workers[0];worker.emit('message',{imageDataUrl:'data:image/png;base64,AA=='});await flush();
+    await vi.advanceTimersByTimeAsync(30_000);expect(await result).toMatchObject({ok:false,error:{status:503}});expect(worker.terminate).toHaveBeenCalledOnce();
+    prepared.resolve('<svg data-late="true"/>');await flush();expect(worker.postMessage).not.toHaveBeenCalled();await expectAllAdmissionSlotsReusable();
+  });
+
   it('rejects a full queue before preparing another image or SVG', async () => {
     const preparing = deferred<string>();
     const makers = [vi.fn(() => preparing.promise), ...Array.from({ length: 3 }, (_, index) => vi.fn(() => `<svg data-page="${index + 2}"/>`))];

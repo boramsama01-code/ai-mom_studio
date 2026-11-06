@@ -12,7 +12,6 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Browser system-package downloads can take over five minutes on hosted runners.
     timeout-minutes: 30
     services:
       postgres:
@@ -33,13 +32,114 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - name: Verify changed workspace contracts first
+        run: npx vitest run tests/creative-workspace-postgres.test.ts tests/publication-process-restart-postgres.test.ts tests/video-project.test.ts tests/studio-home-ui.test.ts tests/app-navigation-ui.test.tsx --bail=1
+      - run: npm test -- --bail=1
       - run: npm run build
-      - name: Measure production-bundle card rendering on Node 22
-        run: node scripts/cardnews14-memory-qa.mjs --concurrent=2 --output=test-results/cardnews14-memory/ci-production.json
+  memory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Verify production image memory with 64 MiB headroom for the free service
+        run: |
+          memory_failed=0
+          for cold_run in 1 2 3; do
+            if ! node scripts/cardnews14-memory-qa.mjs --concurrent=2 --budget-mib=448 --output="test-results/cardnews14-memory/ci-production-${cold_run}.json"; then
+              memory_failed=1
+            fi
+          done
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          const budgetMiB = 448;
+          const reports = [1, 2, 3].map(run => {
+            const file = `test-results/cardnews14-memory/ci-production-${run}.json`;
+            try { return { run, file, report: JSON.parse(fs.readFileSync(file, 'utf8')) }; }
+            catch { return { run, file, report: null }; }
+          });
+          const peaks = reports.map(({ report }) => report?.peakRssMiB).filter(Number.isFinite);
+          const outputParity = reports.every(({ report }) => Array.isArray(report?.outputSha256) && report.outputSha256.length === 8 && JSON.stringify(report.outputSha256) === JSON.stringify(reports[0].report?.outputSha256));
+          const runs = reports.map(({ run, file, report }) => ({ run, file, complete: report?.complete === true, node: report?.node ?? null, requests: report?.requests ?? null,
+            peakRssMiB: report?.peakRssMiB ?? null, parentPeakRssMiB: report?.parentPeakRssMiB ?? null, processTreePeakRssMiB: report?.processTreePeakRssMiB ?? null,
+            passed: report?.complete === true && report.requests === 7 && /^v22\./.test(report.node) && report.forcedGC === false && report.heapCap === false && report.externalCalls === 0
+              && [report.peakRssMiB, report.parentPeakRssMiB, report.processTreePeakRssMiB].every(peak => Number.isFinite(peak) && peak > 0 && peak <= budgetMiB) }));
+          const summary = { budgetMiB, coldRuns: 3, outputParity, maxPeakRssMiB: peaks.length ? Math.max(...peaks) : null, allPassed: outputParity && runs.every(run => run.passed), runs };
+          fs.mkdirSync('test-results/cardnews14-memory', { recursive: true });
+          fs.writeFileSync('test-results/cardnews14-memory/ci-production.json', JSON.stringify(summary, null, 2) + '\n');
+          console.log(JSON.stringify(summary));
+          if (!summary.allPassed) process.exitCode = 1;
+          JS
+          exit "$memory_failed"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cardnews14-memory
+          path: test-results/cardnews14-memory/*.json
+          if-no-files-found: ignore
+  browser:
+    # UI fixtures need no database. Run visual checks independently so a long
+    # database suite cannot postpone or erase a design failure's evidence.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Use the official Ubuntu mirror for browser dependencies
+        run: |
+          sudo python3 - <<'PY'
+          from pathlib import Path
+          candidates = [Path("/etc/apt/sources.list"), *Path("/etc/apt/sources.list.d").glob("*.sources"), *Path("/etc/apt/sources.list.d").glob("*.list")]
+          for source in candidates:
+              if not source.exists():
+                  continue
+              content = source.read_text()
+              updated = content.replace("mirror+file:/etc/apt/apt-mirrors.txt", "https://archive.ubuntu.com/ubuntu/").replace("http://azure.archive.ubuntu.com/ubuntu", "https://archive.ubuntu.com/ubuntu").replace("https://azure.archive.ubuntu.com/ubuntu", "https://archive.ubuntu.com/ubuntu")
+              if updated != content:
+                  source.write_text(updated)
+          PY
       - name: Install mobile browser regression tools
         id: browser_tools
+        timeout-minutes: 8
         run: npm install --no-save --package-lock=false playwright@1.62.1 && npx playwright install --with-deps webkit
+      - name: Verify guarded channel switching and new channel creation
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        run: node scripts/channel-navigation-regression.mjs
+      - name: Verify approved assets, saved videos and exact version history
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        run: node --import tsx scripts/asset-library-regression.mjs
+      - name: Build verified before screen for design comparison
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        run: |
+          git fetch --no-tags --depth=1 origin 42c643d2161db59be2b78ceabf15b1eaa48c4298
+          mkdir -p /tmp/creative-baseline
+          git archive 42c643d2161db59be2b78ceabf15b1eaa48c4298 | tar -x -C /tmp/creative-baseline
+          ln -s "$GITHUB_WORKSPACE/node_modules" /tmp/creative-baseline/node_modules
+          cd /tmp/creative-baseline
+          npm run build
+      - name: Verify creative workspace directions, mobile capture and safe resume
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        env:
+          CREATIVE_BASELINE_DIR: /tmp/creative-baseline
+        run: node scripts/creative-workspace-regression.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: creative-workspace-screenshots
+          path: |
+            test-results/creative-workspace
+            test-results/channel-navigation
+          if-no-files-found: ignore
       - name: Verify mobile WebKit layout and channel actions
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/mobile-regression.mjs
@@ -49,9 +149,9 @@ jobs:
       - name: Verify eight-page news editing, comparison text and page backgrounds
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node --import tsx scripts/news-editorial-regression.mjs
-      - name: Verify guarded channel switching and new channel creation
+      - name: Verify eight-page manual authoring without AI and safe resume
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
-        run: node scripts/channel-navigation-regression.mjs
+        run: node --import tsx scripts/manual-family-regression.mjs
       - name: Verify automatic images, manual fallback and final page previews
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/studio-automatic-regression.mjs
@@ -60,16 +160,12 @@ jobs:
         with:
           name: mobile-webkit-screenshots
           path: |
+            test-results/creative-workspace
             test-results/mobile
             test-results/workspace
             test-results/news-editorial
+            test-results/manual-family
             test-results/channel-navigation
             test-results/studio-automatic-browser
+            test-results/asset-library-browser
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: cardnews14-memory
-          path: test-results/cardnews14-memory/ci-production.json
-          if-no-files-found: ignore
-

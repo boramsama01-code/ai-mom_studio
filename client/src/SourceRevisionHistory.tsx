@@ -12,6 +12,8 @@ type Props = {
   current: SourceRevisionCurrent | null;
   revisions: SourceRevisionSummary[];
   onRestored?: () => void;
+  requestedRevisionId?: number | null;
+  entryError?: string | null;
 };
 type SavedDetail = { item: { id: number; channelId: number; version: number }; current: SourceRevisionCurrent | null; revisions: SourceRevisionSummary[] };
 type Confirmation = { revisionId: number; version: number };
@@ -22,9 +24,9 @@ const date = (value: string | Date) => {
 };
 
 /** Read comparisons without touching the editor. Restoring requires a fresh CAS version. */
-export function SourceRevisionHistory({ channelId, itemId, itemVersion, current, revisions, onRestored }: Props) {
+export function SourceRevisionHistory({ channelId, itemId, itemVersion, current, revisions, onRestored, requestedRevisionId, entryError }: Props) {
   const qc = useQueryClient(), guard = useDirtyGuard(), uid = useId();
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(requestedRevisionId ?? null);
   const [allFields, setAllFields] = useState(false);
   const [fresh, setFresh] = useState<SavedDetail | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
@@ -35,7 +37,11 @@ export function SourceRevisionHistory({ channelId, itemId, itemVersion, current,
   const path = `/channels/${channelId}/items/${itemId}`;
   const loaded = useQuery({
     queryKey: ["source-revision", channelId, itemId, selectedId],
-    queryFn: () => api<SourceRevisionSnapshot>(`${path}/revisions/${selectedId}`),
+    queryFn: async ({ signal }) => {
+      const result = await api<SourceRevisionSnapshot>(`${path}/revisions/${selectedId}`, { signal });
+      if (result.id !== selectedId || result.contentItemId !== itemId) throw new Error("이 콘텐츠의 원고 기록을 확인하지 못했습니다. 다른 원고로 대신 표시하지 않습니다.");
+      return result;
+    },
     enabled: selectedId !== null,
     staleTime: Infinity,
     retry: false,
@@ -49,6 +55,7 @@ export function SourceRevisionHistory({ channelId, itemId, itemVersion, current,
   const busy = checking || restoring;
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { if (requestedRevisionId !== undefined) { setSelectedId(requestedRevisionId); setConfirmation(null); setError(null); setNotice(""); } }, [requestedRevisionId]);
   useEffect(() => {
     if (confirmation && itemVersion > confirmation.version) {
       setConfirmation(null);
@@ -115,13 +122,15 @@ export function SourceRevisionHistory({ channelId, itemId, itemVersion, current,
   }
 
   return <section className="source-revision-history stack" aria-labelledby={`${uid}-heading`} aria-busy={busy}>
-    <div><h3 id={`${uid}-heading`}>원고 버전 비교</h3><p className="small muted">현재 저장본과 과거 원고·카드 문구를 비교합니다. 복원하면 이전 기록을 보존한 채 새 버전으로 저장됩니다.</p></div>
+    <div><h3 id={`${uid}-heading`}>원고 버전 비교</h3><p className="small muted">현재 저장본과 과거 원고·카드 문구를 비교합니다. 복원하면 이전 기록을 보존한 채 새 버전으로 저장됩니다. 승인 당시의 이미지 파일과 승인은 복원하지 않습니다.</p></div>
+    {entryError && <p className="notice err" role="alert">{entryError}</p>}
     <label className="field">비교할 버전
       <select value={selectedId ?? ""} disabled={busy} onChange={event => {
         setSelectedId(event.target.value ? Number(event.target.value) : null);
         setConfirmation(null); setError(null); setNotice("");
       }}>
         <option value="">버전을 선택해 주세요</option>
+        {selectedId !== null && !baseline.revisions.some(revision => revision.id === selectedId) && <option value={selectedId}>{selected ? `r${selected.revisionNo}` : `기록 #${selectedId}`} · 주소로 선택한 기록</option>}
         {baseline.revisions.map(revision => <option key={revision.id} value={revision.id}>r{revision.revisionNo} · {author(revision.author)} · {date(revision.createdAt)}{revision.id === baseline.current?.id ? " · 현재 저장본" : ""}</option>)}
       </select>
     </label>

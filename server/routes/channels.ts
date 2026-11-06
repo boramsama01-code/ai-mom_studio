@@ -1,3 +1,4 @@
+import { creativeProfileSchema } from "../../shared/creativeProfile";
 import { randomUUID } from "node:crypto";
 import { officialHostMatches } from "../services/boardAdapter";
 import { validSubcategory } from "../../shared/channelCategories";
@@ -77,6 +78,7 @@ const channelPatch = z.object({
   contentType: z.enum(channelContentTypes).optional(),
   categories: channelCategoriesSchema.optional(),
   aiSettings: channelAiSettingsSchema.nullable().optional(),
+  creativeProfile: creativeProfileSchema.nullable().optional(),
   accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   active: z.boolean().optional(),
   editorialGuide: z.string().max(4000).optional(),

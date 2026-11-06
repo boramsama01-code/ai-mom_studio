@@ -22,15 +22,19 @@ if(!args.includes('--compiled')){
   const entry=path.join(dir,'memory-qa.mjs');
   await build({entryPoints:[fileURLToPath(import.meta.url)],outfile:entry,bundle:true,platform:'node',format:'esm',target:'node22',packages:'external',logLevel:'error'});
   await fs.copyFile('server/services/readingCardRasterWorker.mjs',path.join(dir,'readingCardRasterWorker.mjs'));
-  const run=spawnSync(process.execPath,[entry,'--compiled',...args],{stdio:'inherit',env:{...process.env,APP_DATABASE_URL:'',DATABASE_URL:''}});
+  await fs.copyFile('server/services/readingCardArtwork.mjs',path.join(dir,'readingCardArtwork.mjs'));
+  const run=spawnSync(process.execPath,[entry,'--compiled',...args],{stdio:'inherit',env:{...process.env,NODE_ENV:'production',MALLOC_ARENA_MAX:'2',APP_DATABASE_URL:'',DATABASE_URL:''}});
   if(run.error)throw run.error;
   if(run.status!==0)process.exit(run.status??1);
   const report=JSON.parse(await fs.readFile(output,'utf8'));
   if(!report.complete)throw new Error('Memory probe did not complete every expected case');
-  console.log(JSON.stringify({node:report.node,peakRssMiB:report.peakRssMiB,requests:report.requests,output}));
+  console.log(JSON.stringify({node:report.node,peakRssMiB:report.peakRssMiB,parentPeakRssMiB:report.parentPeakRssMiB,processTreePeakRssMiB:report.processTreePeakRssMiB,requests:report.requests,output}));
+  const budget=Number(option('budget-mib','512'));
+  if(!Number.isFinite(budget)||budget<=0)throw new Error('Invalid memory budget');
+  if(report.peakRssMiB>budget)throw new Error(`Measured process-tree peak ${report.peakRssMiB} MiB exceeds ${budget} MiB budget`);
 }else{
   const started=performance.now(),samples=[];let requests=0;
-  const sample=stage=>{const m=process.memoryUsage();samples.push({stage,elapsedSeconds:+((performance.now()-started)/1000).toFixed(3),rssMiB:+(m.rss/2**20).toFixed(2),heapUsedMiB:+(m.heapUsed/2**20).toFixed(2),externalMiB:+(m.external/2**20).toFixed(2),peakRssMiB:+(process.resourceUsage().maxRSS/1024).toFixed(2)});};
+  const sample=stage=>{const m=process.memoryUsage();samples.push({stage,elapsedSeconds:+((performance.now()-started)/1000).toFixed(3),rssMiB:+(m.rss/2**20).toFixed(2),heapUsedMiB:+(m.heapUsed/2**20).toFixed(2),externalMiB:+(m.external/2**20).toFixed(2),arrayBuffersMiB:+(m.arrayBuffers/2**20).toFixed(2),peakRssMiB:+(process.resourceUsage().maxRSS/1024).toFixed(2)});console.log('MEMORY_SAMPLE '+JSON.stringify(samples.at(-1)));};
   globalThis.fetch=async()=>{throw new Error('External calls are forbidden in the offline memory probe');};
   sample('runtime');
   const app=await import('../server/app');
@@ -41,6 +45,10 @@ if(!args.includes('--compiled')){
   const {readingFontCacheState}=await import('../server/services/readingCardFonts');
   const {readingRasterState,tryBackgroundImageWork}=await import('../server/services/readingCardRaster');
   const {downloadCanvaLibraryExport}=await import('../server/services/canvaLibraryAssets');
+  let sampledTreePeakMiB=0;
+  const sampleProcessTree=()=>{sampledTreePeakMiB=Math.max(sampledTreePeakMiB,process.memoryUsage().rss/2**20);};
+  const memoryTimer=setInterval(sampleProcessTree,20);memoryTimer.unref();
+
   const {planCarousel,renderCarouselPage}=await import('../server/services/cardCarousel');
   const {READING_CARD_PROFILES,READING_PROFILE_LOGO_ID,readingProfileDesigns}=await import('../shared/readingCardProfiles');
   const {defaultPageDesigns,familyCardCopySchema}=await import('../shared/familyDialogue');
@@ -158,6 +166,9 @@ const designs=readingProfileDesigns(profile,defaultPageDesigns());
     libraryPreview={included:true,fixture:'offline-eight-page-png-zip',fixtureZipBytes:previewFixture.bytes.length,fixturePngBytes:previewFixture.pngBytes,sourcePages:8,originalPixels:{width:1080,height:1350},cachedPixels:{width:540,height:675},cachedPages:images.length,cachedBytes:images.reduce((total,image)=>total+image.bytes.length,0),nativeAspectRatioPreserved:true,deferredDuringForeground,foregroundWaitedForBackground,offlineFetches:fixtureReads,maxObservedHeavyWork:gate.maxObservedHeavyWork,deferredBackgroundWork:gate.deferredBackgroundWork};
     sample('Canva preview: all eight WebP pages cached; shared gate idle');
   }
-  const result={complete:true,kind:'offline-production-bundle',node:process.version,platform:process.platform,architecture:process.arch,backend:option('backend','isolated-native-raster'),profile:profile.id,requests,repeats,concurrent,preflightPagesPerRequest:8,selectedPagePreviews:1+(libraryPreview.foregroundWaitedForBackground?1:0),deckPagesRendered:8*(repeats+concurrent),peakRssKiB:process.resourceUsage().maxRSS,peakRssMiB:+(process.resourceUsage().maxRSS/1024).toFixed(2),elapsedSeconds:+((performance.now()-started)/1000).toFixed(3),forcedGC:false,heapCap:false,externalCalls:0,databaseCalls:0,paidAiCalls:0,canvaCalls:0,canvaLibraryPreview:libraryPreview,fonts:readingFontCacheState(),raster:readingRasterState(),outputSha256:expected,samples};
+  sampleProcessTree();clearInterval(memoryTimer);
+  const parentPeakRssMiB=process.resourceUsage().maxRSS/1024;
+  const processTreePeakRssMiB=Math.max(parentPeakRssMiB,sampledTreePeakMiB);
+  const result={complete:true,kind:'offline-production-bundle',node:process.version,platform:process.platform,architecture:process.arch,backend:option('backend','isolated-worker-raster'),allocatorArenaMax:process.env.MALLOC_ARENA_MAX??null,profile:profile.id,requests,repeats,concurrent,preflightPagesPerRequest:8,selectedPagePreviews:1+(libraryPreview.foregroundWaitedForBackground?1:0),deckPagesRendered:8*(repeats+concurrent),peakRssKiB:process.resourceUsage().maxRSS,peakRssMiB:+processTreePeakRssMiB.toFixed(2),parentPeakRssMiB:+parentPeakRssMiB.toFixed(2),processTreePeakRssMiB:+processTreePeakRssMiB.toFixed(2),memoryMeasurement:'single-process RSS including all worker threads; historical maxRSS and 20ms samples; no child process',elapsedSeconds:+((performance.now()-started)/1000).toFixed(3),forcedGC:false,heapCap:false,externalCalls:0,databaseCalls:0,paidAiCalls:0,canvaCalls:0,canvaLibraryPreview:libraryPreview,fonts:readingFontCacheState(),raster:readingRasterState(),outputSha256:expected,samples};
   await fs.mkdir(path.dirname(output),{recursive:true});fsSync.writeFileSync(output,JSON.stringify(result,null,2)+'\n');
 }

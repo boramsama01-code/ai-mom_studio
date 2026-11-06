@@ -1,3 +1,4 @@
+import type { CreativeProfile } from "./creativeProfile";
 /**
  * 우주펭귄상회 스튜디오 DB 스키마 (PostgreSQL + Drizzle)
  *
@@ -47,6 +48,7 @@ export const channels = pgTable("channels", {
   // null keeps the historical built-in defaults; [] intentionally disables categories.
   categories: jsonb("categories").$type<string[] | null>(),
   aiSettings: jsonb("ai_settings").$type<SavedChannelAiSettings | null>(),
+  creativeProfile: jsonb("creative_profile").$type<CreativeProfile | null>(),
   accentColor: text("accent_color").notNull(),
   active: boolean("active").notNull().default(true),
   editorialGuide: text("editorial_guide").notNull().default(""),
@@ -621,7 +623,7 @@ export const canvaRenderJobs = pgTable("canva_render_jobs", {
   contentItemId: integer("content_item_id").notNull().references(() => contentItems.id),
   sourceRevisionId: integer("source_revision_id").notNull().references(() => contentRevisions.id),
   sourceVersion: integer("source_version").notNull(),
-  masterId: integer("master_id").notNull().references(() => canvaMasters.id),
+  masterId: integer("master_id").references(() => canvaMasters.id),
   requestId: text("request_id").notNull(),
   requestHash: text("request_hash").notNull(),
   purpose: text("purpose").notNull().default("create"),
@@ -689,3 +691,18 @@ export const canvaLibraryPreviews = pgTable('canva_library_previews', {
   width: integer('width').notNull(), height: integer('height').notNull(), sha256: text('sha256').notNull(),
   bytes: bytea('bytes').notNull(), updatedAt: updatedAt(),
 }, t => [uniqueIndex('canva_library_preview_page').on(t.designId, t.page)]);
+
+/** A lost create response must resolve to the same resource, including after restart. */
+export const creationReceipts = pgTable("creation_receipts", {
+  key: text("key").primaryKey(),
+  payloadHash: text("payload_hash").notNull(),
+  resourceId: integer("resource_id").notNull().references(() => studioCards.id),
+  createdAt: createdAt(),
+});
+
+/** Durable receipts for explicit manual source-backed first eight-page saves. */
+export const familyManualRequests=pgTable('family_manual_requests',{
+  requestId:text('request_id').primaryKey(),channelId:integer('channel_id').notNull().references(()=>channels.id),
+  requestHash:text('request_hash').notNull(),contentItemId:integer('content_item_id').notNull().references(()=>contentItems.id),
+  result:jsonb('result').$type<import('./familyManual').FamilyManualReceipt>().notNull(),createdAt:createdAt(),
+});

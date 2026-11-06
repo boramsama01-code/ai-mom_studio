@@ -46,7 +46,7 @@ const pasteImage = await sharp({ create: { width: 360, height: 450, channels: 3,
 function fixture() {
   const evidenceBundle = familyEvidenceFixture(9828, 3), evidence = familyEvidenceView(evidenceBundle);
   const state = { saved: { version: 3, revisionId: 30, hasSavedCopy: true, recommendedStoryFormat: "discussion8", ai: roles, copy: legacyCopy() }, writes: [], aiAttempts: 0, familyAttempts: 0, cards: [], nextAssetId: 800, nextBackgroundId: 9000, canvaLibrary: canvaLibraryStateFixture(), canvaJobs: [] };
-  const backgrounds = Object.assign(new Map(), { credits: new Map() }), assets = new Map();
+  const backgrounds = Object.assign(new Map(), { credits: new Map() }), assets = new Map(), manualImages = [];
   const makeAsset = () => {
     const id = state.nextAssetId; state.nextAssetId += 10;
     const copy = clone(state.saved.copy);
@@ -84,6 +84,21 @@ function fixture() {
     else if (pathname === "/api/canva/template-library/sync" && method === "POST") { assert.deepEqual(body, {}); data = clone(state.canvaLibrary); }
     else if (/^\/api\/canva\/template-library\/designs\/[^/]+\/preview$/.test(pathname)) return route.fulfill({ contentType: "image/png", body: uploadImage });
     else if (pathname === "/api/channels/3/canva/masters") data = { items: [] };
+    else if (pathname === `${itemPath}/canva/manual-imports` && method === "POST") {
+      assert.deepEqual(Object.keys(body).sort(), ["confirmed", "designId", "requestId", "version"]);
+      assert.equal(body.designId, "Dmanual_browser_copy"); assert.equal(body.version, state.saved.version); assert.equal(body.confirmed, true); assert.match(body.requestId, /^[0-9a-f-]{36}$/i);
+      // Production serves already completed export assets. Prepare the fixture
+      // serially rather than starting eight raster jobs from image GETs.
+      for (let index = 0; index < 8; index++) manualImages[index] = await cardImage(state.saved.copy, index, backgrounds, state.saved.pageDesigns);
+      data = { id: 902, requestId: body.requestId, purpose: "import", status: "queued", phase: "export_prepare", sourceRevisionId: state.saved.revisionId, sourceVersion: body.version, designId: body.designId, editUrl: `https://www.canva.com/design/${body.designId}/edit`, exportJobId: null, outputAssetId: null, outputRevisionId: null, errorCode: null, errorMessage: null, createdAt: stamp, result: { manualImport: { version: 1, kind: "manual_copy", designId: body.designId, principal: "fixture-user:fixture-team", designUpdatedAt: 1793836800, pagesHash: "a".repeat(64), capturedAt: stamp } } };
+      state.canvaJobs = [data];
+    }
+    else if (pathname === `${itemPath}/canva/jobs/902/accept` && method === "POST") {
+      const job = state.canvaJobs.find(job => job.id === 902); assert(job); assert.equal(job.status, "needs_review"); assert.equal(job.sourceRevisionId, state.saved.revisionId);
+      assert.deepEqual(body, { version: state.saved.version, textConfirmedUnchanged: true });
+      state.saved = { ...state.saved, version: state.saved.version + 1, revisionId: state.saved.revisionId + 1 };
+      state.canvaJobs = [{ ...job, status: "ready", outputRevisionId: state.saved.revisionId }]; data = { ok: true };
+    }
     else if (pathname === `${itemPath}/canva/jobs`) {
       if (method === "POST") {
         assert.equal(body.libraryDesignId, "Dlibrary_template_1"); assert.equal(body.expectedLibraryUpdatedAt, 1793836800); assert.equal(body.masterId, undefined); assert.equal(body.version, state.saved.version);
@@ -144,6 +159,8 @@ function fixture() {
       const assetId = Number(pathname.split("/").at(-2)), asset = state.cards.find(entry => entry.id === assetId); assert(asset);
       data = { version: 1, values: asset.carousel.pages.map(page => page.altText) };
     } else if (/^\/api\/channels\/3\/media\/\d+$/.test(pathname) && method === "GET") {
+      const manualPage = Number(pathname.split("/").at(-1)) - 9900;
+      if (manualPage >= 0 && manualPage < 8) { assert(manualImages[manualPage]); return route.fulfill({ contentType: "image/jpeg", body: manualImages[manualPage] }); }
       const asset = assets.get(Number(pathname.split("/").at(-1))); assert(asset);
       return route.fulfill({ contentType: "image/jpeg", body: await cardImage(asset.copy, asset.index, backgrounds, asset.pageDesigns) });
     } else return false;
@@ -156,8 +173,44 @@ const title = page => page.locator('.card-copy-editor textarea[id$="-title"]');
 const pageButtons = page => page.locator('.card-copy-dots button');
 const saveButton = page => page.locator('.card-copy-savebar').getByRole('button', { name: '문구 저장', exact: true });
 async function previewReady(page) {
-  const image = page.locator('.card-copy-preview:not(.is-stale)[aria-busy="false"] img'); await image.waitFor(); await image.evaluate(img => img.decode());
-  assert.deepEqual(await image.evaluate(img => [img.naturalWidth, img.naturalHeight]), [1080, 1350], "editor must show the actual 4:5 production renderer output");
+  // Observe the current image, rather than retain a decode() promise for a blob
+  // that a newer preview can replace/revoke while its response is settling.
+  await page.waitForFunction(async () => {
+    const image = document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img');
+    if (!image?.complete || image.naturalWidth !== 1080 || image.naturalHeight !== 1350) return false;
+    const source = image.currentSrc || image.src;
+    try { await image.decode(); } catch { return false; }
+    return image === document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img')
+      && (image.currentSrc || image.src) === source && image.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
+  });
+}
+async function settleEditorPreviews(page, lifecycle) {
+  await previewReady(page);
+  if (await page.locator('.family-dialogue-editor').count()) {
+    // The saved editor starts seven serial thumbnails after its selected page.
+    // A saved badge, or the selected image alone, does not mean those bodies
+    // have finished. Assert all eight CURRENT results before replacing a doc.
+    await page.waitForFunction(() => {
+      const buttons = [...document.querySelectorAll('.family-dialogue-editor .family-page-strip > button')];
+      return buttons.length === 8 && buttons.every(button => {
+        const image = button.querySelector('.family-page-thumb img:not(.is-stale)');
+        return image?.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
+      });
+    });
+  }
+  const deadline = Date.now() + 20_000;
+  while (lifecycle.previewRoutes.size) {
+    assert(Date.now() < deadline, 'controlled navigation must wait for the preview fixture producers to settle');
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  await page.waitForLoadState('networkidle');
+  await previewReady(page);
+  lifecycle.diagnostics.push({ kind: 'previews-settled', at: Date.now(), url: page.url(), pendingPreviewRoutes: lifecycle.previewRoutes.size });
+}
+async function reloadEditor(page, lifecycle, label) {
+  lifecycle.mark(`${label}: settling previews`); await settleEditorPreviews(page, lifecycle);
+  lifecycle.mark(`${label}: reload`); await page.reload(); await previewReady(page);
+  await settleEditorPreviews(page, lifecycle); lifecycle.mark(`${label}: ready`);
 }
 async function saveCopy(page) {
   await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === copyPath && response.request().method() === "PATCH" && response.ok()), saveButton(page).click()]);
@@ -185,6 +238,59 @@ async function pasteBackground(page) {
   }, pasteImage.toString('base64'));
 }
 
+async function activateConfirmation(page, label, width) {
+  await label.scrollIntoViewIfNeeded();
+  const geometry = await label.evaluate(node => {
+    const r = node.getBoundingClientRect(), checkbox = node.querySelector('input').getBoundingClientRect();
+    const point = { x: r.right - 6, y: r.y + Math.min(r.height / 2, 24) }, hit = document.elementFromPoint(point.x, point.y);
+    return { width: r.width, height: r.height, point, reachable: !!hit && node.contains(hit), outsideCheckbox: point.x > checkbox.right };
+  });
+  if (width <= 900) assert(geometry.width >= 48 && geometry.height >= 48, 'Canva confirmation must have a 48px touch label');
+  assert(geometry.reachable && geometry.outsideCheckbox, 'Canva label padding must activate its native checkbox');
+  if (width < 768) await page.touchscreen.tap(geometry.point.x, geometry.point.y); else await page.mouse.click(geometry.point.x, geometry.point.y);
+  assert.equal(await label.locator('input').isChecked(), true);
+}
+
+async function manualCanvaImport(page, state, width, lifecycle) {
+  // A fresh document observes the independently advertised no-Autofill account.
+  // All job and image responses remain synthetic; this tests the built UI only.
+  state.canvaJobs = []; state.canvaLibrary.autofill = false;
+  await reloadEditor(page, lifecycle, 'manual Canva account capability');
+  const editorial = page.locator('.canva-editorial'), manual = editorial.getByRole('form', { name: 'Canva 사본 8장 가져오기' }); await manual.waitFor();
+  assert.equal(await editorial.getByRole('button', { name: 'Canva 8장 만들기', exact: true }).isDisabled(), true);
+  const before = clone(state.saved), writesBefore = state.writes.length;
+  const input = manual.getByRole('textbox', { name: '가져올 Canva 사본 링크 또는 ID' }), submit = manual.getByRole('button', { name: '이 사본의 8장 가져오기', exact: true });
+  await input.fill('https://www.canva.com.attacker.example/design/Dmanual_browser_copy/edit'); assert.equal(await submit.isDisabled(), true);
+  await input.fill('https://www.canva.com/design/Dmanual_browser_copy/edit?utm_content=private-share-query');
+  const confirmations = manual.locator('label.canva-manual-confirm'); await activateConfirmation(page, confirmations.nth(0), width);
+  assert.equal(await submit.isDisabled(), true); await activateConfirmation(page, confirmations.nth(1), width);
+  await submit.scrollIntoViewIfNeeded(); if (width <= 900) assert((await submit.boundingBox()).height >= 48, 'manual import button must be 48px high');
+  await submit.click(); await editorial.getByText('완성된 디자인 확인 중', { exact: true }).waitFor();
+  assert.equal(state.writes.filter(write => write.path === `${itemPath}/canva/manual-imports`).length, 1);
+  assert.deepEqual(state.saved, before, 'import enqueue cannot change the manuscript or version');
+  const queued = state.canvaJobs[0];
+  state.canvaJobs = [{ ...queued, status: 'needs_review', phase: 'complete', exportJobId: 'fixture-manual-export', outputAssetId: 9900, outputRevisionId: before.revisionId,
+    result: { ...queued.result, pages: Array.from({ length: 8 }, (_, index) => ({ id: 9900 + index, sha256: 'b'.repeat(64), title: `직접 편집한 사본 ${index + 1}` })), originals: Array.from({ length: 8 }, (_, index) => ({ id: 10000 + index, sha256: 'c'.repeat(64), page: index + 1 })) } }];
+  await editorial.getByText('직접 편집한 Canva 사본에서 가져온 8장입니다.', { exact: false }).waitFor();
+  const images = editorial.locator('.canva-export-grid img'); assert.equal(await images.count(), 8);
+  await images.evaluateAll(nodes => Promise.all(nodes.map(node => node.decode())));
+  for (const dimensions of await images.evaluateAll(nodes => nodes.map(node => [node.naturalWidth, node.naturalHeight]))) assert.deepEqual(dimensions, [1080, 1350]);
+  const accept = editorial.getByRole('button', { name: '확인한 8장을 새 버전으로 저장', exact: true }); assert.equal(await accept.isDisabled(), true);
+  const review = editorial.locator('label.check').filter({ hasText: '8장의 모든 문구가 현재 스튜디오 원고와 같은지 확인했습니다.' });
+  await activateConfirmation(page, review, width); await accept.scrollIntoViewIfNeeded();
+  await layoutFits(page, `manual Canva import ${width}`);
+  await manual.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${outputDir}/canva-manual-form-${width}.png` });
+  await review.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${outputDir}/canva-manual-review-${width}.png` });
+  await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === `${itemPath}/canva/jobs/902/accept` && response.ok()), accept.click()]);
+  assert.equal(state.saved.version, before.version + 1); assert.equal(state.saved.revisionId, before.revisionId + 1); assert.deepEqual(state.saved.copy, before.copy);
+  // The response can arrive before the invalidated editor query adopts it.
+  // Do not mistake the preceding version's ready image for accepted output.
+  await page.waitForFunction(version => document.querySelector('.family-dialogue-editor .card-copy-heading .badge')?.textContent?.trim() === `저장됨 · 버전 ${version}`, state.saved.version);
+  await editorial.getByText('이미지 8 / 8장 불러옴', { exact: true }).waitFor({ state: 'attached' });
+  assert.deepEqual(state.writes.slice(writesBefore).filter(write => !write.path.endsWith('/preview')).map(write => write.path), [`${itemPath}/canva/manual-imports`, `${itemPath}/canva/jobs/902/accept`], 'manual UI must enqueue and explicitly accept only, without creating, editing or uploading a Canva design');
+  await settleEditorPreviews(page, lifecycle);
+}
+
 let browser, engine = "WebKit";
 const results = [];
 try {
@@ -198,14 +304,18 @@ try {
   for (const width of widths) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 768, hasTouch: width < 768, locale: 'ko-KR', timezoneId: 'Asia/Seoul', serviceWorkers: 'block', reducedMotion: 'reduce' });
     context.setDefaultTimeout(20_000); await context.addInitScript(() => localStorage.setItem('spacepenguin.channel', '3'));
-    const page = await context.newPage(), { state, api } = fixture(), errors = [], external = [], requestFailures = [];
+    const page = await context.newPage(), { state, api } = fixture(), errors = [], external = [], requestFailures = [], diagnostics = [];
     let stage = 'news-editorial';
-    page.on('pageerror', error => errors.push(error.message));
-    page.on('requestfailed', request => requestFailures.push({ stage, method: request.method(), path: new URL(request.url()).pathname, error: request.failure()?.errorText ?? 'unknown' }));
+    const lifecycle = { previewRoutes: new Set(), diagnostics, mark: value => { stage = value; diagnostics.push({ kind: 'stage', stage, at: Date.now() }); } };
+    page.on('pageerror', error => { errors.push(error.message); diagnostics.push({ kind: 'pageerror', stage, at: Date.now(), url: page.url(), message: error.message, stack: error.stack }); });
+    page.on('framenavigated', frame => { if (frame === page.mainFrame()) diagnostics.push({ kind: 'document-navigation', stage, at: Date.now(), url: frame.url() }); });
+    page.on('requestfailed', request => requestFailures.push({ stage, at: Date.now(), method: request.method(), path: new URL(request.url()).pathname, error: request.failure()?.errorText ?? 'unknown' }));
     await context.route('**/*', async route => {
       const url = new URL(route.request().url());
       if (url.origin !== origin) { external.push(url.href); return route.abort('blockedbyclient'); }
       if (!url.pathname.startsWith('/api/')) return route.continue();
+      const preview = url.pathname === `${copyPath}/preview` ? { stage, at: Date.now(), page: route.request().postDataJSON()?.page, version: route.request().postDataJSON()?.version } : null;
+      if (preview) { lifecycle.previewRoutes.add(preview); diagnostics.push({ kind: 'preview-fixture-start', ...preview }); }
       try {
         if (await api(route, url) !== false) return;
         errors.push(`Unmocked API: ${route.request().method()} ${url.pathname}`);
@@ -213,6 +323,8 @@ try {
       } catch (error) {
         errors.push(`Fixture rejected ${url.pathname}: ${error.message}`);
         await route.fulfill({ status: 500, json: { error: 'Synthetic fixture rejected request' } });
+      } finally {
+        if (preview) { lifecycle.previewRoutes.delete(preview); diagnostics.push({ kind: 'preview-fixture-settled', stage, at: Date.now(), page: preview.page, version: preview.version, pendingPreviewRoutes: lifecycle.previewRoutes.size }); }
       }
     });
     try {
@@ -255,7 +367,7 @@ try {
       await first.fill(changed); await previewReady(page); await layoutFits(page, `comparison ${width}`);
       await page.screenshot({ path: `${outputDir}/comparison-${width}.png` }); await saveCopy(page);
       assert.equal(state.saved.copy.pages[3].columns[0].body, changed); assert.equal(state.saved.copy.pages[3].columns[1].body, otherColumn);
-      await page.reload(); await title(page).waitFor(); await page.getByRole('button', { name: '5페이지 두 가지 시선 문구 편집', exact: true }).click();
+      await reloadEditor(page, lifecycle, 'legacy comparison reopen'); await title(page).waitFor(); await page.getByRole('button', { name: '5페이지 두 가지 시선 문구 편집', exact: true }).click();
       assert.equal(await first.inputValue(), changed); assert.equal(await second.inputValue(), otherColumn); assert.equal(await pageButtons(page).count(), 8);
 
       // Upload one page, paste another. Both results remain local choices until copy save.
@@ -271,7 +383,7 @@ try {
       assert.equal(state.saved.copy.pages[4].background.assetId, 9001); assert.equal(state.saved.copy.pages[3].background.assetId, 9000);
       await previewReady(page); await layoutFits(page, `page background ${width}`);
       await page.screenshot({ path: `${outputDir}/background-${width}.png` });
-      await page.reload(); await title(page).waitFor();
+      await reloadEditor(page, lifecycle, 'legacy page backgrounds reopen'); await title(page).waitFor();
       for (const index of [4, 5]) {
         await pageButtons(page).nth(index).click(); await openBackground(page); await page.locator('.page-background-thumb').waitFor();
         assert.match(await page.locator('.page-background-thumb').getAttribute('src'), new RegExp(`/background/${index === 4 ? 9000 : 9001}$`));
@@ -316,7 +428,7 @@ try {
       await family.locator('.card-copy-heading .badge', { hasText: '저장됨' }).waitFor();
       assert.equal(state.saved.copy.pages[4].fields.viewA.body, '내가 덧붙인 판단 기준도 저장하고 다시 확인할 수 있어요.');
       assert.equal(state.saved.copy.pages[4].layout, 'stacked');
-      await page.reload(); await family.waitFor(); await family.getByRole('button', { name: '5페이지 · 두 가지 시선', exact: true }).click();
+      await reloadEditor(page, lifecycle, 'family comparison reopen'); await family.waitFor(); await family.getByRole('button', { name: '5페이지 · 두 가지 시선', exact: true }).click();
       assert.equal(await viewA.inputValue(), '내가 덧붙인 판단 기준도 저장하고 다시 확인할 수 있어요.');
       await previewReady(page); await layoutFits(page, `v2 views ${width}`);
       await page.screenshot({ path: `${outputDir}/v2-perspectives-${width}.png` });
@@ -356,7 +468,7 @@ try {
       assert.deepEqual(state.saved.copy.pages[1].claimRefs.find(ref => ref.fieldPath === 'fields.facts.0'), { fieldPath: 'fields.facts.0', claimType: 'forecast', factIds: ['F1'], resourceIds: [] });
       assert.deepEqual(state.saved.copy.pages[1].claimRefs.filter(ref => ref.fieldPath === 'fields.facts.1'), originalSiblingRefs);
       assert.equal(state.familyAttempts, familyAttemptsBeforeManual, 'manual evidence comparison must not call AI');
-      await page.reload(); await family.waitFor(); await family.getByRole('button', { name: '2페이지 · 뉴스 요약', exact: true }).click();
+      await reloadEditor(page, lifecycle, 'family evidence reopen'); await family.waitFor(); await family.getByRole('button', { name: '2페이지 · 뉴스 요약', exact: true }).click();
       assert.equal(await firstFact.inputValue(), factText);
       assert.match(await evidenceControl.locator('summary').innerText(), /연결됨/);
       await openBackground(page);
@@ -403,7 +515,7 @@ try {
       await family.locator('.page-background-thumb[src$="/9004"]').waitFor();await previewReady(page);
       await family.getByRole('checkbox',{name:'이 장에서 표지 사진 함께 사용'}).uncheck();
       await familySave.click();await family.locator('.card-copy-heading .badge',{hasText:'저장됨'}).waitFor();
-      await page.reload();await family.waitFor();assert.equal(await stylePicker.inputValue(),'cardnews14-cinematic-v1');
+      await reloadEditor(page,lifecycle,'family photo reuse reopen');await family.waitFor();assert.equal(await stylePicker.inputValue(),'cardnews14-cinematic-v1');
       assert.equal(await family.locator('textarea[id$="-displayOverrides.kicker"]').inputValue(),'');
       await family.getByRole('button',{name:'2페이지 · 뉴스 요약',exact:true}).click();await openBackground(page);
       await family.locator('.page-background-thumb[src$="/9002"]').waitFor();
@@ -451,11 +563,24 @@ try {
       await nativeCreate.click(); await canvaEditorial.getByText('템플릿 확인 중', { exact: true }).waitFor();
       assert.equal(state.writes.filter(write => write.path === `${itemPath}/canva/jobs`).length, 1);
       assert.deepEqual(state.saved.copy, savedBeforeCanva, 'native selection and creation must preserve the authoring layout and copy');
+      lifecycle.mark('manual-canva-import'); await manualCanvaImport(page, state, width, lifecycle);
       assert.deepEqual(errors, []); assert.deepEqual(external, []);
+      // Record manual completion separately from the earlier native create.
+      const manualImports = state.writes.filter(write => write.path === `${itemPath}/canva/manual-imports`).length;
+      assert.equal(manualImports, 1);
       results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', '14 style identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists', 'Canva folder sync preserves the mounted editor', 'Canva folder inner-page preview and reachable native creation preserve saved copy'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, mockNativeCreates: state.canvaJobs.length, requestFailures, actualPaidCalls: 0, publicationRequests: 0 });
+      Object.assign(results.at(-1), { manualImports, manualImportReview: true, manualConfirmationPaddingHitTests: true });
+      Object.assign(results.at(-1), { previewLifecycleSettled: true, diagnostics });
+      results.at(-1).checks.push('No-Autofill manual copy safe-ID import, eight real rendered assets, 48px confirmation padding and explicit new-version acceptance');
       await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2)); console.log(`News editorial regression passed at ${width}px (${engine}).`);
     } catch (error) {
-      results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, requestFailures }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
+      const previewState = await page.evaluate(() => {
+        const sample = image => image ? { src: image.currentSrc || image.getAttribute('src'), complete: image.complete, width: image.naturalWidth, height: image.naturalHeight, stale: image.classList.contains('is-stale'), top: image.getBoundingClientRect().top } : null;
+        return { saved: document.querySelector('.family-dialogue-editor .card-copy-heading .badge')?.textContent,
+          selected: sample(document.querySelector('.card-copy-preview img')),
+          thumbnails: [...document.querySelectorAll('.family-page-strip > button')].map(button => ({ label: button.getAttribute('aria-label'), image: sample(button.querySelector('img')) })) };
+      }).catch(() => null);
+      results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, requestFailures, diagnostics, previewState, pendingPreviewRoutes: lifecycle.previewRoutes.size }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
       await page.screenshot({ path: `${outputDir}/failure-${width}.png`, fullPage: true }).catch(() => {}); await writeFile(`${outputDir}/failure-${width}.html`, await page.content()); throw error;
     } finally { await context.close(); }
   }

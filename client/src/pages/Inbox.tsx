@@ -1,6 +1,7 @@
 import { CategorySelect } from "../CategorySelect";
 import { studioKey } from "@shared/channelKeys";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type SetStateAction } from "react";
+import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { useToast } from "../toast";
@@ -18,6 +19,7 @@ import { InboxKeywords } from "./InboxKeywords";
 import { NOTICE_INTENTS, NOTICE_INTENT_LABEL, type NoticeIntent } from "@shared/noticeIntent";
 import { WorkModeControl, type WorkMode } from "../WorkModeControl";
 import { channelCategories } from "@shared/channelCategories";
+import { useListContext, useListScroll } from "../useListContext";
 
 export type ListRow = {
   item: ContentItem;
@@ -44,31 +46,82 @@ const BODY_STATES: Record<string, { label: string; kind: "" | "ok" | "warn" | "e
   unsupported: { label: "본문 직접 확인", kind: "warn", hint: "공개 응답에서 본문을 추출하지 못했습니다. 원문 확인이나 본문 붙여넣기가 필요합니다." },
 };
 
+const inboxContextSchema = z.object({
+  f: z.object({ q: z.string(), review: z.string(), schedule: z.string(), evidence: z.string(), fetchStatus: z.string(), category: z.string(), subcategory: z.string(), noticeIntent: z.string(), view: z.enum(["inbox", "excluded", "all"]), collectedOn: z.string() }),
+  page: z.number().int().positive(), qInput: z.string(), followToday: z.boolean(), mode: z.enum(["ideas", "scraps"]), workMode: z.enum(["auto", "manual"]),
+});
+type InboxContext = z.infer<typeof inboxContextSchema>;
+const inboxDefaults = (today: string): InboxContext => ({ f: { q: "", review: "", schedule: "", evidence: "", fetchStatus: "", category: "", subcategory: "", noticeIntent: "candidate", view: "inbox", collectedOn: today }, page: 1, qInput: "", followToday: true, mode: "ideas", workMode: "auto" });
+const inboxFilterKeys = ["q", "review", "schedule", "evidence", "fetchStatus", "category", "subcategory", "noticeIntent", "view", "collectedOn"] as const;
+const inboxUrlKeys = [...inboxFilterKeys, "page", "mode", "workMode"];
+function inboxEntry(search: string, today: string): InboxContext | null {
+  const params = new URLSearchParams(search);
+  if (!inboxUrlKeys.some(key => params.has(key))) return null;
+  const value = inboxDefaults(today);
+  for (const key of inboxFilterKeys) if (params.has(key) && key !== "view") value.f[key] = params.get(key)!;
+  const view = params.get("view"); if (view === "all" || view === "excluded") value.f.view = view;
+  value.followToday = !params.has("collectedOn");
+  if (value.f.collectedOn === "all") value.f.collectedOn = "";
+  if (!params.has("noticeIntent") && params.has("subcategory")) value.f.noticeIntent = "all";
+  const page = Number(params.get("page")); if (Number.isSafeInteger(page) && page > 0) value.page = page;
+  value.qInput = value.f.q;
+  value.mode = params.has("collectedOn") || params.has("subcategory") || params.has("fetchStatus") ? "scraps" : "ideas";
+  const mode = params.get("mode"); if (mode === "ideas" || mode === "scraps") value.mode = mode;
+  if (params.get("workMode") === "manual") value.workMode = "manual";
+  return value;
+}
+function inboxSearch(value: InboxContext, search: string) {
+  const params = new URLSearchParams(search);
+  inboxUrlKeys.forEach(key => params.delete(key));
+  const defaults = inboxDefaults("").f;
+  for (const key of inboxFilterKeys) {
+    if (key === "noticeIntent" && value.f.subcategory) params.set(key, value.f[key]);
+    else if (key !== "collectedOn" && value.f[key] && value.f[key] !== defaults[key]) params.set(key, value.f[key]);
+  }
+  if (!value.followToday) params.set("collectedOn", value.f.collectedOn || "all");
+  if (value.page > 1) params.set("page", String(value.page));
+  params.set("mode", value.mode);
+  if (value.workMode === "manual") params.set("workMode", "manual");
+  return params.toString();
+}
+
 export function InboxPage() {
   const { selected, current, allChannels } = useChannel();
-  const [workMode, setWorkMode] = useState<WorkMode>("auto");
-  const params = new URLSearchParams(useSearch());
+  const [, navigate] = useLocation();
+  const search = new URLSearchParams(useSearch()).toString();
   const today = useKstToday();
-  const [followToday, setFollowToday] = useState(!params.has("collectedOn"));
-  const [f, setF] = useState({
-    q: params.get("q") ?? "",
-    review: params.get("review") ?? "",
-    schedule: params.get("schedule") ?? "",
-    evidence: params.get("evidence") ?? "",
-    fetchStatus: params.get("fetchStatus") ?? "",
-    category: params.get("category") ?? "",
-    subcategory: params.get("subcategory") ?? "",
-    noticeIntent: params.get("noticeIntent") ?? (params.has("subcategory") ? "all" : "candidate"),
-    view: (params.get("view") as "inbox" | "excluded" | "all") ?? "inbox",
-    collectedOn: params.get("collectedOn") === "all" ? "" : params.get("collectedOn") ?? kstDay(),
-  });
-  const [page, setPage] = useState(1);
-  useEffect(() => { if (followToday) { setF(old => ({ ...old, collectedOn: today })); setPage(1); } }, [today, followToday]);
-  const [qInput, setQInput] = useState(f.q);
-  const [mode, setMode] = useState<"ideas" | "scraps">(() => params.has("collectedOn") || params.has("subcategory") || params.has("fetchStatus") ? "scraps" : "ideas");
+  const entry = inboxEntry(search, today);
+  const context = useListContext("inbox", selected, inboxDefaults(today), value => {
+    const parsed = inboxContextSchema.safeParse(value); return parsed.success ? parsed.data : null;
+  }, entry ? { id: search, value: entry } : undefined);
+  const { f, page, qInput, mode, workMode, followToday } = context.value;
+  const setF = (change: SetStateAction<InboxContext["f"]>) => context.update(previous => ({ ...previous, f: typeof change === "function" ? change(previous.f) : change }));
+  const setPage = (page: number) => context.update({ page });
+  const setQInput = (qInput: string) => context.update({ qInput });
+  const setMode = (mode: InboxContext["mode"]) => context.update({ mode });
+  const setWorkMode = (workMode: WorkMode) => context.update({ workMode });
+  const setFollowToday = (followToday: boolean) => context.update({ followToday });
+  useEffect(() => {
+    if (followToday && f.collectedOn !== today) context.update(previous => ({ ...previous, f: { ...previous.f, collectedOn: today }, page: 1 }));
+  }, [today, followToday, f.collectedOn, context.update]);
+  const urlContext = useRef({ scope: context.scope, observed: search, written: undefined as string | undefined });
+  useEffect(() => {
+    const previous = urlContext.current;
+    if (previous.scope !== context.scope) { previous.scope = context.scope; previous.observed = search; previous.written = undefined; }
+    else if (previous.observed !== search) {
+      const ownReplacement = search === previous.written;
+      previous.observed = search;
+      previous.written = undefined;
+      if (!ownReplacement) {
+        context.rememberEntry(search); context.update(() => inboxEntry(search, today) ?? inboxDefaults(today));
+        return;
+      }
+    }
+    const next = inboxSearch(context.value, search);
+    context.rememberEntry(next);
+    if (next !== search && next !== previous.written) { previous.written = next; navigate(`/inbox${next ? "?" + next : ""}`, { replace: true }); }
+  }, [context.scope, context.value, context.update, context.rememberEntry, search, today, navigate]);
   const ideas = isIdeaChannel(current) && mode === "ideas";
-  const previousChannel = useRef(selected);
-  useEffect(() => { setPage(1); if (previousChannel.current !== selected) { setMode("ideas"); setWorkMode("auto"); setF(old => ({ ...old, subcategory: "" })); previousChannel.current = selected; } }, [selected]);
   const noticeChannel = current?.contentType === "notice";
   const query = useQuery({
     queryKey: ["ch", selected, "items", f, page, ideas],
@@ -76,6 +129,7 @@ export function InboxPage() {
     placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === selected && previousQuery?.queryKey[5] === ideas ? previous : undefined,
     refetchInterval: 60_000,
   });
+  useListScroll(context.key, query.isSuccess && !query.isPlaceholderData);
   const set = (k: keyof typeof f, v: string) => {
     setF((o) => ({ ...o, [k]: v }));
     setPage(1);
@@ -215,7 +269,7 @@ export function InboxPage() {
         </Empty>
       ) : (
         <div className="stack" aria-busy={query.isFetching}>
-          {selected === "all" ? <ItemList rows={query.data.items} showChannel /> : <TriageList rows={query.data.items} cid={selected} />}
+          {selected === "all" ? <ItemList rows={query.data.items} showChannel /> : <TriageList key={context.scope} rows={query.data.items} cid={selected} />}
           <Pager page={page} pageSize={20} total={query.data.total} onPage={setPage} />
         </div>
       )}
@@ -323,7 +377,7 @@ function TriageList({ rows, cid }: { rows: ListRow[]; cid: number }) {
         </div>
       ) : (
         <div className="row between">
-          <label className="check" style={{ minHeight: 32 }}>
+          <label className="check inbox-select-all">
             <input type="checkbox" className="row-check" checked={all} onChange={() => setPicked(all ? new Set() : new Set(rows.map((r) => r.item.id)))} /> 이 페이지 전체 선택
           </label>
           <span className="shortcut-hint hide-mobile">
@@ -335,7 +389,9 @@ function TriageList({ rows, cid }: { rows: ListRow[]; cid: number }) {
         {rows.map((r, i) => (
           <li key={r.item.id} ref={(el) => { refs.current[i] = el; }} className={`list-item ${i === focus ? "focused" : ""}`} onClick={() => setFocus(i)}>
             <div className="item-head">
-              <input type="checkbox" className="row-check" aria-label={`${r.item.title} 선택`} checked={picked.has(r.item.id)} onChange={() => toggle(r.item.id)} style={{ marginTop: 3 }} />
+              <label className="inbox-row-select" onClick={event => { event.stopPropagation(); setFocus(i); }}>
+                <input type="checkbox" className="row-check" aria-label={`${r.item.title} 선택`} checked={picked.has(r.item.id)} onChange={() => toggle(r.item.id)} />
+              </label>
               <div className="stack" style={{ gap: 6, flex: 1, minWidth: 0 }}>
                 <ItemBody row={r} showChannel={false} />
               </div>

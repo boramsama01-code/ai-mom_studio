@@ -1,3 +1,4 @@
+import { videoProjectSchema } from "./videoProject";
 import { experienceSchema, type Experience } from "./experience";
 import { altTextError } from "./altText";
 import { CHANNEL_BRANDS } from "./branding";
@@ -36,6 +37,7 @@ export const studioContentSchema = z.object({
   finishedDeck: z.object({ pages: z.array(z.object({ imageId: z.number().int().positive(), name: z.string().max(200), altText: z.string().max(1000).default(""), uploadId: z.string().uuid().optional() }).strict()).max(10).refine(pages => new Set(pages.map(p => p.imageId)).size === pages.length, "같은 이미지는 한 번만 넣어 주세요.") }).strict().nullable().default(null),
   altTexts: z.array(z.string().max(1000)).max(10).default([]),
   experience: experienceSchema.nullable().default(null),
+  videoProject: videoProjectSchema.nullable().optional(),
   subcategory: z.string().max(40).optional(),
   title: z.string().trim().min(1).max(160),
   channel: z.string().regex(/^[a-z][a-z0-9_-]{0,79}$/).transform(normalizeStudioChannel).default("penguin"),
@@ -68,9 +70,10 @@ function studioInputAltIssues(value: { altTexts?: string[]; finishedDeck?: Studi
  }
  return issues;
 }
-export const studioCreateSchema = studioContentSchema.safeExtend({ sourceItemId: z.number().int().positive().optional() }).superRefine((value, ctx) => { for (const issue of studioInputAltIssues(value)) ctx.addIssue({code:"custom",...issue}); });
+export const studioCreateSchema = studioContentSchema.safeExtend({ sourceItemId: z.number().int().positive().optional(), requestId: z.string().uuid().optional() }).superRefine((value, ctx) => { for (const issue of studioInputAltIssues(value)) ctx.addIssue({code:"custom",...issue}); });
 // Zod 4 applies defaults inside optional fields; unwrap them so a stage-only PATCH cannot erase content.
 export const studioPatchSchema = z.object({
+  videoProject: videoProjectSchema.nullable().optional(),
   finishedDeck: studioContentSchema.shape.finishedDeck.unwrap().refine(
     value => !value || value.pages.every(page => !altTextError(page.altText, true)),
     "대체텍스트는 1~2문장, 공백 포함 최대 125자로 작성해 주세요.",

@@ -66,6 +66,34 @@ describe("Canva folder library UI", () => {
     expect(host.textContent).toContain("기존 8장 템플릿을 복제");
     expect(mocks.select).not.toHaveBeenCalled(); expect(writes()).toHaveLength(0);
   });
+  it("distinguishes unavailable account autofill from missing design fields and updates after a capability change", async () => {
+    library.autofill = false;
+    library.items = [canvaLibraryItemFixture({ status: "needs_fields", canCreate: false, reason: "현재 계정에서 자동 채우기를 사용할 수 없습니다." })];
+    await render();
+    expect(host.querySelector(".canva-library-item-status")?.textContent).toBe("자동 채우기 제한");
+    expect(host.textContent).toContain("현재 연결한 Canva 계정·팀에서 자동 채우기를 사용할 수 없습니다");
+    expect(host.querySelector(".canva-library-field-help")).toBeNull();
+    expect(host.querySelector(".canva-library-large img")).not.toBeNull();
+    expect(host.querySelector('a[href="https://www.canva.com/design/Dlibrary_first/edit"]')).not.toBeNull();
+    expect(button("이 Canva 템플릿 선택").disabled).toBe(true);
+    library.autofill = true;
+    library.items = [canvaLibraryItemFixture({ status: "needs_fields", canCreate: false, reason: "P01_HEADLINE: 텍스트 필드 필요" })];
+    await refresh();
+    expect(host.querySelector(".canva-library-item-status")?.textContent).toBe("원고 연결 필요");
+    expect(host.textContent).toContain("P01_HEADLINE: 텍스트 필드 필요");
+    expect(host.querySelector(".canva-library-field-help")).not.toBeNull();
+    expect(button("이 Canva 템플릿 선택").disabled).toBe(true);
+    expect(mocks.select).not.toHaveBeenCalled(); expect(writes()).toHaveLength(0);
+  });
+  it("does not promise template selection while previews load without autofill capability", async () => {
+    library.autofill = false;
+    library.items = [canvaLibraryItemFixture({ status: "needs_fields", canCreate: false, previewStatus: "pending" })];
+    await render();
+    expect(host.textContent).toContain("준비가 끝나면 원본의 표지와 내지를 확인할 수 있습니다");
+    expect(host.textContent).not.toContain("준비가 끝나면 원고를 채울 템플릿으로 선택");
+    expect(host.querySelector(".canva-library-field-help")).toBeNull();
+    expect(button("이 Canva 템플릿 선택").disabled).toBe(true); expect(writes()).toHaveLength(0);
+  });
   it("offers the exact 46 shared labels by page and copies them without changing a template", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });

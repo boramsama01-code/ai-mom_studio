@@ -12,6 +12,8 @@ import { kickCanvaJobs } from '../worker/canva';
 import { reconcileCanvaJob } from '../services/canvaReconciliation';
 import { canvaReconcileRequestSchema } from '../../shared/canvaReconciliation';
 import type { CanvaConnectionStatus } from '../../shared/canvaCapabilities';
+import { canvaManualImportRequestSchema } from '../../shared/canvaManualImport';
+import { enqueueCanvaManualImport } from '../services/canvaManualImport';
 
 export const canvaEditorialRoutes=Router();
 const route=(fn:Parameters<typeof ah>[0])=>ah(async(req,res,next)=>{try{return await fn(req,res,next);}catch(error){if(error instanceof CanvaRestError)throw new HttpError(error.outcomeUnknown?502:error.status===429?429:error.status&&error.status>=400&&error.status<500?422:502,error.message,{code:error.code,reason:error.reason,providerCode:error.providerCode,outcomeUnknown:error.outcomeUnknown});throw error;}});
@@ -54,6 +56,12 @@ canvaEditorialRoutes.post('/channels/:cid/items/:id/canva/jobs',route(async(req,
   const {channel,itemId}=await itemScope(req.params.cid,req.params.id);
   const body=parse(z.object({version:z.number().int().positive(),requestId:z.string().uuid(),masterId:z.number().int().positive().optional(),importFromJobId:z.number().int().positive().optional(),libraryDesignId:z.string().regex(/^D[A-Za-z0-9_-]{3,199}$/).optional(),expectedLibraryUpdatedAt:z.number().int().nonnegative().optional()}).strict().refine(value=>!(value.libraryDesignId&&(value.masterId||value.importFromJobId))&&!(value.expectedLibraryUpdatedAt!==undefined&&!value.libraryDesignId),{message:'Canva 폴더 원본 선택은 기존 마스터 선택·가져오기와 함께 요청할 수 없습니다.'}),req.body);
   const job=await enqueueCanvaRender(getDb(),{channelId:channel.id,itemId,actor:actorOf(req),...body});
+  kickCanvaJobs(getDb());res.status(202).json(canvaJobDto(job));
+}));
+canvaEditorialRoutes.post('/channels/:cid/items/:id/canva/manual-imports',route(async(req,res)=>{
+  const {channel,itemId}=await itemScope(req.params.cid,req.params.id);
+  const body=parse(canvaManualImportRequestSchema,req.body);
+  const job=await enqueueCanvaManualImport(getDb(),{channelId:channel.id,itemId,actor:actorOf(req),...body});
   kickCanvaJobs(getDb());res.status(202).json(canvaJobDto(job));
 }));
 canvaEditorialRoutes.post('/channels/:cid/items/:id/canva/jobs/:jobId/accept',route(async(req,res)=>{

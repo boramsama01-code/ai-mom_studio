@@ -25,7 +25,7 @@ import "../client/src/main";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
-it("PC·모바일의 주요 메뉴 네 개를 유지하고 연결·운영 도구를 접으며 준비된 초안 수를 전체 초안 badge로 표시하지 않는다", async () => {
+it("PC의 자산 메뉴와 모바일의 주요 메뉴 네 개를 제공하고 연결·운영 도구를 접으며 준비된 초안 수를 전체 초안 badge로 표시하지 않는다", async () => {
   mocks.api.mockImplementation(async (url: string) => {
     if (url === "/status") return { globalStop: false };
     if (url === "/channels/1/today") return { counts: { pendingReview: 7, draftsReady: 99 } };
@@ -44,14 +44,14 @@ it("PC·모바일의 주요 메뉴 네 개를 유지하고 연결·운영 도구
     await renderAt("/");
     const nav = host.querySelector(".sidebar .nav")!;
     const primaryPaths = ["/", "/inbox", "/publish", "/settings"];
-    expect([...nav.querySelectorAll(":scope > div.nav-group a")].map(a => a.getAttribute("href"))).toEqual(primaryPaths);
-    expect([...nav.querySelectorAll(":scope > div.nav-group a .grow")].map(label => label.textContent)).toEqual(["내 콘텐츠", "수집함", "발행함", "설정"]);
+    expect([...nav.querySelectorAll(":scope > div.nav-group a")].map(a => a.getAttribute("href"))).toEqual(["/", "/inbox", "/assets", "/publish", "/settings"]);
+    expect([...nav.querySelectorAll(":scope > div.nav-group a .grow")].map(label => label.textContent)).toEqual(["내 콘텐츠", "수집함", "자산·템플릿", "발행 일정·기록", "설정"]);
     expect([...host.querySelectorAll(".mobile-nav a")].map(a => a.getAttribute("href"))).toEqual(primaryPaths);
     expect(nav.querySelectorAll(":scope > details.nav-group")).toHaveLength(1);
     const tools = nav.querySelector('a[href="/today"]')!.closest("details")!;
     expect(tools.open).toBe(false);
     expect(tools.querySelector("summary")?.textContent).toContain("연결·운영 도구");
-    expect([...tools.querySelectorAll("a")].map(a => a.getAttribute("href"))).toEqual(["/today", "/instagram", "/rules", "/design", "/connections", "/account", "/runs"]);
+    expect([...tools.querySelectorAll("a")].map(a => a.getAttribute("href"))).toEqual(["/today", "/instagram", "/rules", "/connections", "/account", "/runs"]);
     expect(nav.querySelector('a[href="/settings"]')!.closest("details")).toBeNull();
     expect(nav.querySelector('a[href="/drafts"]')).toBeNull();
     expect(nav.querySelector('a[href="/inbox"] .nav-count')?.getAttribute("aria-label")).toBe("검토 대기 7건");

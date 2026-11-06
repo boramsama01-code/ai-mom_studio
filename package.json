@@ -12,7 +12,7 @@
     "dev": "tsx watch --clear-screen=false server/index.ts",
     "prebuild": "node scripts/restore-studio-assets.mjs",
     "build": "vite build && node scripts/build-server.mjs",
-    "start": "NODE_ENV=production node dist/server/index.js",
+    "start": "MALLOC_ARENA_MAX=2 NODE_ENV=production node dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "pretest": "node scripts/restore-studio-assets.mjs",
     "test": "vitest run",

@@ -17,3 +17,4 @@ await build({
 // The raster isolate is plain ESM in dev and production; it deliberately does
 // not inherit TSX, a second font cache, or the main application's state.
 await copyFile('server/services/readingCardRasterWorker.mjs','dist/server/readingCardRasterWorker.mjs');
+await copyFile('server/services/readingCardArtwork.mjs','dist/server/readingCardArtwork.mjs');

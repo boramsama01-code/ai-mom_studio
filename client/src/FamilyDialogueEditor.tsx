@@ -22,6 +22,36 @@ import "./familyDialogue.css";
 export type FamilyDialogueResponse = FamilyDialogueMetadata & { version: number; revisionId: number; copy: CardCopyV2; hasSavedCopy: boolean; ai?: Record<"summary" | "copy" | "image", AiSelection>; recoveryNotice?: string; evidence?: FamilyEvidenceView; artworkCredits?: Record<string, string> };
 export type FamilyProposal = Partial<FamilyDialogueMetadata> & { copy: CardCopyV2 | null; version: number; revisionId?: number; baseRevision?: number; jobId?: number; fieldPath?: string; targetFieldHash?: string; scope?: string; model?: string; status: "ready" | "needs_source" | "needs_review"; reviewFlags: ReviewFlag[]; lateResult?: boolean; evidence?: FamilyEvidenceView; artworkCredits?: Record<string, string> };
 type Preview = { url: string; signature: string };
+type PreviewImages = { preview: Preview | null; thumbs: Record<string, Preview>; retired: string[] };
+const previewUrls = (value: Pick<PreviewImages, "preview" | "thumbs">) => new Set([value.preview?.url, ...Object.values(value.thumbs).map(image => image.url)].filter((url): url is string => !!url));
+
+/** Retire only references displaced by a committed state, never future queued URLs. */
+export function useFamilyPreviewImages() {
+  const [images, setImages] = useState<PreviewImages>({ preview: null, thumbs: {}, retired: [] });
+  const owned = useRef(new Set<string>());
+  function receive(pageId: string, signature: string, blob: Blob, selected = false) {
+    const value = { url: URL.createObjectURL(blob), signature }; owned.current.add(value.url);
+    setImages(current => {
+      const next = { preview: selected ? value : current.preview, thumbs: { ...current.thumbs, [pageId]: value } };
+      const retained = previewUrls(next), retired = new Set(current.retired);
+      for (const url of previewUrls(current)) if (!retained.has(url)) retired.add(url);
+      return { ...next, retired: [...retired] };
+    });
+  }
+  useEffect(() => {
+    if (!images.retired.length) return;
+    // This effect belongs to the render which removed these references. A URL
+    // created for a later, still queued render is not in this retirement list.
+    const retired = new Set(images.retired);
+    for (const url of retired) if (owned.current.delete(url)) URL.revokeObjectURL(url);
+    setImages(current => {
+      const remaining = current.retired.filter(url => !retired.has(url));
+      return remaining.length === current.retired.length ? current : { ...current, retired: remaining };
+    });
+  }, [images.retired]);
+  useEffect(() => () => { for (const url of owned.current) URL.revokeObjectURL(url); owned.current.clear(); }, []);
+  return { preview: images.preview, thumbs: images.thumbs, receive };
+}
 const stable = (value: unknown): string => JSON.stringify(value, (_key, entry) => entry && typeof entry === "object" && !Array.isArray(entry) ? Object.fromEntries(Object.keys(entry).sort().map(key => [key, entry[key]])) : entry);
 const same = (a: unknown, b: unknown) => stable(a) === stable(b);
 const metadataKeys = ["editorialPlan", "evidenceBinding", "pageDesigns", "parentGuide", "captionPackage", "visualBriefs", "editorialReview", "fieldLocks", "generationRuns", "dependencies"] as const;
@@ -156,10 +186,11 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const [saving, setSaving] = useState(false), [rendering, setRendering] = useState(false), [generating, setGenerating] = useState(false), [backgroundBusy, setBackgroundBusy] = useState(false);
   const [saveError, setSaveError] = useState<Error | null>(null), [aiError, setAiError] = useState<Error | null>(null), [conflict, setConflict] = useState<StoredCardCopyResponse | null>(null);
   const [instructions, setInstructions] = useState(""), [proposal, setProposal] = useState<{ result: FamilyProposal; baseline: string; baseVersion: number } | null>(null), [reviewFlags, setReviewFlags] = useState<ReviewFlag[]>([]);
-  const [preview, setPreview] = useState<Preview | null>(null), [thumbs, setThumbs] = useState<Record<string, Preview>>({}), [previewError, setPreviewError] = useState<Error | null>(null), [previewBusy, setPreviewBusy] = useState(false), [previewRetry, setPreviewRetry] = useState(0);
+  const { preview, thumbs, receive: receivePreview } = useFamilyPreviewImages();
+  const [previewError, setPreviewError] = useState<Error | null>(null), [previewBusy, setPreviewBusy] = useState(false), [previewRetry, setPreviewRetry] = useState(0);
   const [designHistory, setDesignHistory] = useState<Partial<Record<FamilyPageId, PageDesign[]>>>({});
   const [structureNotice, setStructureNotice] = useState<string | null>(null);
-  const modeDrafts = useRef<Record<string, FamilyPage["fields"]>>({}), urls = useRef(new Set<string>()), serial = useRef<Promise<FamilyDialogueResponse> | null>(null), appliedProposal = useRef<number | null>(null), action = useRef(false);
+  const modeDrafts = useRef<Record<string, FamilyPage["fields"]>>({}), serial = useRef<Promise<FamilyDialogueResponse> | null>(null), appliedProposal = useRef<number | null>(null), action = useRef(false);
   const modeLockDrafts = useRef<Record<string, Record<string, boolean>>>({});
   const aiPanel = useRef<HTMLDetailsElement>(null);
   const generation = useGenerationRequest(channelId, itemId, "card-copy");
@@ -301,8 +332,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
       try {
         const blob = await apiBlob(`${path}/preview`, "image/jpeg", { method: "POST", body: { version: base.version, copy: draft.copy, pageDesigns: draft.pageDesigns, page: selected, ...(appliedProposal.current ? { proposalJobId: appliedProposal.current } : {}) }, signal: controller.signal });
         if (!live) return;
-        const url = URL.createObjectURL(blob); urls.current.add(url); const value = { url, signature };
-        setPreview(value); setThumbs(current => ({ ...current, [page.id]: value }));
+        receivePreview(page.id, signature, blob, true);
       } catch (error) { if (live && !controller.signal.aborted) setPreviewError(error as Error); }
       finally { if (live) setPreviewBusy(false); }
     }, 450);
@@ -320,18 +350,12 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
         try {
           const blob = await apiBlob(`${path}/preview`, "image/jpeg", { method: "POST", body: { version: base.version, copy: snapshot.copy, pageDesigns: snapshot.pageDesigns, page: index }, signal: controller.signal });
           if (!live) return;
-          const url = URL.createObjectURL(blob); urls.current.add(url); setThumbs(current => ({ ...current, [id]: { url, signature: expected } }));
+          receivePreview(id, expected, blob);
         } catch { if (controller.signal.aborted) return; /* Selecting that page exposes its actionable error. */ }
       }
     }, 1200);
     return () => { live = false; window.clearTimeout(timer); controller.abort(); };
   }, [base.version, dirty, invalid, selected, previewRevision]);
-  useEffect(() => {
-    const retained = new Set([preview?.url, ...Object.values(thumbs).map(value => value.url)]);
-    for (const url of urls.current) if (!retained.has(url)) { URL.revokeObjectURL(url); urls.current.delete(url); }
-  }, [preview, thumbs]);
-  useEffect(() => () => { for (const url of urls.current) URL.revokeObjectURL(url); }, []);
-
   function updateField(descriptor: FamilyFieldDescriptor, value: string | null | string[]) {
     const current = draftRef.current, index = current.copy.pages.findIndex(value => value.id === descriptor.pageId);
     let next = invalidateDerived({ ...current, copy: { ...current.copy, pages: current.copy.pages.map((oldPage, i) => i === index ? replacePageField(oldPage, descriptor.path, value) : oldPage) } });

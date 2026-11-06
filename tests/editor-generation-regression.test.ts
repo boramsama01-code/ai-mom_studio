@@ -15,7 +15,7 @@ vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useCha
 } }], channels: [], selected: "all", select: vi.fn() }) }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
-vi.mock("wouter", () => ({ useLocation: () => ["/studio/8", vi.fn()] }));
+vi.mock("wouter", () => ({ useLocation: () => ["/studio/8", vi.fn()], useSearch: () => window.location.search.slice(1) }));
 vi.mock("../client/src/pages/StudioExport", () => ({ StudioExport: () => null, StudioQuickExport: () => null }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement, root: Root, client: QueryClient, detail: StudioCardDetail;
@@ -27,6 +27,7 @@ function filled(card: StudioCard): StudioCard {
 }
 beforeEach(() => {
   vi.clearAllMocks(); sessionStorage.clear(); localStorage.clear(); connected = true; failGeneration = false;
+  history.replaceState(null, "", "/studio/8");
   const card: StudioCard = { ...studioContentSchema.parse({ title: "테스트 웹툰", channel: "penguin", format: "웹툰" }), id: 8, version: 1, sourceItemId: null, createdAt: date, updatedAt: date };
   detail = { card, revisions: [], jobs: [] };
   mocks.api.mockImplementation(async (path: string, opts?: { method?: string; body?: any }) => {

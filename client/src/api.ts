@@ -20,10 +20,18 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
     res = await fetch(`/api${path}`, { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body), credentials: "same-origin", signal: opts.signal });
   } catch (error) {
     if (opts.signal?.aborted) throw error;
+    if (method !== "GET") throw new ApiError(0, "처리 결과를 확인하지 못했습니다. 현재 입력을 유지했습니다. 최신 서버 상태를 확인해 주세요.", { code: "request_result_unknown", resultUnknown: true });
     throw new ApiError(0, "서버에 연결할 수 없습니다. 네트워크를 확인하세요.");
   }
   const ct = res.headers.get("content-type") || "";
-  const body = ct.includes("json") ? await res.json().catch(() => ({})) : {};
+  let body: Record<string, unknown> = {};
+  if (ct.includes("json")) {
+    try { body = await res.json(); }
+    catch {
+      opts.signal?.throwIfAborted();
+      if (res.ok) throw new ApiError(0, method === "GET" ? "서버 응답을 끝까지 받지 못했습니다. 다시 확인해 주세요." : "처리 결과를 확인하지 못했습니다. 현재 입력을 유지했습니다. 최신 서버 상태를 확인해 주세요.", { code: "response_incomplete", resultUnknown: method !== "GET" });
+    }
+  }
   opts.signal?.throwIfAborted();
   if (!res.ok) throw new ApiError(res.status, (body as { error?: string }).error || `요청 실패 (HTTP ${res.status})`, body as Record<string, unknown>);
   return body as T;
@@ -51,7 +59,14 @@ export async function apiBlob(path: string, expectedType: string, opts: { method
     throw new ApiError(res.status, body.error || `파일 요청 실패 (HTTP ${res.status})`, body);
   }
   if (type !== expectedType) throw new ApiError(502, "파일 응답을 확인할 수 없습니다. 로그인 상태를 확인한 뒤 다시 시도하세요.");
-  return res.blob();
+  try {
+    const blob = await res.blob();
+    opts.signal?.throwIfAborted();
+    return blob;
+  } catch (error) {
+    opts.signal?.throwIfAborted();
+    throw new ApiError(0, "파일을 끝까지 받지 못했습니다. 현재 작업을 유지한 채 다시 확인해 주세요.", { code: "download_interrupted" });
+  }
 }
 
 /** 파일 그대로 올리기(이미지 업로드 등) */
@@ -60,8 +75,12 @@ export async function apiUpload<T = unknown>(path: string, file: File): Promise<
   if (csrf) headers["x-csrf-token"] = csrf;
   let res: Response;
   try { res = await fetch(`/api${path}`, { method: "POST", headers, body: file, credentials: "same-origin" }); }
-  catch { throw new ApiError(0, "파일을 저장하지 못했습니다. 네트워크를 확인한 뒤 다시 저장해 주세요."); }
-  const body = (res.headers.get("content-type") || "").includes("json") ? await res.json().catch(() => ({})) : {};
+  catch { throw new ApiError(0, "업로드 결과를 확인하지 못했습니다. 저장된 자료 목록을 확인한 뒤 재시도해 주세요.", { code: "upload_result_unknown", resultUnknown: true }); }
+  let body: Record<string, unknown> = {};
+  if ((res.headers.get("content-type") || "").includes("json")) {
+    try { body = await res.json(); }
+    catch { if (res.ok) throw new ApiError(0, "업로드 결과를 확인하지 못했습니다. 저장된 자료 목록을 확인한 뒤 재시도해 주세요.", { code: "upload_result_unknown", resultUnknown: true }); }
+  }
   if (!res.ok) throw new ApiError(res.status, (body as { error?: string }).error || `업로드 실패 (HTTP ${res.status})`, body as Record<string, unknown>);
   return body as T;
 }

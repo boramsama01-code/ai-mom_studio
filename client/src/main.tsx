@@ -7,6 +7,7 @@ import "./studio.css";
 import "./design-system.css";
 import "./channel-navigation.css";
 import "./contentWorkspace.css";
+import "./creativeWorkspace.css";
 import { Icon, type IconName } from "./icons";
 import { useFocusScope } from "./useFocusScope";
 import { api } from "./api";
@@ -20,6 +21,7 @@ import { GlobalChannelSelect } from "./GlobalChannelSelect";
 import { ScreenErrorBoundary } from "./ScreenErrorBoundary";
 import { LoginPage } from "./pages/Login";
 import { AccountPage, PasswordSetupPage } from "./pages/Password";
+const AssetsPage = lazy(() => import("./pages/Assets").then(m => ({ default: m.AssetsPage })));
 const TodayPage = lazy(() => import("./pages/Today").then(m => ({ default: m.TodayPage })));
 const InboxPage = lazy(() => import("./pages/Inbox").then(m => ({ default: m.InboxPage })));
 const ItemDetailPage = lazy(() => import("./pages/ItemDetail").then(m => ({ default: m.ItemDetailPage })));
@@ -42,7 +44,8 @@ const NAV: Array<{ group: string; collapsible?: boolean; items: Array<{ href: st
     items: [
       { href: "/", label: "내 콘텐츠", icon: "grid" },
       { href: "/inbox", label: "수집함", icon: "inbox", count: "review" },
-      { href: "/publish", label: "발행함", icon: "send" },
+      { href: "/assets", label: "자산·템플릿", icon: "design" },
+      { href: "/publish", label: "발행 일정·기록", icon: "send" },
       { href: "/settings", label: "설정", icon: "channels" },
     ],
   },
@@ -53,7 +56,6 @@ const NAV: Array<{ group: string; collapsible?: boolean; items: Array<{ href: st
       { href: "/today", label: "아침 수집 브리핑", icon: "sun" },
       { href: "/instagram", label: "인스타그램 연결", icon: "link" },
       { href: "/rules", label: "검색 설정", icon: "sliders" },
-      { href: "/design", label: "수집 카드 디자인", icon: "design" },
       { href: "/connections", label: "API 키 관리", icon: "link" },
       { href: "/account", label: "계정·비밀번호", icon: "lock" },
       { href: "/runs", label: "실행 기록", icon: "clock" },
@@ -211,7 +213,8 @@ function Shell() {
           <Route path="/items/:cid/:id">{(p) => <ItemDetailPage cid={Number(p.cid)} id={Number(p.id)} />}</Route>
           <Route path="/drafts"><Redirect to="/" replace /></Route>
           <Route path="/rules" component={RulesPage} />
-          <Route path="/design" component={DesignPage} />
+          <Route path="/assets" component={AssetsPage} />
+          <Route path="/design"><DesignPage /></Route>
           <Route path="/publish" component={PublishPage} />
           <Route path="/settings" component={ChannelSettingsPage} />
           <Route path="/connections" component={ConnectionsPage} />

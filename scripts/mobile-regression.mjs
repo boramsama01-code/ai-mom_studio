@@ -33,8 +33,8 @@ const row = { ...channels[1], queries: 1, discoveryQueries: 0, boards: 0, budget
 const orphanApproval = { ap: { id: 5, revisionId: 2, scheduledAt: "2026-11-02T07:38:00.000Z", status: "active" }, item: { id: 12174, title: "승인은 저장됐지만 전송 예약이 없는 콘텐츠", channelId: 3 }, reason: "활성 게시 목적지가 없어 전송 예약이 만들어지지 않았습니다. 계정을 연결한 뒤 해당 콘텐츠에서 다시 승인해 주세요." };
 const overlap = (a, b) => Math.min(a.x + a.width, b.x + b.width) > Math.max(a.x, b.x) + 1 && Math.min(a.y + a.height, b.y + b.height) > Math.max(a.y, b.y) + 1;
 try {
-  for (const width of [320, 393, 430, 768]) {
-    const context = await browser.newContext({ viewport: { width, height: 852 }, isMobile: true, hasTouch: true, locale: "ko-KR", timezoneId: "Asia/Seoul" });
+  for (const width of [320, 360, 393, 430, 768, 1440]) {
+    const context = await browser.newContext({ viewport: { width, height: 852 }, isMobile: width < 768, hasTouch: width < 768, locale: "ko-KR", timezoneId: "Asia/Seoul", reducedMotion: "reduce" });
     await context.addInitScript(() => localStorage.setItem("spacepenguin.channel", "3"));
     const page = await context.newPage(), errors = [], writes = [];
     page.on("pageerror", e => errors.push(e.message));
