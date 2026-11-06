@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({ api: vi.fn(), toast: vi.fn(), navigate: vi.fn(
 vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => ({ allChannels: [{ id: 1, slug: "penguin", name: "우주펭귄상회", active: true, accentColor: "#285f6a", categories: null, aiSettings: { summary: { provider: "gemini", model: "" }, copy: { provider: mocks.writer, model: "" }, image: { provider: "openai", model: "" } } }], channels: [], selected: "all", select: vi.fn() }) }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
-vi.mock("wouter", () => ({ useLocation: () => ["/studio/8", mocks.navigate] }));
+vi.mock("wouter", () => ({ useLocation: () => ["/studio/8", mocks.navigate], useSearch: () => window.location.search.slice(1) }));
 vi.mock("../client/src/pages/StudioExport", () => ({ StudioExport: () => null, StudioQuickExport: () => null }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement, root: Root, client: QueryClient, detail: StudioCardDetail, connected: boolean;
