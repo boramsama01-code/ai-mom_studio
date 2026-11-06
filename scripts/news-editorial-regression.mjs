@@ -574,7 +574,13 @@ try {
       results.at(-1).checks.push('No-Autofill manual copy safe-ID import, eight real rendered assets, 48px confirmation padding and explicit new-version acceptance');
       await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2)); console.log(`News editorial regression passed at ${width}px (${engine}).`);
     } catch (error) {
-      results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, requestFailures, diagnostics }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
+      const previewState = await page.evaluate(() => {
+        const sample = image => image ? { src: image.currentSrc || image.getAttribute('src'), complete: image.complete, width: image.naturalWidth, height: image.naturalHeight, stale: image.classList.contains('is-stale'), top: image.getBoundingClientRect().top } : null;
+        return { saved: document.querySelector('.family-dialogue-editor .card-copy-heading .badge')?.textContent,
+          selected: sample(document.querySelector('.card-copy-preview img')),
+          thumbnails: [...document.querySelectorAll('.family-page-strip > button')].map(button => ({ label: button.getAttribute('aria-label'), image: sample(button.querySelector('img')) })) };
+      }).catch(() => null);
+      results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, requestFailures, diagnostics, previewState, pendingPreviewRoutes: lifecycle.previewRoutes.size }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
       await page.screenshot({ path: `${outputDir}/failure-${width}.png`, fullPage: true }).catch(() => {}); await writeFile(`${outputDir}/failure-${width}.html`, await page.content()); throw error;
     } finally { await context.close(); }
   }

@@ -1,5 +1,5 @@
-import { lazy, Suspense, useState } from "react";
-import { useLocation } from "wouter";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { useLocation, useSearch } from "wouter";
 import { creativeProfileFor, creativeLogoSource } from "@shared/creativeProfile";
 import { useChannel, useDirtyGuard } from "../state";
 import { ErrorBox, GuardedLink, Loading } from "../ui";
@@ -8,15 +8,20 @@ import { registeredProfileAsset } from "@shared/characterVariantAssets";
 import { BrandAssetPreview } from "../BrandAssetPreview";
 const Design = lazy(() => import("./Design").then(m => ({ default: m.DesignPage })));
 const Characters = lazy(() => import("./StudioPosePicker").then(m => ({ default: m.StudioCharacterArchive })));
+const Results = lazy(() => import("../AssetResults").then(m => ({ default: m.AssetResults })));
+const assetTab = (search: string) => { const tab = new URLSearchParams(search).get("tab"); return ["templates", "characters", "brands", "results"].includes(tab ?? "") ? tab! : "templates"; };
 export function AssetsPage() {
   const { channels, selected, current, error, refresh } = useChannel();
   const guard = useDirtyGuard(), [, navigate] = useLocation();
-  const [tab, setTab] = useState(() => ["templates","characters","brands"].includes(new URLSearchParams(location.search).get("tab") ?? "") ? new URLSearchParams(location.search).get("tab")! : "templates");
+  const search = useSearch();
+  const [tab, setTab] = useState(() => assetTab(search));
+  useEffect(() => { setTab(assetTab(search)); }, [search]);
   const change = (value: string) => guard.confirmLeave(() => { setTab(value); navigate(`/assets?tab=${value}`, { replace: true }); });
   return <div className="asset-workspace"><header className="page-head"><div><span className="section-kicker">CREATIVE LIBRARY</span><h1>자산·템플릿</h1><p className="muted">선택할 디자인과 승인된 캐릭터를 한곳에서.</p></div><span className="asset-scope"><Icon name="channels" size={16}/>{current?.name ?? "모든 채널"}</span></header>
-    <nav className="asset-tabs" aria-label="자산 종류">{[["templates","디자인 템플릿"],["characters","캐릭터·포즈"],["brands","브랜드 가이드"]].map(([key,label]) => <button className="btn ghost" key={key} aria-pressed={tab === key} onClick={() => change(key)}>{label}</button>)}</nav>
+    <nav className="asset-tabs" aria-label="자산 종류">{[["templates","디자인 템플릿"],["characters","캐릭터·포즈"],["brands","브랜드 가이드"],["results","콘텐츠 결과"]].map(([key,label]) => <button className="btn ghost" key={key} aria-pressed={tab === key} onClick={() => change(key)}>{label}</button>)}</nav>
     {error && <ErrorBox error={error} retry={refresh}/>}
     <Suspense fallback={<Loading label="자산 불러오는 중" lines={5}/>}>
+      {tab === "results" && <Results/>}
       {tab === "templates" && <div className="asset-template-content"><Design embedded/></div>}
       {tab === "characters" && <Characters/>}
       {tab === "brands" && <div className="asset-brand-grid">{channels.filter(channel => selected === "all" || channel.id === selected).map(channel => { const profile = creativeProfileFor(channel), logo = registeredProfileAsset(profile.logoAssetId); return <article className="asset-brand" key={channel.id}>

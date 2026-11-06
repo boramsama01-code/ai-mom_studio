@@ -115,6 +115,9 @@ jobs:
       - name: Verify guarded channel switching and new channel creation
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/channel-navigation-regression.mjs
+      - name: Verify approved assets, saved videos and exact version history
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        run: node --import tsx scripts/asset-library-regression.mjs
       - name: Build verified before screen for design comparison
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: |
@@ -164,4 +167,5 @@ jobs:
             test-results/manual-family
             test-results/channel-navigation
             test-results/studio-automatic-browser
+            test-results/asset-library-browser
           if-no-files-found: ignore

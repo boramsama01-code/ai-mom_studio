@@ -17,6 +17,7 @@ import { collectionRoutes } from "./routes/collection";
 import { canvaEditorialRoutes } from "./routes/canvaEditorial";
 import { canvaTemplateLibraryRoutes } from "./routes/canvaTemplateLibrary";
 import { cardPageArtworkRoutes } from "./routes/cardPageArtwork";
+import { assetLibraryRoutes } from './routes/assetLibrary';
 import { HttpError } from "./routes/util";
 import { isPrivateStudioAssetPath } from "./studioAssetPath";
 
@@ -60,7 +61,7 @@ export function createApp() {
       if (!authConfigured() && !demoAllowed()) return res.status(503).json({ error: "운영자 인증이 설정되지 않아 운영 API를 차단했습니다.", code: "auth_not_configured" });
       next();
     });
-    app.use("/api", requireOperator, captureRoutes, canvaTemplateLibraryRoutes, canvaEditorialRoutes, channelRoutes, ruleRoutes, cardPageArtworkRoutes, itemRoutes, opsRoutes, secretRoutes, templateRoutes, studioRoutes, collectionRoutes);
+    app.use("/api", requireOperator, assetLibraryRoutes, captureRoutes, canvaTemplateLibraryRoutes, canvaEditorialRoutes, channelRoutes, ruleRoutes, cardPageArtworkRoutes, itemRoutes, opsRoutes, secretRoutes, templateRoutes, studioRoutes, collectionRoutes);
   }
   app.use("/api", (_req, res) => res.status(404).json({ error: "없는 API입니다." }));
 

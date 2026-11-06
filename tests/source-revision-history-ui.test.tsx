@@ -11,11 +11,11 @@ import { api, ApiError } from "../client/src/api";
 import { emptyPayload } from "../shared/payloads";
 import { cardCopyFixture } from "./fixtures/cardCopy";
 
-const mocks = vi.hoisted(() => ({ api: vi.fn(), blob: vi.fn(), restored: vi.fn(), save: vi.fn(), navigate: vi.fn(), toast: vi.fn() }));
+const mocks = vi.hoisted(() => ({ api: vi.fn(), blob: vi.fn(), restored: vi.fn(), save: vi.fn(), navigate: vi.fn(), toast: vi.fn(), search: "" }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api, apiBlob: mocks.blob }));
 vi.mock("../client/src/state", async original => ({ ...await original<object>(), useChannel: () => ({ selected: 2, channels: [{ id: 2, name: "테스트 채널", active: true }], allChannels: [{ id: 2, name: "테스트 채널", active: true }] }) }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
-vi.mock("wouter", async original => ({ ...await original<object>(), useLocation: () => ["/items/2/9", mocks.navigate], useSearch: () => "" }));
+vi.mock("wouter", async original => ({ ...await original<object>(), useLocation: () => ["/items/2/9", mocks.navigate], useSearch: () => mocks.search }));
 vi.mock("../client/src/pages/Design", () => ({ useTemplates: () => ({ data: { current: "set:n03", items: [] } }), TemplatePicker: () => null }));
 vi.mock("../client/src/CardCarousel", () => ({ CardCarousel: () => null }));
 vi.mock("../client/src/CategorySelect", () => ({ CategorySelect: () => null }));
@@ -69,6 +69,7 @@ const writes = () => mocks.api.mock.calls.filter(([, opts]) => opts?.method === 
 
 beforeEach(() => {
   vi.clearAllMocks(); localStorage.clear(); sessionStorage.clear(); restoreBarrier = null;
+  mocks.search = "";
   mocks.save.mockResolvedValue(true);
   old = { id: 3, contentItemId: 9, revisionNo: 1, author: "operator", createdAt: "2026-11-01T00:00:00Z", note: "수정 전 원고", payload: { ...emptyPayload("science_dialogue", "이전 주제"), key_question: "과거에 저장한 질문", cardCopy: cardCopyFixture("set:n01-blue") } };
   old.payload.cardCopy.cover.title = "과거 카드 표지";
@@ -112,6 +113,19 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); });
 
 describe("source history with real dirty guard and mocked HTTP", () => {
+  it("opens an exact manuscript history link without writes and keeps its namespace on a Studio-origin item", async () => {
+    mocks.search = "tab=history&revision=3"; detail.item.origin = "studio"; detail.canonicalStudioCardId = 77;
+    await render(<><ItemDetailPage cid={2} id={9}/><DirtyModal/></>);
+    expect(host.querySelector(".source-revision-history")!.closest("details")!.open).toBe(true);
+    expect(host.textContent).toContain("과거에 저장한 질문");
+    expect(mocks.navigate).not.toHaveBeenCalled(); expect(writes()).toHaveLength(0);
+  });
+  it("loads an exact source revision absent from the recent options and rejects a foreign response", async () => {
+    const props = { channelId: 2, itemId: 9, itemVersion: 2, current: detail.current, revisions: [detail.current], requestedRevisionId: 3 };
+    await render(<SourceRevisionHistory {...props}/>); expect(host.textContent).toContain("주소로 선택한 기록"); expect(host.textContent).toContain("과거에 저장한 질문"); expect(writes()).toHaveLength(0);
+    await act(async () => root.render(<QueryClientProvider client={client}><DirtyGuardProvider><p>다른 화면</p></DirtyGuardProvider></QueryClientProvider>)); client.clear(); old.contentItemId = 999;
+    await render(<SourceRevisionHistory {...props}/>); expect(host.textContent).toContain("이 콘텐츠의 원고 기록을 확인하지 못했습니다"); expect(host.querySelector('[aria-label="원고 내용 비교"]')).toBeNull(); expect(writes()).toHaveLength(0);
+  });
   it("loads history only on selection and compares actual source/card text without writing", async () => {
     await render();
     expect(mocks.api.mock.calls.some(([url]) => url.includes("/revisions/"))).toBe(false);

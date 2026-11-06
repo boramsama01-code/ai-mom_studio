@@ -1,6 +1,7 @@
 import { WorkspaceSkeleton } from "../WorkspaceSkeleton";
 import { StudioWorkingPreview } from "../StudioWorkingPreview";
 import { ManualFamilyInitializer } from "../ManualFamilyInitializer";
+import { StudioHistoryEntry } from "../StudioHistoryEntry";
 import { emptyVideoProject } from "@shared/videoProject";
 const VideoEditor = lazy(() => import("./VideoEditor").then(m => ({ default: m.VideoEditor })));
 import { creativeProfileFor } from "@shared/creativeProfile";
@@ -293,12 +294,13 @@ function StudioDetail({ id }: { id: number }) {
   if (q.isLoading) return <Loading lines={5} />;
   if (!q.data) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   if (q.data.card.trashedAt) return <TrashedStudioDetail card={q.data.card} />;
-  if (q.data.card.format === "릴스") return <VideoEditor key={q.data.card.id} data={q.data} />;
-  if (q.data.card.finishedDeck) return <FinishedDeckEditor key={q.data.card.id} data={q.data} />;
-  if (q.data.card.experience) return <ExperienceEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} />;
-  if ((q.data.card.sourceReference || q.data.card.sourceOutput) && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard key={q.data.card.id} card={q.data.card} /><SourceBoardNotes card={q.data.card} /></>;
+  const history = !q.data.card.sourceReference && <StudioHistoryEntry card={q.data.card}/>;
+  if (q.data.card.format === "릴스") return <>{history}<VideoEditor key={q.data.card.id} data={q.data} /></>;
+  if (q.data.card.finishedDeck) return <>{history}<FinishedDeckEditor key={q.data.card.id} data={q.data} /></>;
+  if (q.data.card.experience) return <>{history}<ExperienceEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} /></>;
+  if (q.data.card.sourceReference && !q.data.card.script && !q.data.card.panels.some(p => p.dialogue || p.scene || p.imageId) && !q.data.card.imagePath) return <><SourceStudioCard key={q.data.card.id} card={q.data.card} /><SourceBoardNotes card={q.data.card} /></>;
   // A background polling failure must not unmount the editor and discard unsaved work.
-  return <>{q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}<StudioEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} /></>;
+  return <>{history}{q.error && <ErrorBox error={q.error} retry={() => q.refetch()} />}<StudioEditor key={q.data.card.id} data={q.data} refresh={() => q.refetch()} /></>;
 }
 
 function SourceBoardNotes({ card }: { card: Card }) {

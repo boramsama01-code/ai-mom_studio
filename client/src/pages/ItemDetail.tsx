@@ -39,6 +39,7 @@ import { useGenerationRequest } from "../useGenerationRequest";
 import { useDraftRecovery } from "../useDraftRecovery";
 import { RecoveryNotice } from "../RecoveryNotice";
 import { SourceRevisionHistory } from "../SourceRevisionHistory";
+import { historyEntry } from "../StudioHistoryEntry";
 import { PublicationDraftControls } from "../PublicationDraftControls";
 import { compareSourceRevisions } from "@shared/sourceRevisionHistory";
 import { WorkModeControl, type WorkMode } from "../WorkModeControl";
@@ -86,8 +87,10 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   const imageGeneration = useGenerationRequest(cid, id, "card-render");
   const sourceChannel = allChannels.find(ch => ch.id === cid);
   const search = useSearch();
+  const history = historyEntry(search);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [deliveryOpen, setDeliveryOpen] = useState(() => entryTab(search) === "delivery");
+  const [historyOpen, setHistoryOpen] = useState(() => history.open);
   const [templateChoice, setTemplateChoice] = useState<string | null>(null);
   const [sourceDraftDirty, setSourceDraftDirty] = useState(false);
   const [sourceTextDirty, setSourceTextDirty] = useState(false);
@@ -98,13 +101,16 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
     const target = entryTab(search);
     setSourceOpen(target === "source" || target === "edit");
     setDeliveryOpen(target === "delivery");
+    setHistoryOpen(target === "history");
     if (target === "delivery") window.setTimeout(() => document.getElementById("delivery-panel")?.scrollIntoView({ block: "start" }), 100);
   }, [requestedCid, id, search]);
   useEffect(() => { setTemplateChoice(null); setWorkMode("auto"); }, [requestedCid, id]);
   useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}${search ? `?${search}` : ""}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, search, navigate]);
   useEffect(() => {
-    if (!fromStudio && q.data?.item.origin === "studio" && q.data.canonicalStudioCardId) navigate(`/studio/${q.data.canonicalStudioCardId}`, { replace: true });
-  }, [fromStudio, q.data?.item.origin, q.data?.canonicalStudioCardId, navigate]);
+    // Source revision IDs and Studio revision IDs have different namespaces.
+    // A manuscript deep link stays here rather than selecting an unrelated Studio record.
+    if (!fromStudio && !history.open && q.data?.item.origin === "studio" && q.data.canonicalStudioCardId) navigate(`/studio/${q.data.canonicalStudioCardId}`, { replace: true });
+  }, [fromStudio, history.open, q.data?.item.origin, q.data?.canonicalStudioCardId, navigate]);
   const guard = useDirtyGuard();
   const qc = useQueryClient();
   const categorize = useMutation({
@@ -168,7 +174,7 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
         <summary><strong>전송 내역</strong><span>{d.deliveries.length ? `${d.deliveries.length}건 · 예약 취소·재전송` : "승인 후 상태 확인"}</span></summary>
         <ItemDeliveryPanel d={d} cid={cid} runtime={runtime.data} runtimeError={runtime.error} refresh={() => { q.refetch(); runtime.refetch(); }} refreshing={q.isFetching || runtime.isFetching} />
       </details>
-      <details className="content-drawer"><summary><strong>버전 기록</strong><span>{d.revisions.length}개</span></summary><SourceRevisionHistory key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} current={d.current} revisions={d.revisions} onRestored={() => setTemplateChoice(null)} /></details>
+      <details className="content-drawer" open={historyOpen} onToggle={event => { if (event.target === event.currentTarget) setHistoryOpen(event.currentTarget.open); }}><summary><strong>버전 기록</strong><span>{d.revisions.length}개</span></summary><SourceRevisionHistory key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} current={d.current} revisions={d.revisions} requestedRevisionId={history.open ? history.revisionId : undefined} entryError={history.error} onRestored={() => setTemplateChoice(null)} /></details>
     </div>
   );
 }
