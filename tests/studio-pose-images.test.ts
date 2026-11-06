@@ -17,7 +17,7 @@ it("passes the actual selected image cells after the identity master without any
   const sheet = await sharp(pixels, { raw: { width: 1254, height: 1254, channels: 3 } }).png().toBuffer();
   const master = await sharp({ create: { width: 80, height: 30, channels: 3, background: "#fafafa" } }).png().toBuffer();
   const read = vi.spyOn(fs, "readFile").mockImplementation((async (file: unknown) => {
-    const name = String(file);
+    const name = String(file).replaceAll("\\", "/");
     if (name.endsWith("/poses-v2/family-v2.png")) return master;
     if (/\/poses-v2\/(pengpeng|pempem|penguin|pengki)\.png$/.test(name)) return sheet;
     throw Error("Untrusted asset path");
