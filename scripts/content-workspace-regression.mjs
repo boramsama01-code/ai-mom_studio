@@ -89,6 +89,22 @@ function fixture() {
     else if (pathname === "/api/canva/status") data = { connected: false };
     else if (pathname === "/api/studio/cards/25") data = studio();
     else if (pathname === "/api/studio/cards") data = { cards: [studio().card], ai, notes: "", notesVersion: 1 };
+    else if (pathname === "/api/items") {
+      const page = Number(url.searchParams.get("page") || 1), source = detail().primary;
+      data = { total: 80, page, pageSize: 20, items: Array.from({ length: 20 }, (_, index) => {
+        const id = 9770 + (page - 1) * 20 + index;
+        return { item: { ...detail().item, id, title: `가족 자료 ${id}`, reviewStatus: url.searchParams.get("review") || "pending" }, channelSlug: "current-dialogue", channelName: "Alligodang", source: { ...source, url: source.originalUrl, fetchStatus: url.searchParams.get("fetchStatus") || "ok" } };
+      }) };
+    }
+    else if (pathname === "/api/channels/3/rules") data = { items: [], discovery: null };
+    else if (pathname === "/api/deliveries") {
+      const page = Number(url.searchParams.get("page") || 1);
+      data = { total: 90, page, pageSize: 30, counts: { overdue: 0, needsAttention: 0 }, items: Array.from({ length: 30 }, (_, index) => {
+        const id = 9760 + (page - 1) * 30 + index;
+        return { d: { id: 20000 + id, approvalId: 30000 + id, status: "failed", listState: url.searchParams.get("view") || "active", listVersion: 1, needsReconciliation: false, lastError: "합성 검증 기록", completedAt: stamp, externalUrl: null }, dest: { label: "검증용 계정", platform: "instagram" }, ap: { id: 30000 + id, scheduledAt: stamp, status: "active", revisionId: state.saved.revisionId }, item: { id, channelId: 3, title: `발행 기록 ${id}` } };
+      }) };
+    }
+    else if (pathname === "/api/publication-orphans") data = { items: [], total: 0, page: 1, pageSize: 30 };
     else if (pathname === "/api/channels/3/templates") data = { current: "set:n04", items: [{ key: "set:n04", name: "뉴스 브리핑", description: "원문에서 시작하는 가족의 뉴스", kind: "builtin", family: "news", pageCount: 5 }] };
     else if (pathname === itemPath && method === "GET") data = detail();
     else if (pathname === `${itemPath}/publication-draft` && method === "PATCH") {
@@ -170,10 +186,22 @@ async function ready(page) {
   assert.equal(await page.locator('.content-workspace [role="tablist"]').count(), 0);
 }
 async function previewReady(page) {
-  const image = page.locator('.card-copy-preview:not(.is-stale)[aria-busy="false"] img');
-  await image.waitFor();
-  await image.evaluate(img => img.decode());
-  assert(await image.evaluate(img => img.naturalWidth >= 200 && img.naturalHeight >= 250), "preview must contain a real card-sized image");
+  await page.locator('.card-copy-preview:not(.is-stale)[aria-busy="false"] img').waitFor();
+  // Sample the current DOM: React may revoke an older blob while replacing it.
+  // A retained decode() promise can reject even when the latest image is ready.
+  await page.waitForFunction(() => {
+    const image = document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img');
+    return image instanceof HTMLImageElement && image.complete && image.naturalWidth >= 200 && image.naturalHeight >= 250;
+  });
+}
+async function replaceWorkspaceDocument(page, replace) {
+  // This scenario verifies persisted drafts, not a preview request racing a
+  // provisional document replacement. WebKit can misreport that cancelled
+  // same-origin request as an access-control pageerror (Playwright #43120).
+  // Finish the latest read-only preview first; keep every pageerror fatal.
+  await previewReady(page);
+  await replace();
+  await ready(page);
 }
 async function noOverflow(page, label) {
   const dimensions = await page.evaluate(() => ({ width: innerWidth, scroll: document.documentElement.scrollWidth, offenders: [...document.querySelectorAll("main *")].filter(node => { const r = node.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right > innerWidth + 1; }).slice(0, 8).map(node => ({ tag: node.tagName, class: node.className, width: node.getBoundingClientRect().width })) }));
@@ -186,6 +214,8 @@ async function noOverflow(page, label) {
 async function actionNotCovered(page) {
   for (const button of await page.locator(".card-copy-savebar button").all()) {
     await button.evaluate(node => node.scrollIntoView({ block: "end" }));
+    const size = await button.boundingBox();
+    if (page.viewportSize().width <= 900) assert(size && size.width >= 48 && size.height >= 48, `primary mobile action must be at least 48×48px: ${JSON.stringify(size)}`);
     assert(await button.evaluate(node => {
       const rect = node.getBoundingClientRect();
       const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
@@ -201,17 +231,101 @@ async function clickMutation(page, button, pathname) {
   await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === pathname && response.request().method() === "POST" && response.ok()), button.click()]);
 }
 
+async function selectThroughLabel(page, checkbox, checked, resultCheckbox = checkbox) {
+  const label = checkbox.locator("..");
+  await label.evaluate(node => node.scrollIntoView({ block: "center" }));
+  const box = await label.boundingBox(), native = await checkbox.boundingBox(), url = page.url();
+  assert(box && native, "selection must have both a native checkbox and its label");
+  assert.notEqual(await checkbox.isChecked(), checked, "test must activate a selection change");
+  if (page.viewportSize().width <= 900) {
+    assert(box.width >= 48 && box.height >= 48, "mobile selection label must be at least 48×48px: " + JSON.stringify(box));
+    const point = { x: box.x + box.width - 4, y: box.y + box.height - 4 };
+    assert(point.x > native.x + native.width || point.y > native.y + native.height, "tap must exercise the label padding, not the tiny native checkbox");
+    assert(await label.evaluate((node, point) => { const hit = document.elementFromPoint(point.x, point.y); return !!hit && (node === hit || node.contains(hit)); }, point), "selection padding must receive the tap");
+    if (page.viewportSize().width < 768) await page.touchscreen.tap(point.x, point.y);
+    else await page.mouse.click(point.x, point.y);
+  } else {
+    assert(box.height <= 44, "desktop selection must retain its compact height");
+    await label.click();
+  }
+  assert.equal(await resultCheckbox.isChecked(), checked, "label activation must toggle the intended checkbox once");
+  assert.equal(page.url(), url, "selecting a row must not open its content");
+}
+
+async function verifyListReturnContext(page, width, state) {
+  const before = mutations(state).length;
+  await previewReady(page);
+  await page.goto(origin + "/inbox?collectedOn=all&workMode=manual");
+  const search = page.getByRole("textbox", { name: "검색", exact: true });
+  await search.fill("가족 자료");
+  await page.getByRole("search").getByRole("button", { name: "검색", exact: true }).click();
+  await page.getByRole("combobox", { name: "본문 상태", exact: true }).selectOption("not_fetched");
+  await page.getByRole("navigation", { name: "페이지", exact: true }).getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByText("2 / 4 페이지 · 총 80건", { exact: true }).waitFor();
+  await search.fill("검색 전 임시 입력");
+  await selectThroughLabel(page, page.getByRole("checkbox", { name: "이 페이지 전체 선택", exact: true }), true, page.getByRole("checkbox", { name: "가족 자료 9790 선택", exact: true }));
+  assert.equal(await page.locator(".inbox-row-select input:checked").count(), 20);
+  await page.getByRole("button", { name: "선택 해제", exact: true }).click();
+  await selectThroughLabel(page, page.getByRole("checkbox", { name: "가족 자료 9790 선택", exact: true }), true);
+  const source = page.locator('a.title[href="/items/3/9790"]');
+  await page.evaluate(() => scrollTo(0, 200));
+  await source.scrollIntoViewIfNeeded();
+  const inboxTop = await page.evaluate(() => scrollY);
+  assert(inboxTop > 0, "inbox return must restore a real scrolled list");
+  await source.click(); await ready(page); await previewReady(page);
+  await page.goBack();
+  await page.getByText("2 / 4 페이지 · 총 80건", { exact: true }).waitFor();
+  assert.equal(await search.inputValue(), "검색 전 임시 입력");
+  assert.equal(await page.getByRole("combobox", { name: "본문 상태", exact: true }).inputValue(), "not_fetched");
+  assert.equal(new URL(page.url()).searchParams.get("q"), "가족 자료");
+  assert.equal(await page.getByRole("checkbox", { name: "가족 자료 9790 선택", exact: true }).isChecked(), false);
+  await page.waitForFunction(top => Math.abs(scrollY - top) <= 2, inboxTop);
+  await noOverflow(page, "inbox return " + width);
+  await page.screenshot({ path: `${outputDir}/inbox-return-${width}.png` });
+
+  await page.goto(origin + "/publish");
+  await page.getByRole("tab", { name: "보관함", exact: true }).click();
+  await page.getByRole("combobox", { name: "전송 상태 필터", exact: true }).selectOption("failed");
+  await page.getByLabel("시작일 (한국 시간)", { exact: true }).fill("2026-10-01");
+  await page.getByLabel("종료일 (한국 시간)", { exact: true }).fill("2026-11-01");
+  await page.getByRole("navigation", { name: "페이지", exact: true }).getByRole("button", { name: "다음", exact: true }).click();
+  await page.getByText("2 / 3 페이지 · 총 90건", { exact: true }).waitFor();
+  const allRecords = page.getByRole("checkbox", { name: "이 페이지에서 정리 가능한 기록 모두 선택", exact: true });
+  await selectThroughLabel(page, allRecords, true);
+  assert.equal(await page.locator(".publication-record-select input:checked").count(), 30);
+  await selectThroughLabel(page, allRecords, false);
+  await selectThroughLabel(page, page.getByRole("checkbox", { name: "발행 기록 9790 발행 기록 선택", exact: true }), true);
+  const publication = page.locator('a.title[href="/items/3/9790?tab=delivery"]');
+  await page.evaluate(() => scrollTo(0, 200));
+  await publication.scrollIntoViewIfNeeded();
+  const publishTop = await page.evaluate(() => scrollY);
+  assert(publishTop > 0, "publication return must restore a real scrolled list");
+  await publication.click(); await ready(page); await previewReady(page);
+  await page.goBack();
+  await page.getByText("2 / 3 페이지 · 총 90건", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("tab", { name: "보관함", exact: true }).getAttribute("aria-selected"), "true");
+  assert.equal(await page.getByRole("combobox", { name: "전송 상태 필터", exact: true }).inputValue(), "failed");
+  assert.equal(await page.getByLabel("시작일 (한국 시간)", { exact: true }).inputValue(), "2026-10-01");
+  assert.equal(await page.getByLabel("종료일 (한국 시간)", { exact: true }).inputValue(), "2026-11-01");
+  assert.equal(await page.getByRole("checkbox", { name: "발행 기록 9790 발행 기록 선택", exact: true }).isChecked(), false);
+  await page.waitForFunction(top => Math.abs(scrollY - top) <= 2, publishTop);
+  await noOverflow(page, "publication return " + width);
+  await page.screenshot({ path: `${outputDir}/publication-return-${width}.png` });
+  assert.equal(mutations(state).length, before, "returning to lists must not generate, publish or organize records");
+}
+
 let browser;
 let engine = "WebKit";
 const results = [];
 try {
   try { browser = await playwright.webkit.launch(); }
   catch (webkitError) {
+    if (process.env.CI) throw webkitError;
     engine = "Chromium";
     console.log(`WebKit unavailable; using Chromium (${String(webkitError.message).split("\n")[0]})`);
     browser = await playwright.chromium.launch({ ...(process.env.WORKSPACE_BROWSER_EXECUTABLE ? { executablePath: process.env.WORKSPACE_BROWSER_EXECUTABLE, args: ["--no-zygote", "--disable-dev-shm-usage"] } : {}) });
   }
-  const widths = process.env.WORKSPACE_BROWSER_WIDTHS ? process.env.WORKSPACE_BROWSER_WIDTHS.split(",").map(Number) : [393, 1280, 320, 430];
+  const widths = process.env.WORKSPACE_BROWSER_WIDTHS ? process.env.WORKSPACE_BROWSER_WIDTHS.split(",").map(Number) : [393, 1280, 320, 430, 768];
   for (const width of widths) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 768, hasTouch: width < 768, locale: "ko-KR", timezoneId: "Asia/Seoul", serviceWorkers: "block", reducedMotion: "reduce" });
     await context.addInitScript(() => localStorage.setItem("spacepenguin.channel", "3"));
@@ -246,6 +360,16 @@ try {
       const workspaceNav = await page.locator(".content-workspace-nav").innerText();
       const mountedEditor = await page.locator("#card-panel").elementHandle();
       await noOverflow(page, `studio ${width}`);
+      if (width === 393) {
+        await page.setViewportSize({ width: 852, height: 393 });
+        await noOverflow(page, "landscape editor"); await actionNotCovered(page);
+        await page.screenshot({ path: `${outputDir}/landscape-editor-393.png` });
+        await page.setViewportSize({ width: 393, height: 480 });
+        await page.locator(".card-copy-fields textarea").first().focus();
+        await noOverflow(page, "focused short-height editor"); await actionNotCovered(page);
+        await page.screenshot({ path: `${outputDir}/short-height-editor-393.png` });
+        await page.setViewportSize({ width, height: 900 }); await previewReady(page);
+      }
       await page.screenshot({ path: `${outputDir}/workspace-${width}.png` });
 
       const firstTitle = "첫 카드에 저장한 제목", firstBody = "첫 번째 카드의 본문입니다.\n줄바꿈도 저장 후 그대로 유지합니다.";
@@ -294,7 +418,7 @@ try {
       await page.getByLabel("보기 채널", { exact: true }).selectOption("3");
       await page.waitForURL(`${origin}/`);
       await page.locator('a[href="/studio/25"]').first().click(); await ready(page);
-      await page.reload(); await ready(page);
+      await replaceWorkspaceDocument(page, () => page.reload());
       await page.getByRole("button", { name: /^1번째 본문 문구 편집/ }).click();
       await waitValue(page, "title", firstTitle); await waitValue(page, "body", firstBody);
       await page.getByRole("button", { name: /^2번째 본문 문구 편집/ }).click();
@@ -306,6 +430,7 @@ try {
       await field(page, "title").fill(crashTitle);
       await page.locator(".card-copy-editor .draft-recovery").getByText(/이 기기에 임시 보관됨/).waitFor();
       assert.equal(state.saved.copy.pages[1].title, secondTitle);
+      await previewReady(page);
       await page.close({ runBeforeUnload: false });
       page = await context.newPage(); trackPage(page);
       await page.goto(`${origin}/studio/25`); await ready(page);
@@ -318,7 +443,7 @@ try {
       await field(page, "title").fill(secondTitle);
       await page.getByText("문구 저장됨", { exact: true }).waitFor();
 
-      await page.goto(`${origin}/items/3/9790`); await ready(page);
+      await replaceWorkspaceDocument(page, () => page.goto(`${origin}/items/3/9790`));
       assert.equal(await page.locator(".content-workspace-nav").innerText(), workspaceNav, "studio and item routes must share the canonical editor");
       await page.getByRole("button", { name: /^2번째 본문 문구 편집/ }).click();
       await waitValue(page, "body", secondBody);
@@ -359,6 +484,7 @@ try {
       await page.locator(".publication-draft-controls .draft-recovery").getByText(/이 기기에 임시 보관됨/).waitFor();
       const recoveryBeforeClose = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("spacepenguin.draft-recovery"))));
       await writeFile(`${outputDir}/recovery-before-${width}.json`, JSON.stringify(recoveryBeforeClose, null, 2));
+      await previewReady(page);
       await page.close({ runBeforeUnload: false });
       page = await context.newPage(); trackPage(page);
       await page.goto(`${origin}/items/3/9790`); await ready(page);
@@ -368,7 +494,7 @@ try {
       assert.equal(await page.getByRole("textbox", { name: "인스타그램 캡션", exact: true }).inputValue(), caption);
       await page.getByRole("button", { name: "게시 준비 저장", exact: true }).click();
       await page.getByText("게시 준비 저장됨 · v2", { exact: true }).waitFor();
-      await page.reload(); await ready(page); await nav(page, "게시 준비").click();
+      await replaceWorkspaceDocument(page, () => page.reload()); await nav(page, "게시 준비").click();
       assert.equal(await page.getByRole("textbox", { name: "인스타그램 캡션", exact: true }).inputValue(), caption);
       await page.getByRole("button", { name: "내용 확인 · 검토 완료", exact: true }).click();
       await page.getByRole("button", { name: "내용 검토 완료됨", exact: true }).waitFor();
@@ -383,7 +509,7 @@ try {
       assert(await page.locator(".publish-confirm input").isDisabled());
       await page.getByRole("button", { name: "게시 준비 저장", exact: true }).click();
       await page.getByText("게시 준비 저장됨 · v3", { exact: true }).waitFor();
-      await page.reload(); await ready(page); await nav(page, "게시 준비").click();
+      await replaceWorkspaceDocument(page, () => page.reload()); await nav(page, "게시 준비").click();
       assert(await later.isChecked(), "the selected mode must survive reopening");
       assert.equal(await page.locator('input[type="datetime-local"]').inputValue(), selectedTime);
       assert.equal(state.publicationDraft.options.scheduledAtKst, selectedTime);
@@ -424,8 +550,9 @@ try {
       assert.equal(state.writes.filter(write => /\/retry$/.test(write.path)).length, 1);
       assert.equal(state.writes.filter(write => /\/cancel$/.test(write.path)).length, 1);
       assert.equal(state.saved.copy.pages[0].body, firstBody); assert.equal(state.saved.copy.pages[1].body, secondBody);
+      await verifyListReturnContext(page, width, state);
       assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
-      results.push({ engine, width, result: "passed", savedPages: 2, aiRecovery: true, publicationModes: ["now", "later"], cancelAndConfirmedRetry: true, captionPersistence: true, deviceRecovery: true, publicationOptionsPersistence: true, historyGuard: true, channelPreservation: true, actionHitTests: true });
+      results.push({ engine, width, result: "passed", savedPages: 2, aiRecovery: true, publicationModes: ["now", "later"], cancelAndConfirmedRetry: true, captionPersistence: true, deviceRecovery: true, publicationOptionsPersistence: true, historyGuard: true, channelPreservation: true, actionHitTests: true, listReturnContext: true, selectionPaddingHitTests: true });
       console.log(`${engine} ${width}px: canonical workspace, two-page save/reload, unsaved navigation, AI recovery, now/later and cancel/retry passed`);
     } catch (error) {
       console.error(JSON.stringify({ width, errors, blocked, diagnostics, writes: mutations(state), url: page.url() }));

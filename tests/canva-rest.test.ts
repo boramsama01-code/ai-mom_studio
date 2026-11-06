@@ -170,6 +170,11 @@ describe("safe Canva failures and request limits", () => {
     await expect(submitCanvaExport(db, "design_1", { fetchImpl, signal: controller.signal })).rejects.toMatchObject({ code: "cancelled", outcomeUnknown: false });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+  it.each([["redirect_uri does not match never-print-secret", "반환 주소"], ["invalid code_verifier never-print-secret", "PKCE"], ["invalid client_secret never-print-secret", "앱 인증 정보"], ["invalid authorization code never-print-secret", "인증 코드"]])("classifies token errors without disclosing provider text", async (detail, expected) => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ code: "invalid_request", message: detail }, 400));
+    const error = await exchangeCode(db, { code: "code", verifier: "verifier", redirectUri: "https://studio.example/callback" }, fetchImpl).catch(e => e);
+    expect(error.message).toContain(expected); expect(error.message).not.toContain("never-print-secret");
+  });
   it("sanitizes OAuth failures without persisting or printing provider descriptions", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(json({ error: "invalid_grant", error_description: "never-print-client-secret" }, 400));
     const error = await exchangeCode(db, { code: "isolated-code", verifier: "isolated-verifier", redirectUri: "https://studio.example/callback" }, fetchImpl).catch(value => value);

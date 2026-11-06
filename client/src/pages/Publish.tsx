@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type SetStateAction } from "react";
+import { z } from "zod";
 import { useQuery } from "@tanstack/react-query";
 import { api, qs } from "../api";
 import { useChannel } from "../state";
@@ -11,12 +12,20 @@ import { WorkModeControl, type WorkMode } from "../WorkModeControl";
 import { canOrganizePublication, publicationListLabels, publicationListState, publicationListStates, type PublicationListState } from "@shared/publicationList";
 import { PublicationListActions, usePublicationOrganization } from "../PublicationListActions";
 import "../publicationList.css";
+import { useListContext, useListScroll } from "../useListContext";
 
 type Row = { d: Delivery | null; dest: { label: string; platform: string } | null; ap: { id: number; scheduledAt: string; status: string; revisionId: number }; item: { id: number; title: string; channelId: number }; canonicalStudioCardId?: number | null; reason?: string };
 type DeliveryRow = Row & { d: Delivery; dest: { label: string; platform: string } };
 type Page<T> = { items: T[]; total: number; page: number; pageSize: number; counts?: Record<string, number> };
 type Orphan = PublicationOrphan & { canonicalStudioCardId?: number | null };
 const PAGE_SIZE = 30;
+const publishContextSchema = z.object({
+  workMode: z.enum(["auto", "manual"]), view: z.enum(["calendar", "list"]), weekOffset: z.number().int().min(-52000).max(52000), page: z.number().int().positive(),
+  statusFilter: z.enum(["", "attention", "orphan", "scheduled", "processing", "succeeded", "failed", "unknown", "cancelled", "dry_run"]),
+  listView: z.enum(publicationListStates), from: z.string(), to: z.string(),
+});
+type PublishContext = z.infer<typeof publishContextSchema>;
+const publishDefaults: PublishContext = { workMode: "auto", view: "list", weekOffset: 0, page: 1, statusFilter: "", listView: "active", from: "", to: "" };
 function pageResult<T>(result: Page<T> | T[]): Page<T> {
   return Array.isArray(result) ? { items: result, total: result.length, page: 1, pageSize: PAGE_SIZE } : result;
 }
@@ -36,17 +45,19 @@ function rowState(row: Row) {
 }
 export function PublishPage() {
   const { selected } = useChannel();
-  const [workMode, setWorkMode] = useState<WorkMode>("auto");
-  useEffect(() => { setWorkMode("auto"); }, [selected]);
-  const [view, setView] = useState<"calendar" | "list">("list");
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [page, setPage] = useState(1);
-  const [statusFilter, setStatusFilter] = useState("");
-  const [listView, setListView] = useState<PublicationListState>("active");
+  const context = useListContext("publish", selected, publishDefaults, value => {
+    const parsed = publishContextSchema.safeParse(value); return parsed.success ? parsed.data : null;
+  });
+  const { workMode, view, weekOffset, page, statusFilter, listView, from, to } = context.value;
+  const setWorkMode = (workMode: WorkMode) => context.update({ workMode });
+  const setView = (view: PublishContext["view"]) => context.update({ view, page: 1 });
+  const setWeekOffset = (change: SetStateAction<number>) => context.update(previous => ({ ...previous, weekOffset: typeof change === "function" ? change(previous.weekOffset) : change, page: 1 }));
+  const setPage = (page: number) => context.update({ page });
+  const setStatusFilter = (statusFilter: PublishContext["statusFilter"]) => context.update({ statusFilter });
+  const setListView = (listView: PublicationListState) => context.update({ listView });
+  const setFrom = (from: string) => context.update({ from });
+  const setTo = (to: string) => context.update({ to });
   const [checked, setChecked] = useState<number[]>([]);
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  useEffect(() => { setPage(1); }, [selected, view, weekOffset]);
   const days = useMemo(() => {
     const start = new Date(Date.now() + weekOffset * 7 * 86400_000);
     return Array.from({ length: 7 }, (_, i) => kstYmd(new Date(start.getTime() + i * 86400_000)));
@@ -56,6 +67,7 @@ export function PublishPage() {
   const status = usePublicationRuntime();
   const q = useQuery({ queryKey: ["ch", selected, "deliveries", listView, statusValue, range.from, range.to, page], queryFn: async () => pageResult(await api<Page<DeliveryRow> | DeliveryRow[]>(`/deliveries?${qs({ channelId: selected, page, pageSize: PAGE_SIZE, status: statusValue, view: listView, ...range })}`)), refetchInterval: query => query.state.data?.items.some(({ d }) => ["scheduled", "processing"].includes(d.status)) ? 5000 : false });
   const orphans = useQuery({ queryKey: ["ch", selected, "publication-orphans", range.from, range.to, statusFilter === "orphan" ? page : 1], queryFn: async () => pageResult(await api<Page<Orphan> | Orphan[]>(`/publication-orphans?${qs({ channelId: selected, page: statusFilter === "orphan" ? page : 1, pageSize: PAGE_SIZE, ...range })}`)), enabled: listView === "active" });
+  useListScroll(context.key, q.isSuccess && (listView !== "active" || !orphans.isLoading));
   const rows = useMemo<Row[]>(() => statusFilter === "orphan" ? (orphans.data?.items ?? []).map(row => ({ ...row, d: null, dest: null })) : q.data?.items ?? [], [statusFilter, q.data, orphans.data]);
   const overdue = q.data?.counts?.overdue ?? q.data?.items.filter(r => r.d.status === "scheduled" && new Date(r.ap.scheduledAt).getTime() < Date.now() - 60_000).length ?? 0;
   const needsAttention = q.data?.counts?.needsAttention ?? q.data?.items.filter(r => r.d.needsReconciliation || ["failed", "unknown", "dry_run"].includes(r.d.status)).length ?? 0;
@@ -66,7 +78,7 @@ export function PublishPage() {
   const organization = usePublicationOrganization(() => setChecked([]));
   const selectable = rows.filter((row): row is DeliveryRow => !!row.d && !!row.dest && canOrganizePublication(row.d));
   const selectedRows = selectable.filter(row => checked.includes(row.d.id));
-  useEffect(() => { setChecked([]); }, [selected, page, view, listView, statusFilter, from, to, weekOffset]);
+  useEffect(() => { setChecked([]); }, [context.scope, page, view, listView, statusFilter, from, to, weekOffset]);
   useEffect(() => { const loaded = statusFilter === "orphan" ? orphans.data && !orphans.isFetching : q.data && !q.isFetching; if (loaded && page > Math.max(1, Math.ceil(total / PAGE_SIZE))) setPage(Math.max(1, Math.ceil(total / PAGE_SIZE))); }, [q.data, q.isFetching, orphans.data, orphans.isFetching, statusFilter, page, total]);
   const hasFilters = !!statusFilter || !!from || !!to || view === "calendar";
   const resetFilters = () => { setView("list"); setStatusFilter(""); setFrom(""); setTo(""); setWeekOffset(0); setPage(1); };
@@ -106,7 +118,7 @@ export function PublishPage() {
       <div className="stack" style={{ marginBottom: 16 }}>
         {listView === "active" && <PublicationRuntimeNotice runtime={status.data} error={status.error} retry={() => status.refetch()} />}
         <div className="row between"><span className="small muted">조회 결과 총 {total}건 · 이 페이지 {rows.length}건 · 전송 예약 없음 {orphanCount}건 · 예약 시각 지난 대기 {overdue}건 · 실패·확인 필요·모의 실행 {needsAttention}건</span><button className="btn sm" disabled={refreshing} onClick={refresh}>{refreshing ? "상태 확인 중…" : "상태 새로고침"}</button></div>
-        <div className="row publication-filters"><label className="field">전송 상태<select aria-label="전송 상태 필터" value={statusFilter} onChange={event => { setStatusFilter(event.target.value); setPage(1); }}><option value="">전체 전송</option><option value="attention">실패·결과 확인 필요·모의 실행</option>{listView === "active" && <><option value="scheduled">예약 대기</option><option value="processing">전송 중</option></>}<option value="succeeded">게시됨</option><option value="failed">실패</option>{listView === "active" && <option value="unknown">결과 확인 필요</option>}<option value="cancelled">취소</option><option value="dry_run">모의 실행</option>{listView === "active" && <option value="orphan">승인만 저장됨 · 전송 예약 없음</option>}</select></label>{view === "list" && <><label className="field">시작일 (한국 시간)<input type="date" value={from} max={to || undefined} onChange={event => { setFrom(event.target.value); setPage(1); }} /></label><label className="field">종료일 (한국 시간)<input type="date" value={to} min={from || undefined} onChange={event => { setTo(event.target.value); setPage(1); }} /></label></>}</div>
+        <div className="row publication-filters"><label className="field">전송 상태<select aria-label="전송 상태 필터" value={statusFilter} onChange={event => { setStatusFilter(event.target.value as PublishContext["statusFilter"]); setPage(1); }}><option value="">전체 전송</option><option value="attention">실패·결과 확인 필요·모의 실행</option>{listView === "active" && <><option value="scheduled">예약 대기</option><option value="processing">전송 중</option></>}<option value="succeeded">게시됨</option><option value="failed">실패</option>{listView === "active" && <option value="unknown">결과 확인 필요</option>}<option value="cancelled">취소</option><option value="dry_run">모의 실행</option>{listView === "active" && <option value="orphan">승인만 저장됨 · 전송 예약 없음</option>}</select></label>{view === "list" && <><label className="field">시작일 (한국 시간)<input type="date" value={from} max={to || undefined} onChange={event => { setFrom(event.target.value); setPage(1); }} /></label><label className="field">종료일 (한국 시간)<input type="date" value={to} min={from || undefined} onChange={event => { setTo(event.target.value); setPage(1); }} /></label></>}</div>
         {listView === "active" && needsAttention > 0 && statusFilter !== "attention" && <div className="notice warn"><strong>확인하거나 복구할 전송이 {needsAttention}건 있습니다.</strong><div><button className="btn sm" onClick={() => { setStatusFilter("attention"); setPage(1); }}>실패·확인 필요부터 보기</button></div></div>}
         {listView === "active" && orphans.error && <div><p className="small">승인만 저장된 기록을 불러오지 못했습니다.</p><ErrorBox error={orphans.error} retry={() => orphans.refetch()} /></div>}
         {orphanCount > 0 && <div className="notice warn"><strong>승인만 저장되고 전송 예약이 없는 콘텐츠가 {orphanCount}건 있습니다.</strong><p className="small">예약 시간이 지나도 자동 게시되지 않습니다. 게시 계정을 연결하고 해당 콘텐츠에서 다시 승인해 주세요.</p><GuardedLink href="/instagram">인스타그램 연결 확인 →</GuardedLink><button className="btn sm" onClick={() => { setView("list"); setStatusFilter("orphan"); setPage(1); }}>승인만 저장된 기록 보기</button></div>}
@@ -114,7 +126,7 @@ export function PublishPage() {
       </div>
       {organization.error && <div className="notice err" role="alert">{organization.error}</div>}
       {view === "list" && selectable.length > 0 && <div className="row publication-list-toolbar" aria-label="발행 기록 선택 관리">
-        <label className="check"><input type="checkbox" aria-label="이 페이지에서 정리 가능한 기록 모두 선택" disabled={organization.pending} checked={selectedRows.length === selectable.length} onChange={event => setChecked(event.target.checked ? selectable.map(row => row.d.id) : [])} />이 페이지 선택 · {selectedRows.length}건</label>
+        <label className="check publication-select-all"><input type="checkbox" aria-label="이 페이지에서 정리 가능한 기록 모두 선택" disabled={organization.pending} checked={selectedRows.length === selectable.length} onChange={event => setChecked(event.target.checked ? selectable.map(row => row.d.id) : [])} />이 페이지 선택 · {selectedRows.length}건</label>
         {listView !== "active" && <button className="btn sm" disabled={organization.pending || !selectedRows.length} onClick={() => void organization.move(selectedRows, "active")}>선택 복원</button>}
         {listView !== "archived" && <button className="btn sm" disabled={organization.pending || !selectedRows.length} onClick={() => void organization.move(selectedRows, "archived")}>선택 보관</button>}
         {listView !== "trashed" && <button className="btn sm" disabled={organization.pending || !selectedRows.length} onClick={() => void organization.move(selectedRows, "trashed")}>선택 삭제</button>}

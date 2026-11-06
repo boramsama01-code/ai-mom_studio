@@ -72,6 +72,7 @@ const statusLabels: Record<CanvaLibraryItem["status"], string> = {
   unavailable: "연결 확인 필요",
   missing: "폴더에서 제외됨",
 };
+const autofillUnavailableMessage = "현재 연결한 Canva 계정·팀에서 자동 채우기를 사용할 수 없습니다. 원본 미리보기와 Canva 직접 편집은 사용할 수 있습니다.";
 
 function syncLabel(state: CanvaTemplateLibraryState): string {
   if (!state.configured) return "Canva 연결 대기";
@@ -140,12 +141,13 @@ function CanvaFieldHelp() {
   </details>;
 }
 
-export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false, onSelect, canCreate = true }: {
+export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false, onSelect, canCreate = true, autofillAvailable }: {
   items: CanvaLibraryItem[];
   selectedDesignId?: string | null;
   disabled?: boolean;
   onSelect?: (item: CanvaLibraryItem) => void;
   canCreate?: boolean;
+  autofillAvailable?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [previewId, setPreviewId] = useState<string | null>(selectedDesignId ?? null);
@@ -168,8 +170,10 @@ export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false,
   const activePreview = safeCanvaPreview(activePage?.previewUrl ?? (shownPage === 1 ? active?.thumbnailUrl : null));
   const editUrl = safeCanvaLink(active?.editUrl);
   const selectedMissing = !!selectedDesignId && !items.some(item => item.designId === selectedDesignId && item.status !== "missing");
+  const autofillUnavailable = autofillAvailable === false;
   const canSelect = !!active?.canCreate && active.status === "ready" && active.previewStatus === "ready" && canCreate;
-  const unavailable = active?.reason ?? (active?.status !== "ready" ? statusLabels[active?.status ?? "unavailable"] : null);
+  const itemLabel = (item: CanvaLibraryItem) => item.status === "needs_fields" && autofillUnavailable ? "자동 채우기 제한" : statusLabels[item.status];
+  const unavailable = active?.status === "needs_fields" && autofillUnavailable ? autofillUnavailableMessage : active?.reason ?? (active?.status !== "ready" ? statusLabels[active?.status ?? "unavailable"] : null);
   return <div className="canva-library-browser">
     <div className="canva-library-toolbar">
       <label className="field">Canva 디자인 검색<input type="search" value={search} placeholder="디자인 이름으로 찾기" onChange={event => { setSearch(event.target.value); setPageNumber(1); }} /></label>
@@ -184,7 +188,7 @@ export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false,
             {item.designId === selectedDesignId && <span className="canva-library-selected">선택됨</span>}
           </div>
           <strong>{item.title || "이름 없는 디자인"}</strong>
-          <span className={`canva-library-item-status ${item.canCreate && item.previewStatus === "ready" ? "is-ready" : ""}`}>{item.previewStatus === "stale" ? "새 미리보기 갱신 중" : item.previewStatus === "pending" ? "미리보기 준비 중" : statusLabels[item.status]}</span>
+          <span className={`canva-library-item-status ${item.canCreate && item.previewStatus === "ready" ? "is-ready" : ""}`}>{item.previewStatus === "stale" ? "새 미리보기 갱신 중" : item.previewStatus === "pending" ? "미리보기 준비 중" : itemLabel(item)}</span>
         </button>)}
       </div>
       {active && <aside className="canva-library-detail" aria-label="Canva 디자인 상세">
@@ -198,10 +202,10 @@ export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false,
         <h3>{active.title}</h3>
         <p className="small muted">Canva 수정 · {libraryTime(active.updatedAt)}</p>
         {active.previewStatus === "stale" && <p className="small muted" role="status">지금 보이는 이미지는 이전 버전입니다. Canva 수정 내용을 다시 불러오면 자동으로 바뀝니다.</p>}
-        {active.previewStatus === "pending" && <p className="small muted" role="status">최신 미리보기를 준비하고 있습니다. 준비가 끝나면 원고를 채울 템플릿으로 선택할 수 있습니다.</p>}
+        {active.previewStatus === "pending" && <p className="small muted" role="status">{autofillUnavailable ? "최신 미리보기를 준비하고 있습니다. 준비가 끝나면 원본의 표지와 내지를 확인할 수 있습니다." : "최신 미리보기를 준비하고 있습니다. 준비가 끝나면 원고를 채울 템플릿으로 선택할 수 있습니다."}</p>}
         {["failed", "unavailable"].includes(active.previewStatus) && <p className="notice small" role="status">{active.previewStatus === "failed" ? "미리보기를 다시 준비해야 합니다. ‘지금 동기화’로 확인하거나 Canva에서 원본을 열어 주세요." : "이 디자인의 미리보기를 아직 가져올 수 없습니다. Canva에서 원본을 확인해 주세요."}</p>}
         {unavailable && <p className="notice small" role="status">{unavailable}</p>}
-        {active.status === "needs_fields" && <><p className="small muted">기존 8장 템플릿을 복제해 수정하면 원고를 채우는 연결도 함께 유지할 수 있습니다.</p><CanvaFieldHelp key={active.designId} /></>}
+        {active.status === "needs_fields" && !autofillUnavailable && <><p className="small muted">기존 8장 템플릿을 복제해 수정하면 원고를 채우는 연결도 함께 유지할 수 있습니다.</p><CanvaFieldHelp key={active.designId} /></>}
         <div className="canva-library-actions">
           {editUrl && <a className="btn" href={editUrl} target="_blank" rel="noopener noreferrer">Canva에서 편집 ↗</a>}
           {onSelect && <button type="button" className="btn primary" disabled={disabled || !canSelect || selectedDesignId === active.designId} onClick={() => onSelect(active)}>{selectedDesignId === active.designId ? "선택한 Canva 템플릿" : "이 Canva 템플릿 선택"}</button>}
@@ -263,7 +267,7 @@ export function CanvaLibraryPanel({ query, manageFolder = false, selectedDesignI
       </div>
       {state.syncStatus === "error" && state.message && <p className="notice warn" role="alert">{state.message}</p>}
       {state.syncStatus === "disabled" && <p className="notice small">자동 확인이 일시정지되어 있습니다. 폴더 설정에서 다시 켤 수 있습니다.</p>}
-      {state.connected && !state.autofill && <p className="notice small">원본 미리보기와 Canva 편집은 사용할 수 있습니다. 원고 자동 채우기는 연결한 Canva 계정의 기능·권한 확인이 필요합니다.</p>}
+      {state.connected && !state.autofill && <p className="notice small">{autofillUnavailableMessage}</p>}
     </>}
     {manageFolder && <details className="content-options" open={!state?.connected || settingsDirty || !state?.lastSyncedAt}>
       <summary>템플릿 폴더 설정</summary>
@@ -278,7 +282,7 @@ export function CanvaLibraryPanel({ query, manageFolder = false, selectedDesignI
     {notice && <p className="small canva-library-feedback" role="status">{notice}</p>}
     {sync.error && <ErrorBox error={sync.error} retry={() => sync.mutate()} />}
     {save.error && <ErrorBox error={save.error} />}
-    {state && <CanvaLibraryBrowser items={state.items} selectedDesignId={selectedDesignId} disabled={disabled || mutating} onSelect={onSelect} canCreate={state.enabled && state.connected && state.autofill && state.syncStatus !== "needs_reconnect"} />}
+    {state && <CanvaLibraryBrowser items={state.items} selectedDesignId={selectedDesignId} disabled={disabled || mutating} onSelect={onSelect} canCreate={state.enabled && state.connected && state.autofill && state.syncStatus !== "needs_reconnect"} autofillAvailable={state.connected ? state.autofill : undefined} />}
   </div>;
 }
 
