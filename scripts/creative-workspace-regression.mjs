@@ -63,6 +63,7 @@ async function intercept(route,origin,errors,writes){
  else if(p==="/api/studio/export-check")data={errors:[],warnings:[],pageCount:1};
  else if(/\/studio\/cards\/\d+\/media$/.test(p))data=[];
  else if(p==="/api/canva/status")data={connected:false};
+ else if(p==="/api/canva/template-library")data={configured:false,connected:false,autofill:false,folderId:"FAHZ9dTp-H8",folderName:"검증용 템플릿 폴더",folderUrl:"https://www.canva.com/folder/FAHZ9dTp-H8",enabled:false,syncIntervalSeconds:120,lastSyncedAt:null,syncStatus:"disabled",errorCode:null,message:"실제 Canva 연결을 사용하지 않는 브라우저 검증 환경입니다.",items:[]};
  else if(/\/studio\/cards\/\d+\/publication$/.test(p))data={channelId:1,channelName:"우주펭귄상회",expectedUsername:"spacepenguin.co",ready:false,blockers:["검증용 환경 · 외부 게시 차단"],dailyLimit:0,dryRun:true,autoPublish:false,destinations:[],deliveries:[],publicationDraft:{version:0,options:{destinationIds:[],timing:"now",scheduledAtKst:""}}};
  else if(/^\/api\/studio\/(images\/|characters\/)/.test(p)||/export\.png$/.test(p)){
   const id=Number(p.split("/").at(-1)),body=p.includes("/characters/")?familyImage:id>=101&&id<=104?webtoonArt[id-101]:id>=91&&id<=94?channelArt[0]:id>=81&&id<=84?channelArt[1]:id>=71&&id<=74?channelArt[2]:image;
@@ -204,7 +205,10 @@ async function run(root,label,port){
    await page.locator(".video-history > summary").click();await page.locator(".video-history details > summary").click();await noOverflow(page,"expanded video history "+width);
    const navVisible=await page.locator(".mobile-nav").isVisible();assert.equal(navVisible,false,"editing must have one bottom action region");
    // Leave by full navigation; local recovery remains available on return.
-   await page.goto(origin+"/assets?tab=brands");await page.locator(".asset-brand").first().waitFor();
+   await page.goto(origin+"/assets");await page.locator(".registered-design-card").nth(13).waitFor();
+   assert.equal(await page.locator(".registered-design-card").count(),14,"registered template sets remain available without Canva OAuth");
+   await noOverflow(page,"template gallery "+width);await shot(page,"after-templates-"+width);
+   await page.getByRole("button",{name:"브랜드 가이드",exact:true}).click();await page.locator(".asset-brand").first().waitFor();
    await noOverflow(page,"assets "+width);await shot(page,"after-assets-"+width);
    await page.goto(origin+"/");await page.locator(".creative-overview").waitFor();
    const scopedReads=await page.evaluate(()=>({key:localStorage.getItem("spacepenguin.channel")}));
@@ -239,7 +243,7 @@ try{
 }finally{
  await browsers.close();
  try{const encoded=(await readFile(output+"/workspace-review.png")).toString("base64"),size=32768,total=Math.ceil(encoded.length/size);for(let i=0;i<total;i++)console.log("WORKSPACE_REVIEW_PNG "+i+"/"+total+" "+encoded.slice(i*size,(i+1)*size));}catch{/* A failed gate keeps its individual screenshots and diagnostics. */}
- for(const name of ["before-home-1440","after-home-1440","direction-b-graphite-1440","after-editor-1440","after-home-393","after-capture-393","after-video-393","after-assets-1440","after-error-393","workspace-review-preview"]){
+ for(const name of ["before-home-1440","after-home-1440","direction-b-graphite-1440","after-editor-1440","after-home-393","after-capture-393","after-video-393","after-templates-1440","after-assets-1440","after-error-393","workspace-review-preview"]){
   try{const bytes=await sharp(await readFile(output+"/"+name+(name==="workspace-review-preview"?".webp":".png"))).resize({width:name.endsWith("393")?393:1080,withoutEnlargement:true}).webp({quality:72}).toBuffer();console.log("VISUAL_REVIEW_IMAGE "+name+" "+bytes.toString("base64"));}catch{ /* Earlier layout failures can prevent a later screenshot. Artifacts retain the original failure. */ }
  }
 }

@@ -97,3 +97,8 @@ The merged main revision passed typecheck, all 210 files / 2,147 tests, build an
 ## Explicit cross-device handoff gate
 
 The viewport suite deliberately resets its fixture for fair visual comparison. A separate handoff scenario now keeps one shared synthetic server while using independent mobile (393px) and PC (1440px) browser contexts with separate storage: capture on mobile, save the first manuscript, open that exact ID on PC, append and save, reload PC and mobile, and assert the server version and single-card count. This tests the actual client handoff path; PostgreSQL durability remains covered by the separate real-database tests. It must pass before delivery and must not be reported as live-device or production-account verification.
+
+
+## Asset gallery evidence
+
+Final visual coverage also visits the default asset template tab at every viewport, asserts all fourteen registered eight-page sets remain available without Canva OAuth, and checks overflow and loaded thumbnails before switching to brands. The library API fixture explicitly reports disconnected/unconfigured status; it does not simulate a successful Canva account connection. The review PNG now includes the native-ratio template gallery, brand guide, quick capture and first-load recovery screen in addition to both directions and before/after editor/mobile views. This closes an inspection gap where only the brand tab had been captured.
