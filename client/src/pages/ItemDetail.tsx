@@ -87,6 +87,7 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   const imageGeneration = useGenerationRequest(cid, id, "card-render");
   const sourceChannel = allChannels.find(ch => ch.id === cid);
   const search = useSearch();
+  const entryWorkMode: WorkMode = new URLSearchParams(search).get("mode") === "manual" ? "manual" : "auto";
   const history = historyEntry(search);
   const [sourceOpen, setSourceOpen] = useState(false);
   const [deliveryOpen, setDeliveryOpen] = useState(() => entryTab(search) === "delivery");
@@ -94,7 +95,7 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   const [templateChoice, setTemplateChoice] = useState<string | null>(null);
   const [sourceDraftDirty, setSourceDraftDirty] = useState(false);
   const [sourceTextDirty, setSourceTextDirty] = useState(false);
-  const [workMode, setWorkMode] = useState<WorkMode>("auto");
+  const [workMode, setWorkMode] = useState<WorkMode>(entryWorkMode);
   useEffect(() => { if (sourceDraftDirty || sourceTextDirty) setSourceOpen(true); }, [sourceDraftDirty, sourceTextDirty]);
   const [, navigate] = useLocation();
   useEffect(() => {
@@ -104,7 +105,10 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
     setHistoryOpen(target === "history");
     if (target === "delivery") window.setTimeout(() => document.getElementById("delivery-panel")?.scrollIntoView({ block: "start" }), 100);
   }, [requestedCid, id, search]);
-  useEffect(() => { setTemplateChoice(null); setWorkMode("auto"); }, [requestedCid, id]);
+  useEffect(() => { setTemplateChoice(null); }, [requestedCid, id]);
+  // Canonical Studio entries share this editor. Respect their manual URL, but
+  // retain an explicit mode choice across refetches and unrelated drawer links.
+  useEffect(() => { setWorkMode(entryWorkMode); }, [requestedCid, id, entryWorkMode]);
   useEffect(() => { if (q.data && q.data.item.channelId !== requestedCid) navigate(`/items/${q.data.item.channelId}/${id}${search ? `?${search}` : ""}`, { replace: true }); }, [q.data?.item.channelId, requestedCid, id, search, navigate]);
   useEffect(() => {
     // Source revision IDs and Studio revision IDs have different namespaces.

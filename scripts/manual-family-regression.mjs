@@ -11,6 +11,7 @@ import { defaultPageDesigns, familyCardCopySchema, familyFieldDescriptors, famil
 import { familyEvidenceView } from '../server/services/familyEvidence.ts';
 import { planCarousel, renderCarouselPage } from '../server/services/cardCarousel.ts';
 import { canvaLibraryStateFixture } from '../tests/fixtures/canvaTemplateLibrary.ts';
+import { assertStudioStartLayout } from './studio-start-layout.mjs';
 
 const require = createRequire(import.meta.url); let playwright;
 try { playwright = require('playwright'); } catch { playwright = require(require.resolve('playwright', { paths: [process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES ?? '/nonexistent'] })); }
@@ -31,9 +32,9 @@ async function render(copy, page, pageDesigns) {
   return imageCache.get(key);
 }
 function fixture() {
-  const state = { body: null, writes: [], saved: null, payload: null, evidence: null };
+  const state = { body: null, writes: [], saved: null, payload: null, evidence: null, pendingPreviews: 0 };
   const card = () => ({ id: 88, version: 1, title: state.body.title, channel: 'news', format: '카드뉴스', stage: 'writing', sourceItemId: 39, sourceReference: { channelId: 3, itemId: 39 }, panels: Array.from({ length: 4 }, () => ({ scene: '', dialogue: '', imageId: null })), script: '', caption: '', memo: '', imagePath: '', createdAt: stamp, updatedAt: stamp });
-  const current = () => ({ id: 99, revisionNo: 1, author: 'operator', payload: state.payload, createdAt: stamp, note: '제공 문서·직접 작성한 8장 원고 저장 · AI 호출 없음' });
+  const current = () => ({ id: state.saved.revisionId, revisionNo: state.saved.version - 1, author: 'operator', payload: state.payload, createdAt: stamp, note: '제공 문서·직접 작성한 8장 원고 저장 · AI 호출 없음' });
   async function route(route, url) {
     const request = route.request(), pathname = url.pathname, method = request.method(), body = request.postData() ? request.postDataJSON() : undefined;
     if (method !== 'GET') state.writes.push({ pathname, body: clone(body) });
@@ -61,10 +62,24 @@ function fixture() {
       return route.fulfill({ status: 201, json: { requestId: saved.requestId, itemId: 39, studioCardId: 88, version: 2, revisionId: 99 } });
     }
     else if (pathname === '/api/studio/cards/88' && state.body) data = { card: card(), revisions: [], jobs: [], images: [] };
-    else if (pathname === itemPath && state.body) data = { item: { id: 39, channelId: 3, title: state.body.title, kind: 'current_dialogue', origin: 'manual', version: 2, currentRevisionId: 99, reviewStatus: 'pending', evidenceStatus: 'needs_review', relevance: 'relevant', publishStatus: 'waiting', excluded: false, edited: state.payload, createdAt: stamp, updatedAt: stamp }, current: current(), primary: { id: 1, title: state.body.source.title, originalUrl: state.body.source.url, normalizedUrl: state.body.source.url, kind: 'manual_text', fetchStatus: 'ok', fetchedText: state.body.source.text, snippet: '', meta: { independentlyVerified: false }, attachments: [], lastFetchedAt: stamp }, linked: [], revisions: [current()], cards: [], approvals: [], deliveries: [], similar: [], canonicalStudioCardId: 88, imageAiAvailable: false, publicationDraft: { version: 1, captions: { instagram: '', telegram: '' }, options: { destinationIds: [], timing: 'now', scheduledAtKst: '' } }, defaultCaptions: { instagram: '', telegram: '' }, publicationReadiness: { ready: false, blockers: ['QA 예시는 게시하지 않습니다.'], destinations: [], dryRun: true, autoPublish: false } };
+    else if (pathname === itemPath && state.body) data = { item: { id: 39, channelId: 3, title: state.body.title, kind: 'current_dialogue', origin: 'manual', version: state.saved.version, currentRevisionId: state.saved.revisionId, reviewStatus: 'pending', evidenceStatus: 'needs_review', relevance: 'relevant', publishStatus: 'waiting', excluded: false, edited: state.payload, createdAt: stamp, updatedAt: stamp }, current: current(), primary: { id: 1, title: state.body.source.title, originalUrl: state.body.source.url, normalizedUrl: state.body.source.url, kind: 'manual_text', fetchStatus: 'ok', fetchedText: state.body.source.text, snippet: '', meta: { independentlyVerified: false }, attachments: [], lastFetchedAt: stamp }, linked: [], revisions: [current()], cards: [], approvals: [], deliveries: [], similar: [], canonicalStudioCardId: 88, imageAiAvailable: false, publicationDraft: { version: 1, captions: { instagram: '', telegram: '' }, options: { destinationIds: [], timing: 'now', scheduledAtKst: '' } }, defaultCaptions: { instagram: '', telegram: '' }, publicationReadiness: { ready: false, blockers: ['QA 예시는 게시하지 않습니다.'], destinations: [], dryRun: true, autoPublish: false } };
     else if (pathname === `${itemPath}/card-copy` && method === 'GET' && state.saved) data = state.saved;
+    else if (pathname === `${itemPath}/card-copy` && method === 'PATCH' && state.saved) {
+      assert.equal(body.version, state.saved.version, 'save uses the current version CAS');
+      assert.deepEqual(Object.keys(body).sort(), ['version', 'copy', 'pageDesigns', 'fieldLocks', 'parentGuide', 'captionPackage'].sort(), 'manual save must not fabricate evidence, AI runs or a proposal receipt');
+      familyCardCopySchema.parse(body.copy);
+      for (const index of [0, 1, 2, 3, 4, 5, 7]) assert.deepEqual(body.copy.pages[index], state.saved.copy.pages[index], 'manual activity edit must retain every other page');
+      assert.notDeepEqual(body.copy.pages[6], state.saved.copy.pages[6], 'one explicit activity edit is saved');
+      const metadata = Object.fromEntries(['pageDesigns', 'fieldLocks', 'parentGuide', 'captionPackage'].map(key => [key, clone(body[key])]));
+      state.saved = { ...state.saved, ...metadata, copy: clone(body.copy), version: state.saved.version + 1, revisionId: state.saved.revisionId + 1 };
+      state.payload = { ...state.payload, ...metadata, cardCopy: clone(body.copy) };
+      data = state.saved;
+    }
     else if (pathname === `${itemPath}/card-copy/preview` && method === 'POST' && state.saved) {
-      assert.equal(body.version, 2); familyCardCopySchema.parse(body.copy); return route.fulfill({ contentType: 'image/jpeg', body: await render(body.copy, body.page, body.pageDesigns) });
+      assert.equal(body.version, state.saved.version); familyCardCopySchema.parse(body.copy);
+      state.pendingPreviews++;
+      try { return await route.fulfill({ contentType: 'image/jpeg', body: await render(body.copy, body.page, body.pageDesigns) }); }
+      finally { state.pendingPreviews--; }
     }
     else if (pathname === '/api/channels/3/templates') data = { current: 'set:n03', items: [{ key: 'set:n03', name: '뉴스 대화', description: '', kind: 'builtin', family: 'news', pageCount: 5 }] };
     else if (pathname === '/api/canva/status') data = { connected: true };
@@ -81,6 +96,36 @@ async function hit(page, locator, width) {
   const r = await locator.boundingBox(); assert(r && r.width >= 48 && (width > 900 || r.height >= 48), 'primary action must have a 48px mobile hit area');
   assert(await locator.evaluate(node => { const r = node.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!hit && (hit === node || node.contains(hit)); }), 'primary action must be reachable');
 }
+async function previewReady(page) {
+  await page.waitForFunction(async () => {
+    const image = document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img');
+    if (!image?.complete || image.naturalWidth !== 1080 || image.naturalHeight !== 1350) return false;
+    const src = image.src;
+    try { await image.decode(); } catch { return false; }
+    return document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img') === image && image.src === src;
+  });
+}
+async function settleEditorPreviews(page, state) {
+  await previewReady(page);
+  await page.waitForFunction(() => {
+    const images = [...document.querySelectorAll('.family-page-thumb img')];
+    return images.length === 8 && images.every(image => !image.classList.contains('is-stale') && image.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350);
+  });
+  const deadline = Date.now() + 20_000;
+  while (state.pendingPreviews) {
+    assert(Date.now() < deadline, 'controlled save/reload must drain preview producers');
+    await page.waitForTimeout(25);
+  }
+  await previewReady(page);
+}
+async function assertCanonicalManualMode(page) {
+  const workMode = page.locator('.content-workspace > .work-mode');
+  assert.equal(await workMode.locator('.work-mode-option').nth(1).getAttribute('aria-pressed'), 'true', 'canonical manual URL must retain the manual work mode');
+  assert.equal(await workMode.locator('.work-mode-option').nth(0).getAttribute('aria-pressed'), 'false', 'manual entry must not silently select automatic work');
+  assert.equal(await page.locator('.family-ai').count(), 0, 'manual entry must not expose paid rewriting controls');
+  assert.equal(await page.getByRole('button', { name: '저장 원고 자동 검수 제안', exact: true }).count(), 0, 'manual entry must not expose an AI review action');
+  assert.equal(await page.getByRole('button', { name: '저장된 카드로 캡션 자동 제안', exact: true }).count(), 0, 'manual entry must not expose an AI caption action');
+}
 let browser, engine = 'WebKit'; const results = [];
 try {
   try { browser = await playwright.webkit.launch(); } catch (error) { if (process.env.CI) throw error; engine = 'Chromium'; browser = await playwright.chromium.launch({ ...(process.env.WORKSPACE_BROWSER_EXECUTABLE ? { executablePath: process.env.WORKSPACE_BROWSER_EXECUTABLE } : {}) }); }
@@ -94,7 +139,7 @@ try {
     await context.route('**/*', async request => { const url = new URL(request.request().url()); if (url.origin !== origin) { external.push(url.href); return request.abort('blockedbyclient'); } if (!url.pathname.startsWith('/api/')) return request.continue(); try { if (await route(request, url) !== false) return; errors.push(`Unmocked API ${url.pathname}`); await request.fulfill({ status: 404, json: { error: 'Isolated fixture' } }); } catch (error) { errors.push(`${url.pathname}: ${error.message}`); await request.fulfill({ status: 500, json: { error: error.message } }); } });
     try {
       await page.goto(`${origin}/?start=free&channel=news&mode=manual`);
-      const start = page.getByRole('button', { name: 'AI 없이 8장 원고 직접 작성', exact: true }); await start.waitFor(); await hit(page, start, width); await start.click();
+      const start = page.getByRole('button', { name: 'AI 없이 8장 원고 직접 작성', exact: true }); await start.waitFor(); await assertStudioStartLayout(page); await hit(page, start, width); await start.click();
       const form = page.getByRole('form', { name: '직접 작성 8장 원고' }); await form.waitFor();
       if (width === 1280) {
         await form.getByLabel('8장 원고 파일', { exact: true }).setInputFiles({ name: 'provided-template-eight.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(example)) });
@@ -128,13 +173,29 @@ try {
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'manual form must fit the viewport');
       await page.screenshot({ path: `${output}/provided-form-${width}.png` }); await save.click();
       await page.waitForURL('**/studio/88?mode=manual'); await page.getByRole('region', { name: '가족 대화 8장 카드 편집기' }).waitFor();
-      const image = page.locator('.card-copy-preview:not(.is-stale)[aria-busy="false"] img'); await image.waitFor();
-      await page.waitForFunction(() => { const img = document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img'); return img?.complete && img.naturalWidth === 1080 && img.naturalHeight === 1350; });
+      await assertCanonicalManualMode(page); await settleEditorPreviews(page, state);
       assert.equal(await page.locator('.family-page-strip button').count(), 8); await page.getByRole('form', { name: 'Canva 사본 8장 가져오기' }).waitFor();
+      const copySave = page.getByRole('button', { name: '문구·디자인 저장', exact: true }); await hit(page, copySave, width); await copySave.click();
+      await page.locator('.card-copy-savebar [role="status"]').filter({ hasText: '변경 내용이 없어 이미 저장된 버전 2을 유지했습니다.' }).waitFor();
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'no-op save feedback must fit the viewport');
+      assert.equal(state.writes.filter(write => write.pathname === `${itemPath}/card-copy`).length, 0, 'unchanged save gives explicit feedback without another write');
+      await page.getByRole('button', { name: '7페이지 · 작은 활동', exact: true }).click(); await settleEditorPreviews(page, state);
+      const activityText = `${example.copy.pages[6].fields.homeActivity.action} 조건을 바꾼 뒤 생각을 한 번 더 나눕니다.`;
+      await page.getByLabel('집에서 할 일', { exact: false }).fill(activityText); await previewReady(page);
+      const drainDeadline = Date.now() + 20_000;
+      while (state.pendingPreviews) { assert(Date.now() < drainDeadline, 'activity preview must settle before the explicit save'); await page.waitForTimeout(25); }
+      await hit(page, copySave, width); await copySave.click();
+      await page.locator('.card-copy-savebar [role="status"]').filter({ hasText: '문구·디자인 저장 완료 · 버전 3' }).waitFor();
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'save confirmation and controls must fit the viewport');
+      assert.equal(state.saved.copy.pages[6].fields.homeActivity.action, activityText); assert.equal(state.saved.version, 3); assert.equal(state.saved.revisionId, 100);
+      await settleEditorPreviews(page, state); await page.screenshot({ path: `${output}/manual-save-${width}.png` });
+      await page.reload(); await page.getByRole('region', { name: '가족 대화 8장 카드 편집기' }).waitFor(); await assertCanonicalManualMode(page); await settleEditorPreviews(page, state);
+      await page.getByRole('button', { name: '7페이지 · 작은 활동', exact: true }).click(); await settleEditorPreviews(page, state);
+      assert.equal(await page.getByLabel('집에서 할 일', { exact: false }).inputValue(), activityText, 'saved activity must reopen from the server receipt');
       assert.deepEqual(state.saved.generationRuns, []); assert.equal(state.payload.manualAuthoring.independentlyVerified, false); assert(state.evidence.facts.every(fact => fact.sourceScope === 'provided_document' && fact.verificationStatus === 'article_only'));
-      assert.deepEqual(state.writes.filter(value => !value.pathname.endsWith('/preview')).map(value => value.pathname), ['/api/channels/3/items/manual-family']);
+      assert.deepEqual(state.writes.filter(value => !value.pathname.endsWith('/preview')).map(value => value.pathname), ['/api/channels/3/items/manual-family', `${itemPath}/card-copy`]);
       assert.deepEqual(errors, []); assert.deepEqual(external, []); await page.screenshot({ path: `${output}/manual-editor-${width}.png` });
-      results.push({ width, engine, passed: true, example: 'exact preserved Canva template text, supplied example, not verified news', input: width === 1280 ? 'manuscript file plus explicit comparison' : 'ordinary eight-page fields plus source/excerpts', sourceScope: 'provided_document', newContentRequests: 1, aiCalls: 0, publicationRequests: 0, realRenderer: true }); await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)); console.log(`Manual family regression passed at ${width}px (${engine}).`);
+      results.push({ width, engine, passed: true, example: 'exact preserved Canva template text, supplied example, not verified news', input: width === 1280 ? 'manuscript file plus explicit comparison' : 'ordinary eight-page fields plus source/excerpts', sourceScope: 'provided_document', newContentRequests: 1, manualSaveRequests: 1, noOpSaveFeedback: true, savedActivityReopened: true, aiCalls: 0, publicationRequests: 0, realRenderer: true, canonicalManualMode: true, automaticActionsHidden: true }); await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)); console.log(`Manual family regression passed at ${width}px (${engine}).`);
     } catch (error) { results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, external }); await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2)); await page.screenshot({ path: `${output}/failure-${width}.png`, fullPage: true }).catch(() => {}); throw error; }
     finally { await context.close(); }
   }

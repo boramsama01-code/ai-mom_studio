@@ -4,6 +4,8 @@ import { act, createElement, StrictMode, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ItemDetailPage } from "../client/src/pages/ItemDetail";
+import { SourceStudioCard } from "../client/src/pages/SourceStudioCard";
+import { studioContentSchema, type StudioCard } from "../shared/studio";
 import { ApiError } from "../client/src/api";
 
 const mocks = vi.hoisted(() => ({
@@ -14,7 +16,7 @@ const channel = { id: 2, slug: "highscoop", name: "하이스쿱", active: true, 
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api, apiBlob: mocks.blob }));
 vi.mock("../client/src/state", () => ({ useChannel: () => ({ selected: "all", allChannels: [channel], channels: [channel] }), useDirtyGuard: () => mocks.guard }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
-vi.mock("wouter", () => ({ useLocation: () => ["/items/2/9", mocks.navigate], useSearch: () => "" }));
+vi.mock("wouter", () => ({ useLocation: () => [window.location.pathname, mocks.navigate], useSearch: () => window.location.search.slice(1) }));
 vi.mock("../client/src/pages/Design", () => ({ useTemplates: () => ({ data: { current: "builtin:classic", items: [] } }), TemplatePicker: () => null }));
 vi.mock("../client/src/CardCarousel", () => ({ CardCarousel: () => null }));
 vi.mock("../client/src/CategorySelect", () => ({ CategorySelect: () => null }));
@@ -31,6 +33,7 @@ function source(fetchStatus = "not_fetched", fetchedText: string | null = null, 
 }
 beforeEach(() => {
   vi.clearAllMocks(); sessionStorage.clear(); readError = null; sourceLoad = async () => ({ changed: false });
+  history.replaceState(null, "", "/items/2/9");
   detail = {
     item: { id: 9, channelId: 2, title: "하나의 제작 공간", kind: "science_dialogue", origin: "manual", version: 1, currentRevisionId: 4, reviewStatus: "reviewed", evidenceStatus: "needs_review", relevance: "relevant", publishStatus: "waiting", excluded: false, edited: {} },
     primary: null, linked: [], current: { id: 4, revisionNo: 1, author: "operator", payload: { title: "하나의 제작 공간" } }, revisions: [],
@@ -90,6 +93,63 @@ async function chooseTiming(text: "지금 게시" | "예약 게시") {
 async function confirm() { const checkbox = host.querySelector<HTMLInputElement>(".publish-confirm input")!; expect(checkbox.disabled).toBe(false); if (!checkbox.checked) await act(async () => checkbox.click()); await settle(); }
 
 describe("단일 콘텐츠 작업 공간", () => {
+  const canonicalCard = (channelId = 2, itemId = 9): StudioCard => ({
+    ...studioContentSchema.parse({ title: "자료에서 이어 쓰는 카드", channel: "highscoop", format: "카드뉴스" }),
+    id: 36, version: 1, sourceItemId: itemId, sourceReference: { channelId, itemId },
+    createdAt: "2026-11-06T00:00:00Z", updatedAt: "2026-11-06T00:00:00Z",
+  });
+  const modeButton = (mode: "auto" | "manual") => host.querySelector<HTMLButtonElement>(`.content-workspace > .work-mode .work-mode-option:nth-child(${mode === "auto" ? 1 : 2})`)!;
+
+  it("canonical 수동 URL로 열고 자동 선택·다른 서랍 이동·재조회 동안 미저장 입력과 선택을 유지한다", async () => {
+    history.replaceState(null, "", "/studio/36?mode=manual");
+    const element = createElement(SourceStudioCard, { card: canonicalCard() });
+    await render(element);
+    expect(modeButton("manual").getAttribute("aria-pressed")).toBe("true");
+    expect(host.querySelector(".card-copy-ai-tools")?.closest("[hidden]")).not.toBeNull();
+    const editor = host.querySelector(".card-copy-editor"), title = host.querySelector<HTMLTextAreaElement>('.card-copy-editor textarea[id$="-title"]')!;
+    await input(title, "수동에서 이어 쓰는 미저장 원고");
+    await act(async () => modeButton("auto").click()); await settle();
+    expect(modeButton("auto").getAttribute("aria-pressed")).toBe("true");
+    history.replaceState(null, "", "/studio/36?mode=manual&tab=source");
+    await render(element); await refresh();
+    expect(modeButton("auto").getAttribute("aria-pressed")).toBe("true");
+    expect(host.querySelector(".card-copy-editor")).toBe(editor); expect(title.value).toBe("수동에서 이어 쓰는 미저장 원고");
+    expect(mocks.guard.setDirty).toHaveBeenCalledWith("card-copy-2-9", true, expect.any(Function), expect.any(Function));
+    expect(writes()).toEqual([]); expect(mocks.guard.confirmLeave).not.toHaveBeenCalled();
+  });
+
+  it("동일 콘텐츠 URL 모드의 뒤로·앞으로 복귀는 반영하되 입력과 편집기를 바꾸지 않는다", async () => {
+    const element = createElement(SourceStudioCard, { card: canonicalCard() });
+    history.replaceState(null, "", "/studio/36?mode=manual"); await render(element);
+    const editor = host.querySelector(".card-copy-editor"), title = host.querySelector<HTMLTextAreaElement>('.card-copy-editor textarea[id$="-title"]')!;
+    await input(title, "주소로 모드를 바꾸어도 남을 원고");
+    for (const mode of ["auto", "manual", "auto"] as const) {
+      history.replaceState(null, "", `/studio/36?mode=${mode}`); await render(createElement(SourceStudioCard, { card: canonicalCard() }));
+      expect(modeButton(mode).getAttribute("aria-pressed")).toBe("true");
+      expect(host.querySelector(".card-copy-editor")).toBe(editor); expect(title.value).toBe("주소로 모드를 바꾸어도 남을 원고");
+    }
+    expect(writes()).toEqual([]); expect(mocks.guard.confirmLeave).not.toHaveBeenCalled();
+  });
+
+  it("새 채널·콘텐츠로 이동하면 그 주소의 수동 모드를 따르고 모드 없는 새 진입은 자동으로 연다", async () => {
+    const originalApi = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: any }) => {
+      if (path === "/channels/3/items/10") return { ...structuredClone(detail), item: { ...detail.item, id: 10, channelId: 3 } };
+      if (path === "/channels/3/items/10/card-copy") return { version: 1, revisionId: 4, hasSavedCopy: true, copy: structuredClone(copy) };
+      return originalApi(path, options);
+    });
+    await render(createElement(ItemDetailPage, { cid: 2, id: 9 }));
+    await act(async () => modeButton("manual").click()); await settle();
+    history.replaceState(null, "", "/items/3/10?mode=manual"); await render(createElement(ItemDetailPage, { cid: 3, id: 10 }));
+    expect(modeButton("manual").getAttribute("aria-pressed")).toBe("true");
+    await act(async () => modeButton("auto").click()); await settle();
+    history.replaceState(null, "", "/items/2/9?mode=manual"); await render(createElement(ItemDetailPage, { cid: 2, id: 9 }));
+    expect(modeButton("manual").getAttribute("aria-pressed")).toBe("true");
+    history.replaceState(null, "", "/items/3/10"); await render(createElement(ItemDetailPage, { cid: 3, id: 10 }));
+    expect(modeButton("auto").getAttribute("aria-pressed")).toBe("true");
+    expect(writes()).toEqual([]);
+  });
+
   it("카드 편집기를 상시 유지하고 자료·게시·전송을 접은 상태에서 필요할 때 연다", async () => {
     await render();
     expect(host.querySelectorAll(".card-copy-editor")).toHaveLength(1);
