@@ -8,20 +8,21 @@ import { StudioPage } from "../client/src/pages/Studio";
 import { StudioTextImport } from "../client/src/pages/StudioTextImport";
 import { GlobalChannelSelect } from "../client/src/GlobalChannelSelect";
 
-const mocks = vi.hoisted(() => ({ guard: { setDirty: vi.fn(), confirmLeave: vi.fn((f: () => void) => f()) }, selected: "all" as "all" | number, select: vi.fn(), toast: vi.fn(), navigate: vi.fn(), api: vi.fn(), blob: vi.fn(), clipboard: vi.fn() }));
+const mocks = vi.hoisted(() => ({ guard: { setDirty: vi.fn(), confirmLeave: vi.fn((f: () => void) => f()) }, selected: "all" as "all" | number, search: "", select: vi.fn(), toast: vi.fn(), navigate: vi.fn(), api: vi.fn(), blob: vi.fn(), clipboard: vi.fn() }));
 vi.mock("../client/src/state", () => ({ useDirtyGuard: () => mocks.guard, useChannel: () => {
   const allChannels = [{ id: 1, slug: "penguin", name: "내 채널", active: true, accentColor: "#285f6a" }, { id: 2, slug: "fryday", name: "감자 채널", active: true, accentColor: "#996633" }, { id: 3, slug: "archived", name: "보관 채널", active: false }];
   return { allChannels, channels: allChannels.filter(c => c.active), current: allChannels.find(c => c.id === mocks.selected) ?? null, selected: mocks.selected, isLoading: false, select: mocks.select };
 } }));
 vi.mock("../client/src/toast", () => ({ useToast: () => mocks.toast }));
 vi.mock("../client/src/api", async importOriginal => ({ ...await importOriginal<object>(), api: mocks.api, apiBlob: mocks.blob }));
-vi.mock("wouter", () => ({ useLocation: () => ["/", mocks.navigate], useSearch: () => "" }));
+vi.mock("wouter", () => ({ useLocation: () => ["/", mocks.navigate], useSearch: () => mocks.search }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let host: HTMLDivElement; let root: Root; let client: QueryClient; let cards: StudioCard[];
 const draft = { script: "전체 원고 초안", caption: "캡션 초안", panels: Array.from({ length: 4 }, (_, i) => ({ scene: `장면 ${i}`, dialogue: `대사 ${i}` })) };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.search = "";
   history.replaceState(null, "", "/");
   mocks.selected = "all"; mocks.select.mockImplementation(value => { mocks.selected = value; });
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value() { this.setAttribute("open", ""); } });
@@ -338,8 +339,33 @@ describe("홈과 단계별 제작 화면", () => {
 
 describe("수집 카드뉴스 보드 연결", () => {
   function generated() {
-    cards[0] = { ...cards[0], format: "카드뉴스", sourceItemId: 20, sourceOutput: { assetId: 51, channelId: 2, itemId: 20, revisionId: 5, stale: false, pages: Array.from({ length: 5 }, (_, i) => ({ id: 51 + i, title: `페이지 ${i + 1}` })), coverCredit: "표지: AI 생성 · OpenAI" } };
+    // GET studioDetail/board enrich non-Studio source items with this reference.
+    // Item20 below is origin=manual; output alone also exists on generic published cards.
+    cards[0] = { ...cards[0], format: "카드뉴스", sourceItemId: 20, sourceReference: { channelId: 2, itemId: 20 }, sourceOutput: { assetId: 51, channelId: 2, itemId: 20, revisionId: 5, stale: false, pages: Array.from({ length: 5 }, (_, i) => ({ id: 51 + i, title: `페이지 ${i + 1}` })), coverCredit: "표지: AI 생성 · OpenAI" } };
   }
+  it("일반 완성 이미지 발행본은 원고 연결 번호가 있어도 자체 편집기와 정확한 작업 기록을 연다", async () => {
+    generated(); delete cards[0].sourceReference;
+    // studioPublication/origin=studio is exposed as sourceItemId+sourceOutput,
+    // without sourceReference. Internal importedMeta is not part of the DTO.
+    cards[0] = { ...cards[0], channel: "fryday", version: 2, title: "일반 작업 발행본", finishedDeck: { pages: [{ imageId: 101, name: "current.jpg", altText: "현재 이미지" }] } };
+    mocks.search = "tab=history&revision=17";
+    const originalApi = mocks.api.getMockImplementation()!;
+    mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: object }) => {
+      if (path === "/studio/cards/1/revisions/17") return { id: 17, cardId: 1, version: 1, snapshot: studioContentSchema.parse({ channel: "fryday", title: "정확한 과거 작업", finishedDeck: { pages: [{ imageId: 91, name: "old.jpg", altText: "과거 이미지" }] } }), instruction: "직접 저장", provider: null, model: null, applied: true, createdAt: "2026-10-25T00:00:00Z" };
+      if (path === "/studio/cards/1/publication") return { channelId: 2, channelName: "감자 채널", ready: false, blockers: ["검증 자료 · 게시하지 않음"], dailyLimit: 0, dryRun: true, autoPublish: false, destinations: [], deliveries: [], publicationDraft: { version: 0 } };
+      if (path === "/studio/instagram/oauth/config") return { configured: false };
+      return originalApi(path, options);
+    });
+    await render(createElement(StudioPage, { cardId: 1 })); await settle(); await settle();
+    expect(host.querySelectorAll(".finished-deck-editor")).toHaveLength(1);
+    expect(host.querySelectorAll(".studio-history-entry")).toHaveLength(1);
+    expect(host.textContent).toContain("정확한 과거 작업");
+    expect(host.querySelector('.studio-history-entry img[src="/api/studio/images/91"]')).not.toBeNull();
+    expect(host.querySelectorAll(".content-workspace")).toHaveLength(0);
+    expect(host.querySelector(".source-board-notes")).toBeNull();
+    expect(mocks.api.mock.calls.some(([path]) => String(path).startsWith("/channels/2/items/20"))).toBe(false);
+    expect(mocks.api.mock.calls.some(([, options]) => options?.method && options.method !== "GET")).toBe(false);
+  });
   it("갤러리에 실제 표지와 전체 페이지 수를 표시한다", async () => {
     generated(); await render(createElement(StudioPage));
     expect(host.querySelector('img[src="/api/channels/2/media/51"]')).not.toBeNull();
