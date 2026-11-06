@@ -22,7 +22,7 @@ if(!args.includes('--compiled')){
   const entry=path.join(dir,'memory-qa.mjs');
   await build({entryPoints:[fileURLToPath(import.meta.url)],outfile:entry,bundle:true,platform:'node',format:'esm',target:'node22',packages:'external',logLevel:'error'});
   await fs.copyFile('server/services/readingCardRasterWorker.mjs',path.join(dir,'readingCardRasterWorker.mjs'));
-  const run=spawnSync(process.execPath,[entry,'--compiled',...args],{stdio:'inherit',env:{...process.env,APP_DATABASE_URL:'',DATABASE_URL:''}});
+  const run=spawnSync(process.execPath,[entry,'--compiled',...args],{stdio:'inherit',env:{...process.env,NODE_ENV:'production',MALLOC_ARENA_MAX:'2',APP_DATABASE_URL:'',DATABASE_URL:''}});
   if(run.error)throw run.error;
   if(run.status!==0)process.exit(run.status??1);
   const report=JSON.parse(await fs.readFile(output,'utf8'));
@@ -45,12 +45,7 @@ if(!args.includes('--compiled')){
   const {readingRasterState,tryBackgroundImageWork}=await import('../server/services/readingCardRaster');
   const {downloadCanvaLibraryExport}=await import('../server/services/canvaLibraryAssets');
   let sampledTreePeakMiB=0;
-  const sampleProcessTree=()=>{
-    let total=process.memoryUsage().rss/2**20;
-    const pid=readingRasterState().activeNativePid;
-    if(pid){try{const value=/^VmRSS:\s+(\d+)\s+kB$/m.exec(fsSync.readFileSync('/proc/'+pid+'/status','utf8'));if(value)total+=Number(value[1])/1024;}catch{/* The child may have just exited. */}}
-    sampledTreePeakMiB=Math.max(sampledTreePeakMiB,total);
-  };
+  const sampleProcessTree=()=>{sampledTreePeakMiB=Math.max(sampledTreePeakMiB,process.memoryUsage().rss/2**20);};
   const memoryTimer=setInterval(sampleProcessTree,20);memoryTimer.unref();
 
   const {planCarousel,renderCarouselPage}=await import('../server/services/cardCarousel');
@@ -172,7 +167,7 @@ const designs=readingProfileDesigns(profile,defaultPageDesigns());
   }
   sampleProcessTree();clearInterval(memoryTimer);
   const parentPeakRssMiB=process.resourceUsage().maxRSS/1024;
-  const processTreePeakRssMiB=Math.max(parentPeakRssMiB,sampledTreePeakMiB,readingRasterState().maxObservedProcessTreeMiB);
-  const result={complete:true,kind:'offline-production-bundle',node:process.version,platform:process.platform,architecture:process.arch,backend:option('backend','isolated-process-raster'),profile:profile.id,requests,repeats,concurrent,preflightPagesPerRequest:8,selectedPagePreviews:1+(libraryPreview.foregroundWaitedForBackground?1:0),deckPagesRendered:8*(repeats+concurrent),peakRssKiB:process.resourceUsage().maxRSS,peakRssMiB:+processTreePeakRssMiB.toFixed(2),parentPeakRssMiB:+parentPeakRssMiB.toFixed(2),processTreePeakRssMiB:+processTreePeakRssMiB.toFixed(2),memoryMeasurement:'parent historical RSS and sampled parent+child RSS plus conservative child-peak overlap; shared pages may be double-counted',elapsedSeconds:+((performance.now()-started)/1000).toFixed(3),forcedGC:false,heapCap:false,externalCalls:0,databaseCalls:0,paidAiCalls:0,canvaCalls:0,canvaLibraryPreview:libraryPreview,fonts:readingFontCacheState(),raster:readingRasterState(),outputSha256:expected,samples};
+  const processTreePeakRssMiB=Math.max(parentPeakRssMiB,sampledTreePeakMiB);
+  const result={complete:true,kind:'offline-production-bundle',node:process.version,platform:process.platform,architecture:process.arch,backend:option('backend','isolated-worker-raster'),allocatorArenaMax:process.env.MALLOC_ARENA_MAX??null,profile:profile.id,requests,repeats,concurrent,preflightPagesPerRequest:8,selectedPagePreviews:1+(libraryPreview.foregroundWaitedForBackground?1:0),deckPagesRendered:8*(repeats+concurrent),peakRssKiB:process.resourceUsage().maxRSS,peakRssMiB:+processTreePeakRssMiB.toFixed(2),parentPeakRssMiB:+parentPeakRssMiB.toFixed(2),processTreePeakRssMiB:+processTreePeakRssMiB.toFixed(2),memoryMeasurement:'single-process RSS including all worker threads; historical maxRSS and 20ms samples; no child process',elapsedSeconds:+((performance.now()-started)/1000).toFixed(3),forcedGC:false,heapCap:false,externalCalls:0,databaseCalls:0,paidAiCalls:0,canvaCalls:0,canvaLibraryPreview:libraryPreview,fonts:readingFontCacheState(),raster:readingRasterState(),outputSha256:expected,samples};
   await fs.mkdir(path.dirname(output),{recursive:true});fsSync.writeFileSync(output,JSON.stringify(result,null,2)+'\n');
 }

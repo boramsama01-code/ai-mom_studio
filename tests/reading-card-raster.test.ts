@@ -5,12 +5,11 @@ import {rasterizeReadingSvg,readingRasterState,tryBackgroundImageWork} from '../
 
 const svg='<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#226655"/></svg>';
 describe('bounded reading-card page preparation and native lifetime',()=>{
-  it('preserves the existing JPEG recipe and reaps the native process before resolving',async()=>{
+  it('preserves the existing JPEG recipe and releases its native worker before resolving',async()=>{
     const rendered=new Resvg(svg,{font:{loadSystemFonts:false}}).render();
     const expected=await sharp(rendered.pixels,{raw:{width:rendered.width,height:rendered.height,channels:4}}).flatten({background:'#ffffff'}).toColorspace('srgb').removeAlpha().jpeg({quality:92,chromaSubsampling:'4:4:4'}).toBuffer();
     expect((await rasterizeReadingSvg(()=>svg)).equals(expected)).toBe(true);
-    expect(readingRasterState()).toMatchObject({nativeBackend:'process',activeNativePid:null,activeWorkers:0,pendingPages:0,maxObservedWorkers:1});
-    expect(readingRasterState().maxObservedChildRssMiB).toBeGreaterThan(0);
+    expect(readingRasterState()).toMatchObject({nativeBackend:'worker-thread',activeWorkers:0,pendingPages:0,maxObservedWorkers:1});
   });
   it('rejects a fifth page before its preparation and runs admitted pages with one native worker',async()=>{
     let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
