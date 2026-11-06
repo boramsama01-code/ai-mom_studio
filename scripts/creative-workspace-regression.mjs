@@ -172,7 +172,7 @@ try{
 }finally{
  await browsers.close();
  try{const encoded=(await readFile(output+"/workspace-review.png")).toString("base64"),size=32768,total=Math.ceil(encoded.length/size);for(let i=0;i<total;i++)console.log("WORKSPACE_REVIEW_PNG "+i+"/"+total+" "+encoded.slice(i*size,(i+1)*size));}catch{/* A failed gate keeps its individual screenshots and diagnostics. */}
- for(const name of ["before-home-1440","after-home-1440","direction-b-graphite-1440","after-editor-1440","after-home-393","after-capture-393","after-video-393","after-assets-1440"]){
+ for(const name of ["before-home-1440","after-home-1440","direction-b-graphite-1440","after-editor-1440","after-home-393","after-capture-393","after-video-393","after-assets-1440","after-error-393","workspace-review-preview"]){
   try{const bytes=await sharp(await readFile(output+"/"+name+".png")).resize({width:name.endsWith("393")?393:1080,withoutEnlargement:true}).webp({quality:72}).toBuffer();console.log("VISUAL_REVIEW_IMAGE "+name+" "+bytes.toString("base64"));}catch{ /* Earlier layout failures can prevent a later screenshot. Artifacts retain the original failure. */ }
  }
 }
