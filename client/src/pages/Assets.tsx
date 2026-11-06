@@ -1,9 +1,11 @@
 import { lazy, Suspense, useState } from "react";
 import { useLocation } from "wouter";
-import { creativeProfileFor } from "@shared/creativeProfile";
+import { creativeProfileFor, creativeLogoSource } from "@shared/creativeProfile";
 import { useChannel, useDirtyGuard } from "../state";
 import { ErrorBox, GuardedLink, Loading } from "../ui";
 import { Icon } from "../icons";
+import { registeredProfileAsset } from "@shared/characterVariantAssets";
+import { BrandAssetPreview } from "../BrandAssetPreview";
 const Design = lazy(() => import("./Design").then(m => ({ default: m.DesignPage })));
 const Characters = lazy(() => import("./StudioPosePicker").then(m => ({ default: m.StudioCharacterArchive })));
 export function AssetsPage() {
@@ -17,9 +19,9 @@ export function AssetsPage() {
     <Suspense fallback={<Loading label="자산 불러오는 중" lines={5}/>}>
       {tab === "templates" && <div className="asset-template-content"><Design embedded/></div>}
       {tab === "characters" && <Characters/>}
-      {tab === "brands" && <div className="asset-brand-grid">{channels.filter(channel => selected === "all" || channel.id === selected).map(channel => { const profile = creativeProfileFor(channel); return <article className="asset-brand" key={channel.id}>
-        <div className="asset-brand-art" style={{ backgroundColor: channel.accentColor + "12" }}>{profile.logoUrl ? <img src={profile.logoUrl} alt={`${channel.name} 등록 로고`}/> : channel.slug === "penguin" ? <img src="/branding/space-penguin-company.svg" alt="우주펭귄상회 로고"/> : <span style={{ color: channel.accentColor }}>{channel.name}</span>}</div>
-        <div className="asset-brand-copy"><h2>{channel.name}</h2><span className="asset-version">채널 설정 v{channel.version}</span><p>{channel.description || "브랜드 설명을 추가해 주세요."}</p><dl><div><dt>대상</dt><dd>{channel.audience}</dd></div><div><dt>색상</dt><dd><i style={{ backgroundColor: channel.accentColor }}/>{channel.accentColor}</dd></div><div><dt>서체 가이드</dt><dd>{profile.font}</dd></div><div><dt>말투</dt><dd>{profile.tone || "채널 편집 기준 사용"}</dd></div><div><dt>자산 기준</dt><dd>{profile.assetGuide || "채널 설정에서 승인 자산의 기준을 기록하세요."}</dd></div></dl><GuardedLink className="btn" href={`/settings?channel=${channel.id}`}>브랜드 설정 <Icon name="arrow" size={16}/></GuardedLink></div>
+      {tab === "brands" && <div className="asset-brand-grid">{channels.filter(channel => selected === "all" || channel.id === selected).map(channel => { const profile = creativeProfileFor(channel), logo = registeredProfileAsset(profile.logoAssetId); return <article className="asset-brand" key={channel.id}>
+        <div className="asset-brand-art" style={{ backgroundColor: channel.accentColor + "12" }}><BrandAssetPreview src={creativeLogoSource(profile)} name={channel.name} accent={channel.accentColor} background={logo && "previewBackground" in logo ? logo.previewBackground : undefined}/></div>
+        <div className="asset-brand-copy"><h2>{channel.name}</h2><span className="asset-version">채널 설정 v{channel.version}</span><p>{channel.description || "브랜드 설명을 추가해 주세요."}</p><dl><div><dt>로고</dt><dd>{profile.logoUrl ? "등록한 이미지 URL" : logo?.label ?? "채널 이름 표시"}</dd></div><div><dt>대상</dt><dd>{channel.audience}</dd></div><div><dt>색상</dt><dd><i style={{ backgroundColor: channel.accentColor }}/>{channel.accentColor}</dd></div><div><dt>서체 가이드</dt><dd>{profile.font}</dd></div><div><dt>말투</dt><dd>{profile.tone || "채널 편집 기준 사용"}</dd></div><div><dt>자산 기준</dt><dd>{profile.assetGuide || "채널 설정에서 승인 자산의 기준을 기록하세요."}</dd></div></dl><GuardedLink className="btn" href={`/settings?channel=${channel.id}`}>브랜드 설정 <Icon name="arrow" size={16}/></GuardedLink></div>
       </article>; })}</div>}
     </Suspense>
   </div>;

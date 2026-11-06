@@ -5,6 +5,8 @@ import request from "supertest";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Express } from "express";
 import { isPrivateStudioAssetPath } from "../server/studioAssetPath";
+import { REGISTERED_PROFILE_ASSETS } from "../shared/characterVariantAssets";
+import { readRegisteredCharacterAsset } from "../server/services/characterVariantAssets";
 import { studioFinalAsset } from "../server/services/studioFinalAssets";
 
 const testEnv = vi.hoisted(() => ({ databaseUrl: "memory-session-test", adminUsername: "pose-test-operator", isProduction: false, canonicalRedirectUrl: "", baseUrl: "http://localhost" }));
@@ -134,5 +136,23 @@ it("serves the registered family and actual pose PNGs through authenticated imag
       expect(image.width).toBeGreaterThan(0);
       expect(image.height).toBeGreaterThan(0);
     }
+  }
+});
+
+
+it("protects registered brand originals, preserves exact bytes and rejects arbitrary filesystem paths", async () => {
+  const app = createApp(), operator = request.agent(app);
+  await operator.post("/test-only/session");
+  for (const asset of REGISTERED_PROFILE_ASSETS) {
+    const url = "/api/studio/brand-assets/" + encodeURIComponent(asset.id);
+    expect((await request(app).get(url)).status).toBe(401);
+    const response = await operator.get(url);
+    expect(response.status).toBe(200);
+    expect(response.headers["cache-control"]).toContain("private");
+    expect(response.headers["content-type"]).toContain("image/png");
+    expect(response.body.equals(readRegisteredCharacterAsset(asset))).toBe(true);
+  }
+  for (const id of ["../../server/env.ts", "unknown-logo", "brand:unregistered"]) {
+    expect((await operator.get("/api/studio/brand-assets/" + encodeURIComponent(id))).status).toBe(404);
   }
 });

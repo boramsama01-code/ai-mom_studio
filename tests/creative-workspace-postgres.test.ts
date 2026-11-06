@@ -86,9 +86,11 @@ describe("creative workspace on real PostgreSQL", () => {
   it("round-trips one channel profile and archive without changing another channel", async () => {
     const f=await fixture(), other=await fixture();
     const baseline=(await getDb().select().from(channels).where(eq(channels.id,other.ch.id)))[0];
-    const profile={...creativeProfileFor({slug:f.slug}),formats:["웹툰"],defaultFormat:"웹툰",tone:"짧고 건조한 한국어",defaultRoute:"writing"};
+    const profile={...creativeProfileFor({slug:f.slug}),formats:["웹툰"],defaultFormat:"웹툰",tone:"짧고 건조한 한국어",defaultRoute:"writing",logoAssetId:"brand:highscoop:original:20261101"};
     const saved=await f.agent.patch("/api/channels/"+f.ch.id).set(f.H).send({version:f.ch.version,creativeProfile:profile});
     expect(saved.status,JSON.stringify(saved.body)).toBe(200); expect(saved.body.creativeProfile.tone).toBe(profile.tone);
+    expect(saved.body.creativeProfile.logoAssetId).toBe(profile.logoAssetId);
+    expect((await f.agent.patch("/api/channels/"+f.ch.id).set(f.H).send({version:saved.body.version,creativeProfile:{...profile,logoAssetId:"../../server/env.ts"}})).status).toBe(400);
     const disallowed=await f.agent.post("/api/studio/cards").set(f.H).send({title:"금지된 형식",channel:f.slug,format:"카드뉴스"});
     expect(disallowed.status).toBe(400);
     expect((await f.agent.patch("/api/channels/"+f.ch.id).set(f.H).send({version:f.ch.version,active:false})).status).toBe(409);

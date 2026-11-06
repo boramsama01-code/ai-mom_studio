@@ -54,7 +54,7 @@ export const CHARACTER_VARIANT_ASSETS = [FAMILY_PROFILE_ASSET, ...FAMILY_ENDING_
 export const REGISTERED_PROFILE_ASSETS = [
   FAMILY_PROFILE_ASSET,
   HIGHSCOOP_PROFILE_ASSET,
-  { id: "brand:allligodang:bw:20261104", label: "ALL 프로필", kind: "profile", serverPath: "assets/branding/allligodang-bw.png", sha256: "743e3a9bddc5465a08970900eb078148c19aadedd80b55a328a2b4c0bfe25908" },
+  { id: "brand:allligodang:bw:20261104", label: "ALL 프로필", kind: "profile", previewBackground: "#222b2c", serverPath: "assets/branding/allligodang-bw.png", sha256: "743e3a9bddc5465a08970900eb078148c19aadedd80b55a328a2b4c0bfe25908" },
   { id: "brand:space-penguin-company:20261101", label: "우주펭귄상회 로고", kind: "profile", serverPath: "assets/branding/space-penguin-company.png", sha256: "a66350333b86e9e0c14981154e67e26218497ecc2942dc4b826f87a48fff55ad" },
 ] as const;
 export type RegisteredProfileAssetId = typeof REGISTERED_PROFILE_ASSETS[number]["id"];

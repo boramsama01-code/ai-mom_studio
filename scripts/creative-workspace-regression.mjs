@@ -15,6 +15,7 @@ const image=await readFile("client/public/cardnews14/cinematic-cover.webp");
 const familyImage=await sharp(await readFile("assets/studio-final-v14/restored/MODEL_FAMILY.png")).webp({quality:85}).toBuffer();
 const webtoonArt=await Promise.all(["PP001","PM012","KG022","KK030"].map(async id=>sharp(await readFile(`assets/studio-final-v14/restored/${id}.png`)).webp({quality:85}).toBuffer()));
 const channelArt=await Promise.all(["cobalt-paper","amber-cream","bang-bang"].map(id=>readFile(`client/public/cardnews14/${id}-cover.webp`)));
+const brandImages=new Map(await Promise.all([["brand:space-penguin-company:20261101","space-penguin-company.png"],["brand:highscoop:original:20261101","highscoop-original.png"],["brand:allligodang:bw:20261104","allligodang-bw.png"]].map(async([id,file])=>[id,await readFile("assets/branding/"+file)])));
 const stamp="2026-11-06T00:00:00Z", clone=value=>structuredClone(value);
 const ai={defaultProvider:"openai",text:{openai:false,anthropic:false,gemini:false},image:false};
 const channels=[
@@ -62,6 +63,10 @@ async function intercept(route,origin,errors,writes){
  else if(p==="/api/studio/instagram/oauth/config")data={configured:false,missing:["INSTAGRAM_APP_ID"],appId:null,redirectUri:origin+"/api/studio/instagram/oauth/callback"};
  else if(p==="/api/studio/export-check")data={errors:[],warnings:[],pageCount:1};
  else if(/\/studio\/cards\/\d+\/media$/.test(p))data=[];
+ else if(p.startsWith("/api/studio/brand-assets/")){
+  const bytes=brandImages.get(decodeURIComponent(p.split("/").at(-1)));assert(bytes,"registered brand fixture");
+  return route.fulfill({contentType:"image/png",body:bytes});
+ }
  else if(p==="/api/canva/status")data={connected:false};
  else if(p==="/api/canva/template-library")data={configured:false,connected:false,autofill:false,folderId:"FAHZ9dTp-H8",folderName:"검증용 템플릿 폴더",folderUrl:"https://www.canva.com/folder/FAHZ9dTp-H8",enabled:false,syncIntervalSeconds:120,lastSyncedAt:null,syncStatus:"disabled",errorCode:null,message:"실제 Canva 연결을 사용하지 않는 브라우저 검증 환경입니다.",items:[]};
  else if(/\/studio\/cards\/\d+\/publication$/.test(p))data={channelId:1,channelName:"우주펭귄상회",expectedUsername:"spacepenguin.co",ready:false,blockers:["검증용 환경 · 외부 게시 차단"],dailyLimit:0,dryRun:true,autoPublish:false,destinations:[],deliveries:[],publicationDraft:{version:0,options:{destinationIds:[],timing:"now",scheduledAtKst:""}}};
@@ -210,6 +215,7 @@ async function run(root,label,port){
    await noOverflow(page,"template gallery "+width);await shot(page,"after-templates-"+width);
    await page.getByRole("button",{name:"브랜드 가이드",exact:true}).click();await page.locator(".asset-brand").first().waitFor();
    await noOverflow(page,"assets "+width);await shot(page,"after-assets-"+width);
+   assert.equal(await page.locator(".asset-brand img").count(),3,"existing registered brand originals are displayed");
    await page.goto(origin+"/");await page.locator(".creative-overview").waitFor();
    const scopedReads=await page.evaluate(()=>({key:localStorage.getItem("spacepenguin.channel")}));
    await shot(page,"after-return-"+width);
