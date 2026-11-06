@@ -64,6 +64,18 @@ async function saveTokens(db: DB, j: { access_token: string; refresh_token: stri
   await saveSecret(db, "CANVA_TOKEN_EXPIRES_AT", String(Date.now() + j.expires_in * 1000), "canva");
 }
 
+// Classify provider descriptions into fixed messages without exposing their contents.
+function tokenFailureDetail(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 4096) return null;
+  const s = value.toLowerCase();
+  if (/redirect[_ -]?(uri|url)/.test(s)) return "Canva가 반환 주소를 문제로 지목했습니다.";
+  if (/code[_ -]?verifier|pkce|code[_ -]?challenge/.test(s)) return "Canva가 PKCE 인증 검증을 문제로 지목했습니다.";
+  if (/client[_ -]?(id|secret)|client credentials/.test(s)) return "Canva가 앱 인증 정보를 문제로 지목했습니다.";
+  if (/authorization[_ -]?code|auth(?:orization)? grant/.test(s)) return "Canva가 인증 코드를 문제로 지목했습니다.";
+  if (/grant[_ -]?type/.test(s)) return "Canva가 인증 방식(grant_type)을 문제로 지목했습니다.";
+  return null;
+}
+
 async function tokenRequest(body: Record<string, string>, fetchImpl: typeof fetch) {
   const problem = canvaConfigurationProblem();
   if (problem) throw new CanvaError(problem, 400, "not_configured");
@@ -96,7 +108,7 @@ async function tokenRequest(body: Record<string, string>, fetchImpl: typeof fetc
     // Canva's REST token endpoint returns { code, message }; standard OAuth
     // providers may instead return { error, error_description }.
     const reason = [j.code, j.error].find((value): value is string => typeof value === "string" && Object.hasOwn(reasons, value)) ?? null;
-    const advice = reason ? reasons[reason] : res.status === 429 ? "Canva 호출 한도에 도달했습니다. 잠시 후 다시 확인해 주세요." : res.status >= 500 ? "Canva 인증 서버가 요청을 처리하지 못했습니다. 잠시 후 다시 확인해 주세요." : "Canva 앱의 연결 설정을 확인해 주세요.";
+    const advice = (reason === "invalid_request" ? tokenFailureDetail(j.message) ?? tokenFailureDetail(j.error_description) : null) ?? (reason ? reasons[reason] : res.status === 429 ? "Canva 호출 한도에 도달했습니다. 잠시 후 다시 확인해 주세요." : res.status >= 500 ? "Canva 인증 서버가 요청을 처리하지 못했습니다. 잠시 후 다시 확인해 주세요." : "Canva 앱의 연결 설정을 확인해 주세요.");
     throw new CanvaError(`Canva 인증 요청이 거절되었습니다(HTTP ${res.status}${reason ? `, ${reason}` : ""}). ${advice}`, res.status, "auth_required");
   }
   if (typeof j.access_token !== "string" || !j.access_token.trim() || typeof j.refresh_token !== "string" || !j.refresh_token.trim() || !Number.isFinite(j.expires_in) || Number(j.expires_in) <= 0)
