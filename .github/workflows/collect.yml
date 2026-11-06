@@ -1,7 +1,6 @@
 # 수집 워커 — 한 번 실행 후 종료
-# 예약: 매일 KST 08:00에 하루 한 번(UTC 23:00). GitHub 예약 실행은 지연될 수 있습니다.
-# 실제 수집 여부는 앱 화면 '오늘의 작업'의 [자동 수집] 스위치(또는 Variables의 AUTO_COLLECT=true)로 정합니다.
-# 스위치가 꺼져 있으면 DB만 확인하고 바로 끝납니다. Secrets(APP_DATABASE_URL 등)가 없으면 아무것도 하지 않고 끝납니다.
+# 자동 예약 수집은 사용하지 않습니다. workflow_dispatch로 요청한 수동 수집만 실행합니다.
+# 수동 실행은 [자동 수집] 스위치와 무관합니다. 연결만 확인하려면 check_only를 선택하세요.
 name: collect
 on:
   workflow_dispatch:
@@ -14,8 +13,6 @@ on:
         description: "연결만 확인 (수집·AI·알림·게시 안 함)"
         type: boolean
         default: false
-  schedule:
-    - cron: "0 23 * * *"
 permissions:
   contents: read
 concurrency:
