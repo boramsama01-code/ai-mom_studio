@@ -60,6 +60,23 @@ const writes = () => mocks.api.mock.calls.filter(([, options]) => options?.metho
 async function editFirst() { await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="첫 번째 채널 수정"]')!.click()); await settle(); }
 
 describe("manual channel administration", () => {
+  it("saves model and cost settings for a legacy zero-budget channel without asking for operating caps", async () => {
+    channels[0].budget = { naverCallsPerRun: 0, resultsPerRun: 0, fetchTargetsPerRun: 0, fetchCallsPerRun: 0, llmCallsPerRun: 0, dailyPublishLimit: 0 };
+    client.setQueryData(["channels"], structuredClone(channels));
+    await render(); await editFirst();
+    for (const name of ["검색 실행 한도", "결과 수", "원문 확보 대상", "원문 호출", "AI 호출", "하루 게시 한도"]) {
+      expect([...host.querySelectorAll("label")].some(label => label.textContent?.trim().startsWith(name))).toBe(false);
+    }
+    await fill("카드뉴스 문구 모델 ID", "gpt-my-editor");
+    await fill("입력 단가", "1.25"); await fill("출력 단가", "4.5");
+    await click("채널 설정 저장");
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0][1].body).toMatchObject({ version: 1, budget: { llmCallsPerRun: 0, dailyPublishLimit: 0, llmInputTokenPriceUsdPerM: 1.25, llmOutputTokenPriceUsdPerM: 4.5 } });
+    expect(normalizeChannelRoleSettings(channels[0].aiSettings).roleModels.card_copy).toEqual({ provider: "openai", model: "gpt-my-editor" });
+    expect(channels[0].version).toBe(2);
+    expect(host.textContent).toContain("채널 설정 저장됨");
+    expect(mocks.api.mock.calls.some(([path]) => /generate|collect|publish/.test(String(path)))).toBe(false);
+  });
   it("creates a usable channel with an automatic-content default, chosen taxonomy and optional stable address", async () => {
     await render(); await click("＋ 새 채널 추가");
     expect(field("주로 만들 콘텐츠").value).toBe("current_dialogue");

@@ -36,10 +36,9 @@ export async function studioPublishStatus(db: DB, cardId: number): Promise<Studi
   if (!choices.some(d => d.enabled && d.configured)) blockers.push("인스타그램 게시 계정을 연결하세요.");
   if (!env.cloudinaryConfigured) blockers.push("API 키 관리에서 Cloudinary를 연결하세요.");
   if (!env.instagramApiVersion) blockers.push("API 키 관리에서 Instagram API 버전을 입력하세요.");
-  if (ch.budget.dailyPublishLimit < 1) blockers.push("채널의 하루 발행 한도를 1건 이상으로 설정하세요.");
   if (env.dryRun || !env.autoPublish) blockers.push("서버가 모의 실행 또는 발행 중지 상태입니다.");
   const history = card.sourceItemId ? await db.select({ id: deliveries.id, approvalId: approvals.id, approvalStatus: approvals.status, status: deliveries.status, lastError: deliveries.lastError, externalUrl: deliveries.externalUrl, errorKind: deliveries.errorKind, needsReconciliation: deliveries.needsReconciliation, outcomeSource: deliveries.outcomeSource, phase: deliveries.phase, resolutionNote: deliveries.resolutionNote, destinationSnapshot: deliveries.destinationSnapshot, scheduledAt: approvals.scheduledAt }).from(deliveries).innerJoin(approvals, eq(deliveries.approvalId, approvals.id)).where(eq(approvals.contentItemId, card.sourceItemId)).orderBy(desc(deliveries.id)).limit(20) : [];
-  return { channelId: ch.id, channelName: ch.name, expectedUsername: expectedInstagramUsername(ch.slug), ready: !blockers.length, blockers, dailyLimit: ch.budget.dailyPublishLimit, dryRun: env.dryRun, autoPublish: env.autoPublish, destinations: choices, publicationDraft: card.publicationDraft ?? { version: 0 }, deliveries: history.map(d => ({ ...d, scheduledAt: d.scheduledAt.toISOString() })) };
+  return { channelId: ch.id, channelName: ch.name, expectedUsername: expectedInstagramUsername(ch.slug), ready: !blockers.length, blockers, dryRun: env.dryRun, autoPublish: env.autoPublish, destinations: choices, publicationDraft: card.publicationDraft ?? { version: 0 }, deliveries: history.map(d => ({ ...d, scheduledAt: d.scheduledAt.toISOString() })) };
 }
 
 async function previewDto(db: DB, card: typeof studioCards.$inferSelect): Promise<StudioPublishPreview> {

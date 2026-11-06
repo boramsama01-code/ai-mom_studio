@@ -34,12 +34,18 @@ describe("new approvals require a usable publication route", () => {
     expect(result.ready).toBe(false);
     expect(result.blockers).toEqual(expect.arrayContaining([expect.stringContaining("Cloudinary"), expect.stringContaining("API 버전")]));
   });
-  it("blocks archived channels, global stop, zero daily limit and simulated/stopped publishing", () => {
+  it("blocks archived channels, global stop and simulated/stopped publishing even with an ignored legacy zero cap", () => {
     vi.stubEnv("DRY_RUN", "true"); vi.stubEnv("AUTO_PUBLISH", "false");
     const result = publicationReadinessFor({ ...channel, active: false, budget: { ...channel.budget, dailyPublishLimit: 0 } }, [destination], true);
     expect(result.ready).toBe(false);
-    expect(result.blockers).toHaveLength(5);
+    expect(result.blockers).toHaveLength(4);
     expect(result.dryRun).toBe(true); expect(result.autoPublish).toBe(false);
+  });
+  it.each([0, 3])("allows an otherwise ready approved account with legacy daily cap %s", dailyPublishLimit => {
+    const result = publicationReadinessFor({ ...channel, budget: { ...channel.budget, dailyPublishLimit } }, [destination], false);
+    expect(result).toMatchObject({ ready: true, blockers: [], expectedUsername: "spacepenguin.co" });
+    expect(result).not.toHaveProperty("dailyLimit");
+    expect(mocks.identity).not.toHaveBeenCalled(); expect(mocks.quota).not.toHaveBeenCalled();
   });
   it("does not approve duplicated active Instagram destinations", () => {
     expect(publicationReadinessFor(channel, [destination, { ...destination, id: 9 }], false)).toMatchObject({ ready: false, blockers: [expect.stringContaining("여러 개")] });

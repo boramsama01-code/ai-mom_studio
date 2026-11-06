@@ -7,6 +7,7 @@ import { setTestEnv } from "./helpers";
 setTestEnv();
 vi.mock("../server/seed", () => ({ getSetting: async () => false }));
 const { cancelApproval, retryDelivery, publishDue } = await import("../server/worker/publish");
+const { claimPublicationDelivery } = await import("../server/services/publicationAttempts");
 
 /** In-memory transactional rows; tests never connect to a database or a publisher. */
 function fixture(status = "failed") {
@@ -14,7 +15,7 @@ function fixture(status = "failed") {
   const item = { id: 1, currentRevisionId: 7, reviewStatus: "reviewed", relevance: "relevant", excluded: false, publishStatus: status };
   const approval = { id: 21, contentItemId: 1, revisionId: 7, channelId: 3, status: "active", scheduledAt: stamp };
   const delivery = { id: 44, approvalId: 21, channelId: 3, destinationId: 90, status, destinationSnapshot: { version: 1, accountId: "123" }, phase: "finished", needsReconciliation: false, updatedAt: stamp, externalId: null as string | null, externalUrl: null, externalContainerId: "container", completedAt: stamp, requestStartedAt: stamp, attempts: 2, lastError: "fixture", errorKind: "transient" };
-  const rows: Record<string, Array<Record<string, any>>> = { content_items: [item], approvals: [approval], deliveries: [delivery], audit_logs: [], delivery_attempt_events: [], publisher_heartbeats: [] };
+  const rows: Record<string, Array<Record<string, any>>> = { content_items: [item], approvals: [approval], deliveries: [delivery], channels: [], audit_logs: [], delivery_attempts: [], delivery_attempt_events: [], publisher_heartbeats: [] };
   const predicates: Array<{ sql: string; params: unknown[] }> = [];
   const locked: string[] = [];
   let onLock: ((name: string) => void) | undefined;
@@ -60,7 +61,7 @@ function fixture(status = "failed") {
     return query;
   }
   let serial = Promise.resolve<unknown>(undefined);
-  const db = { select, update, insert: (table: any) => ({ values: (value: unknown) => {
+  const db = { select, update, execute: vi.fn(async () => ({ rows: [{ c: 3 }] })), insert: (table: any) => ({ values: (value: unknown) => {
     const apply = () => { rows[getTableName(table)].push(value as any); };
     return { then(resolve: (value: unknown) => unknown) { apply(); return Promise.resolve(undefined).then(resolve); }, onConflictDoUpdate() { apply(); return Promise.resolve(); } };
   } }),
@@ -70,6 +71,34 @@ function fixture(status = "failed") {
     beforeLock(callback: typeof onLock) { onLock = callback; }, loseUpdate() { conflictUpdate = true; } };
 }
 afterEach(() => vi.unstubAllEnvs());
+
+describe("approved delivery admission ignores obsolete application daily caps", () => {
+  it.each([0, 3])("claims once despite legacy cap %s and prior daily publications", async dailyPublishLimit => {
+    const f = fixture("scheduled");
+    f.rows.channels.push({ id: 3, active: true, budget: { dailyPublishLimit } });
+    Object.assign(f.delivery, { externalContainerId: null, phase: "queued", attempts: 0 });
+    const claimed = await claimPublicationDelivery(f.db, f.delivery.id, "worker", new Date());
+    expect(claimed).toMatchObject({ id: f.delivery.id, status: "processing", phase: "preparing", attempts: 1, leaseOwner: "worker" });
+    expect(claimed?.leaseToken).toEqual(expect.any(String));
+    expect(f.rows.delivery_attempts).toHaveLength(1);
+    expect(await claimPublicationDelivery(f.db, f.delivery.id, "second-worker", new Date())).toBeNull();
+    expect(f.rows.delivery_attempts).toHaveLength(1);
+    expect(f.rows.channels[0].budget.dailyPublishLimit).toBe(dailyPublishLimit);
+  });
+  it.each(["unknown", "cancelled", "succeeded", "processing"])("does not reopen a %s delivery even when its legacy cap is zero", async status => {
+    const f = fixture(status); f.rows.channels.push({ id: 3, budget: { dailyPublishLimit: 0 } });
+    expect(await claimPublicationDelivery(f.db, f.delivery.id, "worker", new Date())).toBeNull();
+    expect(f.delivery.status).toBe(status); expect(f.rows.delivery_attempts).toHaveLength(0);
+  });
+  it.each(["inactive approval", "future schedule", "reconciliation"])("does not bypass %s while removing the cap", async reason => {
+    const f = fixture("scheduled");
+    if (reason === "inactive approval") f.approval.status = "cancelled";
+    if (reason === "future schedule") f.approval.scheduledAt = new Date(Date.now() + 60_000);
+    if (reason === "reconciliation") f.delivery.needsReconciliation = true;
+    expect(await claimPublicationDelivery(f.db, f.delivery.id, "worker", new Date())).toBeNull();
+    expect(f.rows.delivery_attempts).toHaveLength(0); expect(f.delivery.status).toBe("scheduled");
+  });
+});
 
 describe("atomic cancellation and retry controls", () => {
   it("cancels queued destinations and the approval together", async () => {

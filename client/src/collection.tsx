@@ -36,6 +36,7 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
   if (query.isLoading) return <Loading label="수집 현황 확인 중" />;
   if (query.error) return <ErrorBox error={query.error} retry={() => query.refetch()} />;
   const d = query.data!;
+  const nextCollection = d.nextAt ? fmtDate(d.nextAt) : d.globalStop ? "전체 정지" : d.autoCollect ? "예약 실행 설정 필요" : "자동 수집 꺼짐";
   const totals = d.channels.reduce((a, c) => ({ newItems: a.newItems + c.newItems, pending: a.pending + c.pending }), { newItems: 0, pending: 0 });
   const busy = d.channels.some(c => c.jobs.some(j => j.status === "running" && !j.stale));
   const queued = d.channels.some(c => c.jobs.length);
@@ -50,7 +51,7 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
   if (!detailed) return <section className="panel collection-compact" aria-label="날짜별 수집 현황">
     <div className="collection-compact-head"><div><span className="collection-kicker">COLLECTION</span><h2>{day === today ? "오늘의 수집" : `${day} 수집 결과`}</h2></div><div className="row"><button className="btn ghost icon" aria-label="수집 현황 새로고침" onClick={() => query.refetch()} disabled={query.isFetching}><Icon name="refresh" size={18} /></button><button className="btn primary" onClick={() => collect.mutate(selected)} disabled={subcategory === "미분류" || (!!subcategory && selected === "all") || collect.isPending || busy || d.globalStop || !(d.searchReady ?? d.naverReady)}>{collect.isPending ? "요청 중…" : busy ? "수집 중…" : subcategory ? `${subcategory} 수집` : queued ? "대기 수집 재개" : selected === "all" ? "전체 채널 지금 수집" : "지금 수집"}</button></div></div>
     {subcategory && <p className="small muted">선택한 소분류의 공식 출처와 활성 키워드를 수집합니다. 아래 현황 수치는 채널 전체 기준입니다.</p>}
-    <div className="collection-compact-metrics"><div><span>새로 모은 자료</span><strong>{totals.newItems}<small>건</small></strong></div><div><span>검토를 기다리는 자료</span><strong>{totals.pending}<small>건</small></strong></div><div className="collection-compact-next"><span>다음 자동 수집</span><strong>{d.nextAt ? fmtDate(d.nextAt) : d.globalStop ? "전체 정지" : "자동 수집 꺼짐"}</strong></div></div>
+    <div className="collection-compact-metrics"><div><span>새로 모은 자료</span><strong>{totals.newItems}<small>건</small></strong></div><div><span>검토를 기다리는 자료</span><strong>{totals.pending}<small>건</small></strong></div><div className="collection-compact-next"><span>다음 자동 수집</span><strong>{nextCollection}</strong></div></div>
     {d.globalStop && <p className="notice warn">전역 정지 중이므로 수집이 실행되지 않습니다.</p>}
     {!(d.searchReady ?? d.naverReady) && <p className="notice warn">검색 연결을 확인해 주세요. <GuardedLink href="/connections?service=naver">연결 설정</GuardedLink></p>}
     {searchAuthFailed && <p className="notice err" role="alert">최근 수집에서 네이버 검색 인증에 실패했습니다. <GuardedLink href="/connections?service=naver">네이버 키 확인·수정 →</GuardedLink></p>}
@@ -70,11 +71,11 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
     <div className="collection-metrics">
       <div><span>신규 자료</span><strong>{totals.newItems}<small>건</small></strong></div>
       <div><span>검토 대기</span><strong>{totals.pending}<small>건</small></strong></div>
-      <div><span>다음 예약</span><strong className="collection-next">{d.nextAt ? fmtDate(d.nextAt) : d.globalStop ? "전체 정지" : "자동 수집 꺼짐"}</strong></div>
+      <div><span>다음 예약</span><strong className="collection-next">{nextCollection}</strong></div>
     </div>
     <div className="row between small">
-      <label className="check"><input type="checkbox" checked={auto.isPending ? auto.variables ?? d.autoCollect : d.autoCollect} disabled={workroom || auto.isPending} aria-describedby={workroom ? "workroom-auto-collect-note" : undefined} onChange={e => { if (!workroom) auto.mutate(e.target.checked); }} />매일 자동 수집</label>
-      <span className="muted">05:13 · 07:13 · 19:13 예약 / GitHub 실행 지연 가능</span>
+      <label className="check"><input type="checkbox" checked={auto.isPending ? auto.variables ?? d.autoCollect : d.autoCollect} disabled={workroom || auto.isPending} aria-describedby={workroom ? "workroom-auto-collect-note" : undefined} onChange={e => { if (!workroom) auto.mutate(e.target.checked); }} />자동 수집 허용</label>
+      <span className="muted">자동 수집에는 별도 예약 실행 설정이 필요합니다. 필요한 때 ‘지금 수집’을 사용할 수 있습니다.</span>
     </div>
     {workroom && <p id="workroom-auto-collect-note" className="small muted">비공개 작업실에서는 예약 수집 설정을 바꿀 수 없어요. ‘지금 수집’은 바로 사용할 수 있어요.</p>}
     {(d.sourceMode === "public_rss" || d.sourceMode === "official_naver") && <div className="small muted">학교·기관 공지와 청소년 활동 목록 우선 · 네이버 뉴스·웹문서로 보완</div>}
@@ -108,7 +109,7 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
       </details>}
       {!c.queries && !c.discoveryQueries && !c.boards && !c.profile && <p className="small muted">직접 창작하는 채널입니다. 외부 자료가 필요하면 검색어를 추가하세요.</p>}
     </article>)}</div> : <GuardedLink href="/today" className="small">채널별 실행 결과·검색어 확인 →</GuardedLink>}
-    <details className="small"><summary>무엇을 어떻게 수집하나요?</summary><p>학교·영재교육원·GED·기관의 공개 게시판과 공식 RSS를 먼저 확인합니다. 공식 출처가 정상 응답하면 뉴스 검색은 하이스쿱 24회, 알리고당 20회 이내에서 보완하고, 공식 경로가 모두 실패하면 기존 검색 한도로 복원합니다. 기관 발표와 언론 보도는 각각 원문을 확인해 비교합니다. 한 경로가 실패해도 다른 경로는 계속 처리하고, URL 및 같은 언론사·제목·날짜의 중복을 제외합니다. 보완 검색은 네이버 뉴스·웹문서·블로그를 사용합니다. 네이버 장애 시 뉴스만 언론사 RSS·Google RSS로 보완하며 웹문서·블로그 오류는 표시합니다. 과학·시사는 여러 언론의 보도를 주제별로 묶어 화제도 함께 찾습니다. 한도를 넘는 검색어·공식 출처는 다음 수집에서 먼저 처리합니다. 공식 목록은 제공된 최신 목록 범위만 확인하며 과거 공고 전체를 보장하지 않습니다.</p><p>‘오늘’은 오늘 처음 저장한 날짜입니다. 원문의 게시일과 다를 수 있습니다. 일부 RSS가 중단되거나 결과 상한에 닿으면 부분 수집으로 표시합니다. 원문 확보 실패·출처 미확인은 자료별로 표시하며, 연결되지 않은 공식 게시판은 자동 수집하지 않습니다. 이 화면의 수집 버튼은 AI 생성·알림 전송·SNS 게시를 실행하지 않습니다.</p>{d.publicFeeds && <p>직접 RSS: {d.publicFeeds.join(" · ")}</p>}</details>
+    <details className="small"><summary>무엇을 어떻게 수집하나요?</summary><p>학교·영재교육원·GED·기관의 공개 게시판과 공식 RSS를 먼저 확인합니다. ‘지금 수집’은 선택한 채널·소분류의 활성 검색어와 연결된 공식 출처를 처리합니다. 기관 발표와 언론 보도는 각각 원문을 확인해 비교합니다. 한 경로가 실패해도 다른 경로는 계속 처리하고, URL 및 같은 언론사·제목·날짜의 중복을 제외합니다. 보완 검색은 네이버 뉴스·웹문서·블로그를 사용합니다. 네이버 장애 시 뉴스만 언론사 RSS·Google RSS로 보완하며 웹문서·블로그 오류는 표시합니다. 과학·시사는 여러 언론의 보도를 주제별로 묶어 화제도 함께 찾습니다. 공식 목록은 제공된 최신 목록 범위만 확인하며 과거 공고 전체를 보장하지 않습니다.</p><p>‘오늘’은 오늘 처음 저장한 날짜입니다. 원문의 게시일과 다를 수 있습니다. 일부 RSS가 중단되거나 출처에서 제공하는 결과 범위에 닿으면 부분 수집으로 표시합니다. 원문 확보 실패·출처 미확인은 자료별로 표시하며, 연결되지 않은 공식 게시판은 수집하지 않습니다. 이 화면의 수집 버튼은 AI 생성·알림 전송·SNS 게시를 실행하지 않습니다.</p>{d.publicFeeds && <p>직접 RSS: {d.publicFeeds.join(" · ")}</p>}</details>
   </section>;
 }
 

@@ -4,7 +4,8 @@ export type PublicationReadiness = {
   blockers: string[];
   dryRun: boolean;
   autoPublish: boolean;
-  dailyLimit: number;
+  /** Deprecated response field tolerated from older servers; never gates approval. */
+  dailyLimit?: number;
   expectedUsername: string | null;
   destinations: Array<{ id: number; label: string; platform: string; configured: boolean }>;
 };

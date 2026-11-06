@@ -55,7 +55,8 @@ import { fetchPublisherArticle as fetchAndExtract } from "../services/publisherL
 import { sourceFetchUrl } from "../services/sourceFetchUrl";
 import { normalizeUrl } from "../services/url";
 import { extractForItem } from "../worker/collect";
-import { generateCardCopy, LlmBudget } from "../services/llm";
+import { generateCardCopy } from "../services/llm";
+import { createManualCardCopyBudget, createManualSourceBudget } from "../services/manualAiBudget";
 import { generateDialogueDraft } from "../worker/generate";
 import { approveItem, cancelApproval, findReusableCardCover, renderCardForItem, retryDelivery, sourceOrgFor, reconcileDelivery, confirmDeliveryPosted, confirmDeliveryNotPosted } from "../worker/publish";
 import { kickInlinePublish } from "../worker/inlinePublish";
@@ -510,8 +511,11 @@ itemRoutes.post(
     const ai = { summary: channelAiSelection(ch, "summary", { provider }), copy: channelAiSelection(ch, "copy"), familyPlan: familyExecutionPlan(ch, item.currentRevisionId ?? 0) };
     const result = await runSourceGeneration(db, { type: "source_generate", itemId: item.id, channelId: ch.id, version: version ?? item.version, requestId: logicalRequestId, intent: { provider: provider ?? null, templateKey: templateKey ?? null }, configuration: ai, actor: actorOf(req) }, async () => {
       if (item.kind === "notice") {
-        const calls = readingProfileForTemplateKey(templateKey ?? ch.cardTemplate) ? Math.min(12, Math.max(0, ch.budget.llmCallsPerRun)) : 4;
-        const r = await extractForItem(db, item.id, new LlmBudget(calls), new Date(), undefined, provider, templateKey, ai);
+        const [saved] = item.currentRevisionId ? await db.select({ payload: contentRevisions.payload }).from(contentRevisions).where(eq(contentRevisions.id, item.currentRevisionId)) : [];
+        const selectedTemplate = templateKey ?? ch.cardTemplate;
+        const budget = createManualSourceBudget({ summary: ai.summary, copy: ai.copy, notice: true, hasSavedCopy: !!saved?.payload.cardCopy, templateKey: selectedTemplate,
+          ...(readingProfileForTemplateKey(selectedTemplate) ? { familyPlan: ai.familyPlan } : {}) });
+        const r = await extractForItem(db, item.id, budget, new Date(), undefined, provider, templateKey, ai);
         if (!r.ok) throw new HttpError(r.kind === "not_configured" ? 503 : 400, r.error);
       } else {
         const r = await generateDialogueDraft(db, item.id, new Date(), provider, templateKey, { ...ai, explicitRetry: true, requestId: logicalRequestId });
@@ -705,7 +709,8 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
   const existingCopy = cardCopySchema.safeParse(revision.payload.cardCopy);
   if (body.selectedPage !== undefined && existingCopy.success && body.selectedPage > existingCopy.data.pages.length) throw new HttpError(400, "수정할 카드 페이지를 확인해 주세요.");
   const storyFormat = body.storyFormat ?? (existingCopy.success ? existingCopy.data.storyFormat : undefined);
-  const args = { kind: item.kind, title: item.title, payload: revision.payload, templateKey: body.templateKey, channelName: ch.name, channelSlug: ch.slug, sources, instructions: body.instructions, selectedPage: body.selectedPage, budget: new LlmBudget(4) };
+  const args = { kind: item.kind, title: item.title, payload: revision.payload, templateKey: body.templateKey, channelName: ch.name, channelSlug: ch.slug, sources, instructions: body.instructions, selectedPage: body.selectedPage,
+    budget: createManualCardCopyBudget({ ...ai, refreshAnalysis: storyFormat === "discussion8" && (body.refreshAnalysis === true || !articleAnalysisSchema.safeParse(revision.payload.articleAnalysis).success) }) };
   const generated = storyFormat === "discussion8"
     ? await proposeNewsDiscussion({ ...args, ...ai, refreshAnalysis: body.refreshAnalysis })
     : await generateCardCopy({ ...args, ...ai.copy });

@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api";
 import { useChannel, useDirtyGuard } from "../state";
 import { Badge, Empty, ErrorBox, GuardedLink, Loading } from "../ui";
-import type { Channel, ChannelBudget, Destination } from "@shared/schema";
+import type { Channel, Destination } from "@shared/schema";
 import { ChannelDirectory } from "./ChannelDirectory";
 import { ConnectionsSection, SecretInput, useSecrets } from "./Connections";
 import { StudioImport } from "./Studio";
@@ -174,16 +174,10 @@ function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }
     }, () => { setF(channelFields(baseRef.current)); setConflict(null); });
     return () => guard.setDirty("channel-form", false);
   }, [dirty, f, base.version, conflict, m.isPending, archive.isPending]); // eslint-disable-line react-hooks/exhaustive-deps
-  const b = (k: keyof ChannelBudget, label: string, max: number) => (
-    <label className="field">
-      {label}
-      <input type="number" min={0} max={max} value={(f.budget[k] as number | null) ?? 0} onChange={(e) => setF({ ...f, budget: { ...f.budget, [k]: Number(e.target.value) } })} />
-    </label>
-  );
   return (
     <form className="panel stack channel-editor" onSubmit={(e) => { e.preventDefault(); if (!conflict) m.mutate(); }}>
       <h2>{base.name}</h2>
-      {conflict && <div className="notice warn stack channel-settings-conflict" role="alert"><strong>다른 곳에서 바꾼 채널 설정이 있습니다. 입력은 유지했습니다.</strong><details open><summary>최신 설정과 비교</summary><div className="draft-recovery-compare"><div><h3>최신 저장본</h3><pre>{`${conflict.name}\n${conflict.description}\n대상: ${conflict.audience}\n자료 유형: ${channelContentTypeLabels[conflict.contentType as ChannelContentType] ?? conflict.contentType}\n소분류: ${channelCategories(conflict.slug, conflict.categories).join(", ")}\n강조색: ${conflict.accentColor}\n편집 기준: ${conflict.editorialGuide}\n역할별 AI: ${JSON.stringify(conflict.aiSettings ?? defaultChannelRoleSettings(), null, 2)}\n실행 한도·비용: ${JSON.stringify(conflict.budget, null, 2)}`}</pre></div><div><h3>현재 입력</h3><pre>{`${f.name}\n${f.description}\n대상: ${f.audience}\n자료 유형: ${channelContentTypeLabels[f.contentType]}\n소분류: ${f.categoryText}\n강조색: ${f.accentColor}\n편집 기준: ${f.editorialGuide}\n역할별 AI: ${JSON.stringify(f.aiSettings, null, 2)}\n실행 한도·비용: ${JSON.stringify(f.budget, null, 2)}`}</pre></div></div><div className="row"><button type="button" className="btn" disabled={m.isPending} onClick={() => { accept(conflict); m.reset(); }}>최신 설정 사용</button><button type="button" className="btn" disabled={m.isPending} onClick={() => { baseRef.current = conflict; setBase(conflict); setConflict(null); m.mutate(); }}>현재 입력으로 다시 저장</button></div></details></div>}
+      {conflict && <div className="notice warn stack channel-settings-conflict" role="alert"><strong>다른 곳에서 바꾼 채널 설정이 있습니다. 입력은 유지했습니다.</strong><details open><summary>최신 설정과 비교</summary><div className="draft-recovery-compare"><div><h3>최신 저장본</h3><pre>{`${conflict.name}\n${conflict.description}\n대상: ${conflict.audience}\n자료 유형: ${channelContentTypeLabels[conflict.contentType as ChannelContentType] ?? conflict.contentType}\n소분류: ${channelCategories(conflict.slug, conflict.categories).join(", ")}\n강조색: ${conflict.accentColor}\n편집 기준: ${conflict.editorialGuide}\n역할별 AI: ${JSON.stringify(conflict.aiSettings ?? defaultChannelRoleSettings(), null, 2)}\n비용 단가: ${JSON.stringify({ input: conflict.budget.llmInputTokenPriceUsdPerM ?? null, output: conflict.budget.llmOutputTokenPriceUsdPerM ?? null }, null, 2)}`}</pre></div><div><h3>현재 입력</h3><pre>{`${f.name}\n${f.description}\n대상: ${f.audience}\n자료 유형: ${channelContentTypeLabels[f.contentType]}\n소분류: ${f.categoryText}\n강조색: ${f.accentColor}\n편집 기준: ${f.editorialGuide}\n역할별 AI: ${JSON.stringify(f.aiSettings, null, 2)}\n비용 단가: ${JSON.stringify({ input: f.budget.llmInputTokenPriceUsdPerM ?? null, output: f.budget.llmOutputTokenPriceUsdPerM ?? null }, null, 2)}`}</pre></div></div><div className="row"><button type="button" className="btn" disabled={m.isPending} onClick={() => { accept(conflict); m.reset(); }}>최신 설정 사용</button><button type="button" className="btn" disabled={m.isPending} onClick={() => { baseRef.current = conflict; setBase(conflict); setConflict(null); m.mutate(); }}>현재 입력으로 다시 저장</button></div></details></div>}
       <fieldset className="channel-form-fields stack" disabled={m.isPending || archive.isPending}>
       <div className="grid grid-2">
         <label className="field">
@@ -216,16 +210,9 @@ function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }
       <CreativeProfileFields value={f.creativeProfile} onChange={creativeProfile => setF({ ...f, creativeProfile })} />
       <ChannelAiFields value={f.aiSettings} onChange={aiSettings => setF({ ...f, aiSettings })} runtime={base as Channel & Partial<ChannelAiRuntime>} />
       <details className="settings-details">
-        <summary>고급 설정 · 실행 한도와 비용</summary><div className="stack">
-        <div className="grid grid-3">
-          {b("naverCallsPerRun", "검색 실행 한도", 100)}
-          {b("resultsPerRun", "결과 수", 500)}
-          {b("fetchTargetsPerRun", "원문 확보 대상", 100)}
-          {b("fetchCallsPerRun", "원문 호출", 200)}
-          {b("llmCallsPerRun", "AI 호출", 100)}
-          {b("dailyPublishLimit", "하루 게시 한도", 25)}
-        </div>
-        <p className="small muted">AI 비용은 실제 토큰 사용량 × 아래 단가로 계산한 추정치입니다(단가는 직접 입력).</p>
+        <summary>AI 비용 추정</summary><div className="stack">
+        <p className="small muted">수집과 작성은 작업 화면에서 실행합니다. 자동 수집은 ‘오늘의 작업’에서 별도로 설정합니다.</p>
+        <p className="small muted">아래 단가는 비용 추정에만 사용합니다. 실제 요금은 선택한 모델의 사용량과 계정에 적용된 혜택에 따라 달라집니다.</p>
         <div className="grid grid-2">
           <label className="field">
             입력 단가 (USD / 100만 토큰)

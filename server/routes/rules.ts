@@ -38,9 +38,11 @@ ruleRoutes.get(
         // 규칙 1개(검색어+endpoint) = 네이버 호출 1회, 자동 발굴 탐색 주제 1개 = 1회
         activeRules: active.length,
         discoveryCalls,
-        callsPerRun: Math.min(active.length + discoveryCalls, ch.budget.naverCallsPerRun),
-        cappedByBudget: active.length + discoveryCalls > ch.budget.naverCallsPerRun,
-        budget: ch.budget.naverCallsPerRun,
+        callsPerRun: active.length + discoveryCalls,
+        cappedByBudget: false,
+        // Compatibility field: the selected manual query workload, not the
+        // retired channel input. Provider retries are reserved by the worker.
+        budget: active.length + discoveryCalls,
       },
     });
   }),

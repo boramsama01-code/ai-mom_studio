@@ -5,7 +5,7 @@
 import { eq, sql } from "drizzle-orm";
 import type { DB } from "../db";
 import { channels, contentItems, contentRevisions, contentSources, sourceDocuments } from "../../shared/schema";
-import { draftCurrent, draftScience, LlmBudget, PROMPT_VERSION, type LlmSource, type AiProvider } from "../services/llm";
+import { draftCurrent, draftScience, PROMPT_VERSION, type LlmBudget, type LlmSource, type AiProvider } from "../services/llm";
 import { createRevision } from "../content";
 import { itemPrimarySource } from "../services/itemSources";
 import { preserveCardCopy } from "../../shared/cardCopy";
@@ -17,6 +17,7 @@ import type { AiSelection } from "../../shared/channelAi";
 import type { AiExecutionPlan } from "../../shared/aiProvenance";
 import { generateFamilySourceDraft } from "../services/familySourceDraft";
 import { readingProfileForTemplateKey } from "../../shared/readingCardProfiles";
+import { createManualSourceBudget } from "../services/manualAiBudget";
 
 export async function generateDialogueDraft(db: DB, itemId: number, now = new Date(), provider?: AiProvider, templateKey?: string, options: { budget?: LlmBudget; summary?: AiSelection; copy?: AiSelection; familyPlan?: AiExecutionPlan; explicitRetry?: boolean; requestId?: string } = {}) {
   const [item] = await db.select().from(contentItems).where(eq(contentItems.id, itemId));
@@ -52,7 +53,7 @@ export async function generateDialogueDraft(db: DB, itemId: number, now = new Da
   if (item.kind === "current_dialogue" && !sources.length)
     return { ok: false as const, error: "시사 대화는 원문이 확보된 자료가 있어야 생성합니다(제목만으로 생성하지 않음)." };
 
-  const budget = options.budget ?? new LlmBudget(4); // 요약·카드 편집을 분리하고 실행 전체 예산을 공유한다.
+  const budget = options.budget ?? createManualSourceBudget({ summary: summaryAi, copy: copyAi, hasSavedCopy: !!previousRevision?.payload.cardCopy });
   const r =
     item.kind === "science_dialogue"
       ? await draftScience({ topic: item.topicKey || item.title, sources, now, budget, ...summaryAi, analyzeSource: sources.length > 0 })

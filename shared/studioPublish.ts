@@ -4,7 +4,7 @@ export type StudioPublishPreview = {
 };
 export type StudioPublishStatus = {
   channelId: number; channelName: string; expectedUsername: string | null;
-  ready: boolean; blockers: string[]; dailyLimit: number; dryRun: boolean; autoPublish: boolean;
+  ready: boolean; blockers: string[]; /** Deprecated older-server response field. */ dailyLimit?: number; dryRun: boolean; autoPublish: boolean;
   destinations: Array<{ id: number; label: string; enabled: boolean; configured: boolean }>;
   publicationDraft?: import("./publicationDraft").StudioPublicationDraft;
   deliveries: Array<{ id: number; approvalId: number; approvalStatus: string; status: string; lastError: string | null; externalUrl: string | null; scheduledAt: string;

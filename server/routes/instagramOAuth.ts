@@ -28,7 +28,7 @@ instagramOAuthRoutes.post("/studio/instagram/:cid/oauth/start", ah(async (req, r
   // For a custom channel an omitted hint allows only one fully verified account.
   // accountIdentity rejects an ambiguous Meta grant instead of picking a row.
   const username = expected ?? (body.username ? normalizeInstagramUsername(body.username) : "");
-  const pending = newInstagramOAuth({ channelId: channel.id, username, dailyLimit: channel.budget.dailyPublishLimit });
+  const pending = newInstagramOAuth({ channelId: channel.id, username });
   req.session.instagramOauth = pending;
   await new Promise<void>((resolve, reject) => req.session.save(error => error ? reject(error) : resolve()));
   res.json({ url: instagramAuthorizationUrl(pending) });
@@ -57,7 +57,7 @@ instagramOAuthRoutes.get("/studio/instagram/oauth/callback", ah(async (req, res)
     return error instanceof InstagramOAuthError ? back(error.reason, error.diagnostic) : back("exchange_failed", { stage: "token_exchange" });
   }
   try {
-    await connectInstagram(getDb(), pending.channelId, { token: credential.token, expiresAt: credential.expiresAt, username: pending.username, dailyLimit: pending.dailyLimit, authMode: "facebook" }, actorOf(req));
+    await connectInstagram(getDb(), pending.channelId, { token: credential.token, expiresAt: credential.expiresAt, username: pending.username, authMode: "facebook" }, actorOf(req));
   } catch (error) {
     const extra = error instanceof HttpError ? error.extra : undefined;
     const diagnostic = sanitizeInstagramDiagnostic(extra?.diagnostic) ?? { stage: "connection_validation" as const };
