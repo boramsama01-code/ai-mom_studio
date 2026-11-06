@@ -2,6 +2,7 @@
 // No production credentials, external requests, paid generation or SNS writes.
 import assert from "node:assert/strict";
 import { browserLayout } from "./browser-layout.mjs";
+import { writeWorkspaceReview } from "./creative-workspace-review.mjs";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -144,7 +145,8 @@ async function run(root,label,port){
    await shot(page,"after-return-"+width);
    assert(writes.every(write=>!/(publish|generate|approval|deliveries)/.test(write.p)),"visual QA must never publish or generate");
    if(width===393){
-    mode="empty";await page.reload();await page.locator(".studio-home-empty").waitFor();await shot(page,"after-empty-393");mode="error";await page.reload();await page.getByRole("alert").waitFor();await shot(page,"after-error-393");mode="normal";
+    mode="empty";await page.reload();await page.locator(".studio-home-empty").waitFor();await shot(page,"after-empty-393");mode="error";await page.reload();await page.getByRole("alert").waitFor();await shot(page,"after-error-393");
+    const recoveryBox=await page.getByRole("alert").boundingBox();assert(recoveryBox&&recoveryBox.y>=0&&recoveryBox.y+recoveryBox.height<900,"first-load recovery must be visible without scrolling");mode="normal";
    }
   }
   assert.deepEqual(errors,[],label+" browser errors");
@@ -165,9 +167,11 @@ try{
  if(process.env.CREATIVE_BASELINE_DIR)await run(process.env.CREATIVE_BASELINE_DIR,"before",4188);
  await run(process.cwd(),"after",4189);
  assert(results.every(result=>result.passed),"Every viewport must pass: "+JSON.stringify(results.filter(result=>!result.passed)));
+ if(process.env.CREATIVE_BASELINE_DIR)await writeWorkspaceReview(output);
  await writeFile(output+"/README.txt","Screens are real built React UI with synthetic API data and existing template artwork. before = verified main 42c643d; after = PR build; direction-b = same components with graphite/density alternative. External requests, generation and social publishing were blocked. No claim about production cold-start improvements is made.\n");
 }finally{
  await browsers.close();
+ try{const encoded=(await readFile(output+"/workspace-review.png")).toString("base64"),size=32768,total=Math.ceil(encoded.length/size);for(let i=0;i<total;i++)console.log("WORKSPACE_REVIEW_PNG "+i+"/"+total+" "+encoded.slice(i*size,(i+1)*size));}catch{/* A failed gate keeps its individual screenshots and diagnostics. */}
  for(const name of ["before-home-1440","after-home-1440","direction-b-graphite-1440","after-editor-1440","after-home-393","after-capture-393","after-video-393","after-assets-1440"]){
   try{const bytes=await sharp(await readFile(output+"/"+name+".png")).resize({width:name.endsWith("393")?393:1080,withoutEnlargement:true}).webp({quality:72}).toBuffer();console.log("VISUAL_REVIEW_IMAGE "+name+" "+bytes.toString("base64"));}catch{ /* Earlier layout failures can prevent a later screenshot. Artifacts retain the original failure. */ }
  }

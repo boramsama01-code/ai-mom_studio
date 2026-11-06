@@ -65,3 +65,19 @@ CI 42132576077 passed typecheck, 27 changed-contract tests, 210 files / 2,138 to
 CI now runs PostgreSQL and browser jobs independently, with an early artifact upload for creative/channel failures. Both remain required; no test or browser engine is removed. New local preview selection / Canva return, clipboard-denial and failed-import checks pass 59 UI tests. Visual polish removes redundant vertical gaps and aligns mobile save actions to the right. The next combined run must verify all pending changes before the PR leaves draft.
 
 The 6642eb0 browser diagnostics isolate the overflow to the channel control: its visible width is 155px but WebKit reports 183px of native select content. The header starts that control at x=222, yielding document width 405px. Hiding the header alone removes it; hiding main, sidebar, navigation or notifications does not. The fix contains only this native select label, applies ellipsis, retains the complete option and title, and moves the visible keyboard focus ring to its wrapper. No page-wide overflow suppression is added. The 360px capture/edit/conflict/video/save/reopen/assets scenario passed. A later viewport filled the already-saved subtitle and correctly found Save disabled; reset scenario fixtures and unique subtitle values fix this test error. Viewport checks now collect all screenshots and then fail the aggregate if any scenario failed.
+
+## Visual review of b16c76c
+
+All five creative viewports (360/393/430/768/1440px) and both channel viewports (393/1280px) passed. The entire browser job, including the existing mobile, content, news and automatic workflows, passed CI 42136876590. Its PostgreSQL/typecheck/build job also passed. These are actual built screens and real PostgreSQL tests; browser APIs are synthetic, with external generation and posting blocked.
+
+Direction A is selected: warm neutral desk, 26px title, 24px gallery gaps, original-ratio imagery and light navigation. B was rendered on the same content with graphite navigation, cooler surfaces, 22px titles, 12px gaps and shorter previews. A gives Korean writing and colourful artwork more room. B remains a comparison artifact, not a new theme setting.
+
+Human inspection found Retry below the mobile fold on an initial read failure. Final polish places the error and Retry where the overview was, and reserves the first-content illustration for a genuine empty result. A browser assertion requires recovery to be visible without scrolling. Manual-mode copy now describes direct writing/import as a normal route rather than only an API-error fallback.
+
+Offline browser script transfer was 363,868 bytes before and 372,163 after (+8,295), so no overall initial-download speed improvement is claimed. The previously measured local entry gzip changed from 96.78kB to 94.08kB; added workspace CSS also costs bytes. These are not Render cold-start measurements. The 6642eb0 Node22 renderer QA completed seven offline requests with peak RSS 496.83MiB, close to the free plan limit; existing shared heavy-work admission control remains in place.
+
+## Execution interruption and durable evidence
+
+The local exec-server transport disconnected again during final review and failed to recover after 45 seconds. This is a verified execution-environment interruption; it does not establish the cause of a ChatGPT conversation error. GitHub operations and CI remained available. Final UI patches were reconstructed from the exact b16c76c file contents, applied with unique-context guards and committed through GitHub. No production rows or credentials were changed.
+
+Before/after screens and both directions are now assembled into workspace-review.png directly in CI, using existing Sharp and repository fonts. The source, screenshots, JSON results, diagnostics and review PNG remain reproducible without an interactive execution session. The final polish still requires its own complete CI outcome before this PR leaves draft.
