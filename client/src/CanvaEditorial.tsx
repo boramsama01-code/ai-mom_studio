@@ -1,4 +1,6 @@
 import { ExternalDesignLink } from "./ExternalDesignLink";
+import { CanvaManualImport } from "./CanvaManualImport";
+import { canvaManualSnapshotSchema } from '@shared/canvaManualImport';
 import { useEffect,useRef,useState } from 'react';
 import { useMutation,useQuery,useQueryClient } from '@tanstack/react-query';
 import { api,ApiError } from './api';
@@ -50,6 +52,7 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   const variant=canvaVariant(copy),available=masters.data?.items.filter(m=>m.status==='ready'&&!m.templateVersion.startsWith('canva-folder:')&&(readingProfile?m.templateVersion===readingProfile.templateVersion&&readingMasterSourceApproved(readingProfile,m.sourceId):!readingProfileForTemplateVersion(m.templateVersion)&&m.conceptMode===variant.conceptMode&&m.hasExternalActivity===variant.hasExternalActivity))??[];
   const [choice,setChoice]=useState<number|null>(null),selected=available.find(m=>m.id===choice)??available[0];
   const [focusedJobId,setFocusedJobId]=useState<number|null>(null);
+  const [manualBlocking,setManualBlocking]=useState(false);
   const pending=jobs.data?.items.find(j=>['queued','running'].includes(j.status)),unresolved=jobs.data?.items.find(j=>j.status==='result_unknown');
   const focused=jobs.data?.items.find(j=>j.id===focusedJobId),currentOutput=jobs.data?.items.find(j=>j.status==='ready'&&j.outputRevisionId===revisionId);
   const current=focused&&!(focused.status==='ready'&&focused.outputRevisionId!==revisionId&&currentOutput)?focused:pending??jobs.data?.items.find(j=>j.status==='needs_review'&&j.sourceVersion===version&&j.sourceRevisionId===revisionId)??currentOutput??jobs.data?.items[0];
@@ -93,7 +96,8 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   },onSuccess:()=>{void qc.invalidateQueries({queryKey:key});void qc.invalidateQueries({queryKey:['ch',channelId,'item',itemId]});},onError:()=>{void qc.invalidateQueries({queryKey:key});}});
   const pages=Array.isArray(current?.result?.pages)?current!.result!.pages as Array<{id:number;title:string;sha256:string}>:[];
   const originals=Array.isArray(current?.result?.originals)?current!.result!.originals as Array<{id:number;page:number}>:[];
-  const drawing=pending||start.isPending||action.isPending;
+  const automaticDrawing=pending||start.isPending||action.isPending;
+  const drawing=automaticDrawing||manualBlocking;
   const nativeReady=library.isSuccess&&library.data.enabled&&library.data.connected&&library.data.autofill&&library.data.syncStatus!=='needs_reconnect'&&selectedLibrary?.status==='ready'&&selectedLibrary.canCreate&&selectedLibrary.previewStatus==='ready'&&selectedLibrary.updatedAt!==null;
   const canStart=!disabled&&!drawing&&!unsupportedOutro&&jobs.isSuccess&&!lostRequest&&!unresolved&&(libraryDesignId?nativeReady:connection.isSuccess&&masters.isSuccess&&connection.data?.autofill&&!!selected);
   const preferLocal=!!onLocalRender&&!libraryDesignId&&(!!unsupportedOutro||!!readingProfile?.sourceStyleId&&!available.length);
@@ -101,8 +105,11 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   const useRegistered=()=>{setLibraryDesignId(null);keepLibraryChoice(libraryChoiceKey,null);};
   const reviewMatchesCurrent=current?.sourceVersion===version&&current?.sourceRevisionId===revisionId;
   const canReexport=current?.status==='failed'&&!!current.exportJobId&&(current.errorCode==='export_expired'||current.errorCode==='job_failed'&&current.phase==='export_polling');
+  const manualRecommended=connection.data?.connected===true&&!connection.data.autofill;
+  const manualOutput=canvaManualSnapshotSchema.safeParse(current?.result?.manualImport).success;
+  const originalDesignIds=[...(masters.data?.items.map(master=>master.sourceId)??[]),...(library.data?.items.map(item=>item.designId)??[])];
   return <section className="canva-editorial stack" aria-label={preferLocal?'스튜디오 8장 디자인':'Canva 8장 디자인'}>
-    <div className="row between"><div><h3>8장 디자인 완성</h3><p className="small muted">{libraryDesignId?'Canva의 배치·이미지와 기본 사진 출처를 유지하고 저장된 원고를 채웁니다.':preferLocal?'저장한 문구와 사진으로 선택한 스타일의 8장을 만듭니다.':'저장한 문구와 페이지 이미지를 Canva 템플릿에 넣습니다.'}</p></div><span className="pill">자동 · {preferLocal?'스튜디오':'Canva'}</span></div>
+    <div className="row between"><div><h3>8장 디자인 완성</h3><p className="small muted">{manualRecommended?'Canva에서 이 콘텐츠용 사본을 직접 편집한 뒤 8장을 가져와 대조할 수 있습니다.':libraryDesignId?'Canva의 배치·이미지와 기본 사진 출처를 유지하고 저장된 원고를 채웁니다.':preferLocal?'저장한 문구와 사진으로 선택한 스타일의 8장을 만듭니다.':'저장한 문구와 페이지 이미지를 Canva 템플릿에 넣습니다.'}</p></div><span className="pill">{manualRecommended?'직접 편집 · Canva':`자동 · ${preferLocal?'스튜디오':'Canva'}`}</span></div>
     <details className="canva-library-entry" open={libraryOpen} onToggle={event=>{if(event.target===event.currentTarget)setLibraryOpen(event.currentTarget.open);}}>
       <summary>Canva 폴더 템플릿{library.data?.items.length?` · ${library.data.items.filter(item=>item.status!=='missing').length}종`:''}{selectedLibrary?` · ${selectedLibrary.title} 선택됨`:''}</summary>
       <CanvaLibraryPanel query={library} selectedDesignId={libraryDesignId} disabled={disabled||!!drawing||!!lostRequest||!!unresolved} onSelect={selectLibrary}/>
@@ -113,6 +120,7 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
     {!libraryDesignId&&!connection.isLoading&&!connection.error&&!connection.data?.connected&&<p className={preferLocal?'small muted':'notice warn'}>{preferLocal?'Canva 출력도 사용하려면 계정을 연결해 주세요.':'Canva 계정을 먼저 연결해 주세요.'} <GuardedLink href="/connections?service=canva">Canva 연결 설정</GuardedLink></p>}
     {!libraryDesignId&&connection.data?.connected&&!connection.data.autofill&&<div className="notice warn stack" data-testid="canva-capability-status" role="status"><strong>{connection.data.capabilityStatus==='unknown'?'자동 채우기 권한을 아직 확인하지 못했습니다':'연결한 계정에서 자동 채우기를 사용할 수 없습니다'}</strong><p>{connection.data.message??'연결한 계정·팀의 기능 이용 권한을 확인해 주세요.'}</p><div className="row wrap"><button className="btn sm" disabled={connection.isFetching} onClick={()=>connection.refetch()}>{connection.isFetching?'확인 중…':'권한 다시 확인'}</button>{['missing_scope','auth_required'].includes(connection.data.reason??'')&&<GuardedLink href="/connections?service=canva">Canva 다시 연결</GuardedLink>}</div></div>}
     {!libraryDesignId&&connection.error&&<ErrorBox error={connection.error} retry={()=>connection.refetch()}/>}
+    <CanvaManualImport channelId={channelId} itemId={itemId} version={version} revisionId={revisionId} disabled={disabled} busy={!!automaticDrawing||!!lostRequest||!!unresolved} connected={connection.data?.connected===true} recommended={manualRecommended} jobs={jobs.data?.items??[]} originalDesignIds={originalDesignIds} onBlockingChange={setManualBlocking} onJob={job=>{setFocusedJobId(job.id);qc.setQueryData<{items:CanvaJobDto[]}>(key,old=>({items:[job,...(old?.items??[]).filter(item=>item.id!==job.id)]}));void qc.invalidateQueries({queryKey:key});}}/>
     {!libraryDesignId&&<label className="field">템플릿 선택<select aria-label="Canva 템플릿 선택" value={selected?.id??''} disabled={!!drawing||!available.length} onChange={e=>setChoice(Number(e.target.value))}>
       {!available.length&&<option value="">이 원고 구조에 맞는 템플릿 등록 필요</option>}
       {available.map(m=><option value={m.id} key={m.id}>{readingProfile?`${readingProfile.label} · 모든 개념·활동 구조`:`${m.conceptMode==='value_definition'?'가치 정의':'과학 설명'} · ${m.hasExternalActivity?'추가 자료 포함':'집 활동'}`} · {m.templateVersion}</option>)}
@@ -135,6 +143,7 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
     {unresolved&&<CanvaRecovery key={`${channelId}:${itemId}:${unresolved.id}`} channelId={channelId} itemId={itemId} version={version} job={unresolved} disabled={disabled} connected={!!connection.data?.connected} busy={!!drawing} onRecovered={job=>{setFocusedJobId(job.id);qc.setQueryData<{items:CanvaJobDto[]}>(key,old=>({items:[job,...(old?.items??[]).filter(value=>value.id!==job.id)]}));void qc.invalidateQueries({queryKey:key});}}/>}
     {start.error&&<ErrorBox error={start.error}/>}{action.error&&<ErrorBox error={action.error}/>}{jobs.error&&<ErrorBox error={jobs.error} retry={()=>jobs.refetch()}/>}
     {pages.length===8&&<details className="content-options" open={current?.status==='needs_review'}><summary>실제 Canva 출력 8장 {current?.outputRevisionId===revisionId?'· 현재 저장본':'· 결과 보관본'}</summary><div className="stack">
+      {manualOutput&&<p className="notice">직접 편집한 Canva 사본에서 가져온 8장입니다. 자동 채우기나 문구 동기화 결과가 아니므로 현재 저장본과 모든 문구를 대조해 주세요.</p>}
       {current?.result?.reconciled===true&&<p className="notice warn">결과 미확정 작업에 기존 디자인을 연결해 가져온 8장입니다. 제목·템플릿 필드가 같아도 원고 일치를 자동으로 보장하지 않으므로 현재 저장본과 모든 문구를 대조해 주세요.</p>}
       {current?.result?.reuseReason==='caption_only'&&<p className="notice">카드 내용은 같고 캡션만 바뀌어, 기존 8장 이미지와 원본 PNG를 그대로 재사용했습니다. Canva에 다시 생성·내보내기를 요청하지 않았습니다.</p>}
       <div className="canva-export-grid">{pages.map((page,i)=><figure key={`${page.id}:${imageAttempt}`}><a href={`/api/channels/${channelId}/media/${page.id}`} target="_blank" rel="noopener noreferrer"><img src={`/api/channels/${channelId}/media/${page.id}${imageAttempt?`?previewRetry=${imageAttempt}`:''}`} alt={`${i+1}장 ${page.title}`} onLoad={()=>{setLoaded(old=>old.includes(page.id)?old:[...old,page.id]);setFailedImages(old=>old.filter(id=>id!==page.id));}} onError={()=>{setLoaded(old=>old.filter(id=>id!==page.id));setConfirmed(false);setFailedImages(old=>old.includes(page.id)?old:[...old,page.id]);}}/></a><figcaption>{i+1} / 8{originals[i]&&<> · <a href={`/api/channels/${channelId}/media/${originals[i].id}?download=1`}>원본 PNG</a></>}</figcaption></figure>)}</div>

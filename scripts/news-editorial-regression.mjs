@@ -46,7 +46,7 @@ const pasteImage = await sharp({ create: { width: 360, height: 450, channels: 3,
 function fixture() {
   const evidenceBundle = familyEvidenceFixture(9828, 3), evidence = familyEvidenceView(evidenceBundle);
   const state = { saved: { version: 3, revisionId: 30, hasSavedCopy: true, recommendedStoryFormat: "discussion8", ai: roles, copy: legacyCopy() }, writes: [], aiAttempts: 0, familyAttempts: 0, cards: [], nextAssetId: 800, nextBackgroundId: 9000, canvaLibrary: canvaLibraryStateFixture(), canvaJobs: [] };
-  const backgrounds = Object.assign(new Map(), { credits: new Map() }), assets = new Map();
+  const backgrounds = Object.assign(new Map(), { credits: new Map() }), assets = new Map(), manualImages = [];
   const makeAsset = () => {
     const id = state.nextAssetId; state.nextAssetId += 10;
     const copy = clone(state.saved.copy);
@@ -84,6 +84,21 @@ function fixture() {
     else if (pathname === "/api/canva/template-library/sync" && method === "POST") { assert.deepEqual(body, {}); data = clone(state.canvaLibrary); }
     else if (/^\/api\/canva\/template-library\/designs\/[^/]+\/preview$/.test(pathname)) return route.fulfill({ contentType: "image/png", body: uploadImage });
     else if (pathname === "/api/channels/3/canva/masters") data = { items: [] };
+    else if (pathname === `${itemPath}/canva/manual-imports` && method === "POST") {
+      assert.deepEqual(Object.keys(body).sort(), ["confirmed", "designId", "requestId", "version"]);
+      assert.equal(body.designId, "Dmanual_browser_copy"); assert.equal(body.version, state.saved.version); assert.equal(body.confirmed, true); assert.match(body.requestId, /^[0-9a-f-]{36}$/i);
+      // Production serves already completed export assets. Prepare the fixture
+      // serially rather than starting eight raster jobs from image GETs.
+      for (let index = 0; index < 8; index++) manualImages[index] = await cardImage(state.saved.copy, index, backgrounds, state.saved.pageDesigns);
+      data = { id: 902, requestId: body.requestId, purpose: "import", status: "queued", phase: "export_prepare", sourceRevisionId: state.saved.revisionId, sourceVersion: body.version, designId: body.designId, editUrl: `https://www.canva.com/design/${body.designId}/edit`, exportJobId: null, outputAssetId: null, outputRevisionId: null, errorCode: null, errorMessage: null, createdAt: stamp, result: { manualImport: { version: 1, kind: "manual_copy", designId: body.designId, principal: "fixture-user:fixture-team", designUpdatedAt: 1793836800, pagesHash: "a".repeat(64), capturedAt: stamp } } };
+      state.canvaJobs = [data];
+    }
+    else if (pathname === `${itemPath}/canva/jobs/902/accept` && method === "POST") {
+      const job = state.canvaJobs.find(job => job.id === 902); assert(job); assert.equal(job.status, "needs_review"); assert.equal(job.sourceRevisionId, state.saved.revisionId);
+      assert.deepEqual(body, { version: state.saved.version, textConfirmedUnchanged: true });
+      state.saved = { ...state.saved, version: state.saved.version + 1, revisionId: state.saved.revisionId + 1 };
+      state.canvaJobs = [{ ...job, status: "ready", outputRevisionId: state.saved.revisionId }]; data = { ok: true };
+    }
     else if (pathname === `${itemPath}/canva/jobs`) {
       if (method === "POST") {
         assert.equal(body.libraryDesignId, "Dlibrary_template_1"); assert.equal(body.expectedLibraryUpdatedAt, 1793836800); assert.equal(body.masterId, undefined); assert.equal(body.version, state.saved.version);
@@ -144,6 +159,8 @@ function fixture() {
       const assetId = Number(pathname.split("/").at(-2)), asset = state.cards.find(entry => entry.id === assetId); assert(asset);
       data = { version: 1, values: asset.carousel.pages.map(page => page.altText) };
     } else if (/^\/api\/channels\/3\/media\/\d+$/.test(pathname) && method === "GET") {
+      const manualPage = Number(pathname.split("/").at(-1)) - 9900;
+      if (manualPage >= 0 && manualPage < 8) { assert(manualImages[manualPage]); return route.fulfill({ contentType: "image/jpeg", body: manualImages[manualPage] }); }
       const asset = assets.get(Number(pathname.split("/").at(-1))); assert(asset);
       return route.fulfill({ contentType: "image/jpeg", body: await cardImage(asset.copy, asset.index, backgrounds, asset.pageDesigns) });
     } else return false;
@@ -183,6 +200,55 @@ async function pasteBackground(page) {
     const data = new DataTransfer(); data.items.add(new File([bytes], 'pasted-fixture.png', { type: 'image/png' }));
     node.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
   }, pasteImage.toString('base64'));
+}
+
+async function activateConfirmation(page, label, width) {
+  await label.scrollIntoViewIfNeeded();
+  const geometry = await label.evaluate(node => {
+    const r = node.getBoundingClientRect(), checkbox = node.querySelector('input').getBoundingClientRect();
+    const point = { x: r.right - 6, y: r.y + Math.min(r.height / 2, 24) }, hit = document.elementFromPoint(point.x, point.y);
+    return { width: r.width, height: r.height, point, reachable: !!hit && node.contains(hit), outsideCheckbox: point.x > checkbox.right };
+  });
+  if (width <= 900) assert(geometry.width >= 48 && geometry.height >= 48, 'Canva confirmation must have a 48px touch label');
+  assert(geometry.reachable && geometry.outsideCheckbox, 'Canva label padding must activate its native checkbox');
+  if (width < 768) await page.touchscreen.tap(geometry.point.x, geometry.point.y); else await page.mouse.click(geometry.point.x, geometry.point.y);
+  assert.equal(await label.locator('input').isChecked(), true);
+}
+
+async function manualCanvaImport(page, state, width) {
+  // A fresh document observes the independently advertised no-Autofill account.
+  // All job and image responses remain synthetic; this tests the built UI only.
+  state.canvaJobs = []; state.canvaLibrary.autofill = false;
+  await previewReady(page); await page.waitForLoadState('networkidle'); await page.reload(); await previewReady(page);
+  const editorial = page.locator('.canva-editorial'), manual = editorial.getByRole('form', { name: 'Canva 사본 8장 가져오기' }); await manual.waitFor();
+  assert.equal(await editorial.getByRole('button', { name: 'Canva 8장 만들기', exact: true }).isDisabled(), true);
+  const before = clone(state.saved), writesBefore = state.writes.length;
+  const input = manual.getByRole('textbox', { name: '가져올 Canva 사본 링크 또는 ID' }), submit = manual.getByRole('button', { name: '이 사본의 8장 가져오기', exact: true });
+  await input.fill('https://www.canva.com.attacker.example/design/Dmanual_browser_copy/edit'); assert.equal(await submit.isDisabled(), true);
+  await input.fill('https://www.canva.com/design/Dmanual_browser_copy/edit?utm_content=private-share-query');
+  const confirmations = manual.locator('label.canva-manual-confirm'); await activateConfirmation(page, confirmations.nth(0), width);
+  assert.equal(await submit.isDisabled(), true); await activateConfirmation(page, confirmations.nth(1), width);
+  await submit.scrollIntoViewIfNeeded(); if (width <= 900) assert((await submit.boundingBox()).height >= 48, 'manual import button must be 48px high');
+  await submit.click(); await editorial.getByText('완성된 디자인 확인 중', { exact: true }).waitFor();
+  assert.equal(state.writes.filter(write => write.path === `${itemPath}/canva/manual-imports`).length, 1);
+  assert.deepEqual(state.saved, before, 'import enqueue cannot change the manuscript or version');
+  const queued = state.canvaJobs[0];
+  state.canvaJobs = [{ ...queued, status: 'needs_review', phase: 'complete', exportJobId: 'fixture-manual-export', outputAssetId: 9900, outputRevisionId: before.revisionId,
+    result: { ...queued.result, pages: Array.from({ length: 8 }, (_, index) => ({ id: 9900 + index, sha256: 'b'.repeat(64), title: `직접 편집한 사본 ${index + 1}` })), originals: Array.from({ length: 8 }, (_, index) => ({ id: 10000 + index, sha256: 'c'.repeat(64), page: index + 1 })) } }];
+  await editorial.getByText('직접 편집한 Canva 사본에서 가져온 8장입니다.', { exact: false }).waitFor();
+  const images = editorial.locator('.canva-export-grid img'); assert.equal(await images.count(), 8);
+  await images.evaluateAll(nodes => Promise.all(nodes.map(node => node.decode())));
+  for (const dimensions of await images.evaluateAll(nodes => nodes.map(node => [node.naturalWidth, node.naturalHeight]))) assert.deepEqual(dimensions, [1080, 1350]);
+  const accept = editorial.getByRole('button', { name: '확인한 8장을 새 버전으로 저장', exact: true }); assert.equal(await accept.isDisabled(), true);
+  const review = editorial.locator('label.check').filter({ hasText: '8장의 모든 문구가 현재 스튜디오 원고와 같은지 확인했습니다.' });
+  await activateConfirmation(page, review, width); await accept.scrollIntoViewIfNeeded();
+  await layoutFits(page, `manual Canva import ${width}`);
+  await manual.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${outputDir}/canva-manual-form-${width}.png` });
+  await review.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${outputDir}/canva-manual-review-${width}.png` });
+  await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === `${itemPath}/canva/jobs/902/accept` && response.ok()), accept.click()]);
+  assert.equal(state.saved.version, before.version + 1); assert.equal(state.saved.revisionId, before.revisionId + 1); assert.deepEqual(state.saved.copy, before.copy);
+  assert.deepEqual(state.writes.slice(writesBefore).filter(write => !write.path.endsWith('/preview')).map(write => write.path), [`${itemPath}/canva/manual-imports`, `${itemPath}/canva/jobs/902/accept`], 'manual UI must enqueue and explicitly accept only, without creating, editing or uploading a Canva design');
+  await previewReady(page);
 }
 
 let browser, engine = "WebKit";
@@ -451,8 +517,14 @@ try {
       await nativeCreate.click(); await canvaEditorial.getByText('템플릿 확인 중', { exact: true }).waitFor();
       assert.equal(state.writes.filter(write => write.path === `${itemPath}/canva/jobs`).length, 1);
       assert.deepEqual(state.saved.copy, savedBeforeCanva, 'native selection and creation must preserve the authoring layout and copy');
+      stage = 'manual-canva-import'; await manualCanvaImport(page, state, width);
       assert.deepEqual(errors, []); assert.deepEqual(external, []);
+      // Record manual completion separately from the earlier native create.
+      const manualImports = state.writes.filter(write => write.path === `${itemPath}/canva/manual-imports`).length;
+      assert.equal(manualImports, 1);
       results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', '14 style identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists', 'Canva folder sync preserves the mounted editor', 'Canva folder inner-page preview and reachable native creation preserve saved copy'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, mockNativeCreates: state.canvaJobs.length, requestFailures, actualPaidCalls: 0, publicationRequests: 0 });
+      Object.assign(results.at(-1), { manualImports, manualImportReview: true, manualConfirmationPaddingHitTests: true });
+      results.at(-1).checks.push('No-Autofill manual copy safe-ID import, eight real rendered assets, 48px confirmation padding and explicit new-version acceptance');
       await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2)); console.log(`News editorial regression passed at ${width}px (${engine}).`);
     } catch (error) {
       results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, requestFailures }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));

@@ -169,6 +169,13 @@
       "when": 1794009600000,
       "tag": "0023_creative_workspace",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794009600001,
+      "tag": "0024_canva_manual_import",
+      "breakpoints": true
     }
   ]
 }

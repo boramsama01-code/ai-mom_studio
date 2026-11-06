@@ -10,6 +10,7 @@ import { audit } from "../audit";
 import { HttpError } from "../routes/util";
 import { canvaInputHash } from "./canvaEditorialAssets";
 import * as rest from "./canvaRest";
+import { assertManualCanvaCopy, canvaManualPagesHash, manualCanvaBinding } from './canvaManualImport';
 
 type Job = typeof canvaRenderJobs.$inferSelect;
 type Request = CanvaReconcileRequest & { channelId: number; itemId: number; jobId: number; actor: string };
@@ -50,7 +51,7 @@ export async function reconcileCanvaJob(db: DB, request: Request): Promise<Job> 
   if (design.pageCount !== 8 || !pages.validEightPageMaster) throw new HttpError(422, "연결할 디자인은 정확히 1080×1350 크기의 8장이어야 합니다.", { code: "page_mismatch" });
   if (design.updatedAt === null) throw new HttpError(422, "디자인의 수정 버전을 확인할 수 없어 연결하지 않았습니다.", { code: "design_version_unavailable" });
   let dataset: Awaited<ReturnType<typeof rest.getCanvaDataset>> | null = null;
-  try { dataset = await rest.getCanvaDataset(db, { type: "design", id: request.designId }); }
+  try { if(!manualCanvaBinding(before))dataset = await rest.getCanvaDataset(db, { type: "design", id: request.designId }); }
   catch (error) { if (!(error instanceof rest.CanvaRestError)) throw error; /* An edited copy need not retain master dataset access. */ }
 
   return db.transaction(async tx => {
@@ -67,16 +68,18 @@ export async function reconcileCanvaJob(db: DB, request: Request): Promise<Job> 
     if (registeredMaster) throw new HttpError(422, "공용 마스터 자체는 연결할 수 없습니다. 이 콘텐츠용 복사본을 Canva에서 만든 뒤 연결해 주세요.", { code: "master_is_not_output" });
     // Different item locks must not allow two contents to claim the same orphan.
     await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`canva-reconcile-design:${request.designId}`}, 0))`);
+    const manualImport=manualCanvaBinding(job);
+    if(manualImport)await assertManualCanvaCopy(tx as DB,request.designId,item.id);
     const [otherContent] = await tx.select({ id: canvaRenderJobs.id }).from(canvaRenderJobs).where(and(eq(canvaRenderJobs.designId, request.designId), ne(canvaRenderJobs.contentItemId, item.id))).limit(1);
     if (otherContent) throw new HttpError(409, "다른 콘텐츠에 연결된 Canva 디자인입니다. 이 콘텐츠용 복사본을 만들어 연결해 주세요.", { code: "design_already_linked" });
     const [revision] = await tx.select().from(contentRevisions).where(and(eq(contentRevisions.id, item.currentRevisionId), eq(contentRevisions.contentItemId, item.id)));
     if (!revision) throw new HttpError(409, "현재 원고 저장본을 찾을 수 없습니다.");
     const copy = familyCardCopySchema.safeParse(revision.payload.cardCopy), pageDesigns = pageDesignsSchema.safeParse(revision.payload.pageDesigns), evidence = evidenceBindingSchema.safeParse(revision.payload.evidenceBinding);
     if (!copy.success || !pageDesigns.success || !evidence.success) throw new HttpError(422, "현재 8장 원고와 근거·이미지 설정을 먼저 저장해 주세요.");
-    const source = job.input as CanvaProfileSnapshot & { datasetHash: string; artworkCredits?: Record<string, string>;folderTemplate?:CanvaFolderSnapshot };
+    const source = job.input as CanvaProfileSnapshot & { datasetHash: string|null; artworkCredits?: Record<string, string>;folderTemplate?:CanvaFolderSnapshot };
     if(source.folderTemplate&&!canvaFolderSnapshotSchema.safeParse(source.folderTemplate).success)throw new HttpError(409,'Canva 폴더 원본의 저장된 버전 기록을 확인할 수 없습니다.');
     const input = { payload: revision.payload, title: item.title, copy: copy.data, pageDesigns: pageDesigns.data, evidenceSetId: evidence.data.evidenceSetId,
-      ...storedCanvaProfileSnapshot(source), datasetHash: source.datasetHash, ...(source.artworkCredits ? { artworkCredits: source.artworkCredits } : {}),...(source.folderTemplate?{folderTemplate:source.folderTemplate}:{}) };
+      ...storedCanvaProfileSnapshot(source), datasetHash: source.datasetHash, ...(source.artworkCredits ? { artworkCredits: source.artworkCredits } : {}),...(source.folderTemplate?{folderTemplate:source.folderTemplate}:{}),...(manualImport?{manualImport:{...manualImport,designUpdatedAt:design.updatedAt!,pagesHash:canvaManualPagesHash(pages),capturedAt:new Date().toISOString()}}:{}) };
     // Reconciliation only exports a user-confirmed existing design. An older
     // profile becoming unavailable must not launch Autofill or block recovery.
     let matchesProfile = true, profile: ReturnType<typeof resolveCanvaProfile>;

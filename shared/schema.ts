@@ -623,7 +623,7 @@ export const canvaRenderJobs = pgTable("canva_render_jobs", {
   contentItemId: integer("content_item_id").notNull().references(() => contentItems.id),
   sourceRevisionId: integer("source_revision_id").notNull().references(() => contentRevisions.id),
   sourceVersion: integer("source_version").notNull(),
-  masterId: integer("master_id").notNull().references(() => canvaMasters.id),
+  masterId: integer("master_id").references(() => canvaMasters.id),
   requestId: text("request_id").notNull(),
   requestHash: text("request_hash").notNull(),
   purpose: text("purpose").notNull().default("create"),
