@@ -92,3 +92,8 @@ Visual capture now awaits only visible images with a five-second bound before sc
 ## Image readiness gate correction
 
 The merged main revision passed typecheck, all 210 files / 2,147 tests, build and the seven-request Node22 renderer check (peak RSS 486.43MiB). In CI 42140553290 all older browser workflows passed; the new creative gate failed at the final home return in 430/768/1440px with WebKit `EncodingError: Aborted by source change`. No API error or production write occurred. The helper had retained decode promises for image nodes being replaced during navigation. It now samples the currently connected, visible DOM each animation frame, requires complete images with positive natural width and two stable frames, and still fails after eight seconds for a missing/broken image. Failure screenshots bypass this readiness gate so diagnostics survive the original error. This is a correction to the capture harness; it does not alter app rendering or brand artwork. Verify the asset logo visually in the next run before marking the PR ready.
+
+
+## Explicit cross-device handoff gate
+
+The viewport suite deliberately resets its fixture for fair visual comparison. A separate handoff scenario now keeps one shared synthetic server while using independent mobile (393px) and PC (1440px) browser contexts with separate storage: capture on mobile, save the first manuscript, open that exact ID on PC, append and save, reload PC and mobile, and assert the server version and single-card count. This tests the actual client handoff path; PostgreSQL durability remains covered by the separate real-database tests. It must pass before delivery and must not be reported as live-device or production-account verification.

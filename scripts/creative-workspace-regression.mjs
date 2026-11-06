@@ -97,6 +97,53 @@ async function shot(page,label){
  });
  await page.screenshot({path:output+"/"+label+".png"});
 }
+async function verifyDeviceHandoff(origin){
+ // Separate browser contexts have independent local/session storage. Only the
+ // synthetic server map is shared; PostgreSQL persistence is tested separately.
+ mode="normal";cards.clear();initial.forEach(value=>cards.set(value.id,clone(value)));
+ const errors=[],writes=[],contexts=[];
+ try{
+  for(const width of [393,1440]){
+   const context=await browsers.newContext({viewport:{width,height:1000},locale:"ko-KR",timezoneId:"Asia/Seoul",isMobile:width<768,hasTouch:width<768,reducedMotion:"reduce",serviceWorkers:"block"});
+   contexts.push(context);await context.route("**/*",route=>intercept(route,origin,errors,writes));
+  }
+  const mobile=await contexts[0].newPage(),pc=await contexts[1].newPage();
+  for(const page of [mobile,pc])page.on("pageerror",error=>errors.push(error.message));
+  await mobile.goto(origin+"/");await mobile.getByRole("button",{name:"링크 저장",exact:true}).click();
+  await mobile.getByLabel("저장할 채널",{exact:true}).selectOption("2");
+  await mobile.getByLabel("원문 URL",{exact:true}).fill("https://example.org/mobile-to-pc");
+  await mobile.getByLabel(/내가 알아볼 제목/).fill("모바일에서 모아 PC로 이어 쓰는 자료");
+  await mobile.getByRole("button",{name:"자료 저장",exact:true}).click();
+  await mobile.getByRole("link",{name:"이 콘텐츠 열기"}).click();
+  await mobile.getByLabel("전체 원고",{exact:true}).fill("모바일에서 저장한 첫 원고");
+  await mobile.locator(".studio-detail > .page-head").getByRole("button",{name:"저장",exact:true}).click();
+  await mobile.getByText("서버 저장 완료",{exact:true}).waitFor();
+  const contentId=Number(new URL(mobile.url()).pathname.split("/").at(-1));
+  assert.equal(contentId,31);assert.equal(cards.size,initial.length+1);
+  await shot(mobile,"handoff-mobile-saved-393");
+  await pc.goto(origin+"/studio/"+contentId);
+  const pcManuscript=pc.getByLabel("전체 원고",{exact:true});
+  await pcManuscript.waitFor();
+  assert.equal(await pcManuscript.inputValue(),"모바일에서 저장한 첫 원고","PC reads the same server content without mobile storage");
+  await pcManuscript.fill("모바일에서 저장한 첫 원고\nPC에서 이어 쓴 두 번째 문장");
+  await pc.locator(".studio-detail > .page-head").getByRole("button",{name:"저장",exact:true}).click();
+  await pc.getByText("서버 저장 완료",{exact:true}).waitFor();
+  await pc.reload();await pcManuscript.waitFor();
+  assert.equal(await pcManuscript.inputValue(),cards.get(contentId).script);
+  await shot(pc,"handoff-pc-saved-1440");
+  await mobile.reload();await mobile.getByLabel("전체 원고",{exact:true}).waitFor();
+  assert.equal(await mobile.getByLabel("전체 원고",{exact:true}).inputValue(),"모바일에서 저장한 첫 원고\nPC에서 이어 쓴 두 번째 문장","mobile sees PC's saved version on reconnect");
+  assert.equal(cards.size,initial.length+1,"handoff must not create another draft");
+  assert.deepEqual(errors,[]);
+  assert(writes.every(write=>!/(publish|generate|approval|deliveries)/.test(write.p)));
+  results.push({label:"device-handoff",mobileWidth:393,pcWidth:1440,contentId,version:cards.get(contentId).version,passed:true,syntheticApi:true});
+  await writeFile(output+"/results.json",JSON.stringify(results,null,2));
+  console.log("Mobile capture -> independent PC edit -> mobile reconnect: same content "+contentId+" passed");
+ }catch(error){
+  for(let i=0;i<contexts.length;i++)for(const page of contexts[i].pages())await page.screenshot({path:output+"/handoff-failure-"+i+".png"}).catch(()=>{});
+  console.log("HANDOFF_FAILURE "+JSON.stringify({errors,writes:writes.map(write=>write.p),message:String(error)}));throw error;
+ }finally{await Promise.all(contexts.map(context=>context.close()));}
+}
 async function run(root,label,port){
  const server=await preview({configFile:path.resolve(root,"vite.config.ts"),root:path.resolve(root,"client"),build:{outDir:path.resolve(root,"dist/public")},preview:{host:"127.0.0.1",port,strictPort:true}});
  const origin="http://127.0.0.1:"+port;
@@ -180,6 +227,7 @@ async function run(root,label,port){
    await writeFile(output+"/results.json",JSON.stringify(results,null,2));
   }finally{await context.close();}
  }
+ if(label==="after")await verifyDeviceHandoff(origin);
  }finally{await new Promise(resolve=>server.httpServer.close(resolve));}
 }
 try{
