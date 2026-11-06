@@ -232,6 +232,43 @@ describe("통합 제작 보드", () => {
     expect(detail.body.card.stage).toBe("review");
     expect(detail.body.revisions[0].provider).toBe("openai");
   });
+  it("provider의 실제 모델·요청·사용량을 job과 같은 revision에 원자적으로 연결한다", async () => {
+    const { agent, headers, card } = await setup(), requestId = crypto.randomUUID();
+    const execution = { provider: "openai", requestedModel: "gpt-6.1-sol", actualModel: "gpt-6.1-sol-2026-11-01", requestId: "resp-safe-qa", usageStatus: "known", inputTokens: 120, outputTokens: 45, status: "completed" };
+    const promptTrace = { toolName: "save_studio_draft", inputSha256: "a".repeat(64) };
+    mockText.mockResolvedValue({ ...generated(), model: execution.actualModel, provenance: execution, promptTrace });
+    await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send({ version: 1, kind: "text", provider: "openai", instruction: "직접 쓴 원고 유지", requestId });
+    const job = await claimJob(getDb(), "provenance-known", ["studio_generate"]);
+    expect(await processStudioJob(getDb(), job!, "provenance-known")).toBe(true);
+    const [saved] = await getDb().select().from(jobs).where(eq(jobs.id, job!.id));
+    const detail = (await agent.get(`/api/studio/cards/${card.id}`)).body;
+    expect(saved.result).toMatchObject({ provenance: execution, promptTrace, binding: { jobId: job!.id, operatorRequestId: requestId, cardId: card.id, sourceVersion: 1, revisionId: detail.revisions[0].id } });
+    expect(detail.revisions[0]).toMatchObject({ model: execution.actualModel, provider: "openai", applied: true });
+    expect(detail.jobs[0].result.provenance).toEqual(execution);
+    expect(mockText).toHaveBeenCalledOnce();
+  });
+  it("이전 adapter의 호환 모델·0 사용량을 실제 provider 검증값으로 꾸미지 않는다", async () => {
+    const { agent, headers, card } = await setup();
+    mockText.mockResolvedValue({ ...generated(), usage: { inputTokens: 0, outputTokens: 0 } });
+    await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send({ version: 1, kind: "text", instruction: "빈칸 완성", requestId: crypto.randomUUID() });
+    const job = await claimJob(getDb(), "provenance-unknown", ["studio_generate"]);
+    expect(await processStudioJob(getDb(), job!, "provenance-unknown")).toBe(true);
+    const [saved] = await getDb().select().from(jobs).where(eq(jobs.id, job!.id));
+    expect(saved.result).toMatchObject({ provenance: { actualModel: null, requestId: null, usageStatus: "usage_unknown", inputTokens: null, outputTokens: null, status: "completed" }, promptTrace: null });
+    expect(mockText).toHaveBeenCalledOnce();
+  });
+  it("완성되지 않은 provider 응답의 알려진 사용량은 보존하고 원고를 적용하지 않는다", async () => {
+    const { agent, headers, card } = await setup();
+    const execution = { provider: "openai", requestedModel: "gpt-6.1-sol", actualModel: "gpt-6.1-sol-2026-11-01", requestId: "resp-truncated-qa", usageStatus: "known", inputTokens: 100, outputTokens: 200, status: "truncated" };
+    mockText.mockRejectedValue(Object.assign(new Error("safe generation failure"), { provenance: execution, promptTrace: { toolName: "save_studio_draft", inputSha256: "b".repeat(64) } }));
+    await agent.post(`/api/studio/cards/${card.id}/generate`).set(headers).send({ version: 1, kind: "text", instruction: "원고 완성", requestId: crypto.randomUUID() });
+    const job = await claimJob(getDb(), "provenance-truncated", ["studio_generate"]);
+    expect(await processStudioJob(getDb(), job!, "provenance-truncated")).toBe(false);
+    const [saved] = await getDb().select().from(jobs).where(eq(jobs.id, job!.id));
+    expect(saved).toMatchObject({ status: "failed", attempts: 1, maxAttempts: 1, result: { applied: false, provenance: execution, binding: { revisionId: null } } });
+    expect((await agent.get(`/api/studio/cards/${card.id}`)).body.revisions).toHaveLength(1);
+    expect(mockText).toHaveBeenCalledOnce();
+  });
   it("생성 도중 직접 수정한 내용은 지키고 생성 결과는 적용 가능한 기록으로 남김", async () => {
     const { agent, headers, card } = await setup();
     mockText.mockImplementation(async () => {
@@ -245,6 +282,8 @@ describe("통합 제작 보드", () => {
     expect(detail.body.card.script).toBe("사용자의 최신 수정");
     expect(detail.body.revisions[0].applied).toBe(false);
     expect(detail.body.revisions[0].snapshot.script).toBe("생성 원고");
+    expect(detail.body.jobs[0].result).toMatchObject({ applied: false, binding: { revisionId: detail.body.revisions[0].id, sourceVersion: 1 } });
+    expect(detail.body.jobs[0].result.provenance).toMatchObject({ usageStatus: "usage_unknown", actualModel: null, inputTokens: null, outputTokens: null });
   });
   it("유료 호출 실패·lease 만료는 자동 재시도하지 않음", async () => {
     const { agent, headers, card } = await setup();

@@ -5,7 +5,8 @@ import { collectionDateSchema, collectionDayRange, kstDay, nextCollectionAt } fr
 setTestEnv();
 const { createApp } = await import("../server/app");
 const { getDb, closeDb } = await import("../server/db");
-const { channels, contentItems, searchRules, jobs } = await import("../shared/schema");
+const { appSettings, channels, contentItems, searchRules, jobs, runs } = await import("../shared/schema");
+const secretStore = await import("../server/secretStore");
 const { runCollect } = await import("../server/worker/collect");
 const { PUBLIC_NEWS_FEEDS } = await import("../server/services/newsSearch");
 const { enqueueJob } = await import("../server/worker/queue");
@@ -23,6 +24,38 @@ it("한국 날짜 경계와 아침·저녁 예약 시각을 계산한다", () =>
   expect(nextCollectionAt(new Date("2026-10-26T10:14:00Z"))).toBe("2026-10-26T20:13:00.000Z");
 });
 describe("실제 수집 설정·브리핑", () => {
+  it("연결 검사 안전 메타데이터를 제공하고 이전 수집 실패는 보존한다", async () => {
+    const db = getDb(), { agent } = await login(app);
+    const errors = [{ scope: "naver", message: "인증/권한 오류 (HTTP 401)" }];
+    const [run] = await db.insert(runs).values({ channelId: 1, kind: "collect", status: "partial", startedAt: new Date("2026-11-06T01:02:00Z"), finishedAt: new Date("2026-11-06T01:08:00Z"), errors }).returning();
+    const at = new Date("2026-11-06T01:40:00Z");
+    await db.insert(appSettings).values({ key: "conn_test:naver", value: { ok: true, message: "private diagnostic", token: "must not be returned" }, updatedAt: at });
+    const statuses = vi.spyOn(secretStore, "secretStatuses").mockResolvedValue([
+      { key: "NAVER_CLIENT_ID", source: "screen", updatedAt: "2026-11-06T01:39:00Z", valueLength: 10 },
+      { key: "NAVER_CLIENT_SECRET", source: "screen", updatedAt: "2026-11-06T01:39:00Z", valueLength: 40 },
+    ]);
+    try {
+      const overview = await agent.get("/api/collection/overview?channelId=1");
+      expect(overview.status).toBe(200);
+      expect(overview.body.naverConnectionTest).toEqual({ ok: true, at: at.toISOString() });
+      expect(overview.body.channels[0].lastRun).toMatchObject({ id: run.id, status: "partial", errors });
+      expect(JSON.stringify(overview.body)).not.toMatch(/private diagnostic|must not be returned/);
+      statuses.mockResolvedValue([{ key: "NAVER_CLIENT_ID", source: "screen", updatedAt: "2026-11-06T01:41:00Z", valueLength: 10 }]);
+      expect((await agent.get("/api/collection/overview?channelId=1")).body.naverConnectionTest).toBeNull();
+      // A prior deploy may have tested different Render-owned credentials.
+      // Those values are stable only for this process, so require a test since boot.
+      statuses.mockResolvedValue([{ key: "NAVER_CLIENT_ID", source: "environment", updatedAt: null, valueLength: null }]);
+      await db.update(appSettings).set({ updatedAt: new Date(0) }).where(eq(appSettings.key, "conn_test:naver"));
+      expect((await agent.get("/api/collection/overview?channelId=1")).body.naverConnectionTest).toBeNull();
+      const freshAt = new Date();
+      await db.update(appSettings).set({ updatedAt: freshAt }).where(eq(appSettings.key, "conn_test:naver"));
+      expect((await agent.get("/api/collection/overview?channelId=1")).body.naverConnectionTest).toEqual({ ok: true, at: freshAt.toISOString() });
+      await db.update(appSettings).set({ value: { ok: "true" } }).where(eq(appSettings.key, "conn_test:naver"));
+      statuses.mockResolvedValue([]);
+      expect((await agent.get("/api/collection/overview?channelId=1")).body.naverConnectionTest).toBeNull();
+      expect((await db.select().from(runs).where(eq(runs.id, run.id)))[0].errors).toEqual(errors);
+    } finally { statuses.mockRestore(); }
+  });
   it("기존 자료를 삭제하지 않고 분류한 뒤 페이지를 나누며 후보 수를 따로 집계한다", async () => {
     const db = getDb(), { agent } = await login(app);
     const day = new Date("2026-10-24T01:00:00Z");

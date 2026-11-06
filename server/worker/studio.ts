@@ -23,10 +23,18 @@ import { channelBrandName } from "../../shared/branding";
 import { studioGenerationFeedback, type StudioImageProgress } from "../../shared/studioGenerationFeedback";
 import { aiExecutionSchema, aiModelMatches, type AiExecution } from "../../shared/channelAi";
 import { channelAiSelection } from "../services/channelAi";
+import { providerExecutionSchema, type ProviderExecution } from "../../shared/aiProvenance";
 
 const payloadSchema = studioGenerationSchema.safeExtend({ cardId: z.number().int().positive(), snapshot: studioContentSchema, ai: aiExecutionSchema.optional() });
 const activeJobs = new Map<number, { controller: AbortController; work: Promise<boolean> }>();
 let stopping = false;
+const promptTraceSchema = z.object({ toolName: z.string().min(1).max(160), inputSha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+function textExecution(value: unknown, ai: Pick<AiExecution, "provider" | "model">, status: ProviderExecution["status"]): ProviderExecution {
+  const parsed = providerExecutionSchema.safeParse(value);
+  const execution: ProviderExecution = parsed.success ? parsed.data : { provider: ai.provider, requestedModel: ai.model, actualModel: null, requestId: null, usageStatus: "usage_unknown", inputTokens: null, outputTokens: null, status };
+  return execution.usageStatus === "known" && execution.inputTokens !== null && execution.outputTokens !== null ? execution
+    : { ...execution, usageStatus: "usage_unknown", inputTokens: null, outputTokens: null };
+}
 
 /** One panel is one paid request. Existing art is a reference and is never deleted. */
 async function drawStudioPanel(db: DB, cardId: number, content: StudioContent, panelIndex: number, instruction: string, signal: AbortSignal, ai: AiExecution) {
@@ -133,6 +141,7 @@ export function processStudioJob(db: DB, job: Job, workerId: string): Promise<bo
 async function runStudioJob(db: DB, job: Job, workerId: string, signal: AbortSignal): Promise<boolean> {
   let timer: ReturnType<typeof setInterval> | undefined;
   let imageProgress: StudioImageProgress | undefined;
+  let textMetadata: { provenance: ProviderExecution; promptTrace: z.infer<typeof promptTraceSchema> | null; binding: { jobId: number; operatorRequestId: string | null; cardId: number; sourceVersion: number } } | undefined;
   try {
     const payload = payloadSchema.parse(job.payload);
     await checkStudioJob(db, job.id, workerId, signal);
@@ -157,6 +166,13 @@ async function runStudioJob(db: DB, job: Job, workerId: string, signal: AbortSig
     let content: StudioContent = payload.snapshot;
     let provider = ai.provider;
     let model: string;
+    textMetadata = { provenance: textExecution(undefined, ai, "failed"), promptTrace: null,
+      binding: { jobId: job.id, operatorRequestId: payload.requestId ?? null, cardId: card.id, sourceVersion: payload.version } };
+    const rememberExecution = (generated: unknown) => {
+      const observed = generated as { provenance?: unknown; promptTrace?: unknown };
+      textMetadata!.provenance = textExecution(observed?.provenance, ai, "completed");
+      const trace = promptTraceSchema.safeParse(observed?.promptTrace); textMetadata!.promptTrace = trace.success ? trace.data : null;
+    };
     {
       const options = {
         provider: ai.provider, model: ai.model, directive: instruction,
@@ -166,17 +182,21 @@ async function runStudioJob(db: DB, job: Job, workerId: string, signal: AbortSig
       };
       if (payload.textTarget === "experience") {
         const generated=await generateExperience(db,card.id,content,payload.instruction, ai.model);
+        rememberExecution(generated);
         content=generated.content; model=generated.model; provider="openai";
       } else if (payload.textTarget === "caption") {
         const generated = await generateStudioCaption(options);
+        rememberExecution(generated);
         model = generated.model; provider = generated.provider;
         content = studioContentSchema.parse({ ...content, caption: generated.caption });
       } else if (payload.textTarget === "panel") {
         const generated = await generateStudioPanel({ ...options, panelIndex: payload.panelIndex! });
+        rememberExecution(generated);
         model = generated.model; provider = generated.provider;
         content = studioContentSchema.parse({ ...content, stage: "review", panels: content.panels.map((panel, index) => index === payload.panelIndex ? { ...panel, scene: generated.scene, dialogue: generated.dialogue } : panel) });
       } else {
         const generated = await generateStudioText(options);
+        rememberExecution(generated);
         model = generated.model; provider = generated.provider;
         content = applyStudioText(content, generated, payload.textTarget);
       }
@@ -192,13 +212,23 @@ async function runStudioJob(db: DB, job: Job, workerId: string, signal: AbortSig
       const updated = await tx.update(studioCards).set({ content, version: payload.version + 1, updatedAt: new Date() }).where(and(eq(studioCards.id, card.id), eq(studioCards.version, payload.version))).returning();
       const applied = updated.length > 0;
       const [revision] = await tx.insert(studioRevisions).values({ cardId: card.id, version: payload.version + 1, snapshot: content, instruction, provider, model, applied }).returning({ id: studioRevisions.id });
-      const result = { cardId: card.id, revisionId: revision.id, applied, kind: payload.kind, textTarget: payload.textTarget, changedFields: payload.kind === "text" ? studioChangedTextFields(payload.snapshot, content) : [], panelIndex: payload.panelIndex ?? null, message: applied ? "생성 결과를 저장했습니다." : "생성 중 직접 수정한 내용은 유지했습니다. 기록에서 생성 결과를 확인하고 적용하세요." };
+      const result = { cardId: card.id, revisionId: revision.id, applied, kind: payload.kind, textTarget: payload.textTarget, changedFields: payload.kind === "text" ? studioChangedTextFields(payload.snapshot, content) : [], panelIndex: payload.panelIndex ?? null, ...textMetadata, binding: { ...textMetadata!.binding, revisionId: revision.id }, message: applied ? "생성 결과를 저장했습니다." : "생성 중 직접 수정한 내용은 유지했습니다. 기록에서 생성 결과를 확인하고 적용하세요." };
       await assertGenerationActive(tx as unknown as DB);
       await completeJob(tx as unknown as DB, job.id, workerId, result);
       return result;
     });
     return true;
   } catch (e) {
+    if (textMetadata) {
+      const observed = e as { provenance?: unknown; promptTrace?: unknown };
+      const parsed = providerExecutionSchema.safeParse(observed?.provenance);
+      if (parsed.success) textMetadata.provenance = textExecution(parsed.data, { provider: parsed.data.provider, model: parsed.data.requestedModel }, parsed.data.status);
+      const trace = promptTraceSchema.safeParse(observed?.promptTrace); if (trace.success) textMetadata.promptTrace = trace.data;
+      // Preserve known provider facts even when output validation or result application fails.
+      // A cancelled or reassigned job is never rewritten by this worker.
+      await db.update(jobs).set({ result: { kind: "text", applied: false, ...textMetadata, binding: { ...textMetadata.binding, revisionId: null } } })
+        .where(and(eq(jobs.id, job.id), eq(jobs.status, "running"), eq(jobs.leaseOwner, workerId)));
+    }
     // Provider adapters use fixed safe messages. Never return upstream response bodies or credentials.
     const ownMessage = /^(휴지통에 있는 콘텐츠입니다|보관된 채널입니다|전역 정지 상태로|생성 전 콘텐츠가|캐릭터 기준 이미지가|생성 이미지가|생성 이미지 형식이|생성 작업의 실행 권한이)/.test((e as Error).message ?? "");
     const message = signal.aborted ? "생성을 중단해 결과를 적용하지 않았습니다. 공급자의 처리·과금 여부는 확인할 수 없습니다." : e instanceof z.ZodError ? "생성 결과의 형식이 올바르지 않아 적용하지 않았습니다." : e instanceof AiServiceError || ownMessage ? (e as Error).message : "생성 처리 또는 결과 저장에 실패했습니다. 연결과 작업 상태를 확인하세요.";

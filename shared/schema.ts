@@ -699,3 +699,10 @@ export const creationReceipts = pgTable("creation_receipts", {
   resourceId: integer("resource_id").notNull().references(() => studioCards.id),
   createdAt: createdAt(),
 });
+
+/** Durable receipts for explicit manual source-backed first eight-page saves. */
+export const familyManualRequests=pgTable('family_manual_requests',{
+  requestId:text('request_id').primaryKey(),channelId:integer('channel_id').notNull().references(()=>channels.id),
+  requestHash:text('request_hash').notNull(),contentItemId:integer('content_item_id').notNull().references(()=>contentItems.id),
+  result:jsonb('result').$type<import('./familyManual').FamilyManualReceipt>().notNull(),createdAt:createdAt(),
+});

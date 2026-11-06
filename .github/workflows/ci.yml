@@ -77,12 +77,13 @@ jobs:
               if not source.exists():
                   continue
               content = source.read_text()
-              updated = content.replace("http://azure.archive.ubuntu.com/ubuntu", "https://archive.ubuntu.com/ubuntu").replace("https://azure.archive.ubuntu.com/ubuntu", "https://archive.ubuntu.com/ubuntu")
+              updated = content.replace("mirror+file:/etc/apt/apt-mirrors.txt", "https://archive.ubuntu.com/ubuntu/").replace("http://azure.archive.ubuntu.com/ubuntu", "https://archive.ubuntu.com/ubuntu").replace("https://azure.archive.ubuntu.com/ubuntu", "https://archive.ubuntu.com/ubuntu")
               if updated != content:
                   source.write_text(updated)
           PY
       - name: Install mobile browser regression tools
         id: browser_tools
+        timeout-minutes: 8
         run: npm install --no-save --package-lock=false playwright@1.62.1 && npx playwright install --with-deps webkit
       - name: Verify guarded channel switching and new channel creation
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
@@ -118,6 +119,9 @@ jobs:
       - name: Verify eight-page news editing, comparison text and page backgrounds
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node --import tsx scripts/news-editorial-regression.mjs
+      - name: Verify eight-page manual authoring without AI and safe resume
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        run: node --import tsx scripts/manual-family-regression.mjs
       - name: Verify automatic images, manual fallback and final page previews
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/studio-automatic-regression.mjs
@@ -130,6 +134,7 @@ jobs:
             test-results/mobile
             test-results/workspace
             test-results/news-editorial
+            test-results/manual-family
             test-results/channel-navigation
             test-results/studio-automatic-browser
           if-no-files-found: ignore

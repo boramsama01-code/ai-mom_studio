@@ -39,8 +39,13 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
   const totals = d.channels.reduce((a, c) => ({ newItems: a.newItems + c.newItems, pending: a.pending + c.pending }), { newItems: 0, pending: 0 });
   const busy = d.channels.some(c => c.jobs.some(j => j.status === "running" && !j.stale));
   const queued = d.channels.some(c => c.jobs.length);
-  const searchAuthFailed = d.sourceMode !== "public_rss" && d.channels.some(c => (c.lastRun?.errors ?? []).some(e =>
-    (e.scope === "naver" || e.scope === "discovery" || e.scope.startsWith("rule:")) && /인증\/권한 오류 \(HTTP (401|403)\)/.test(e.message)));
+  const authFailedRuns = d.sourceMode === "public_rss" ? [] : d.channels.flatMap(c => c.lastRun && c.lastRun.errors.some(e =>
+    (e.scope === "naver" || e.scope === "discovery" || e.scope.startsWith("rule:")) && /인증\/권한 오류 \(HTTP (401|403)\)/.test(e.message)) ? [c.lastRun] : []);
+  const laterConnectionPassed = d.naverReady && d.naverConnectionTest?.ok === true && authFailedRuns.every(run =>
+    run.finishedAt && new Date(d.naverConnectionTest!.at).getTime() > new Date(run.finishedAt).getTime());
+  const searchAuthFailed = authFailedRuns.length > 0 && !laterConnectionPassed;
+  const recoveredSearchAuth = authFailedRuns.length > 0 && laterConnectionPassed;
+  const recoveredNotice = recoveredSearchAuth && <p className="notice" role="status">이전 수집에서 네이버 인증에 실패했지만, 이후 연결 검사는 성공했습니다({fmtDate(d.naverConnectionTest!.at)}). 이 채널의 다음 수집 결과는 아직 확인하지 않았습니다. <GuardedLink href="/today">이전 실행 기록 확인 →</GuardedLink></p>;
   const showItems = (id: number, subcategory = "") => { select(id); navigate(`/inbox?collectedOn=${day}${subcategory ? `&subcategory=${encodeURIComponent(subcategory)}` : ""}`); };
   if (!detailed) return <section className="panel collection-compact" aria-label="날짜별 수집 현황">
     <div className="collection-compact-head"><div><span className="collection-kicker">COLLECTION</span><h2>{day === today ? "오늘의 수집" : `${day} 수집 결과`}</h2></div><div className="row"><button className="btn ghost icon" aria-label="수집 현황 새로고침" onClick={() => query.refetch()} disabled={query.isFetching}><Icon name="refresh" size={18} /></button><button className="btn primary" onClick={() => collect.mutate(selected)} disabled={subcategory === "미분류" || (!!subcategory && selected === "all") || collect.isPending || busy || d.globalStop || !(d.searchReady ?? d.naverReady)}>{collect.isPending ? "요청 중…" : busy ? "수집 중…" : subcategory ? `${subcategory} 수집` : queued ? "대기 수집 재개" : selected === "all" ? "전체 채널 지금 수집" : "지금 수집"}</button></div></div>
@@ -49,6 +54,7 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
     {d.globalStop && <p className="notice warn">전역 정지 중이므로 수집이 실행되지 않습니다.</p>}
     {!(d.searchReady ?? d.naverReady) && <p className="notice warn">검색 연결을 확인해 주세요. <GuardedLink href="/connections?service=naver">연결 설정</GuardedLink></p>}
     {searchAuthFailed && <p className="notice err" role="alert">최근 수집에서 네이버 검색 인증에 실패했습니다. <GuardedLink href="/connections?service=naver">네이버 키 확인·수정 →</GuardedLink></p>}
+    {recoveredNotice}
     {d.channels.some(c => c.lastRun?.errors.length || c.jobs.some(j => j.stale)) && <p className="notice warn">최근 수집에 확인할 내용이 있습니다. <GuardedLink href="/today">실행 결과 확인 →</GuardedLink></p>}
     <div className="collection-compact-foot"><span>{d.lastScheduledAt ? `최근 예약 수집 ${fmtDate(d.lastScheduledAt)}` : "예약 수집 기록이 아직 없습니다"}</span><GuardedLink href="/today">{workroom ? "자동 수집 현황·상세 기록" : "자동 수집 설정·상세 기록"} <Icon name="chevron" size={13} /></GuardedLink></div>
   </section>;
@@ -75,6 +81,7 @@ export function CollectionPanel({ date, detailed = false, subcategory = "" }: { 
     {current?.contentType === "notice" && <div className="small muted">공식 모집 게시판과 청소년 공모전 목록부터 확인하고, 네이버 검색으로 보완합니다. 사후 홍보·대상 외 모집은 새로 저장하지 않습니다.</div>}
     {!d.naverReady && d.sourceMode !== "public_rss" && <div className="notice warn">네이버가 미연결 상태입니다. 학교·기관 공지는 직접 읽고 뉴스는 공개 RSS로 보완합니다. 웹문서·블로그 검색은 연결 후 사용할 수 있습니다. <GuardedLink href="/connections?service=naver">연결 확인</GuardedLink></div>}
     {searchAuthFailed && <div className="notice err" role="alert"><strong>최근 수집에서 네이버 검색 인증에 실패했습니다.</strong><p style={{ margin: "6px 0" }}>학교·기관 공지는 계속 확인합니다. 저장된 Client ID·Client Secret 또는 검색 API 권한을 확인해 주세요.</p><GuardedLink href="/connections?service=naver">네이버 키 확인·수정 →</GuardedLink><span className="small"> 키 저장 → 연결 확인 → 지금 수집 순서로 재개할 수 있습니다.</span></div>}
+    {recoveredNotice}
     {d.globalStop && <div className="notice warn">전역 정지 중이므로 수집이 실행되지 않습니다.</div>}
     <p className="small muted" style={{ margin: 0 }}>{d.lastScheduledAt ? `최근 실제 예약 수집: ${fmtDate(d.lastScheduledAt)}` : "실제 예약 수집 기록이 아직 없습니다. 연결 검사 성공과 자료 수집 완료는 별개입니다."}</p>
     {detailed ? <div className="collection-channels">{d.channels.map(c => <article key={c.id} className="collection-channel">

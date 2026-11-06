@@ -8,6 +8,8 @@ import { storedCardCopySchema } from "../../shared/storedCardCopy";
 import { FAMILY_METADATA_KEYS, familyExecutionPlan, familyGenerateSchema, familyMetadataFromPayload, proposeFamilyDialogue, synchronizeFamilyQuestion } from "../services/familyEditorial";
 import { assertFamilyEvidenceForCopy, confirmFamilyCaption, familyCaptionConfirmSchema, familyProposalMetadata, familySaveSchema, saveFamilyCardCopy } from "../services/familyEditorialPersistence";
 import { familyEvidenceView, loadFamilyEvidence } from "../services/familyEvidence";
+import { familyManualCreateSchema, familyManualInitializeSchema } from '../../shared/familyManual';
+import { initializeManualFamily } from '../services/familyManual';
 import { completeGenerationResult } from "../services/generationContext";
 import { proposeNewsDiscussion } from "../services/newsEditorial";
 import { articleAnalysisSchema, aiWorkflowSchema } from "../../shared/articleAnalysis";
@@ -240,6 +242,14 @@ itemRoutes.get(
 );
 
 /** 수동 작성 */
+itemRoutes.post('/channels/:cid/items/manual-family',ah(async(req,res)=>{
+  const channel=await loadChannel(req.params.cid),body=parse(familyManualCreateSchema,req.body);
+  res.status(201).json(await initializeManualFamily(getDb(),channel.id,body,actorOf(req)));
+}));
+itemRoutes.post('/channels/:cid/items/:id/card-copy/manual-initialize',ah(async(req,res)=>{
+  const channel=await loadChannel(req.params.cid),body=parse(familyManualInitializeSchema,req.body);
+  res.status(201).json(await initializeManualFamily(getDb(),channel.id,body,actorOf(req),intParam(req.params.id)));
+}));
 itemRoutes.post(
   "/channels/:cid/items",
   ah(async (req, res) => {

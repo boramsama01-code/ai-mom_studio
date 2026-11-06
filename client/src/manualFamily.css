@@ -1,0 +1,12 @@
+.manual-family-initializer { min-width:0; }
+.manual-family-initializer fieldset { min-width:0; }
+.manual-family-fields { border:0;padding:0;margin:0; }
+.manual-family-pages { display:flex;flex-wrap:wrap;gap:8px; }
+.manual-family-pages [aria-current] { background:var(--accent);color:#fff; }
+.manual-family-binding { border:1px solid var(--border);border-radius:10px;padding:14px; }
+.manual-family-confirm { align-items:flex-start;min-height:48px;padding:12px 0;cursor:pointer; }
+.manual-family-confirm input { flex:none;width:20px;height:20px;margin-top:3px; }
+.manual-family-actions { flex-wrap:wrap; }
+.manual-family-initializer input:not([type=checkbox]),.manual-family-initializer textarea,.manual-family-initializer select { width:100%;min-width:0; }
+.manual-family-initializer summary { min-height:48px;display:flex;align-items:center;cursor:pointer; }
+@media(max-width:900px) { .shell .manual-family-initializer .btn,.shell .manual-family-initializer input:not([type=checkbox]),.shell .manual-family-initializer select { min-height:48px;font-size:16px; }.manual-family-actions { display:grid;grid-template-columns:1fr; }.manual-family-pages .btn { flex:1 1 100px; } }

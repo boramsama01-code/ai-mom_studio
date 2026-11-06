@@ -1,5 +1,6 @@
 import { WorkspaceSkeleton } from "../WorkspaceSkeleton";
 import { StudioWorkingPreview } from "../StudioWorkingPreview";
+import { ManualFamilyInitializer } from "../ManualFamilyInitializer";
 import { emptyVideoProject } from "@shared/videoProject";
 const VideoEditor = lazy(() => import("./VideoEditor").then(m => ({ default: m.VideoEditor })));
 import { creativeProfileFor } from "@shared/creativeProfile";
@@ -185,6 +186,7 @@ function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = ""
   const { channels: sourceChannels, select } = useChannel();
   const [mode, setMode] = useState<"experience" | "finished" | "free">(() => initialMode !== "free" ? initialMode : channels.find(c => c.id === channel)?.profile.defaultRoute === "media" ? "experience" : channels.find(c => c.id === channel)?.profile.defaultRoute === "upload" ? "finished" : "free");
   const [title, setTitle] = useState("");
+  const [manualFamily, setManualFamily] = useState(false);
   const [ch, setCh] = useState(channel);
   const [subcategory, setSubcategory] = useState(validSubcategory(channel, initialSubcategory, channels.find(c => c.id === channel)?.categories) ? initialSubcategory : "");
   const [format, setFormat] = useState<Format>(() => channels.find(c => c.id === channel)?.profile.defaultFormat ?? "카드뉴스");
@@ -225,6 +227,8 @@ function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = ""
     if (next === "auto" && mode === "finished") { setMode("free"); setRoute("writing"); }
   };
   const createLabel = mode === "experience" ? "사진·영상 올리러 가기 →" : mode === "finished" ? "이미지 가져오기 편집기 열기" : workMode === "auto" ? "자동 제작 편집기 열기" : "직접 작성 편집기 열기";
+  const manualChannel = sourceChannels.find(value => studioKey(value.slug) === ch && value.contentType === "current_dialogue" && value.active);
+  if (manualFamily && manualChannel) return <Dialog title="AI 없이 8장 원고 직접 작성" onClose={() => guard.confirmLeave(onClose)}><ManualFamilyInitializer channelId={manualChannel.id} channelName={manualChannel.name} initialTitle={title} templateKey={channels.find(value => value.id === ch)?.profile.defaultTemplate} logoAssetId={channels.find(value => value.id === ch)?.profile.logoAssetId} onBack={() => setManualFamily(false)} onSaved={receipt => { onClose(); select(manualChannel.id); navigate(`/studio/${receipt.studioCardId}?mode=manual`); }} /></Dialog>;
   return <Dialog title={mode === "finished" ? "완성 이미지 가져오기" : mode === "experience" ? "사진·영상으로 후기 만들기" : workMode === "auto" ? "새 콘텐츠 자동 제작" : "새 콘텐츠 직접 작성"} onClose={() => !create.isPending && onClose()}>
     <form className="stack studio-create-form" onSubmit={event => { event.preventDefault(); if (route === "source") startFromInbox(); else create.mutate(); }}>
       <div className="creative-start-routes" role="group" aria-label="콘텐츠 시작 방식">{([["writing","pen","아이디어·원고","직접 쓰거나 AI로 구체화"],["source","link","뉴스·자료","링크를 모으고 원문 확인"],["media","video","사진·영상","촬영 자료부터 정리"],["upload","design","완성 이미지","순서·캡션을 확인해 발행"]] as const).map(([key,icon,label,description]) => <button type="button" key={key} aria-pressed={route === key} disabled={create.isPending} onClick={() => { setRoute(key); if (key === "media") setMode("experience"); else if (key === "upload") { setMode("finished"); setWorkMode("manual"); } else setMode("free"); }}><Icon name={icon} size={20}/><strong>{label}</strong><small>{description}</small></button>)}</div>
@@ -240,6 +244,7 @@ function NewCard({ channel, stage, initialMode, onClose, initialSubcategory = ""
         <button type="button" disabled={create.isPending} aria-pressed={mode === "free"} onClick={() => setMode("free")}><Icon name="pen" size={22} /><strong>직접 원고 작성</strong><p>직접 쓴 문구와 외부에서 만든 결과를 편집</p></button>
         <button type="button" disabled={create.isPending} aria-pressed={mode === "finished"} onClick={() => setMode("finished")}><Icon name="design" size={22} /><strong>완성 이미지 가져오기</strong><p>여러 장을 묶어 순서·캡션 확인 후 발행</p></button>
       </div>}
+      {workMode === "manual" && route === "writing" && manualChannel && <div className="notice small stack"><strong>가족 대화 8장을 직접 쓰려면</strong><p>제공 자료·근거 구절과 8장 문구를 직접 입력합니다. AI 없이 기존 8장 편집기와 Canva 사본 가져오기로 이어갑니다.</p><button type="button" className="btn" disabled={create.isPending} onClick={() => setManualFamily(true)}>AI 없이 8장 원고 직접 작성</button></div>}
       <p className="small muted">{mode === "experience" ? "먼저 사진을 모으세요. 제목과 글은 나중에 다듬을 수 있습니다." : mode === "finished" ? "이미지 한 묶음이 게시물 한 건입니다. 1~10장을 가져와 순서를 정하세요." : workMode === "auto" ? "제목을 정하고 편집기를 여세요. 원고·컷 구성 자동 작성 버튼을 눌렀을 때 AI가 시작됩니다." : "직접 원고를 쓰거나 외부에서 만든 초안과 그림을 가져오세요. 입력을 유지한 채 자동으로 돌아갈 수 있습니다."}</p>
       <CategorySelect channel={ch} categories={channels.find(c => c.id === ch)?.categories} value={subcategory} onChange={setSubcategory} disabled={create.isPending || !ch} />
       <label className="field">{mode === "experience" ? "작업 제목 (나중에 입력 가능)" : "제목"}<input autoFocus required={mode !== "experience" && route !== "source"} disabled={create.isPending} value={title} maxLength={160} onChange={event => setTitle(event.target.value)} placeholder={mode === "experience" ? "예: 과학관에 다녀온 날" : "어떤 이야기를 만들까요?"} /></label>

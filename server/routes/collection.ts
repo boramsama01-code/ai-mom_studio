@@ -3,7 +3,7 @@ import { Router } from "express";
 import { and, asc, desc, eq, gte, inArray, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "../db";
-import { channels, contentItems, jobs, officialSources, runs, searchRules, sourceDocuments } from "../../shared/schema";
+import { appSettings, channels, contentItems, jobs, officialSources, runs, searchRules, sourceDocuments } from "../../shared/schema";
 import { noticeIntentSql } from "../services/noticeIntent";
 import { itemSourceIdSql } from "../services/itemSources";
 import { COLLECTION_PROFILES, collectionDateSchema, collectionDayRange, kstDay, nextCollectionAt } from "../../shared/collection";
@@ -18,8 +18,10 @@ import { kickInlineCollect } from "../worker/inline";
 import { orderedChannels } from "../services/channelOrder";
 import { boardMatchesCategory } from "../services/officialCatalog";
 import { PUBLIC_NEWS_FEEDS } from "../services/newsSearch";
+import { secretStatuses } from "../secretStore";
 
 export const collectionRoutes = Router();
+const processStartedAt = Date.now() - process.uptime() * 1000;
 const channelIdSchema = z.union([z.literal("all"), z.coerce.number().int().positive()]);
 collectionRoutes.get("/collection/overview", ah(async (req, res) => {
   const q = parse(z.object({ channelId: channelIdSchema, date: collectionDateSchema.optional() }), req.query);
@@ -28,6 +30,14 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
   const chs = (await orderedChannels(db)).filter(ch => q.channelId === "all" ? ch.active : ch.id === q.channelId);
   const autoCollect = env.autoCollect || await getSetting(db, "auto_collect", false) === true;
   const globalStop = await getSetting(db, "global_stop", false) === true;
+  const [naverTest] = await db.select({ value: appSettings.value, at: appSettings.updatedAt }).from(appSettings).where(eq(appSettings.key, "conn_test:naver")).limit(1);
+  const naverKeys = await secretStatuses(db, ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"]);
+  const parsedTest = z.object({ ok: z.boolean() }).safeParse(naverTest?.value);
+  // A later key edit needs a new test. Return only safe result metadata, never provider messages or credentials.
+  const naverConnectionTest = naverTest && parsedTest.success && naverKeys.every(key => key.source === "environment"
+    ? naverTest.at.getTime() >= processStartedAt
+    : !key.updatedAt || new Date(key.updatedAt) <= naverTest.at)
+    ? { ok: parsedTest.data.ok, at: naverTest.at.toISOString() } : null;
   const [scheduled] = await db.select({ startedAt: runs.startedAt }).from(runs).where(eq(runs.trigger, "schedule")).orderBy(desc(runs.id)).limit(1);
   const rows = await Promise.all(chs.map(async ch => {
     const ruleRows = await db.select({ id: searchRules.id, normalizedQuery: searchRules.normalizedQuery, endpoint: searchRules.endpoint, enabled: searchRules.enabled, deletedAt: searchRules.deletedAt }).from(searchRules).where(eq(searchRules.channelId, ch.id));
@@ -57,7 +67,7 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
       jobs: pendingJobs.map(j => ({ id: j.id, status: j.status, createdAt: j.createdAt, stale: j.status === "queued" ? now.getTime() - j.createdAt.getTime() > 120_000 : !j.leaseExpiresAt || j.leaseExpiresAt < now })),
       lastRun: lastRun ? { subcategory: typeof lastRun.snapshot.subcategory === "string" ? lastRun.snapshot.subcategory : null, id: lastRun.id, status: lastRun.status, startedAt: lastRun.startedAt, finishedAt: lastRun.finishedAt, counts: lastRun.counts, errors: lastRun.errors } : null };
   }));
-  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "official_naver", collectionStrategy: "official_first", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
+  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "official_naver", collectionStrategy: "official_first", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, naverConnectionTest, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
 }));
 
 collectionRoutes.post("/channels/:cid/collection-profile", ah(async (req, res) => {
