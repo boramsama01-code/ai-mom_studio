@@ -182,6 +182,18 @@ describe("safe Canva failures and request limits", () => {
     expect(error.message).toContain(`HTTP ${status}`); expect(error.message).toContain(providerError); expect(error.message).toContain(guidance);
     expect(error.message).not.toContain("never-print"); expect(fetchImpl).toHaveBeenCalledOnce();
   });
+  it.each([[400, "invalid_grant", "PKCE"], [400, "invalid_field", "필수 항목"], [400, "bad_request_body", "본문"], [401, "invalid_access_token", "Client secret"], [400, "unauthorized_client", "개발자 설정"]] as const)("handles Canva's documented code field for HTTP %i %s without exposing the message", async (status, providerCode, guidance) => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ code: providerCode, message: "never-print-client-secret" }, status));
+    const error = await exchangeCode(db, { code: "isolated-code", verifier: "isolated-verifier", redirectUri: "https://studio.example/callback" }, fetchImpl).catch(value => value);
+    expect(error).toMatchObject({ status, code: "auth_required" });
+    expect(error.message).toContain(providerCode); expect(error.message).toContain(guidance);
+    expect(error.message).not.toContain("never-print"); expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it("falls back to a known OAuth error when the provider code is unknown", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(json({ code: "never-print-code", error: "invalid_grant", message: "never-print-message" }, 400));
+    const error = await exchangeCode(db, { code: "isolated-code", verifier: "isolated-verifier", redirectUri: "https://studio.example/callback" }, fetchImpl).catch(value => value);
+    expect(error.message).toContain("invalid_grant"); expect(error.message).not.toContain("never-print"); expect(fetchImpl).toHaveBeenCalledOnce();
+  });
   it("does not echo unrecognized OAuth errors or accept malformed success responses", async () => {
     const fetchImpl = vi.fn().mockResolvedValueOnce(json({ error: "never-print-client-secret", message: "never-print-access-token" }, 400)).mockResolvedValueOnce(json(null));
     const input = { code: "isolated-code", verifier: "isolated-verifier", redirectUri: "https://studio.example/callback" };
