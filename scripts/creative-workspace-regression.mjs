@@ -83,12 +83,12 @@ async function noOverflow(page,label){
  const value=await browserLayout(page);
  assert(value.scroll<=value.width+1,label+": "+JSON.stringify(value));
 }
-async function shot(page,label){
+async function shot(page,label,{resetScroll=true}={}){
  // React can replace an image while WebKit is decoding its previous source.
  // Inspect the current connected DOM on each frame; do not reuse decode()
  // promises from detached nodes. Missing/broken images still fail this gate.
- await page.evaluate(async()=>{
-  await document.fonts.ready;scrollTo(0,0);
+ await page.evaluate(async(resetScroll)=>{
+  await document.fonts.ready;if(resetScroll)scrollTo(0,0);
   const deadline=performance.now()+8000;
   let previous="",stable=0,state=[];
   while(performance.now()<deadline){
@@ -100,7 +100,7 @@ async function shot(page,label){
    if(ready&&stable>=2)return;
   }
   throw new Error("Visible images did not finish loading: "+JSON.stringify(state.map(img=>({...img,src:img.src.slice(0,220)}))));
- });
+ },resetScroll);
  await page.screenshot({path:output+"/"+label+".png"});
 }
 async function verifyDeviceHandoff(origin){
@@ -159,7 +159,7 @@ async function run(root,label,port){
   // within that scenario mutate its server fixture; production is never used.
   mode="normal";cards.clear();initial.forEach(value=>cards.set(value.id,clone(value)));
   const context=await browsers.newContext({viewport:{width,height:1000},locale:"ko-KR",timezoneId:"Asia/Seoul",isMobile:width<768,hasTouch:width<768,reducedMotion:"reduce",serviceWorkers:"block"});
-  const page=await context.newPage(),errors=[],writes=[];
+  const page=await context.newPage(),errors=[],writes=[],registeredBrandAssets=[];
   try{
   page.on("pageerror",e=>errors.push(e.message));
   await context.route("**/*",route=>intercept(route,origin,errors,writes));
@@ -216,6 +216,20 @@ async function run(root,label,port){
    await page.getByRole("button",{name:"브랜드 가이드",exact:true}).click();await page.locator(".asset-brand").first().waitFor();
    await noOverflow(page,"assets "+width);await shot(page,"after-assets-"+width);
    assert.equal(await page.locator(".asset-brand img").count(),3,"existing registered brand originals are displayed");
+   for(const [name,key,assetId] of [
+    ["우주펭귄상회","penguin","brand:space-penguin-company:20261101"],
+    ["HighScoop","highscoop","brand:highscoop:original:20261101"],
+    ["ALLligodang","allligodang","brand:allligodang:bw:20261104"],
+   ]){
+    const brand=page.locator(".asset-brand").filter({has:page.getByRole("heading",{name,exact:true})});
+    const logo=brand.locator("img");
+    assert.equal(await logo.getAttribute("src"),"/api/studio/brand-assets/"+encodeURIComponent(assetId));
+    await logo.scrollIntoViewIfNeeded();
+    await shot(page,"after-brand-"+key+"-"+width,{resetScroll:false});
+    assert(await logo.evaluate(img=>img.complete&&img.naturalWidth>0&&img.naturalHeight>0),name+" original must load");
+    if(key==="allligodang")assert.equal(await brand.locator(".brand-asset-preview").evaluate(node=>getComputedStyle(node).backgroundColor),"rgb(34, 43, 44)","white ALL artwork must retain its dark proof surface");
+    registeredBrandAssets.push({assetId,loaded:true,screenshot:"after-brand-"+key+"-"+width+".png"});
+   }
    await page.goto(origin+"/");await page.locator(".creative-overview").waitFor();
    const scopedReads=await page.evaluate(()=>({key:localStorage.getItem("spacepenguin.channel")}));
    await shot(page,"after-return-"+width);
@@ -226,7 +240,7 @@ async function run(root,label,port){
    }
   }
   assert.deepEqual(errors,[],label+" browser errors");
-  results.push({label,width,passed:true,navigation,syntheticApi:true,existingTemplateArtwork:true});
+  results.push({label,width,passed:true,navigation,syntheticApi:true,existingTemplateArtwork:true,...(label==="after"?{registeredBrandAssets}:{})});
   await writeFile(output+"/results.json",JSON.stringify(results,null,2));
   console.log(label+" "+width+"px: render, layout, saved context and safe actions passed");
   }catch(error){
