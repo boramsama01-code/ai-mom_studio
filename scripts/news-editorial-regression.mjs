@@ -172,22 +172,95 @@ function fixture() {
 const title = page => page.locator('.card-copy-editor textarea[id$="-title"]');
 const pageButtons = page => page.locator('.card-copy-dots button');
 const saveButton = page => page.locator('.card-copy-savebar').getByRole('button', { name: '문구 저장', exact: true });
-async function previewReady(page) {
+const settlementRemaining = deadline => {
+  const remaining = deadline - Date.now();
+  assert(remaining > 0, 'current editor images and local API completion must settle within 20 seconds');
+  return remaining;
+};
+function createApiLifecycle(diagnostics, stage) {
+  const requests = new Map(), producers = new Map(), waiters = new Set();
+  let sequence = 0, generation = 0;
+  const snapshot = () => ({ requests: [...requests.values()], producers: [...producers.values()] });
+  const changed = () => { generation++; for (const notify of [...waiters]) notify(); };
+  const describe = request => ({ id: ++sequence, stage: stage(), method: request.method(), path: new URL(request.url()).pathname });
+  const empty = () => requests.size === 0 && producers.size === 0;
+  return {
+    snapshot, empty, get generation() { return generation; },
+    domChanged() { changed(); },
+    startRequest(request) { const detail = describe(request); requests.set(request, detail); diagnostics.push({ kind: 'api-transport-start', at: Date.now(), ...detail }); changed(); },
+    finishRequest(request, error = null) {
+      const detail = requests.get(request); if (!detail) return;
+      requests.delete(request); diagnostics.push({ kind: 'api-transport-finished', ...detail, finishedAt: Date.now(), finishedStage: stage(), error }); changed();
+    },
+    startProducer(request) { const detail = requests.get(request) ?? describe(request); producers.set(request, detail); diagnostics.push({ kind: 'api-producer-start', at: Date.now(), ...detail }); changed(); },
+    finishProducer(request) { const detail = producers.get(request); if (!detail) return; producers.delete(request); diagnostics.push({ kind: 'api-producer-finished', ...detail, finishedAt: Date.now(), finishedStage: stage() }); changed(); },
+    waitForEmpty(deadline) {
+      if (empty()) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const finish = () => { if (!empty()) return; clearTimeout(timer); waiters.delete(finish); resolve(); };
+        const timer = setTimeout(() => { waiters.delete(finish); reject(new Error(`Local API work remains before document replacement: ${JSON.stringify(snapshot())}`)); }, settlementRemaining(deadline));
+        waiters.add(finish); finish();
+      });
+    },
+    waitForQuiet(deadline) {
+      // networkidle may already have fired before a newly scheduled 450ms
+      // preview effect. Start a fresh quiet window only after current images
+      // are ready; actual request/producer/DOM changes invalidate this window.
+      return new Promise((resolve, reject) => {
+        const remaining = settlementRemaining(deadline), startedAt = Date.now();
+        const finish = quiet => {
+          clearTimeout(timer); waiters.delete(interrupted);
+          diagnostics.push({ kind: 'editor-quiet-window', stage: stage(), at: Date.now(), startedAt, elapsedMs: Date.now() - startedAt, quiet, generation, ...snapshot() });
+          resolve(quiet);
+        };
+        const interrupted = () => finish(false);
+        const timer = setTimeout(() => {
+          if (remaining < 500) { waiters.delete(interrupted); reject(new Error('Current editor readiness did not remain quiet within the shared 20-second deadline')); }
+          else finish(true);
+        }, Math.min(500, remaining));
+        waiters.add(interrupted);
+      });
+    },
+  };
+}
+async function currentEditorImagesReady(expectedCopyVersion) {
+  const editors = [...document.querySelectorAll('.card-copy-editor')];
+  if (editors.length !== 1) return false;
+  const editor = editors[0], figure = editor.querySelector('.card-copy-preview'), image = figure?.querySelector('img');
+  const current = () => editor.isConnected && figure?.isConnected && figure.matches(':not(.is-stale)[aria-busy="false"]')
+    && figure.querySelector('img') === image && image?.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
+  if (!current() || (expectedCopyVersion === 2 && !editor.matches('.family-dialogue-editor'))) return false;
+  const buttons = expectedCopyVersion === 2 ? [...editor.querySelectorAll('.family-page-strip > button')] : [];
+  const thumbs = buttons.map(button => button.querySelector('.family-page-thumb img:not(.is-stale)'));
+  const thumbnailsCurrent = () => {
+    if (expectedCopyVersion !== 2) return true;
+    const currentButtons = [...editor.querySelectorAll('.family-page-strip > button')];
+    return buttons.length === 8 && currentButtons.length === 8 && thumbs.every((thumb, index) =>
+      currentButtons[index] === buttons[index] && thumb?.isConnected && buttons[index].querySelector('.family-page-thumb img:not(.is-stale)') === thumb
+        && thumb.complete && thumb.naturalWidth === 1080 && thumb.naturalHeight === 1350);
+  };
+  if (!thumbnailsCurrent()) return false;
+  const source = image.currentSrc || image.src;
+  try { await image.decode(); } catch { return false; }
+  return document.querySelector('.card-copy-editor') === editor && current() && thumbnailsCurrent() && (image.currentSrc || image.src) === source;
+}
+async function previewReady(page, deadline) {
   // Observe the current image, rather than retain a decode() promise for a blob
   // that a newer preview can replace/revoke while its response is settling.
   await page.waitForFunction(async () => {
-    const image = document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img');
+    const image = document.querySelector('.card-copy-editor .card-copy-preview:not(.is-stale)[aria-busy="false"] img');
     if (!image?.complete || image.naturalWidth !== 1080 || image.naturalHeight !== 1350) return false;
     const source = image.currentSrc || image.src;
     try { await image.decode(); } catch { return false; }
-    return image === document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img')
+    return image === document.querySelector('.card-copy-editor .card-copy-preview:not(.is-stale)[aria-busy="false"] img')
       && (image.currentSrc || image.src) === source && image.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
-  });
+  }, undefined, deadline === undefined ? {} : { timeout: settlementRemaining(deadline) });
 }
 async function settleEditorPreviews(page, lifecycle) {
+  const deadline = Date.now() + 20_000;
   const expectedCopyVersion = lifecycle.expectedCopyVersion;
-  if (expectedCopyVersion === 2) await page.locator('.family-dialogue-editor').waitFor({ state: 'visible' });
-  await previewReady(page);
+  if (expectedCopyVersion === 2) await page.locator('.family-dialogue-editor').waitFor({ state: 'visible', timeout: settlementRemaining(deadline) });
+  await previewReady(page, deadline);
   const familyCount = await page.locator('.family-dialogue-editor').count();
   lifecycle.diagnostics.push({ kind: 'family-thumbnail-guard', stage: lifecycle.stage, at: Date.now(), expectedCopyVersion, familyCount, pendingPreviewRoutes: [...lifecycle.previewRoutes] });
   await lifecycle.inspect('after-thumbnail-guard');
@@ -201,17 +274,26 @@ async function settleEditorPreviews(page, lifecycle) {
         const image = button.querySelector('.family-page-thumb img:not(.is-stale)');
         return image?.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
       });
-    });
+    }, undefined, { timeout: settlementRemaining(deadline) });
   }
-  const deadline = Date.now() + 20_000;
-  while (lifecycle.previewRoutes.size) {
-    assert(Date.now() < deadline, 'controlled navigation must wait for the preview fixture producers to settle');
-    await new Promise(resolve => setTimeout(resolve, 20));
+  await page.waitForLoadState('networkidle', { timeout: settlementRemaining(deadline) });
+  while (true) {
+    await lifecycle.api.waitForEmpty(deadline);
+    await page.waitForFunction(currentEditorImagesReady, expectedCopyVersion, { timeout: settlementRemaining(deadline) });
+    if (!lifecycle.api.empty() || !await lifecycle.api.waitForQuiet(deadline)) continue;
+    const generation = lifecycle.api.generation;
+    await page.waitForFunction(currentEditorImagesReady, expectedCopyVersion, { timeout: settlementRemaining(deadline) });
+    if (!lifecycle.api.empty() || generation !== lifecycle.api.generation) continue;
+    // Diagnostic reads cross the process boundary too. Recheck current images
+    // afterwards, so a late React commit cannot turn a ready snapshot stale.
+    const dom = await lifecycle.inspect('candidate-preview-boundary');
+    await page.waitForFunction(currentEditorImagesReady, expectedCopyVersion, { timeout: settlementRemaining(deadline) });
+    if (!lifecycle.api.empty() || generation !== lifecycle.api.generation) continue;
+    settlementRemaining(deadline);
+    assert.equal(lifecycle.previewRoutes.size, 0, 'controlled navigation must wait for all preview fixture producers');
+    lifecycle.diagnostics.push({ kind: 'previews-settled', at: Date.now(), url: page.url(), pendingPreviewRoutes: lifecycle.previewRoutes.size, quietWindowMs: 500, expectedCopyVersion, currentReady: true, dom, generation, settlementElapsedMs: Date.now() - (deadline - 20_000), ...lifecycle.api.snapshot() });
+    return;
   }
-  await page.waitForLoadState('networkidle');
-  await previewReady(page);
-  lifecycle.diagnostics.push({ kind: 'previews-settled', at: Date.now(), url: page.url(), pendingPreviewRoutes: lifecycle.previewRoutes.size });
-  await lifecycle.inspect('previews-settled');
 }
 async function reloadEditor(page, lifecycle, label) {
   lifecycle.mark(`${label}: settling previews`); await settleEditorPreviews(page, lifecycle);
@@ -312,14 +394,30 @@ try {
     context.setDefaultTimeout(20_000); await context.addInitScript(() => localStorage.setItem('spacepenguin.channel', '3'));
     const page = await context.newPage(), { state, api } = fixture(), errors = [], external = [], requestFailures = [], diagnostics = [];
     let stage = 'news-editorial';
-    const lifecycle = { previewRoutes: new Set(), diagnostics, get stage() { return stage; }, get expectedCopyVersion() { return state.saved.copy.version; }, mark: value => { stage = value; diagnostics.push({ kind: 'stage', stage, at: Date.now() }); },
+    const lifecycle = { api: createApiLifecycle(diagnostics, () => stage), previewRoutes: new Set(), diagnostics, get stage() { return stage; }, get expectedCopyVersion() { return state.saved.copy.version; }, mark: value => { stage = value; diagnostics.push({ kind: 'stage', stage, at: Date.now() }); },
       inspect: async label => {
         const requestedAt = Date.now(), pendingAtRequest = [...lifecycle.previewRoutes];
         const dom = await page.evaluate(() => window.__familySelectionSnapshot?.() ?? { url: location.href, diagnosticSnapshotUnavailable: true }).catch(error => ({ diagnosticError: String(error.message) }));
         diagnostics.push({ kind: 'editor-readiness-snapshot', label, stage, at: Date.now(), requestedAt, expectedVersion: state.saved.version, expectedCopyVersion: state.saved.copy.version, expectedRevision: state.saved.revisionId, pendingAtRequest, pendingAtReceipt: [...lifecycle.previewRoutes], dom });
+        return dom;
       },
     };
     await page.exposeBinding('__recordFamilySelection', (_source, event) => { diagnostics.push({ kind: 'family-dom', stage, at: Date.now(), ...event }); });
+    await page.exposeBinding('__editorReadinessChanged', () => lifecycle.api.domChanged());
+    await page.addInitScript(() => {
+      const withinEditor = node => node instanceof Element && (node.matches('.card-copy-editor') || !!node.closest('.card-copy-editor') || !!node.querySelector('.card-copy-editor'));
+      const changed = () => {
+        // This notification only invalidates the harness's quiet window. A
+        // closing document can cancel the bridge, never a product error.
+        void window.__editorReadinessChanged().catch(() => {});
+      };
+      new MutationObserver(records => {
+        if (records.some(record => withinEditor(record.target) || [...record.addedNodes, ...record.removedNodes].some(withinEditor))) changed();
+      }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'src', 'aria-busy'] });
+      for (const event of ['load', 'error']) document.addEventListener(event, value => {
+        if (value.target instanceof HTMLImageElement && value.target.closest('.card-copy-editor')) changed();
+      }, { capture: true, passive: true });
+    });
     await page.addInitScript(() => {
       const documentId = crypto.randomUUID(), identities = new WeakMap(); let nextId = 1, lastState = '', count = 0;
       const identity = node => { if (!node) return null; if (!identities.has(node)) identities.set(node, nextId++); return identities.get(node); };
@@ -328,7 +426,7 @@ try {
       const snapshot = () => {
         const editor = document.querySelector('.family-dialogue-editor'), strip = editor?.querySelector('.family-page-strip');
         const page5 = strip?.querySelector('button[aria-label="5페이지 · 두 가지 시선"]'), field = editor?.querySelector('textarea[id$="-fields.viewA.body"]');
-        const thumbs = [...(strip?.querySelectorAll('.family-page-thumb img') ?? [])], image = document.querySelector('.card-copy-preview img');
+        const thumbs = [...(strip?.querySelectorAll('.family-page-thumb img') ?? [])], image = document.querySelector('.card-copy-editor .card-copy-preview img');
         return { documentId, browserAt: Date.now(), url: location.href, readyState: document.readyState, editorId: identity(editor), editorConnected: !!editor?.isConnected,
           familyCount: document.querySelectorAll('.family-dialogue-editor').length, copyEditorCount: document.querySelectorAll('.card-copy-editor').length, savedBadge: editor?.querySelector('.card-copy-heading .badge')?.textContent ?? null,
           thumbnailCount: thumbs.length, currentLoadedThumbnailCount: thumbs.filter(node => !node.classList.contains('is-stale') && node.complete && node.naturalWidth === 1080 && node.naturalHeight === 1350).length,
@@ -355,6 +453,10 @@ try {
         if (signature !== lastState) { lastState = signature; record('selection-or-mount-mutation'); }
       }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-current'] });
     });
+    const isLocalApi = request => { const url = new URL(request.url()); return url.origin === origin && url.pathname.startsWith('/api/'); };
+    page.on('request', request => { if (isLocalApi(request)) lifecycle.api.startRequest(request); });
+    page.on('requestfinished', request => lifecycle.api.finishRequest(request));
+    page.on('requestfailed', request => lifecycle.api.finishRequest(request, request.failure()?.errorText ?? 'unknown'));
     page.on('pageerror', error => { errors.push(error.message); diagnostics.push({ kind: 'pageerror', stage, at: Date.now(), url: page.url(), message: error.message, stack: error.stack }); });
     page.on('framenavigated', frame => { if (frame === page.mainFrame()) diagnostics.push({ kind: 'document-navigation', stage, at: Date.now(), url: frame.url() }); });
     page.on('requestfailed', request => requestFailures.push({ stage, at: Date.now(), method: request.method(), path: new URL(request.url()).pathname, error: request.failure()?.errorText ?? 'unknown' }));
@@ -362,6 +464,7 @@ try {
       const url = new URL(route.request().url());
       if (url.origin !== origin) { external.push(url.href); return route.abort('blockedbyclient'); }
       if (!url.pathname.startsWith('/api/')) return route.continue();
+      const producerRequest = route.request(); lifecycle.api.startProducer(producerRequest);
       const preview = url.pathname === `${copyPath}/preview` ? { stage, at: Date.now(), page: route.request().postDataJSON()?.page, version: route.request().postDataJSON()?.version } : null;
       if (preview) { lifecycle.previewRoutes.add(preview); diagnostics.push({ kind: 'preview-fixture-start', ...preview }); }
       try {
@@ -372,9 +475,11 @@ try {
         errors.push(`Fixture rejected ${url.pathname}: ${error.message}`);
         await route.fulfill({ status: 500, json: { error: 'Synthetic fixture rejected request' } });
       } finally {
+        lifecycle.api.finishProducer(producerRequest);
         if (preview) { lifecycle.previewRoutes.delete(preview); diagnostics.push({ kind: 'preview-fixture-settled', stage, at: Date.now(), page: preview.page, version: preview.version, pendingPreviewRoutes: lifecycle.previewRoutes.size }); }
       }
     });
+    let scenarioError = null;
     try {
       await page.goto(`${origin}/studio/2828`); await title(page).waitFor(); await previewReady(page);
       assert.equal(await pageButtons(page).count(), 5); assert.equal(state.writes.filter(write => !write.path.endsWith('/preview')).length, 0);
@@ -616,20 +721,32 @@ try {
       // Record manual completion separately from the earlier native create.
       const manualImports = state.writes.filter(write => write.path === `${itemPath}/canva/manual-imports`).length;
       assert.equal(manualImports, 1);
+      lifecycle.mark('successful context close'); await settleEditorPreviews(page, lifecycle);
+      await context.close();
+      assert.deepEqual(errors, []); assert.deepEqual(external, []);
       results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', '14 style identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists', 'Canva folder sync preserves the mounted editor', 'Canva folder inner-page preview and reachable native creation preserve saved copy'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, mockNativeCreates: state.canvaJobs.length, requestFailures, actualPaidCalls: 0, publicationRequests: 0 });
       Object.assign(results.at(-1), { manualImports, manualImportReview: true, manualConfirmationPaddingHitTests: true });
       Object.assign(results.at(-1), { previewLifecycleSettled: true, diagnostics });
       results.at(-1).checks.push('No-Autofill manual copy safe-ID import, eight real rendered assets, 48px confirmation padding and explicit new-version acceptance');
       await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2)); console.log(`News editorial regression passed at ${width}px (${engine}).`);
     } catch (error) {
+      scenarioError = error;
       const previewState = await page.evaluate(() => {
         const sample = image => image ? { src: image.currentSrc || image.getAttribute('src'), complete: image.complete, width: image.naturalWidth, height: image.naturalHeight, stale: image.classList.contains('is-stale'), top: image.getBoundingClientRect().top } : null;
         return { saved: document.querySelector('.family-dialogue-editor .card-copy-heading .badge')?.textContent,
           selected: sample(document.querySelector('.card-copy-preview img')),
           thumbnails: [...document.querySelectorAll('.family-page-strip > button')].map(button => ({ label: button.getAttribute('aria-label'), image: sample(button.querySelector('img')) })) };
       }).catch(() => null);
-      results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, requestFailures, diagnostics, previewState, pendingPreviewRoutes: lifecycle.previewRoutes.size }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
-      await page.screenshot({ path: `${outputDir}/failure-${width}.png`, fullPage: true }).catch(() => {}); await writeFile(`${outputDir}/failure-${width}.html`, await page.content()); throw error;
-    } finally { await context.close(); }
+      results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, requestFailures, diagnostics, previewState, pageClosed: page.isClosed(), pendingPreviewRoutes: lifecycle.previewRoutes.size, ...lifecycle.api.snapshot() }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
+      if (!page.isClosed()) {
+        await page.screenshot({ path: `${outputDir}/failure-${width}.png`, fullPage: true }).catch(() => {});
+        const html = await page.content().catch(() => null);
+        if (html !== null) await writeFile(`${outputDir}/failure-${width}.html`, html);
+      }
+      throw error;
+    } finally {
+      try { await context.close(); }
+      catch (error) { if (!scenarioError) throw error; diagnostics.push({ kind: 'failure-teardown-error', at: Date.now(), message: error.message }); }
+    }
   }
 } finally { await browser?.close(); await server.httpServer.close(); }
