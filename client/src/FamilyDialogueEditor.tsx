@@ -175,6 +175,12 @@ function FamilyEvidenceDetails({ draft }: { draft: FamilyDialogueResponse }) {
   </div>;
 }
 
+function FamilyRunRecord({ run }: { run: FamilyDialogueResponse["generationRuns"][number] }) {
+  const labels = { article_analysis: "원문 분석", editorial_plan: "원고 구성", resource_research: "자료 조사", card_copy: "8장 문구", caption: "게시물 설명(캡션)", image_brief: "이미지 구성", image_generation: "이미지 생성", editorial_review: "원고 검수", partial_copy: "선택 문구" };
+  const statuses = { ready: "완료", needs_source: "자료 확인 필요", needs_review: "검토 필요", failed: "실패", cancelled: "취소됨", running: "진행 중" };
+  const execution = run.provenance, notCalled = execution?.status === "not_started" && execution.usageStatus === "known" && execution.inputTokens === 0 && execution.outputTokens === 0;
+  return <div><dt>{labels[run.stage]} · {notCalled ? "실행 안 됨" : statuses[run.status]}</dt><dd><p>{fmtDate(run.finishedAt ?? run.startedAt)}{execution && ` · ${execution.provider} · ${notCalled ? `${execution.requestedModel} (설정된 모델 · 외부 AI 호출 안 함)` : execution.actualModel ?? `${execution.requestedModel} (응답 모델 미확인)`}`}</p>{run.error && <p className="notice warn small">{run.error} · 현재 원고의 직접 편집과 저장은 계속할 수 있습니다.</p>}</dd></div>;
+}
 /** v2 has eight semantic pages. The v1 editor remains independent and lossless. */
 export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: FamilyDialogueResponse; refresh: () => Promise<unknown> }) {
   const { channelId, itemId, initial, itemVersion, onDirtyChange, onSaved, onSaveAndRender, onApplyCaption, onEditCaption, disabled = false, showAi = true, renderDisabled = false, formatConflict = false, templateKey, onTemplateChange, previewRevision } = props;
@@ -185,6 +191,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const [selected, setSelected] = useState(0), [selectedField, setSelectedField] = useState<string | null>(null);
   const [saving, setSaving] = useState(false), [rendering, setRendering] = useState(false), [generating, setGenerating] = useState(false), [backgroundBusy, setBackgroundBusy] = useState(false);
   const [saveError, setSaveError] = useState<Error | null>(null), [aiError, setAiError] = useState<Error | null>(null), [conflict, setConflict] = useState<StoredCardCopyResponse | null>(null);
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null), [observedRuns, setObservedRuns] = useState<FamilyDialogueResponse["generationRuns"]>([]);
   const [instructions, setInstructions] = useState(""), [proposal, setProposal] = useState<{ result: FamilyProposal; baseline: string; baseVersion: number } | null>(null), [reviewFlags, setReviewFlags] = useState<ReviewFlag[]>([]);
   const { preview, thumbs, receive: receivePreview } = useFamilyPreviewImages();
   const [previewError, setPreviewError] = useState<Error | null>(null), [previewBusy, setPreviewBusy] = useState(false), [previewRetry, setPreviewRetry] = useState(0);
@@ -195,6 +202,13 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const aiPanel = useRef<HTMLDetailsElement>(null);
   const generation = useGenerationRequest(channelId, itemId, "card-copy");
   const dirty = !same(editable(base), editable(draft)), parsed = familyCardCopySchema.safeParse(draft.copy), invalid = !parsed.success;
+  const invalidFields = parsed.success ? [] : parsed.error.issues.map(issue => {
+    const index = issue.path[0] === "pages" && typeof issue.path[1] === "number" ? issue.path[1] : null;
+    const invalidPage = index === null ? null : draft.copy.pages[index], path = issue.path.slice(2).join(".");
+    const label = invalidPage && (familyFieldDescriptors(invalidPage).find(field => field.path === path)?.label
+      ?? (path.startsWith("displayOverrides.") ? familyDisplayDescriptors(invalidPage).find(field => field.key === path.slice(17))?.label : null));
+    return { index, label: invalidPage ? `${index! + 1}페이지 ${FAMILY_PAGE_LABELS[invalidPage.id]} · ${label ?? "문구·구성"}` : "8장 원고 구성", message: issue.message };
+  });
   const page = draft.copy.pages[selected], design = draft.pageDesigns[page.id];
   const selectedEnding = selectedFamilyEnding(page.id, design);
   const readingProfile = readingProfileForTemplateKey(draft.copy.templateKey), readingSlot = readingProfile && readingImageSlot(readingProfile, page.id);
@@ -229,7 +243,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     onRestore: value => { put(value); setProposal(null); setSaveError(null); },
   });
   const busy = disabled || saving || rendering || backgroundBusy || !!recovery.pending || formatConflict, aiBusy = generating && !generation.cancelled;
-  function put(value: FamilyDialogueResponse) { draftRef.current = value; setDraft(value); }
+  function put(value: FamilyDialogueResponse) { draftRef.current = value; setDraft(value); setSaveFeedback(null); }
   function changeReadingStyle(key: string) {
     const current = draftRef.current, profile = readingProfileForTemplateKey(key), collection = familyCollectionDesign(key);
     if (current.copy.templateKey === key) return;
@@ -295,11 +309,12 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   useEffect(() => { setSelectedField(null); }, [selected]);
   async function loadConflict() { try { setConflict(await api<StoredCardCopyResponse>(path)); } catch (error) { setSaveError(error as Error); } }
   async function saveNow(): Promise<FamilyDialogueResponse> {
-    if (formatConflict) throw new Error("다른 형식으로 저장된 원고를 먼저 확인해 주세요. 현재 입력은 유지했습니다.");
-    if (recovery.pending) throw new Error("기기 복구본을 먼저 확인해 주세요.");
+    const reject = (message: string): never => { const error = new Error(message); setSaveError(error); throw error; };
+    if (formatConflict) reject("다른 형식으로 저장된 원고를 먼저 확인해 주세요. 현재 입력은 유지했습니다.");
+    if (recovery.pending) reject("기기 복구본을 먼저 확인해 주세요.");
     if (serial.current) { await serial.current; return saveNow(); }
     const snapshot = draftRef.current, current = baseRef.current;
-    if (!familyCardCopySchema.safeParse(snapshot.copy).success) throw new Error("비어 있는 필수 칸과 입력 안내를 확인해 주세요. 입력 내용은 유지했습니다.");
+    if (!familyCardCopySchema.safeParse(snapshot.copy).success) reject("비어 있는 필수 칸과 입력 안내를 확인해 주세요. 입력 내용은 유지했습니다.");
     if (current.hasSavedCopy && same(editable(snapshot), editable(current))) return current;
     setSaving(true); setSaveError(null);
     const request = api<FamilyDialogueResponse>(path, { method: "PATCH", body: { version: current.version, copy: snapshot.copy, pageDesigns: snapshot.pageDesigns, fieldLocks: snapshot.fieldLocks, parentGuide: snapshot.parentGuide, captionPackage: snapshot.captionPackage, ...(appliedProposal.current ? { proposalJobId: appliedProposal.current } : {}) } });
@@ -312,6 +327,16 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
       return saved;
     } catch (error) { setSaveError(error as Error); if (error instanceof ApiError && error.status === 409) await loadConflict(); throw error; }
     finally { serial.current = null; setSaving(false); }
+  }
+  async function confirmSave() {
+    const previous = baseRef.current;
+    setSaveFeedback(null); setSaveError(null);
+    try {
+      const saved = await saveNow();
+      setSaveFeedback(saved.version === previous.version && saved.revisionId === previous.revisionId
+        ? `변경 내용이 없어 이미 저장된 버전 ${saved.version}을 유지했습니다.`
+        : `문구·디자인 저장 완료 · 버전 ${saved.version}`);
+    } catch (error) { setSaveError(error as Error); }
   }
   const saveRef = useRef(saveNow); saveRef.current = saveNow;
   useEffect(() => {
@@ -441,7 +466,15 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
         ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
       });
       setReviewFlags(response.reviewFlags ?? []);
-      if (response.copy || response.captionPackage || response.editorialReview) setProposal({ result: response,
+      if (response.generationRuns) setObservedRuns(response.generationRuns);
+      const relevantStage = response.scope === "caption" ? "caption" : response.scope === "review" ? "editorial_review" : null;
+      const lastRun = relevantStage && response.generationRuns?.filter(run => run.stage === relevantStage).at(-1);
+      const completedOutput = response.status === "ready" || response.scope === "review" && response.status === "needs_review" && response.reviewFlags.length > 0 && response.reviewFlags.every(flag => flag.code === "review_changes_required");
+      const hasResult = relevantStage
+        ? completedOutput && (!lastRun || lastRun.status === "ready") && !!(response.scope === "caption" ? response.captionPackage : response.editorialReview)
+        : !!response.copy;
+      setProposal(null);
+      if (hasResult) setProposal({ result: response,
         baseline: response.version === saved.version && response.baseRevision === saved.revisionId ? baseline : "",
         baseVersion: response.version,
       });
@@ -475,13 +508,14 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     </div>;
   };
   const caption = draft.captionPackage, captionCurrent = !!caption && caption.contentRevision === base.revisionId && draft.dependencies.caption === "current" && !dirty && caption.coreQuestion === draft.editorialPlan.coreQuestion;
+  const runs = [...new Map([...draft.generationRuns, ...observedRuns].map(run => [run.id, run])).values()].slice(-200);
+  const pendingScope = ({ caption: "캡션", review: "원고 검수", page: "페이지 문구", field: "선택 문구", all: "8장 전체" } as Record<string, string>)[String(generation.pendingBody?.scope)] ?? "AI";
   const sourceAssets = [...new Set(Object.values(draft.pageDesigns).flatMap(value => [...(value.previousAssetIds ?? []), ...(value.background.assetId ? [value.background.assetId] : [])]))];
   return <section className="card-copy-editor family-dialogue-editor stack" aria-label="가족 대화 8장 카드 편집기">
     <div className="card-copy-heading"><div><span className="card-copy-kicker">가족 대화 · 8장</span><h3>카드 안의 문구와 디자인</h3><p>뉴스에서 출발해 한 가지 질문을 나눕니다. 선택한 장을 자세히 수정하고, 자동 제안은 확인한 뒤 적용하세요.</p></div><span className={`badge ${dirty ? "warn" : "ok"}`}>{saving ? "저장 중" : saveError ? "저장 실패" : dirty ? "미저장 변경" : `저장됨 · 버전 ${base.version}`}</span></div>
     <RecoveryNotice recovery={recovery} formatValue={value => copyText(value.copy, value)} />
     <label className="field">카드뉴스 스타일<select aria-label="카드뉴스 스타일" value={readingProfile?.templateKey ?? (collectionPalette ? draft.copy.templateKey : "legacy")} disabled={busy || aiBusy || !!conflict} onChange={event => changeReadingStyle(event.target.value === "legacy" ? "builtin:classic" : event.target.value)}><option value="legacy">기존 8장 디자인</option>{collectionPalette && <option value={draft.copy.templateKey}>{collectionPalette.name}{collectionPalette.colorName ? ` · ${collectionPalette.colorName}` : ""} · 8장 컬러 적용</option>}{READING_CARD_PROFILES.map(profile => <option key={profile.id} value={profile.templateKey}>{profile.label}{profile.sourceStyleId ? "" : " · 기존"} · 사진 {profile.images.length - 1}장</option>)}</select><span className="hint">{collectionPalette ? "기본 세트에서 선택한 컬러를 8장 전용 배치에 적용합니다. 현재 원고의 8장 구성과 직접 지정한 배경색은 유지합니다." : "1080×1350 · 8장. 새 스타일의 미리보기와 문구 편집은 바로 사용할 수 있으며, Canva 자동 제작은 해당 마스터 검증·등록이 완료된 뒤 가능합니다."}</span></label>
     {structureNotice && <div className="notice small row between" role="status"><span>{structureNotice}</span><button className="btn sm ghost" onClick={() => setStructureNotice(null)}>안내 닫기</button></div>}
-    {saveError && <ErrorBox error={saveError} />}
     {conflict && <div className="notice warn stack" role="alert"><strong>다른 곳에서 저장한 버전이 있습니다. 현재 입력은 유지했습니다.</strong><details><summary>저장본과 현재 입력 비교</summary><div className="card-copy-compare"><pre>{conflict.copy.version === 2 ? copyText(conflict.copy, conflict) : "다른 형식으로 저장된 원고입니다."}</pre><pre>{copyText(draft.copy, draft)}</pre></div><button className="btn" disabled={busy} onClick={() => { if (conflict.copy.version === 2) { recovery.clear(); adopt(conflict as FamilyDialogueResponse); } else { recovery.clear(); qc.setQueryData(queryKey, conflict); } }}>서버 저장본 불러오기</button></details></div>}
     <nav className="family-page-strip" aria-label="카드 페이지 선택">{draft.copy.pages.map((value, index) => {
       const thumb = thumbs[value.id], current = thumb?.signature === signatureFor(draft, index);
@@ -559,13 +593,22 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
         </>}
       </div>
     </div>
+    {generation.unresolved && <div className="notice warn stack" role="status"><p>이전 {pendingScope} 요청의 결과가 아직 확인되지 않았습니다. 다른 자동 제안을 시작하지 않고 같은 요청의 결과만 확인합니다.</p><button type="button" className="btn" disabled={busy || aiBusy || !!conflict} onClick={() => { if (generation.unresolved) void generate(); }}>이전 요청 결과 확인</button></div>}
     {showAi && <details ref={aiPanel} className="family-ai"><summary>자동으로 문구 다듬기{aiBusy ? " · 작업 중" : aiError ? " · 확인할 오류 있음" : ""}</summary><div className="stack"><p className="hint">{selectedField ? `선택한 칸: ${familyFieldDescriptors(page).find(value => selectedField.startsWith(value.fieldPath))?.label ?? selectedField}` : `선택한 장: ${FAMILY_PAGE_LABELS[page.id]}`} · 잠근 칸은 자동으로 바꾸지 않습니다.</p><label className="field">고치고 싶은 점<textarea rows={3} maxLength={2000} value={instructions} onChange={event => setInstructions(event.target.value)} placeholder="예: 전망이라는 성격은 유지하고, 일상에서 비교할 수 있는 짧은 문장으로 다듬어 주세요." /></label><div className="row"><button className="btn primary" disabled={busy || aiBusy || !!conflict || !!selectedField && !!draft.fieldLocks[selectedField]} onClick={() => void generate()}>{generation.unresolved ? "이전 요청 결과 확인" : aiBusy ? "자동 제안 중…" : selectedField ? "선택한 칸 자동 제안" : "이 페이지 자동 제안"}</button>{selectedField && <button className="btn ghost" onClick={() => setSelectedField(null)}>페이지 전체 선택</button>}<button className="btn ghost" disabled={busy || aiBusy || !!conflict || generation.unresolved} onClick={() => void generate("all")}>8장 전체 다시 제안</button>{generation.unresolved && <button className="btn ghost" disabled={generation.cancelling} onClick={() => void generation.cancel()}>요청 중단</button>}</div><p className="hint">제안은 원고를 덮어쓰지 않습니다. 결과를 확인하고 직접 적용한 뒤 저장합니다.</p></div></details>}
     {aiError && <ErrorBox error={aiError} />}{generation.cancelError && <ErrorBox error={generation.cancelError} />}
     {!!reviewFlags.length && <div className="notice warn stack" role="status"><strong>현재 작업을 유지했습니다. 다음 내용을 확인해 주세요.</strong>{reviewFlags.map((flag, i) => <p key={`${flag.path}-${i}`}>{flag.message}</p>)}</div>}
     {proposal && <div className="card-copy-proposal notice stack"><strong>자동 제안 · 아직 원고에 적용하지 않았습니다</strong>{proposal.result.scope === "caption" ? <div className="card-copy-compare"><div><h4>현재 캡션 제안</h4><pre>{draft.captionPackage?.fullCaption ?? "없음"}</pre></div><div><h4>새 캡션 제안</h4><pre>{proposal.result.captionPackage?.fullCaption ?? "없음"}</pre></div></div> : proposal.result.scope === "review" ? <div>{proposal.result.editorialReview?.issues.map((issue, i) => <p key={`${issue.path}-${i}`}>{issue.problem}</p>)}{!proposal.result.editorialReview?.issues.length && <p>검수 결과에 등록된 수정 항목이 없습니다. 외부 게시 성공을 확인한 결과는 아닙니다.</p>}</div> : <div className="card-copy-compare"><div><h4>현재 원고</h4><pre>{copyText(draft.copy, draft)}</pre></div><div><h4>제안</h4><pre>{proposal.result.copy ? copyText(proposal.result.copy, { ...draft, ...proposal.result, artworkCredits: { ...draft.artworkCredits, ...proposal.result.artworkCredits } }) : "원고는 유지했습니다."}</pre></div></div>}{!canApply && <p role="alert">요청 뒤 입력 또는 저장 버전이 달라졌습니다. 현재 작업을 보호하기 위해 자동 적용하지 않습니다. 필요한 문구만 복사하거나 최신 원고로 다시 제안받아 주세요.</p>}<div className="row"><button className="btn primary" disabled={!canApply || busy} onClick={applyProposal}>제안을 편집기에 적용</button><button className="btn ghost" onClick={() => setProposal(null)}>현재 원고 유지</button></div></div>}
     <details className="family-parent-guide"><summary>부모를 위한 10분 대화 안내{draft.parentGuide ? "" : " · 아직 없음"}</summary>{draft.parentGuide ? <div className="stack"><ol className="family-timing">{draft.parentGuide.timing.map(step => <li key={step.step}><strong>{({ read: "함께 읽기", question: "중심 질문", compare: "관점·개념", close: "마무리" })[step.step]} · {step.minutes}분</strong><p>{step.instruction}</p></li>)}</ol><p><strong>꼭 나눌 질문</strong><br />{draft.parentGuide.coreQuestion}</p>{draft.parentGuide.optionalFollowup && <p><strong>선택 후속 질문</strong><br />{draft.parentGuide.optionalFollowup}</p>}{draft.parentGuide.optionalDeepening && <p><strong>더 생각하고 싶다면</strong><br />{draft.parentGuide.optionalDeepening}</p>}{([['whenUnsure','모르겠다고 할 때'],['whenDisagree','의견이 다를 때'],['whenMisunderstood','사실을 잘못 이해했을 때'],['whenTired','지쳤거나 원하지 않을 때'],['closingReflection','자녀의 말을 되돌려주는 마무리']] as const).map(([key, label]) => <p key={key}><strong>{label}</strong><br />{draft.parentGuide![key]}</p>)}</div> : <p className="hint">8장 자동 제작에서 부모 안내도 함께 제안합니다. 현재 카드 문구는 계속 직접 수정하고 저장할 수 있습니다.</p>}</details>
-    <details className="family-caption"><summary>게시물 설명(캡션) 제안 · {captionCurrent ? "저장된 카드와 일치" : caption ? "재검토 필요" : "아직 없음"}</summary><div className="stack"><p className="hint">카드 안의 문구와 별도입니다. 아래 제안을 게시 준비의 캡션 칸에 적용하고 그곳에서 저장하세요.</p>{caption && <><p className="small">카드 원고 #{caption.contentRevision} 기준 · 현재 원고 #{base.revisionId}</p><pre>{caption.fullCaption}</pre>{!captionCurrent && <p className="notice warn">현재 카드 버전 또는 중심 질문이 다릅니다. 최신 저장 원고로 캡션을 다시 제안받거나 직접 고쳐 대조 확인해 주세요.</p>}<button className="btn" disabled={!captionCurrent || !onApplyCaption || busy} onClick={() => onApplyCaption?.(caption.fullCaption)}>게시 준비의 캡션 칸에 적용</button></>}{showAi && <button className="btn" disabled={busy || aiBusy || !!conflict} onClick={() => void generate("caption")}>{aiBusy ? "자동 제안 중…" : "저장된 카드로 캡션 자동 제안"}</button>}{onEditCaption && <div className="stack"><p className="hint">AI 한도나 연결 오류로 자동 제안을 받을 수 없다면 게시 준비의 캡션을 직접 고치고 현재 8장과 대조해 확정할 수 있습니다.</p><button className="btn ghost" disabled={busy || aiBusy || !!conflict} onClick={onEditCaption}>게시 준비에서 캡션 직접 수정</button></div>}</div></details>
-    <details className="family-evidence"><summary>원문 근거·검수·생성 기록</summary><div className="stack"><p className="small">중심 질문: {draft.editorialPlan.coreQuestion}</p><p className="small">이 기사와 연결되는 이유: {draft.editorialPlan.connectionReason}</p><FamilyEvidenceDetails draft={draft} />{draft.editorialReview?.issues.map((issue, i) => <p key={`${issue.path}-${i}`} className={issue.severity === "blocking" ? "notice err" : "notice"}>{issue.problem}{issue.evidence && ` · ${issue.evidence}`}</p>)}{showAi && <button className="btn" disabled={busy || aiBusy || !!conflict} onClick={() => void generate("editorial_review")}>저장 원고 자동 검수 제안</button>}<dl className="family-runs">{draft.generationRuns.map(run => <div key={run.id}><dt>{run.stage} · {run.status}</dt><dd>{run.finishedAt ?? run.startedAt}{run.provenance ? ` · ${run.provenance.provider} · ${(run.provenance.actualModel ?? `${run.provenance.requestedModel} (응답 모델 미확인)`)}` : ""}</dd></div>)}</dl></div></details>
-    <div className="card-copy-savebar"><p className="hint">{dirty ? "문구·페이지 디자인에 미저장 변경이 있습니다." : `원고 버전 ${base.version}을 저장했습니다.`} {previewError ? "배치 오류를 고친 뒤 완성 이미지를 만들 수 있습니다." : "입력은 페이지를 옮겨도 유지됩니다."}</p><div className="row"><button className="btn primary" disabled={busy || invalid || !!conflict} onClick={() => { void saveNow().catch(() => {}); }}>{saving ? "저장 중…" : "문구·디자인 저장"}</button></div></div>
+    <details className="family-caption"><summary>게시물 설명(캡션) 제안 · {captionCurrent ? "저장된 카드와 일치" : caption ? "재검토 필요" : "아직 없음"}</summary><div className="stack"><p className="hint">카드 안의 문구와 별도입니다. 아래 제안을 게시 준비의 캡션 칸에 적용하고 그곳에서 저장하세요.</p>{caption && <><p className="small">카드 원고 #{caption.contentRevision} 기준 · 현재 원고 #{base.revisionId}</p><pre>{caption.fullCaption}</pre>{!captionCurrent && <p className="notice warn">현재 카드 버전 또는 중심 질문이 다릅니다. 최신 저장 원고로 캡션을 다시 제안받거나 직접 고쳐 대조 확인해 주세요.</p>}<button className="btn" disabled={!captionCurrent || !onApplyCaption || busy} onClick={() => onApplyCaption?.(caption.fullCaption)}>게시 준비의 캡션 칸에 적용</button></>}{showAi && <button className="btn" disabled={busy || aiBusy || !!conflict || generation.unresolved} onClick={() => void generate("caption")}>{aiBusy ? "자동 제안 중…" : "저장된 카드로 캡션 자동 제안"}</button>}{onEditCaption && <div className="stack"><p className="hint">AI 한도나 연결 오류로 자동 제안을 받을 수 없다면 게시 준비의 캡션을 직접 고치고 현재 8장과 대조해 확정할 수 있습니다.</p><button className="btn ghost" disabled={busy || aiBusy || !!conflict} onClick={onEditCaption}>게시 준비에서 캡션 직접 수정</button></div>}</div></details>
+    <details className="family-evidence"><summary>원문 근거·검수·생성 기록</summary><div className="stack"><p className="small">중심 질문: {draft.editorialPlan.coreQuestion}</p><p className="small">이 기사와 연결되는 이유: {draft.editorialPlan.connectionReason}</p><FamilyEvidenceDetails draft={draft} />{draft.editorialReview?.issues.map((issue, i) => <p key={`${issue.path}-${i}`} className={issue.severity === "blocking" ? "notice err" : "notice"}>{issue.problem}{issue.evidence && ` · ${issue.evidence}`}</p>)}{showAi && <button className="btn" disabled={busy || aiBusy || !!conflict || generation.unresolved} onClick={() => void generate("editorial_review")}>저장 원고 자동 검수 제안</button>}<dl className="family-runs">{runs.map(run => <FamilyRunRecord key={run.id} run={run} />)}</dl></div></details>
+    <div className="card-copy-savebar">
+      <p className="hint">{dirty ? "문구·페이지 디자인에 미저장 변경이 있습니다." : "원고 버전 " + base.version + "을 저장했습니다."} {previewError ? "배치 오류를 고친 뒤 완성 이미지를 만들 수 있습니다." : "입력은 페이지를 옮겨도 유지됩니다."}</p>
+      {!!invalidFields.length && <div className="notice warn stack" role="alert"><strong>저장 전에 다음 칸을 확인해 주세요. 입력한 내용은 유지했습니다.</strong>{invalidFields.map((issue, index) => issue.index === null ? <p key={index}>{issue.label} · {issue.message}</p> : <button type="button" className="btn sm ghost" key={index} onClick={() => setSelected(issue.index!)}>{issue.label} · {issue.message}</button>)}</div>}
+      {recovery.pending && <div className="notice warn small">기기에 보관한 입력의 복구 여부를 먼저 선택해 주세요.</div>}
+      {(formatConflict || conflict) && <div className="notice warn small">다른 곳에서 저장한 원고와 현재 입력을 먼저 비교해 주세요. 현재 입력은 유지했습니다.</div>}
+      {saveError && <ErrorBox error={saveError} />}
+      {saveFeedback && !saveError && <div className={`notice ${dirty ? "warn" : "ok"} small`} role="status">{saveFeedback}{dirty && " 이후 입력한 변경은 아직 저장하지 않았습니다."}</div>}
+      <div className="row"><button type="button" className="btn primary" disabled={busy || invalid || !!conflict} onClick={() => void confirmSave()}>{saving ? "저장 중…" : "문구·디자인 저장"}</button></div>
+    </div>
   </section>;
 }

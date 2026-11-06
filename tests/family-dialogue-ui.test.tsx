@@ -97,6 +97,98 @@ async function connectEvidence(path: string, evidenceId: string) {
 }
 
 describe("family dialogue v2 editor", () => {
+  it("acknowledges unchanged saves beside the button without creating duplicate revisions", async () => {
+    await render(); await click("문구·디자인 저장");
+    expect(host.querySelector('.card-copy-savebar [role="status"]')?.textContent).toContain("변경 내용이 없어 이미 저장된 버전 3");
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(0);
+    await input("fields.headline", "실제로 고친 제목");
+    expect(host.querySelector('.card-copy-savebar [role="status"]')).toBeNull();
+    await click("문구·디자인 저장");
+    expect(host.querySelector('.card-copy-savebar [role="status"]')?.textContent).toContain("저장 완료 · 버전 4");
+    await click("문구·디자인 저장");
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(1);
+  });
+
+  it("locates invalid fields on another page beside save while preserving their incomplete input", async () => {
+    await render(); await selectPage("7페이지 · 작은 활동"); await input("fields.homeActivity.action", "");
+    await selectPage("1페이지 · 표지");
+    expect(button("문구·디자인 저장").disabled).toBe(true);
+    const issue = [...host.querySelectorAll<HTMLButtonElement>('.card-copy-savebar button')].find(node => node.textContent?.includes("7페이지 작은 활동"));
+    expect(issue?.textContent).toContain("집에서 할 일");
+    await act(async () => issue!.click()); await settle();
+    expect(field("fields.homeActivity.action").value).toBe("");
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method === "PATCH")).toHaveLength(0);
+    await input("fields.homeActivity.action", "직접 확인한 활동을 적어요."); await click("문구·디자인 저장");
+    expect(saved.copy.pages[6]).toMatchObject({ fields: { homeActivity: { action: "직접 확인한 활동을 적어요." } } });
+  });
+
+  it("puts a rejected save beside its button and keeps edits available for correction", async () => {
+    await render(); await input("fields.headline", "거부되어도 남는 제목");
+    patch = async () => { throw new ApiError(422, "현재 사실 문구의 근거를 다시 연결해 주세요.", {}); };
+    await click("문구·디자인 저장");
+    expect(host.querySelector('.card-copy-savebar [role="alert"]')?.textContent).toContain("근거를 다시 연결");
+    expect(field("fields.headline").value).toBe("거부되어도 남는 제목");
+    expect(host.querySelector('.card-copy-savebar [role="status"]')).toBeNull();
+    patch = null; await click("문구·디자인 저장");
+    expect(saved.copy.pages[0]).toMatchObject({ fields: { headline: "거부되어도 남는 제목" } });
+  });
+
+  it.each(["caption", "review"] as const)("does not present a budget-blocked %s as a new successful proposal", async scope => {
+    const initial = fresh(); initial.editorialReview = { reviewScope: ["text"], checks: [], issues: [], minimumPatches: [], mustFixBeforeUse: false }; saved = initial;
+    generate = async body => ({ ...structuredClone(saved), status: "needs_review", scope, baseRevision: 30, jobId: 99, reviewFlags: [{ path: scope, code: "budget", message: "이번 실행의 LLM 호출 한도 도달" }], generationRuns: [{ id: "blocked-" + scope, stage: scope === "review" ? "editorial_review" : "caption", status: "failed", baseRevision: 30, inputHash: "fixture", startedAt: "2026-11-06T07:50:27.135Z", finishedAt: "2026-11-06T07:50:27.135Z", error: "이번 실행의 LLM 호출 한도 도달", provenance: { provider: "openai", requestedModel: "fixture-copy", actualModel: null, requestId: null, usageStatus: "known", inputTokens: 0, outputTokens: 0, status: "not_started", role: scope === "review" ? "editorial_review" : "caption", settingsVersion: 1, settingsSchemaVersion: 2, promptVersion: "fixture", schemaVersion: "fixture", sourceSnapshotId: "fixture-source", contentRevision: 30, inheritedFrom: [] } }] });
+    await render(); await click(scope === "review" ? "저장 원고 자동 검수 제안" : "저장된 카드로 캡션 자동 제안");
+    expect(host.querySelector('.card-copy-proposal')).toBeNull();
+    expect(host.textContent).not.toContain("검수 결과에 등록된 수정 항목이 없습니다");
+    expect(host.querySelector('.family-runs')?.textContent).toContain("외부 AI 호출 안 함");
+    expect(host.querySelector('.family-runs')?.textContent).toContain("이번 실행의 LLM 호출 한도 도달");
+    expect(host.querySelector('.family-runs')?.textContent).not.toContain("응답 모델 미확인");
+    await input("fields.headline", "한도와 무관하게 직접 고친 제목"); await click("문구·디자인 저장");
+    expect(saved.copy.pages[0]).toMatchObject({ fields: { headline: "한도와 무관하게 직접 고친 제목" } });
+    expect(mocks.api.mock.calls.filter(([request]) => request.endsWith('/generate'))).toHaveLength(1);
+  });
+
+  it("does not relabel a retained old caption when final caption composition fails", async () => {
+    generate = async () => ({ ...structuredClone(saved), status: "needs_review", scope: "caption", baseRevision: 30, jobId: 101,
+      reviewFlags: [{ path: "captionPackage", code: "caption_length", message: "출처를 포함한 캡션이 길어 확정하지 못했습니다." }],
+      generationRuns: [{ id: "caption-compose-failed", stage: "caption", status: "ready", baseRevision: 30, inputHash: "fixture", startedAt: "2026-11-06T07:50:27.135Z", finishedAt: "2026-11-06T07:50:27.135Z", error: null, provenance: null }] });
+    await render(); await click("저장된 카드로 캡션 자동 제안");
+    expect(host.querySelector('.card-copy-proposal')).toBeNull();
+    expect(host.textContent).toContain("길어 확정하지 못했습니다");
+    expect(host.textContent).toContain((saved as FamilyDialogueResponse).captionPackage!.fullCaption);
+  });
+
+  it.each(["caption", "review"] as const)("does not reuse an old ready result when %s stops before recording a new stage", async scope => {
+    const initial = fresh(); initial.editorialReview = { reviewScope: ["text"], checks: [], issues: [], minimumPatches: [], mustFixBeforeUse: false }; saved = initial;
+    initial.generationRuns = [{ id: "old-ready", stage: scope === "caption" ? "caption" : "editorial_review", status: "ready", baseRevision: 30, inputHash: "old", startedAt: "2026-11-06T06:00:00Z", finishedAt: "2026-11-06T06:00:00Z", error: null, provenance: null }];
+    generate = async () => ({ ...structuredClone(saved), status: "needs_review", scope, baseRevision: 30, reviewFlags: [{ path: scope, code: "input_budget", message: "입력 자료가 이번 실행의 허용 범위를 넘었습니다." }] });
+    await render(); await click(scope === "caption" ? "저장된 카드로 캡션 자동 제안" : "저장 원고 자동 검수 제안");
+    expect(host.querySelector('.card-copy-proposal')).toBeNull();
+    expect(host.textContent).toContain("입력 자료가 이번 실행의 허용 범위를 넘었습니다");
+    expect(host.textContent).not.toContain("검수 결과에 등록된 수정 항목이 없습니다");
+  });
+
+  it("keeps a completed review with real revision issues available as a proposal", async () => {
+    generate = async () => ({ ...structuredClone(saved), status: "needs_review", scope: "review", baseRevision: 30, jobId: 100,
+      reviewFlags: [{ path: "editorialReview", code: "review_changes_required", message: "수정할 문구를 확인해 주세요." }],
+      editorialReview: { reviewScope: ["text"], checks: [], issues: [{ path: "cover", severity: "revision", problem: "표지의 전망 표현을 유지해 주세요.", evidence: "제공된 발언", suggestedReplacement: null }], minimumPatches: [], mustFixBeforeUse: true },
+      generationRuns: [{ id: "completed-review", stage: "editorial_review", status: "ready", baseRevision: 30, inputHash: "fixture", startedAt: "2026-11-06T07:50:27.135Z", finishedAt: "2026-11-06T07:50:27.135Z", error: null, provenance: null }] });
+    await render(); await click("저장 원고 자동 검수 제안");
+    expect(host.querySelector('.card-copy-proposal')?.textContent).toContain("표지의 전망 표현을 유지해 주세요");
+    expect(button("제안을 편집기에 적용").disabled).toBe(false);
+  });
+
+  it("labels the original unresolved scope and rechecks its ID instead of starting a different request", async () => {
+    const requestId = crypto.randomUUID();
+    sessionStorage.setItem("spacepenguin.generation:3:28:card-copy", JSON.stringify({ path: path + "/generate", requestId, body: { scope: "caption", version: 3, baseRevision: 30 }, status: "uncertain" }));
+    generate = async body => { expect(body.scope).toBe("caption"); expect(body.requestId).toBe(requestId); return { ...structuredClone(saved), status: "ready", scope: "caption", baseRevision: 30, reviewFlags: [] }; };
+    await render();
+    expect(host.textContent).toContain("이전 캡션 요청의 결과가 아직 확인되지 않았습니다");
+    expect(button("저장 원고 자동 검수 제안").disabled).toBe(true);
+    expect(button("저장된 카드로 캡션 자동 제안").disabled).toBe(true);
+    await click("이전 요청 결과 확인");
+    expect(mocks.api.mock.calls.filter(([request]) => request.endsWith('/generate'))).toHaveLength(1);
+  });
+
   it("saves and reopens character revisions, preserves the selected profile across styles, and restores editable ending text",async()=>{
     const choose=async(label:string,value:string)=>{const picker=host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;expect(picker).not.toBeNull();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(picker,value);picker.dispatchEvent(new Event('change',{bubbles:true}));});await settle();};
     await render();await selectPage('8페이지 · 닫는 표지');await input('fields.cta','다음 대화를 위해 저장해 주세요.');
