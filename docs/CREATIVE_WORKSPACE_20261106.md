@@ -107,3 +107,13 @@ Final visual coverage also visits the default asset template tab at every viewpo
 ## Registered brand originals connected
 
 Final asset review found preserved HighScoop and ALLligodang originals in the existing hashed profile registry that were not shown in the new brand guide. Channel creative profiles now optionally select a registered logo ID, in addition to an HTTPS URL. Only the compatibility boundary supplies initial IDs for the existing brands; new channels remain data-configured. Selection persists independently with the channel version and does not rewrite original files or old content. The existing ALL white-logo registry entry specifies a dark proof background; no colour filter or raster edit is applied. Shared previews keep the selection on image failure and show a recovery message. A new authenticated read route serves only hash-verified registry entries with private caching. Tests require anonymous 401, arbitrary-path 404, exact original bytes and real PostgreSQL round-trip/isolation. Browser captures use the same three original PNGs and assert all three remain displayed. No asset was made public or deleted. These changes require a fresh final CI outcome.
+
+
+## Final copy and operational record polish
+
+The channel default-design control now resolves persisted IDs through the existing design registry to readable names. The embedded asset gallery owns one page heading; standalone /design keeps its heading and existing functions. Its all-channel guidance describes browsing and per-channel defaults without an empty-result illustration. BRANDING.md now records the authorized old-service deletion and existing production service, keeps the GitHub repository name, and warns that the legacy root Blueprint is not the live configuration. Do not reapply it to recreate the deleted service. These are the last planned changes before final combined verification; add further changes only for a reproduced failure.
+
+
+## Concurrent PR checkpoint preserved
+
+Before updating the feature ref, GitHub returned an uncertain mutation error. A read of the actual ref found d9f2ce00ff3678b0bb8fa64109a4aa1f521f64f4, a concurrent child of 3e7d02b that adds per-logo loaded-source, scroll-visible screenshots and the ALL dark-background assertion. Those QA changes are compatible and preserved verbatim. The four final copy/document files are applied to that current tree, guarded by its exact SHA. The abandoned c11532c commit object was never used to overwrite the branch. Recheck the final ref and all required checks before delivery.
