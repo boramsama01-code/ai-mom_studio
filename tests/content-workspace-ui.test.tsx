@@ -28,6 +28,9 @@ let readError: Error | null, sourceLoad: () => Promise<{ changed: boolean }>;
 const itemPath = "/channels/2/items/9";
 const itemKey = ["ch", 2, "item", 9];
 const copy = { version: 1, templateKey: "builtin:classic", cover: { title: "직접 편집할 표지", subtitle: "확인한 부제" }, pages: Array.from({ length: 4 }, (_, i) => ({ id: `body-${i + 1}`, title: `본문 ${i + 1}`, subtitle: "", body: `카드별 원고 ${i + 1}` })) };
+function reducedMotion(matches: boolean) {
+  vi.stubGlobal("matchMedia", vi.fn((media: string) => ({ matches, media, onchange: null, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: vi.fn(() => true) })));
+}
 function source(fetchStatus = "not_fetched", fetchedText: string | null = null, isSample = false) {
   return { id: 70, kind: "rss_direct", title: "선택한 원문", originalUrl: "https://example.com/article", meta: {}, fetchStatus, fetchedText, snippet: "목록에서 받은 짧은 요약", attachments: [], isSample, publishedAt: "2026-11-01T00:00:00Z", publishedPrecision: "day", publishedRaw: null, lastFetchedAt: null };
 }
@@ -45,6 +48,7 @@ beforeEach(() => {
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:workspace-preview") });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
   HTMLElement.prototype.scrollIntoView = vi.fn();
+  reducedMotion(false);
   mocks.blob.mockResolvedValue(new Blob(["fixture-jpeg"], { type: "image/jpeg" }));
   mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: any }) => {
     if (path === "/status") return { integrations: { aiProvider: "gemini", gemini: true, openai: false, anthropic: false, flags: { dryRun: false, autoPublish: true } }, workerConnected: true, globalStop: false };
@@ -64,10 +68,11 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
-afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); });
+afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); vi.unstubAllGlobals(); });
 async function settle() { for (let i = 0; i < 3; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); }); }
 async function render(element: ReactNode = createElement(ItemDetailPage, { cid: 2, id: 9 })) { await act(async () => root.render(createElement(QueryClientProvider, { client }, element))); await settle(); }
 function button(text: string) { const node = [...host.querySelectorAll("button")].find(node => node.textContent === text); if (!node) throw new Error(`Missing button: ${text}`); return node; }
+function workspaceNav(text: string) { const node = [...host.querySelectorAll<HTMLButtonElement>(".content-workspace-nav button")].find(node => node.textContent === text); if (!node) throw new Error(`Missing workspace navigation: ${text}`); return node; }
 async function click(text: string) { await act(async () => button(text).click()); await settle(); }
 async function input(node: HTMLTextAreaElement | HTMLInputElement, value: string) {
   await act(async () => {
@@ -168,6 +173,79 @@ describe("단일 콘텐츠 작업 공간", () => {
       expect(title.value).toBe("이동해도 남는 입력");
     }
     expect(mocks.navigate).not.toHaveBeenCalled(); expect(mocks.guard.confirmLeave).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
+  });
+
+  it("동작 줄이기에서는 커밋된 서랍으로 바로 이동하며 같은 앵커 재선택·재조회 뒤에도 미저장 원고를 유지한다", async () => {
+    reducedMotion(true); await render();
+    const editor = host.querySelector(".card-copy-editor"), title = host.querySelector<HTMLTextAreaElement>('.card-copy-editor textarea[id$="-title"]')!;
+    await input(title, "화면을 옮겨도 보존할 미저장 원고");
+    const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView); scroll.mockClear();
+    for (let request = 1; request <= 2; request++) {
+      await act(async () => workspaceNav("게시 준비").click()); await settle();
+      const drawer = host.querySelector<HTMLDetailsElement>("#publish-options")!;
+      expect(drawer.open).toBe(true); expect(document.activeElement).toBe(drawer);
+      expect(scroll).toHaveBeenCalledTimes(request);
+      expect(scroll).toHaveBeenLastCalledWith({ behavior: "auto", block: "start" });
+    }
+    await refresh();
+    expect(scroll).toHaveBeenCalledTimes(2);
+    expect(host.querySelector(".card-copy-editor")).toBe(editor); expect(title.value).toBe("화면을 옮겨도 보존할 미저장 원고");
+    expect(writes()).toEqual([]); expect(mocks.guard.confirmLeave).not.toHaveBeenCalled();
+  });
+
+  it("일반 동작에서는 묶인 이동 요청 중 마지막 서랍에 한 번만 부드럽게 이동한다", async () => {
+    await render(createElement(StrictMode, null, createElement(ItemDetailPage, { cid: 2, id: 9 })));
+    const targets: HTMLElement[] = [];
+    const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    scroll.mockImplementation(function (this: HTMLElement) { targets.push(this); }); scroll.mockClear();
+    await act(async () => { workspaceNav("자료·초안").click(); workspaceNav("게시 준비").click(); workspaceNav("전송 상태").click(); }); await settle();
+    const delivery = host.querySelector<HTMLElement>("#delivery-panel")!;
+    expect(targets).toEqual([delivery]); expect(scroll).toHaveBeenCalledOnce();
+    expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect((delivery.closest("details") as HTMLDetailsElement).open).toBe(true); expect(document.activeElement).toBe(delivery);
+    expect(writes()).toEqual([]);
+  });
+
+  it("전송 딥링크는 느린 조회 뒤 실제 패널이 커밋되면 한 번 이동하고 재조회는 초점을 빼앗지 않는다", async () => {
+    history.replaceState(null, "", "/items/2/9?tab=delivery");
+    const original = mocks.api.getMockImplementation()!;
+    let release!: () => void, waiting = true;
+    mocks.api.mockImplementation((path: string, options?: { method?: string; body?: any }) => path === itemPath && waiting
+      ? new Promise(resolve => { release = () => { waiting = false; resolve(structuredClone(detail)); }; }) : original(path, options));
+    await render();
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 120)); });
+    const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+    expect(host.querySelector("#delivery-panel")).toBeNull(); expect(scroll).not.toHaveBeenCalled();
+    await act(async () => release()); await settle();
+    const delivery = host.querySelector<HTMLElement>("#delivery-panel")!;
+    expect((delivery.closest("details") as HTMLDetailsElement).open).toBe(true); expect(document.activeElement).toBe(delivery);
+    expect(scroll).toHaveBeenCalledOnce(); expect(scroll).toHaveBeenCalledWith({ behavior: "auto", block: "start" });
+    const nav = workspaceNav("카드 편집"); nav.focus(); await refresh();
+    expect(scroll).toHaveBeenCalledOnce(); expect(document.activeElement).toBe(nav); expect(writes()).toEqual([]);
+  });
+
+  it("조회 전에 바뀐 딥링크의 이전 전송 이동은 새 주소의 초점과 서랍을 바꾸지 않는다", async () => {
+    history.replaceState(null, "", "/items/2/9?tab=delivery");
+    const original = mocks.api.getMockImplementation()!;
+    let release!: () => void, waiting = true;
+    mocks.api.mockImplementation((path: string, options?: { method?: string; body?: any }) => path === itemPath && waiting
+      ? new Promise(resolve => { release = () => { waiting = false; resolve(structuredClone(detail)); }; }) : original(path, options));
+    await render(); history.replaceState(null, "", "/items/2/9?tab=source");
+    await render(); await act(async () => release()); await settle();
+    expect((host.querySelector("#delivery-panel")!.closest("details") as HTMLDetailsElement).open).toBe(false);
+    expect((host.querySelector("#source-panel")!.closest("details") as HTMLDetailsElement).open).toBe(true);
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled(); expect(writes()).toEqual([]);
+  });
+
+  it("떠난 작업의 이동 요청은 같은 ID를 가진 다음 화면으로 늦게 이동하거나 초점을 빼앗지 않는다", async () => {
+    await render();
+    await act(async () => {
+      workspaceNav("전송 상태").click();
+      root.render(createElement("div", null, createElement("button", { id: "next-screen-focus" }, "다음 화면"), createElement("section", { id: "delivery-panel", tabIndex: -1 }, "다른 화면의 전송 패널")));
+    });
+    const nextFocus = host.querySelector<HTMLButtonElement>("#next-screen-focus")!; nextFocus.focus();
+    const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView); scroll.mockClear(); await settle();
+    expect(scroll).not.toHaveBeenCalled(); expect(document.activeElement).toBe(nextFocus); expect(writes()).toEqual([]);
   });
 
   it("아직 읽지 않은 선택 원문만 한 번 불러오며 재렌더·재조회가 자동 재시도를 만들지 않는다", async () => {

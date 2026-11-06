@@ -10,7 +10,7 @@ import { aiProviders, aiProviderLabels, type AiProvider } from "@shared/aiProvid
 import { channelAiRoleLabels, channelAiRoles, legacyChannelAiSettings, type ChannelAiRuntime } from "@shared/channelAi";
 import { articleAnalysisSchema, aiWorkflowSchema } from "@shared/articleAnalysis";
 import { AiUsageGuide } from "../AiUsageGuide";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../toast";
 import { DiscoveryNote } from "../discovery";
 import { TemplatePicker, useTemplates } from "./Design";
@@ -74,6 +74,7 @@ function incompleteCardCopy(d: Detail) {
 
 const SRC_KIND: Record<string, string> = { naver_web: "네이버 웹문서", opportunity_listing: "공모전·활동 사이트", naver_news: "네이버 뉴스(언론 기사)", naver_blog: "네이버 블로그", google_news_rss: "Google 뉴스 RSS", rss_direct: "언론사 직접 RSS", official: "공식 게시물", manual: "직접 추가 자료", manual_text: "직접 붙여넣은 본문 · 내용 확인 필요" };
 type ItemTab = "source" | "edit" | "publish" | "delivery" | "history";
+type ItemNavigationIntent = { scope: string; anchor: string; behavior: "auto" | "smooth" };
 const entryTab = (search: string): ItemTab => {
   const value = new URLSearchParams(search).get("tab");
   return value && ["source", "edit", "publish", "delivery", "history"].includes(value) ? value as ItemTab : "publish";
@@ -87,6 +88,7 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   const imageGeneration = useGenerationRequest(cid, id, "card-render");
   const sourceChannel = allChannels.find(ch => ch.id === cid);
   const search = useSearch();
+  const navigationScope = `${requestedCid}:${id}:${search}`;
   const entryWorkMode: WorkMode = new URLSearchParams(search).get("mode") === "manual" ? "manual" : "auto";
   const history = historyEntry(search);
   const [sourceOpen, setSourceOpen] = useState(false);
@@ -96,6 +98,8 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   const [sourceDraftDirty, setSourceDraftDirty] = useState(false);
   const [sourceTextDirty, setSourceTextDirty] = useState(false);
   const [workMode, setWorkMode] = useState<WorkMode>(entryWorkMode);
+  const [navigationIntent, setNavigationIntent] = useState<ItemNavigationIntent | null>(null);
+  const handledNavigation = useRef<ItemNavigationIntent | null>(null);
   useEffect(() => { if (sourceDraftDirty || sourceTextDirty) setSourceOpen(true); }, [sourceDraftDirty, sourceTextDirty]);
   const [, navigate] = useLocation();
   useEffect(() => {
@@ -103,8 +107,24 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
     setSourceOpen(target === "source" || target === "edit");
     setDeliveryOpen(target === "delivery");
     setHistoryOpen(target === "history");
-    if (target === "delivery") window.setTimeout(() => document.getElementById("delivery-panel")?.scrollIntoView({ block: "start" }), 100);
+    setNavigationIntent(target === "delivery" ? { scope: navigationScope, anchor: "delivery-panel", behavior: "auto" } : null);
   }, [requestedCid, id, search]);
+  useLayoutEffect(() => {
+    const intent = navigationIntent;
+    if (!intent || handledNavigation.current === intent) return;
+    if (intent.scope !== navigationScope) { handledNavigation.current = intent; return; }
+    // A delivery deep link can arrive before its query. Consume it only after
+    // this route's editor is committed, without leaving a delayed focus timer.
+    if (q.isLoading || !q.data || q.data.item.id !== id) return;
+    handledNavigation.current = intent;
+    const node = document.getElementById(intent.anchor);
+    if (!node) return;
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
+    if (node instanceof HTMLDetailsElement) node.open = true;
+    const behavior = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : intent.behavior;
+    node.scrollIntoView({ behavior, block: "start" });
+    node.focus({ preventScroll: true });
+  }, [navigationIntent, navigationScope, q.isLoading, q.data?.item.id]);
   useEffect(() => { setTemplateChoice(null); }, [requestedCid, id]);
   // Canonical Studio entries share this editor. Respect their manual URL, but
   // retain an explicit mode choice across refetches and unrelated drawer links.
@@ -130,12 +150,9 @@ export function ItemDetailPage({ cid: requestedCid, id, fromStudio = false }: { 
   const go = (t: ItemTab, anchor: string) => {
     if (t === "source" || t === "edit") setSourceOpen(true);
     if (t === "delivery") setDeliveryOpen(true);
-    window.setTimeout(() => {
-      const node = document.getElementById(anchor);
-      for (let parent = node?.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true;
-      if (node instanceof HTMLDetailsElement) node.open = true;
-      node?.scrollIntoView({ behavior: "smooth", block: "start" }); node?.focus({ preventScroll: true });
-    }, 30);
+    // A fresh object also handles a second request for the same anchor. React
+    // batches competing requests so only the latest committed intent is used.
+    setNavigationIntent({ scope: navigationScope, anchor, behavior: "smooth" });
   };
   return (
     <div className="content-workspace">
@@ -943,7 +960,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
             </div></details>
           )}
 
-          <details className="content-drawer publish-drawer" id="publish-options" open={publishOpen || !!captionDraft.recovery.pending} onToggle={event => {
+          <details className="content-drawer publish-drawer" id="publish-options" tabIndex={-1} open={publishOpen || !!captionDraft.recovery.pending} onToggle={event => {
             if (event.target !== event.currentTarget) return;
             if (captionDraft.recovery.pending && !event.currentTarget.open) event.currentTarget.open = true;
             setPublishOpen(event.currentTarget.open);

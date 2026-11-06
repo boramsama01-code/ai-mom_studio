@@ -177,6 +177,58 @@ function fixture() {
 const field = (page, suffix) => page.locator(`.card-copy-editor textarea[id$="-${suffix}"]`);
 const nav = (page, name) => page.getByRole("navigation", { name: "현재 콘텐츠 작업" }).getByRole("button", { name, exact: true });
 const mutations = state => state.writes.filter(write => !write.path.endsWith("/preview"));
+const pageApiLifecycles = new WeakMap();
+function createApiLifecycle(diagnostics) {
+  const requests = new Map(), producers = new Map(), waiters = new Set(); let sequence = 0;
+  const describe = request => ({ id: ++sequence, method: request.method(), path: new URL(request.url()).pathname });
+  const snapshot = () => ({ requests: [...requests.values()], producers: [...producers.values()] });
+  const changed = () => { for (const notify of [...waiters]) notify(); };
+  return {
+    startRequest(request) { const detail = describe(request); requests.set(request, detail); diagnostics.push({ kind: "api-request-start", at: Date.now(), ...detail }); changed(); },
+    finishRequest(request, error = null) {
+      const detail = requests.get(request); if (!detail) return;
+      requests.delete(request); diagnostics.push({ kind: "api-request-finished", at: Date.now(), ...detail, error }); changed();
+    },
+    startProducer(request) { const detail = requests.get(request) ?? describe(request); producers.set(request, detail); diagnostics.push({ kind: "api-producer-start", at: Date.now(), ...detail }); changed(); },
+    finishProducer(request) { const detail = producers.get(request); if (!detail) return; producers.delete(request); diagnostics.push({ kind: "api-producer-finished", at: Date.now(), ...detail }); changed(); },
+    snapshot,
+    empty: () => requests.size === 0 && producers.size === 0,
+    waitForEmpty(timeout) {
+      if (!requests.size && !producers.size) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const finish = () => { if (requests.size || producers.size) return; clearTimeout(timer); waiters.delete(finish); resolve(); };
+        const timer = setTimeout(() => { waiters.delete(finish); reject(new Error(`Local API requests did not settle before document replacement: ${JSON.stringify(snapshot())}`)); }, timeout);
+        waiters.add(finish); finish();
+      });
+    },
+    recordBoundary(label) { diagnostics.push({ kind: "api-document-boundary-settled", at: Date.now(), label, ...snapshot() }); },
+  };
+}
+const settlementRemaining = (deadline, label) => { const value = deadline - Date.now(); assert(value > 0, `${label}: local API settlement deadline`); return value; };
+async function settleLocalApiRequests(page, label, deadline = Date.now() + 20_000) {
+  const lifecycle = pageApiLifecycles.get(page); assert(lifecycle, "every controlled page must track local API completion");
+  // POST response headers are not the end of React Query's onSettled work.
+  // Observe the real follow-up transport and fixture producer completion.
+  await page.waitForLoadState("networkidle", { timeout: settlementRemaining(deadline, label) });
+  await lifecycle.waitForEmpty(settlementRemaining(deadline, label));
+  assert(lifecycle.empty(), `${label}: no local API transport or fixture producer may cross this document replacement`);
+  lifecycle.recordBoundary(label);
+}
+async function settleWorkspaceDocument(page, label) {
+  const deadline = Date.now() + 20_000;
+  await previewReady(page, deadline);
+  await settleLocalApiRequests(page, label, deadline);
+  // A completed response body can still be awaiting its visible query update.
+  await page.waitForFunction(() => {
+    const refresh = document.querySelector("#delivery-panel > .row > button");
+    return refresh instanceof HTMLButtonElement && !refresh.disabled && refresh.textContent === "상태 새로고침";
+  }, undefined, { timeout: settlementRemaining(deadline, label) });
+  await previewReady(page, deadline);
+  const lifecycle = pageApiLifecycles.get(page);
+  await lifecycle.waitForEmpty(settlementRemaining(deadline, label));
+  assert(lifecycle.empty(), `${label}: the current preview and visible refresh must leave no API work behind`);
+  lifecycle.recordBoundary(`${label}: current preview and refresh`);
+}
 async function waitValue(page, suffix, value) {
   await page.waitForFunction(({ suffix, value }) => document.querySelector(`.card-copy-editor textarea[id$="-${suffix}"]`)?.value === value, { suffix, value });
 }
@@ -185,21 +237,22 @@ async function ready(page) {
   assert.equal(await page.locator(".content-workspace .card-copy-editor").count(), 1);
   assert.equal(await page.locator('.content-workspace [role="tablist"]').count(), 0);
 }
-async function previewReady(page) {
-  await page.locator('.card-copy-preview:not(.is-stale)[aria-busy="false"] img').waitFor();
+async function previewReady(page, deadline) {
+  const options = () => deadline === undefined ? {} : { timeout: settlementRemaining(deadline, "current workspace preview") };
+  await page.locator('.card-copy-preview:not(.is-stale)[aria-busy="false"] img').waitFor(options());
   // Sample the current DOM: React may revoke an older blob while replacing it.
   // A retained decode() promise can reject even when the latest image is ready.
   await page.waitForFunction(() => {
     const image = document.querySelector('.card-copy-preview:not(.is-stale)[aria-busy="false"] img');
     return image instanceof HTMLImageElement && image.complete && image.naturalWidth >= 200 && image.naturalHeight >= 250;
-  });
+  }, undefined, options());
 }
 async function replaceWorkspaceDocument(page, replace) {
   // This scenario verifies persisted drafts, not a preview request racing a
   // provisional document replacement. WebKit can misreport that cancelled
   // same-origin request as an access-control pageerror (Playwright #43120).
-  // Finish the latest read-only preview first; keep every pageerror fatal.
-  await previewReady(page);
+  // Finish preview and mutation-triggered read refreshes; every error stays fatal.
+  await settleWorkspaceDocument(page, "replace workspace document");
   await replace();
   await ready(page);
 }
@@ -254,7 +307,7 @@ async function selectThroughLabel(page, checkbox, checked, resultCheckbox = chec
 
 async function verifyListReturnContext(page, width, state) {
   const before = mutations(state).length;
-  await previewReady(page);
+  await settleWorkspaceDocument(page, "workspace to Inbox");
   await page.goto(origin + "/inbox?collectedOn=all&workMode=manual");
   const search = page.getByRole("textbox", { name: "검색", exact: true });
   await search.fill("가족 자료");
@@ -283,6 +336,7 @@ async function verifyListReturnContext(page, width, state) {
   await noOverflow(page, "inbox return " + width);
   await page.screenshot({ path: `${outputDir}/inbox-return-${width}.png` });
 
+  await settleLocalApiRequests(page, "Inbox to publication list");
   await page.goto(origin + "/publish");
   await page.getByRole("tab", { name: "보관함", exact: true }).click();
   await page.getByRole("combobox", { name: "전송 상태 필터", exact: true }).selectOption("failed");
@@ -333,6 +387,13 @@ try {
     const fixtureData = fixture(), { state } = fixtureData;
     const errors = [], blocked = [], diagnostics = [];
     const trackPage = current => {
+      const lifecycle = createApiLifecycle(diagnostics); pageApiLifecycles.set(current, lifecycle);
+      const localApi = request => { const url = new URL(request.url()); return url.origin === origin && url.pathname.startsWith("/api/"); };
+      current.on("request", request => { if (localApi(request)) lifecycle.startRequest(request); });
+      current.on("requestfinished", request => { if (localApi(request)) lifecycle.finishRequest(request); });
+      // Cancellation is a terminal transport event too. Keep its reason in the
+      // trace; the existing fatal pageerror/API-fixture gates stay unchanged.
+      current.on("requestfailed", request => { if (localApi(request)) lifecycle.finishRequest(request, request.failure()?.errorText ?? "unknown"); });
       current.on("pageerror", error => { errors.push(error.message); diagnostics.push({ kind: "pageerror", at: Date.now(), name: error.name, message: error.message, stack: error.stack, url: current.url(), closed: current.isClosed() }); });
       current.on("requestfailed", request => { if (new URL(request.url()).pathname === copyPath+"/preview") diagnostics.push({ kind: "preview-request-failed", at: Date.now(), url: request.url(), failure: request.failure()?.errorText }); });
       current.on("framenavigated", frame => { if (frame === current.mainFrame()) diagnostics.push({ kind: "navigation", at: Date.now(), url: frame.url() }); });
@@ -343,6 +404,9 @@ try {
       const url = new URL(route.request().url());
       if (url.origin !== origin) { blocked.push(url.href); return route.abort("blockedbyclient"); }
       if (!url.pathname.startsWith("/api/")) return route.continue();
+      const lifecycle = pageApiLifecycles.get(route.request().frame().page());
+      assert(lifecycle, "every local API fixture producer must belong to a tracked page");
+      lifecycle.startProducer(route.request());
       try {
         if (await fixtureData.api(route, url) !== false) return;
         errors.push(`Unexpected API: ${route.request().method()} ${url.pathname}`);
@@ -350,6 +414,8 @@ try {
       } catch (error) {
         errors.push(`Fixture error at ${url.pathname}: ${error.message}`);
         await route.fulfill({ status: 500, json: { error: "Synthetic fixture rejected the request" } });
+      } finally {
+        lifecycle.finishProducer(route.request());
       }
     });
     try {
@@ -430,7 +496,7 @@ try {
       await field(page, "title").fill(crashTitle);
       await page.locator(".card-copy-editor .draft-recovery").getByText(/이 기기에 임시 보관됨/).waitFor();
       assert.equal(state.saved.copy.pages[1].title, secondTitle);
-      await previewReady(page);
+      await settleWorkspaceDocument(page, "close page with recovered manuscript draft");
       await page.close({ runBeforeUnload: false });
       page = await context.newPage(); trackPage(page);
       await page.goto(`${origin}/studio/25`); await ready(page);
@@ -484,7 +550,7 @@ try {
       await page.locator(".publication-draft-controls .draft-recovery").getByText(/이 기기에 임시 보관됨/).waitFor();
       const recoveryBeforeClose = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("spacepenguin.draft-recovery"))));
       await writeFile(`${outputDir}/recovery-before-${width}.json`, JSON.stringify(recoveryBeforeClose, null, 2));
-      await previewReady(page);
+      await settleWorkspaceDocument(page, "close page with recovered publication draft");
       await page.close({ runBeforeUnload: false });
       page = await context.newPage(); trackPage(page);
       await page.goto(`${origin}/items/3/9790`); await ready(page);
@@ -552,7 +618,7 @@ try {
       assert.equal(state.saved.copy.pages[0].body, firstBody); assert.equal(state.saved.copy.pages[1].body, secondBody);
       await verifyListReturnContext(page, width, state);
       assert.deepEqual(errors, []); assert.deepEqual(blocked, []);
-      results.push({ engine, width, result: "passed", savedPages: 2, aiRecovery: true, publicationModes: ["now", "later"], cancelAndConfirmedRetry: true, captionPersistence: true, deviceRecovery: true, publicationOptionsPersistence: true, historyGuard: true, channelPreservation: true, actionHitTests: true, listReturnContext: true, selectionPaddingHitTests: true });
+      results.push({ engine, width, result: "passed", savedPages: 2, aiRecovery: true, publicationModes: ["now", "later"], cancelAndConfirmedRetry: true, captionPersistence: true, deviceRecovery: true, publicationOptionsPersistence: true, historyGuard: true, channelPreservation: true, actionHitTests: true, listReturnContext: true, selectionPaddingHitTests: true, documentReplacementsSettled: true, diagnostics });
       console.log(`${engine} ${width}px: canonical workspace, two-page save/reload, unsaved navigation, AI recovery, now/later and cancel/retry passed`);
     } catch (error) {
       console.error(JSON.stringify({ width, errors, blocked, diagnostics, writes: mutations(state), url: page.url() }));
