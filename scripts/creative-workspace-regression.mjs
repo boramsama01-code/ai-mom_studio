@@ -77,7 +77,20 @@ async function noOverflow(page,label){
  const value=await browserLayout(page);
  assert(value.scroll<=value.width+1,label+": "+JSON.stringify(value));
 }
-async function shot(page,label){await page.evaluate(async()=>{await document.fonts.ready;scrollTo(0,0);await new Promise(resolve=>requestAnimationFrame(resolve));});await page.screenshot({path:output+"/"+label+".png"});}
+async function shot(page,label){
+ await page.evaluate(async()=>{
+  await document.fonts.ready;scrollTo(0,0);await new Promise(resolve=>requestAnimationFrame(resolve));
+  const visible=[...document.images].filter(img=>{const r=img.getBoundingClientRect();return r.width&&r.height&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight&&getComputedStyle(img).visibility!=="hidden";});
+  await Promise.all(visible.map(async img=>{
+   let timer;try{
+    await Promise.race([img.decode(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("Visible image did not decode: "+img.currentSrc)),5000);})]);
+    if(!img.naturalWidth)throw new Error("Visible image is unavailable: "+img.currentSrc);
+   }finally{clearTimeout(timer);}
+  }));
+  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+ });
+ await page.screenshot({path:output+"/"+label+".png"});
+}
 async function run(root,label,port){
  const server=await preview({configFile:path.resolve(root,"vite.config.ts"),root:path.resolve(root,"client"),build:{outDir:path.resolve(root,"dist/public")},preview:{host:"127.0.0.1",port,strictPort:true}});
  const origin="http://127.0.0.1:"+port;
@@ -173,6 +186,6 @@ try{
  await browsers.close();
  try{const encoded=(await readFile(output+"/workspace-review.png")).toString("base64"),size=32768,total=Math.ceil(encoded.length/size);for(let i=0;i<total;i++)console.log("WORKSPACE_REVIEW_PNG "+i+"/"+total+" "+encoded.slice(i*size,(i+1)*size));}catch{/* A failed gate keeps its individual screenshots and diagnostics. */}
  for(const name of ["before-home-1440","after-home-1440","direction-b-graphite-1440","after-editor-1440","after-home-393","after-capture-393","after-video-393","after-assets-1440","after-error-393","workspace-review-preview"]){
-  try{const bytes=await sharp(await readFile(output+"/"+name+".png")).resize({width:name.endsWith("393")?393:1080,withoutEnlargement:true}).webp({quality:72}).toBuffer();console.log("VISUAL_REVIEW_IMAGE "+name+" "+bytes.toString("base64"));}catch{ /* Earlier layout failures can prevent a later screenshot. Artifacts retain the original failure. */ }
+  try{const bytes=await sharp(await readFile(output+"/"+name+(name==="workspace-review-preview"?".webp":".png"))).resize({width:name.endsWith("393")?393:1080,withoutEnlargement:true}).webp({quality:72}).toBuffer();console.log("VISUAL_REVIEW_IMAGE "+name+" "+bytes.toString("base64"));}catch{ /* Earlier layout failures can prevent a later screenshot. Artifacts retain the original failure. */ }
  }
 }
