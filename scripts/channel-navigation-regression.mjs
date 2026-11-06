@@ -138,7 +138,7 @@ async function launchBrowser() {
 }
 const widths = process.env.WORKSPACE_BROWSER_WIDTHS ? process.env.WORKSPACE_BROWSER_WIDTHS.split(",").map(Number) : [393, 1280];
 assert(widths.length && widths.every(width => Number.isInteger(width) && width >= 280), "WORKSPACE_BROWSER_WIDTHS must be comma-separated viewport widths");
-const out = [];
+const out = [], failures = [];
 try {
  browser = await launchBrowser();
  for (const width of widths) {
@@ -222,12 +222,14 @@ try {
     assert.equal(directory.find(channel=>channel.id===4).aiSettings,null,"another channel's AI must remain unchanged");
     await page.getByRole("button",{name:"이 채널 콘텐츠 보기",exact:true}).click();
     await page.waitForURL(origin+"/");assert.equal(await selection.inputValue(),"9");
+    assert.equal(await selection.locator("option:checked").textContent(),"테스트로 만든 동네 채널","ellipsis must retain the complete selectable name");
     assert.equal(await page.locator('a[href="/studio/25"]').count(),0);assert.equal(await page.locator('a[href="/studio/26"]').count(),0);
     await noOverflow(page,"created-channel-list");
     assert(listWorks);assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);assert.deepEqual(mutations(f.state),[],"channel switching must not save, generate or publish a discarded draft");
     const result={width,browserEngine,listWorks,dirtyCancelledPreserved:true,explicitDiscardNavigated:true,newChannelCreated:true,newChannelSelected:true,roleAiDefaults:true,roleModelsSaved:true,creates,aiSettingSaves,errors,blocked};
     out.push(result);await writeFile(`${outputDir}/results.json`,JSON.stringify(out,null,2));console.log(JSON.stringify(result));
-  } catch(error) { await page.screenshot({path:`${outputDir}/after-failure-${width}.png`});await writeFile(`${outputDir}/after-failure-${width}.json`,JSON.stringify({errors,blocked,url:page.url(),creates},null,2));throw error; }
+  } catch(error) { await page.screenshot({path:`${outputDir}/after-failure-${width}.png`});const failure={width,errors,blocked,url:page.url(),creates,failure:String(error)};await writeFile(`${outputDir}/after-failure-${width}.json`,JSON.stringify(failure,null,2));failures.push(failure);console.log("CHANNEL_FAILURE "+JSON.stringify(failure)); }
   finally {await context.close();}
  }
+ assert.equal(failures.length,0,"Every channel viewport must pass: "+JSON.stringify(failures));
 } finally {await browser?.close();await new Promise(resolve=>server.httpServer.close(resolve));}

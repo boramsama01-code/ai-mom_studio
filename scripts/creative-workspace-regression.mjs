@@ -82,6 +82,9 @@ async function run(root,label,port){
  const origin="http://127.0.0.1:"+port;
  try{
  for(const width of [360,393,430,768,1440]){
+  // Each viewport compares the identical starting content. Only interactions
+  // within that scenario mutate its server fixture; production is never used.
+  mode="normal";cards.clear();initial.forEach(value=>cards.set(value.id,clone(value)));
   const context=await browsers.newContext({viewport:{width,height:1000},locale:"ko-KR",timezoneId:"Asia/Seoul",isMobile:width<768,hasTouch:width<768,reducedMotion:"reduce",serviceWorkers:"block"});
   const page=await context.newPage(),errors=[],writes=[];
   try{
@@ -125,11 +128,12 @@ async function run(root,label,port){
    await page.getByText("자료를 서버에 저장했습니다",{exact:true}).waitFor();
    await page.getByRole("button",{name:"닫기",exact:true}).click();
    await page.goto(origin+"/studio/20");await page.locator(".video-workspace").waitFor();
-   await page.getByLabel("화면 자막",{exact:true}).fill("기기에 임시 보관할 자막");
+   const subtitle="기기에 임시 보관할 자막 · "+width+"px";
+   await page.getByLabel("화면 자막",{exact:true}).fill(subtitle);
    await noOverflow(page,"video "+width);await shot(page,"after-video-"+width);
    await page.locator(".video-savebar").getByRole("button",{name:"저장",exact:true}).click();
    await page.getByText("서버 저장 완료",{exact:true}).waitFor();
-   await page.reload();await page.locator(".video-workspace").waitFor();assert.equal(await page.getByLabel("화면 자막",{exact:true}).inputValue(),"기기에 임시 보관할 자막");
+   await page.reload();await page.locator(".video-workspace").waitFor();assert.equal(await page.getByLabel("화면 자막",{exact:true}).inputValue(),subtitle);
    await page.locator(".video-history > summary").click();await page.locator(".video-history details > summary").click();await noOverflow(page,"expanded video history "+width);
    const navVisible=await page.locator(".mobile-nav").isVisible();assert.equal(navVisible,false,"editing must have one bottom action region");
    // Leave by full navigation; local recovery remains available on return.
@@ -150,7 +154,9 @@ async function run(root,label,port){
   }catch(error){
    await shot(page,label+"-failure-"+width);
    const state={url:page.url(),errors,writes:writes.map(write=>write.p),screen:await page.locator("main").innerText(),fields:await page.locator("textarea").evaluateAll(nodes=>nodes.map(node=>({label:node.closest("label")?.textContent?.slice(0,80),visible:node.getBoundingClientRect().height>0}))),message:String(error)};
-   await writeFile(output+"/"+label+"-failure-"+width+".json",JSON.stringify(state,null,2));console.log("CREATIVE_FAILURE "+JSON.stringify(state));throw error;
+   await writeFile(output+"/"+label+"-failure-"+width+".json",JSON.stringify(state,null,2));console.log("CREATIVE_FAILURE "+JSON.stringify(state));
+   results.push({label,width,passed:false,error:String(error),syntheticApi:true});mode="normal";
+   await writeFile(output+"/results.json",JSON.stringify(results,null,2));
   }finally{await context.close();}
  }
  }finally{await new Promise(resolve=>server.httpServer.close(resolve));}
@@ -158,6 +164,7 @@ async function run(root,label,port){
 try{
  if(process.env.CREATIVE_BASELINE_DIR)await run(process.env.CREATIVE_BASELINE_DIR,"before",4188);
  await run(process.cwd(),"after",4189);
+ assert(results.every(result=>result.passed),"Every viewport must pass: "+JSON.stringify(results.filter(result=>!result.passed)));
  await writeFile(output+"/README.txt","Screens are real built React UI with synthetic API data and existing template artwork. before = verified main 42c643d; after = PR build; direction-b = same components with graphite/density alternative. External requests, generation and social publishing were blocked. No claim about production cold-start improvements is made.\n");
 }finally{
  await browsers.close();
