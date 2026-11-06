@@ -2,6 +2,8 @@ import {describe,expect,it,vi} from 'vitest';
 import sharp from 'sharp';
 import {Resvg} from '@resvg/resvg-js';
 import {rasterizeReadingSvg,readingRasterState,tryBackgroundImageWork} from '../server/services/readingCardRaster';
+import {prepareReadingArtwork,readingArtworkInput} from '../server/services/readingCardImages';
+import {defaultPageDesigns} from '../shared/familyDialogue';
 
 const svg='<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"><rect width="2" height="2" fill="#226655"/></svg>';
 describe('bounded reading-card page preparation and native lifetime',()=>{
@@ -10,6 +12,21 @@ describe('bounded reading-card page preparation and native lifetime',()=>{
     const expected=await sharp(rendered.pixels,{raw:{width:rendered.width,height:rendered.height,channels:4}}).flatten({background:'#ffffff'}).toColorspace('srgb').removeAlpha().jpeg({quality:92,chromaSubsampling:'4:4:4'}).toBuffer();
     expect((await rasterizeReadingSvg(()=>svg)).equals(expected)).toBe(true);
     expect(readingRasterState()).toMatchObject({nativeBackend:'worker-thread',activeWorkers:0,pendingPages:0,maxObservedWorkers:1});
+  });
+  it.each(['cover','rounded contain','monochrome overlay','empty artwork'] as const)('prepares %s inside the same page worker with exact existing JPEG bytes',async kind=>{
+    const photo=kind==='empty artwork'?null:await sharp({create:{width:23,height:37,channels:4,background:{r:214,g:67,b:92,alpha:.7}}}).png().toBuffer();
+    const design=defaultPageDesigns().cover;
+    design.background={...design.background,fit:kind==='rounded contain'?'contain':'cover',focalX:21,focalY:77,brightness:kind==='monochrome overlay'?83:100,overlay:kind==='monochrome overlay'?24:0};
+    const slot={width:64.4,height:63.6,...(kind==='rounded contain'?{radius:32}:{}),...(kind==='monochrome overlay'?{treatment:{tone:'monochrome' as const}}:{})};
+    const prepared=await prepareReadingArtwork(photo,design,slot,'#102D49');
+    const makeSvg=(dataUrl?:string)=>`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><image width="64" height="64" href="${dataUrl}"/></svg>`;
+    const expected=await rasterizeReadingSvg(()=>makeSvg(`data:image/png;base64,${prepared.toString('base64')}`));
+    const before=readingRasterState().artworkPagesPrepared;
+    const actual=await rasterizeReadingSvg(makeSvg,readingArtworkInput(photo,design,slot,'#102D49'));
+    expect(actual.equals(expected)).toBe(true);
+    expect(readingRasterState()).toMatchObject({activeWorkers:0,pendingPages:0,maxObservedWorkers:1,artworkPreparation:'page-worker',artworkPagesPrepared:before+1});
+    // The JPEG stays valid after isolate termination and subsequent native work.
+    await rasterizeReadingSvg(()=>svg);expect(actual.equals(expected)).toBe(true);
   });
   it('rejects a fifth page before its preparation and runs admitted pages with one native worker',async()=>{
     let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
