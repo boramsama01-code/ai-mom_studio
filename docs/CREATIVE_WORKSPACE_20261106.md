@@ -81,3 +81,9 @@ Offline browser script transfer was 363,868 bytes before and 372,163 after (+8,2
 The local exec-server transport disconnected again during final review and failed to recover after 45 seconds. This is a verified execution-environment interruption; it does not establish the cause of a ChatGPT conversation error. GitHub operations and CI remained available. Final UI patches were reconstructed from the exact b16c76c file contents, applied with unique-context guards and committed through GitHub. No production rows or credentials were changed.
 
 Before/after screens and both directions are now assembled into workspace-review.png directly in CI, using existing Sharp and repository fonts. The source, screenshots, JSON results, diagnostics and review PNG remain reproducible without an interactive execution session. The final polish still requires its own complete CI outcome before this PR leaves draft.
+
+## Concurrent main update preserved
+
+During final review main advanced to 7b2bf40c7bff473bcb1f5d91cb328ed4713f7bca via PR #74 (Canva token endpoint error `code` handling). Its only changed files are server/services/canva.ts and tests/canva-rest.test.ts; neither overlaps the workspace changes. Both exact main blobs were brought into a two-parent merge of the feature branch. The immutable visual baseline remains 42c643d because this main update changes server OAuth error handling, not the screens. Recheck actual production revision separately from the PR head at delivery.
+
+Visual capture now awaits only visible images with a five-second bound before screenshotting. This corrects an observed timing race in the asset logo capture; it does not redraw or replace brand artwork. All application changes remain on the feature branch.
