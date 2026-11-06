@@ -117,3 +117,12 @@ The channel default-design control now resolves persisted IDs through the existi
 ## Concurrent PR checkpoint preserved
 
 Before updating the feature ref, GitHub returned an uncertain mutation error. A read of the actual ref found d9f2ce00ff3678b0bb8fa64109a4aa1f521f64f4, a concurrent child of 3e7d02b that adds per-logo loaded-source, scroll-visible screenshots and the ALL dark-background assertion. Those QA changes are compatible and preserved verbatim. The four final copy/document files are applied to that current tree, guarded by its exact SHA. The abandoned c11532c commit object was never used to overwrite the branch. Recheck the final ref and all required checks before delivery.
+
+
+## Native memory budget follow-up
+
+At a90d308, all 210 files / 2,148 tests, typecheck, build and every browser workflow passed CI 42144474742, but the memory probe measured 529.96 MiB. Its old CLI checked completion without a budget; a green job did not prove suitability for a 512 MiB service. Earlier runs varied around 486–497 MiB, so this is a newly measured operational risk, not proof that the logo UI caused a regression.
+
+The existing one-at-a-time raster gate and four-page admission remain. Rasterization now uses one short-lived OS process rather than a worker thread, and waits for process close before releasing admission; native image allocator state is reclaimed with the process. JPEG settings, artwork, fonts and page geometry are unchanged. The child uses one Sharp thread, no cache and MALLOC_ARENA_MAX=2; it has no DB/job/provider work. This is an in-service child process, not a new Render service or paid worker. Sharp's documented Linux allocator fragmentation is a plausible contributor, not a measured attribution: https://sharp.pixelplumbing.com/performance/ . Node IPC reference: https://nodejs.org/api/child_process.html .
+
+The memory probe now includes live parent+child RSS and a conservative overlap using the child's own peak; shared pages may be double-counted. It prints phase metrics to logs and fails a 448 MiB budget, leaving 64 MiB for request/DB overhead relative to the free plan. It neither caps the heap nor forces GC or lowers output resolution. Memory runs in its own CI job for prompt feedback, while the full DB/build/browser gates remain. Verify new lifecycle/output-parity tests and actual measured results before delivery; do not describe the 529.96 MiB run as a memory pass.

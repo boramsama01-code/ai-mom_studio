@@ -36,8 +36,19 @@ jobs:
         run: npx vitest run tests/creative-workspace-postgres.test.ts tests/video-project.test.ts tests/studio-home-ui.test.ts tests/app-navigation-ui.test.tsx --bail=1
       - run: npm test -- --bail=1
       - run: npm run build
-      - name: Measure production-bundle card rendering on Node 22
-        run: node scripts/cardnews14-memory-qa.mjs --concurrent=2 --output=test-results/cardnews14-memory/ci-production.json
+  memory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Verify production image memory with 64 MiB headroom for the free service
+        run: node scripts/cardnews14-memory-qa.mjs --concurrent=2 --budget-mib=448 --output=test-results/cardnews14-memory/ci-production.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
