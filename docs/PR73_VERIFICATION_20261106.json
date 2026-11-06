@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "generatedAtUtc": "2026-11-06T06:44:20.090Z",
+  "repository": "boramsama01-code/ai-mom_studio",
+  "pullRequest": 73,
+  "featureCommit": "34d5146460da3d0c9e9902df0e4aa1ee1b159e47",
+  "mergeCommit": "3e0d583a42a34402c11aacdad2dd6daebb3cbcec",
+  "applicationTree": "8bea6ea1e3c25c54cce59f565debde54781a438e",
+  "ci": {
+    "pullRequest": {
+      "run": 42172556427,
+      "conclusion": "success",
+      "files": 223,
+      "tests": 2312,
+      "earlyFiles": 5,
+      "earlyTests": 31,
+      "typecheck": true,
+      "build": true,
+      "allStrictWebKit": true,
+      "coldPeaksMiB": [
+        392.39,
+        398.91,
+        417.73
+      ],
+      "outputParity": true
+    },
+    "main": {
+      "run": 42174175582,
+      "conclusion": "success",
+      "files": 223,
+      "tests": 2312,
+      "earlyFiles": 5,
+      "earlyTests": 31,
+      "typecheck": true,
+      "build": true,
+      "allStrictWebKit": true,
+      "coldPeaksMiB": [
+        410.37,
+        405.11,
+        415.93
+      ],
+      "maxPeakMiB": 415.93,
+      "budgetMiB": 448,
+      "outputParity": true
+    }
+  },
+  "deployment": {
+    "id": "dep-dbmn4vtg1s2s73d5jsgg",
+    "status": "live",
+    "trigger": "new_commit",
+    "commit": "3e0d583a42a34402c11aacdad2dd6daebb3cbcec",
+    "startedAt": "2026-11-06T06:24:00.034906Z",
+    "finishedAt": "2026-11-06T06:25:27.085579Z"
+  },
+  "service": {
+    "id": "srv-dbjep0ou01pc73f8rf80",
+    "name": "spacepenguin",
+    "branch": "main",
+    "autoDeploy": "yes",
+    "plan": "free",
+    "numInstances": 1,
+    "startCommand": "npm start"
+  },
+  "health": {
+    "ok": true,
+    "db": "connected",
+    "auth": "configured",
+    "revision": "3e0d583a42a34402c11aacdad2dd6daebb3cbcec"
+  },
+  "actualStartCommandLog": [
+    {
+      "timestamp": "2026-11-06T06:25:10.126384405Z",
+      "instance": "srv-dbjep0ou01pc73f8rf80-nsg9x",
+      "message": "> MALLOC_ARENA_MAX=2 NODE_ENV=production node dist/server/index.js"
+    }
+  ],
+  "migrations": [
+    {
+      "tag": "0023_creative_workspace",
+      "createdAt": "1794009600000",
+      "hash": "08f18417f39a6eadb2c0d94149168b118a8d004225a37e9c66686dc3153e3a6b",
+      "verified": true
+    },
+    {
+      "tag": "0024_canva_manual_import",
+      "createdAt": "1794009600001",
+      "hash": "d9a512dc71e9ad61c00b65d03524c865e84e4f817fb4964f92f39eac5b3478d1",
+      "verified": true
+    },
+    {
+      "tag": "0025_family_manual_requests",
+      "createdAt": "1794009600002",
+      "hash": "bcae5bac41ca3a80cefa2a3eaac1f105c74d381e262b411ee0d4fa86040b1ba1",
+      "verified": true
+    }
+  ],
+  "schema": {
+    "family_manual_requests_present": true,
+    "canva_master_nullable": "YES"
+  },
+  "qaPreservation": [
+    {
+      "section": "QA34/35 cards",
+      "unchanged": true
+    },
+    {
+      "section": "all seven Studio revisions",
+      "unchanged": true
+    },
+    {
+      "section": "job32 original request/result",
+      "unchanged": true
+    },
+    {
+      "section": "approvals7/8 and deliveries2/3",
+      "unchanged": true
+    },
+    {
+      "section": "assets57/58 bytes and hashes",
+      "unchanged": true
+    },
+    {
+      "section": "source item17453 current revision",
+      "unchanged": true
+    }
+  ],
+  "startupMemory": {
+    "newInstance": "srv-dbjep0ou01pc73f8rf80-nsg9x",
+    "samples": [
+      {
+        "timestamp": "2026-11-06T06:25:27Z",
+        "value": 3416064,
+        "MiB": 3.26
+      },
+      {
+        "timestamp": "2026-11-06T06:26:27Z",
+        "value": 110542850,
+        "MiB": 105.42
+      },
+      {
+        "timestamp": "2026-11-06T06:27:27Z",
+        "value": 112435200,
+        "MiB": 107.23
+      }
+    ],
+    "samplePeakMiB": 107.23,
+    "reportedLimitBytes": 536870900,
+    "scope": "Ordinary new-instance startup/health observations only; no synthetic runtime memory/load probe and no actual eight-page export load claim. Old deactivating instance was excluded using the startup-log instance label."
+  },
+  "startupMemoryIsEightPageLoadProof": false,
+  "errorCountDuringDeploymentWindow": 0,
+  "canvaCacheMetadataOnly": {
+    "originalDesigns": 14,
+    "pagesPerDesign": 8,
+    "pages": 112,
+    "previewReady": 14,
+    "previewErrors": 0,
+    "versionsUnchanged": 14,
+    "autofillReady": false,
+    "catalogStatus": "needs_fields",
+    "removedQaCloneCachePages": 8,
+    "reservedManualCopyJobs": 0,
+    "newManualFamilyRequests": 0,
+    "providerCallsByVerifier": 0
+  },
+  "actualExternalEarlier": {
+    "runtime": "b3aca65 PR75",
+    "qaPostCount": 1,
+    "qaPostUrl": "https://www.instagram.com/p/DfYlxqIE-4p/",
+    "qaPostAccount": "@spacepenguin.co",
+    "qaPostAttempts": 1,
+    "cancelledReservationAttempts": 0,
+    "approvedGeminiTextCalls": 1,
+    "actualAiImageCalls": 0,
+    "historicalGeminiUsage": "unknown"
+  },
+  "notDone": [
+    "No approval9/new QA2 schedule or second actual post exists.",
+    "Live manual eight-page authoring, actual Canva-copy export/eight-page visual comparison/explicit adoption have not been performed.",
+    "Live responsive/mobile-to-PC acceptance remains unverified after this deployment.",
+    "Normal production browser access remains denied by the tool's saved policy; no alternative route or session bypass was used.",
+    "GitHub scheduled recovery workflow enabled/disabled state and a new scheduled run remain unverified."
+  ],
+  "browserAccess": {
+    "localUserOriginAccess": "allow",
+    "currentToolDecision": "saved setting or managed policy denies access",
+    "policyBypass": false
+  },
+  "resources": {
+    "localTestPostgres": "stopped normally",
+    "temporaryKeepaliveExpiresAtKst": "2026-11-06T16:36:00+09:00"
+  },
+  "overallProjectComplete": false
+}
