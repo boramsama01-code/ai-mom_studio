@@ -78,16 +78,22 @@ async function noOverflow(page,label){
  assert(value.scroll<=value.width+1,label+": "+JSON.stringify(value));
 }
 async function shot(page,label){
+ // React can replace an image while WebKit is decoding its previous source.
+ // Inspect the current connected DOM on each frame; do not reuse decode()
+ // promises from detached nodes. Missing/broken images still fail this gate.
  await page.evaluate(async()=>{
-  await document.fonts.ready;scrollTo(0,0);await new Promise(resolve=>requestAnimationFrame(resolve));
-  const visible=[...document.images].filter(img=>{const r=img.getBoundingClientRect();return r.width&&r.height&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight&&getComputedStyle(img).visibility!=="hidden";});
-  await Promise.all(visible.map(async img=>{
-   let timer;try{
-    await Promise.race([img.decode(),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error("Visible image did not decode: "+img.currentSrc)),5000);})]);
-    if(!img.naturalWidth)throw new Error("Visible image is unavailable: "+img.currentSrc);
-   }finally{clearTimeout(timer);}
-  }));
-  await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  await document.fonts.ready;scrollTo(0,0);
+  const deadline=performance.now()+8000;
+  let previous="",stable=0,state=[];
+  while(performance.now()<deadline){
+   await new Promise(resolve=>requestAnimationFrame(resolve));
+   const visible=[...document.images].filter(img=>{const r=img.getBoundingClientRect();return img.isConnected&&r.width&&r.height&&r.right>0&&r.left<innerWidth&&r.bottom>0&&r.top<innerHeight&&getComputedStyle(img).visibility!=="hidden";});
+   state=visible.map(img=>({src:img.currentSrc||img.src,complete:img.complete,width:img.naturalWidth}));
+   const signature=JSON.stringify(state),ready=state.every(img=>img.complete&&img.width>0);
+   stable=ready&&signature===previous?stable+1:0;previous=signature;
+   if(ready&&stable>=2)return;
+  }
+  throw new Error("Visible images did not finish loading: "+JSON.stringify(state.map(img=>({...img,src:img.src.slice(0,220)}))));
  });
  await page.screenshot({path:output+"/"+label+".png"});
 }
@@ -167,7 +173,7 @@ async function run(root,label,port){
   await writeFile(output+"/results.json",JSON.stringify(results,null,2));
   console.log(label+" "+width+"px: render, layout, saved context and safe actions passed");
   }catch(error){
-   await shot(page,label+"-failure-"+width);
+   await page.screenshot({path:output+"/"+label+"-failure-"+width+".png"}).catch(captureError=>console.log("FAILURE_CAPTURE "+String(captureError)));
    const state={url:page.url(),errors,writes:writes.map(write=>write.p),screen:await page.locator("main").innerText(),fields:await page.locator("textarea").evaluateAll(nodes=>nodes.map(node=>({label:node.closest("label")?.textContent?.slice(0,80),visible:node.getBoundingClientRect().height>0}))),message:String(error)};
    await writeFile(output+"/"+label+"-failure-"+width+".json",JSON.stringify(state,null,2));console.log("CREATIVE_FAILURE "+JSON.stringify(state));
    results.push({label,width,passed:false,error:String(error),syntheticApi:true});mode="normal";
