@@ -14,18 +14,22 @@ import { getSetting } from "../seed";
 import { channelDiscovery } from "./discovery";
 import { processStudioJob } from "./studio";
 import { withGenerationContext } from "../services/generationContext";
+import { autoCollectEnabled } from "../services/autoCollection";
+
+export { autoCollectEnabled } from "../services/autoCollection";
 
 const collecting = new Set<AbortController>();
 export function stopActiveCollections() {
   for (const controller of collecting) controller.abort(new Error("전역 정지 또는 서버 종료로 수집을 중단했습니다."));
 }
 
-async function withCollectionControl<T>(db: DB, work: () => Promise<T>, ownedJob?: { id: number; workerId: string }): Promise<T> {
+async function withCollectionControl<T>(db: DB, work: () => Promise<T>, ownedJob?: { id: number; workerId: string }, isSchedule = false): Promise<T> {
   const controller = new AbortController();
   collecting.add(controller);
   const assertActive = async (dbtx: DB, lock = false) => {
     controller.signal.throwIfAborted();
     if (await getSetting(dbtx, "global_stop", false)) throw new Error("전역 정지 상태로 수집과 AI 요청을 중단했습니다.");
+    if (isSchedule && !(await autoCollectEnabled(dbtx))) throw new Error("자동 수집 꺼짐 — 진행 중인 예약 수집을 중단했습니다.");
     if (ownedJob) {
       const query = dbtx.select({ id: jobs.id, leaseExpiresAt: jobs.leaseExpiresAt }).from(jobs).where(and(eq(jobs.id, ownedJob.id), eq(jobs.status, "running"), eq(jobs.leaseOwner, ownedJob.workerId)));
       const [job] = await (lock ? query.for("update") : query);
@@ -36,12 +40,13 @@ async function withCollectionControl<T>(db: DB, work: () => Promise<T>, ownedJob
   const monitor = setInterval(() => {
     if (polling || controller.signal.aborted) return;
     polling = true;
-    void assertActive(db).catch(() => controller.abort(new Error("전역 정지 또는 작업 상태 변경으로 수집을 중단했습니다."))).finally(() => { polling = false; });
+    void assertActive(db).catch(error => controller.abort(error)).finally(() => { polling = false; });
   }, 2_000);
   monitor.unref();
   try {
     await assertActive(db);
     const result = await withGenerationContext({ signal: controller.signal, assertActive: tx => assertActive(tx, true) }, work);
+    if (isSchedule) await assertActive(db);
     controller.signal.throwIfAborted();
     return result;
   } finally { clearInterval(monitor); collecting.delete(controller); }
@@ -92,11 +97,6 @@ export async function processCollectJob(db: DB, job: Job, workerId: string): Pro
   return true;
 }
 
-/** 예약 실행에서 자동 수집을 할지 — 화면 스위치(auto_collect) 또는 환경변수 AUTO_COLLECT */
-export async function autoCollectEnabled(db: DB): Promise<boolean> {
-  return env.autoCollect || (await getSetting(db, "auto_collect", false)) === true;
-}
-
 /** DB 대기열의 작업 처리 (수집 요청 등) */
 export async function jobsOnce(opts: { maxMs?: number; types?: string[] } = {}) {
   const db = getDb();
@@ -139,14 +139,17 @@ export async function jobsOnce(opts: { maxMs?: number; types?: string[] } = {}) 
 export async function collectOnce(opts: { channelSlug?: string; isSchedule?: boolean } = {}) {
   const db = getDb();
   await db.execute(sql`select 1`);
+  const disabledReason = "자동 수집 꺼짐 — 예약 실행에서는 수집하지 않음";
+  if (opts.isSchedule && !(await autoCollectEnabled(db))) return { skipped: disabledReason, results: [] };
   await loadStoredSecrets(db);
-  if (opts.isSchedule && !(await autoCollectEnabled(db))) return { skipped: "자동 수집 꺼짐(화면의 '자동 수집' 스위치 또는 AUTO_COLLECT) — 예약 실행에서는 수집하지 않음", results: [] };
   const workerId = newWorkerId();
   const runId = await startRun(db, workerId, "collect:once");
   const chs = await db.select().from(channels).where(eq(channels.active, true));
   const results: Array<{ slug: string; status: string; counts?: Record<string, number>; error?: string }> = [];
+  let skipped: string | undefined;
   for (const ch of chs) {
     if (opts.channelSlug && ch.slug !== opts.channelSlug) continue;
+    if (opts.isSchedule && !(await autoCollectEnabled(db))) { skipped = disabledReason; break; }
     const [{ n }] = (await db
       .select({ n: sql<number>`count(*)::int` })
       .from(searchRules)
@@ -155,15 +158,17 @@ export async function collectOnce(opts: { channelSlug?: string; isSchedule?: boo
     // 활성 검색어·연결된 공식 게시판·자동 화제 발굴이 모두 없는 채널은 호출하지 않음
     if (!n && !b && !channelDiscovery(ch)) continue;
     try {
-      const r = await withCollectionControl(db, () => runCollect(db, ch.id, { trigger: opts.isSchedule ? "schedule" : "cli" }));
+      // A clock trigger only gathers sources: it never opts into AI or review
+      // notifications, even if an old deployment has AUTO_GENERATE enabled.
+      const r = await withCollectionControl(db, () => runCollect(db, ch.id, opts.isSchedule ? { trigger: "schedule", collectionOnly: true } : { trigger: "cli" }), undefined, opts.isSchedule);
       results.push({ slug: ch.slug, status: r.status, counts: r.counts });
     } catch (e) {
       results.push({ slug: ch.slug, status: "failed", error: (e as Error).message });
     }
   }
   const failed = results.filter((r) => r.status === "failed").length;
-  await endRun(db, runId, failed ? (failed === results.length ? "failed" : "partial") : "ok", results.length, failed, JSON.stringify(results));
-  return { results };
+  await endRun(db, runId, failed ? (failed === results.length ? "failed" : "partial") : "ok", results.length, failed, JSON.stringify(skipped ? { results, skipped } : results));
+  return { results, ...(skipped ? { skipped } : {}) };
 }
 
 export async function publishOnce() {

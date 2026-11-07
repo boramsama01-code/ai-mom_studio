@@ -34,6 +34,6 @@
 - 적용 완료한 마이그레이션 0004·0008과 과거 원본 버전·감사 기록: 당시 상태 및 마이그레이션 재현을 보존합니다.
 - 이전 브랜드 별칭·변환 테스트·`.gitignore`의 과거 준비 폴더 제외 규칙: 예전 백업 호환 및 비의도적 업로드 방지용입니다.
 - 루트 Blueprint의 `ai-mom-studio`는 삭제된 서비스의 과거 구성입니다. 이를 그대로 적용하면 삭제한 서비스를 다시 만들 수 있으므로 현재 배포 구성으로 사용하지 않습니다. 운영 배포는 이미 연결된 `spacepenguin` 서비스에서 진행하며, Blueprint 정리는 실제 리소스 연결 관계를 확인한 별도 변경으로 다룹니다.
-- 실제 GitHub 저장소 경로는 `boramsama01-code/ai-mom_studio`로 유지합니다. 운영 서비스 이름 `spacepenguin`과 저장소 이름은 별개의 식별자입니다.
+- GitHub 저장소 경로는 `boramsama01-code/content-workbench`입니다. 운영 서비스 이름 `spacepenguin`과 저장소 이름은 별개의 식별자입니다.
 
 외부 공급자가 발급한 Client ID·모델 ID는 브랜드명이 아닙니다. 임의로 `spacepenguin`으로 치환하지 않습니다.

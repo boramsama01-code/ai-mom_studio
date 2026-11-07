@@ -15,15 +15,56 @@ let app: ReturnType<typeof createApp>;
 beforeAll(async () => { await resetDb(); app = createApp(); });
 afterAll(closeDb);
 
-it("한국 날짜 경계와 아침·저녁 예약 시각을 계산한다", () => {
+it("한국 날짜 경계와 매일 08:00 예약의 직전·정각·다음 날을 계산한다", () => {
   expect(kstDay(new Date("2026-10-25T15:00:00Z"))).toBe("2026-10-26");
   expect(collectionDayRange("2026-10-26").start.toISOString()).toBe("2026-10-25T15:00:00.000Z");
   expect(collectionDateSchema.safeParse("2026-02-30").success).toBe(false);
-  expect(nextCollectionAt(new Date("2026-10-25T20:12:00Z"))).toBe("2026-10-25T20:13:00.000Z");
-  expect(nextCollectionAt(new Date("2026-10-25T20:13:00Z"))).toBe("2026-10-25T22:13:00.000Z");
-  expect(nextCollectionAt(new Date("2026-10-26T10:14:00Z"))).toBe("2026-10-26T20:13:00.000Z");
+  expect(nextCollectionAt(new Date("2026-10-25T22:59:59.999Z"))).toBe("2026-10-25T23:00:00.000Z");
+  expect(nextCollectionAt(new Date("2026-10-25T23:00:00Z"))).toBe("2026-10-26T23:00:00.000Z");
+  expect(nextCollectionAt(new Date("2026-10-26T15:00:00Z"))).toBe("2026-10-26T23:00:00.000Z");
+  expect(nextCollectionAt(new Date("2026-12-31T23:00:00Z"))).toBe("2027-01-01T23:00:00.000Z");
 });
 describe("실제 수집 설정·브리핑", () => {
+  it("저장한 허용 스위치와 전역 정지에 따라 다음 08:00 예약만 안내하며 수집을 실행하지 않는다", async () => {
+    const db = getDb(), { agent, csrf } = await login(app);
+    const keys = ["auto_collect", "global_stop"];
+    const previous = await Promise.all(keys.map(async key => (await db.select().from(appSettings).where(eq(appSettings.key, key)).limit(1))[0]));
+    const jobIds = (await db.select({ id: jobs.id }).from(jobs).orderBy(jobs.id)).map(row => row.id);
+    const set = (key: string, value: boolean) => db.insert(appSettings).values({ key, value }).onConflictDoUpdate({ target: appSettings.key, set: { value } });
+    vi.stubEnv("AUTO_COLLECT", "true");
+    try {
+      await set("auto_collect", false); await set("global_stop", false);
+      const off = await agent.get("/api/collection/overview?channelId=1");
+      expect(off.status).toBe(200);
+      expect(off.body).toMatchObject({ autoCollect: false, globalStop: false, nextAt: null });
+      expect((await agent.get("/api/status")).body).toMatchObject({ autoCollect: false, autoCollectFromEnv: true, integrations: { flags: { autoCollect: false } } });
+      const enable = await agent.put("/api/settings/auto-collect").set("x-csrf-token", csrf).send({ enabled: true });
+      expect(enable.status).toBe(200);
+      expect(enable.body.autoCollect).toBe(true);
+      expect((await agent.get("/api/status")).body).toMatchObject({ autoCollect: true, autoCollectFromEnv: true, integrations: { flags: { autoCollect: true } } });
+      const before = new Date(), on = await agent.get("/api/collection/overview?channelId=1"), after = new Date();
+      expect(on.status).toBe(200);
+      expect(on.body).toMatchObject({ autoCollect: true, globalStop: false, timezone: "Asia/Seoul" });
+      expect([nextCollectionAt(before), nextCollectionAt(after)]).toContain(on.body.nextAt);
+      expect(on.body.nextAt).toMatch(/T23:00:00\.000Z$/);
+      await set("global_stop", true);
+      expect((await agent.get("/api/collection/overview?channelId=1")).body).toMatchObject({ autoCollect: true, globalStop: true, nextAt: null });
+      await set("global_stop", false);
+      const disable = await agent.put("/api/settings/auto-collect").set("x-csrf-token", csrf).send({ enabled: false });
+      expect(disable.status).toBe(200);
+      expect(disable.body.autoCollect).toBe(false);
+      expect((await agent.get("/api/status")).body).toMatchObject({ autoCollect: false, autoCollectFromEnv: true, integrations: { flags: { autoCollect: false } } });
+      expect((await agent.get("/api/collection/overview?channelId=1")).body).toMatchObject({ autoCollect: false, globalStop: false, nextAt: null });
+      expect((await db.select({ id: jobs.id }).from(jobs).orderBy(jobs.id)).map(row => row.id)).toEqual(jobIds);
+    } finally {
+      vi.unstubAllEnvs();
+      for (let i = 0; i < keys.length; i++) {
+        const saved = previous[i];
+        if (saved) await db.update(appSettings).set({ value: saved.value, updatedAt: saved.updatedAt }).where(eq(appSettings.key, keys[i]));
+        else await db.delete(appSettings).where(eq(appSettings.key, keys[i]));
+      }
+    }
+  });
   it('zero legacy collection limits do not reject an explicit collection-only request or let client fields enable AI', async () => {
     const db = getDb(), { agent, csrf } = await login(app);
     const [before] = await db.select().from(channels).where(eq(channels.id, 1));

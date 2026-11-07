@@ -10,10 +10,11 @@ export function collectionDayRange(day: string) {
   const start = new Date(`${day}T00:00:00+09:00`);
   return { start, end: new Date(start.getTime() + 86400_000) };
 }
-export const COLLECTION_HOURS_KST = [5, 7, 19];
+// collect.yml uses 23:00 UTC, which is the following day's 08:00 in Korea.
+export const COLLECTION_HOURS_KST = [8];
 export function nextCollectionAt(now = new Date()) {
   const { start } = collectionDayRange(kstDay(now));
-  return [0, 1].flatMap(day => COLLECTION_HOURS_KST.map(hour => new Date(start.getTime() + (day * 24 + hour) * 3600_000 + 13 * 60_000))).find(t => t > now)!.toISOString();
+  return [0, 1].flatMap(day => COLLECTION_HOURS_KST.map(hour => new Date(start.getTime() + (day * 24 + hour) * 3600_000))).find(t => t > now)!.toISOString();
 }
 
 const terms = (s: string) => s.split("\n").map(x => x.trim()).filter(Boolean);

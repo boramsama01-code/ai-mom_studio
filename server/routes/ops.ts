@@ -16,6 +16,7 @@ import { resolveDiscovery } from "../../shared/domain";
 import { getPublisherHealth } from "../services/publicationHealth";
 import { cancelGeneration, stopActiveGenerations } from "../services/sourceGeneration";
 import { stopActiveCollections } from "../worker/run";
+import { autoCollectEnabled } from "../services/autoCollection";
 
 export const opsRoutes = Router();
 
@@ -26,7 +27,8 @@ opsRoutes.get(
     const [lastWorker] = await db.select().from(workerRuns).orderBy(desc(workerRuns.id)).limit(1);
     const [{ queued }] = (await db.select({ queued: sql<number>`count(*)::int` }).from(jobs).where(eq(jobs.status, "queued"))) as Array<{ queued: number }>;
     const [gs] = await db.select().from(appSettings).where(eq(appSettings.key, "global_stop"));
-    const [ac] = await db.select().from(appSettings).where(eq(appSettings.key, "auto_collect"));
+    const autoCollect = await autoCollectEnabled(db);
+    const integrations = integrationStatus();
     const publisher = await getPublisherHealth(db);
     const [publicationCounts] = await db.select({
       overdueCount: sql<number>`count(*) filter (where ${deliveries.status} = 'scheduled' and ${approvals.scheduledAt} < now() - interval '1 minute')::int`,
@@ -35,10 +37,10 @@ opsRoutes.get(
       oldestPendingAt: sql<string | null>`min(${approvals.scheduledAt}) filter (where ${deliveries.status} = 'scheduled')`,
     }).from(deliveries).innerJoin(approvals, eq(approvals.id, deliveries.approvalId));
     res.json({
-      autoCollect: env.autoCollect || ac?.value === true,
+      autoCollect,
       autoCollectFromEnv: env.autoCollect,
       inlineWorker: env.inlineWorker,
-      integrations: integrationStatus(),
+      integrations: { ...integrations, flags: { ...integrations.flags, autoCollect } },
       worker: lastWorker ?? null,
       inlinePublishing: env.inlineWorker && env.autoPublish && !env.dryRun && !env.canonicalRedirectUrl,
       workerConnected: publisher.connected,
@@ -163,7 +165,7 @@ opsRoutes.put(
       .values({ key: "auto_collect", value: body.enabled })
       .onConflictDoUpdate({ target: appSettings.key, set: { value: body.enabled, updatedAt: new Date() } });
     await audit(db, { actor: actorOf(req), action: body.enabled ? "auto_collect_on" : "auto_collect_off", entity: "settings" });
-    res.json({ autoCollect: env.autoCollect || body.enabled });
+    res.json({ autoCollect: body.enabled });
   }),
 );
 

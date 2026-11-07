@@ -6,7 +6,7 @@ import { getDb } from "../db";
 import { appSettings, channels, contentItems, jobs, officialSources, runs, searchRules, sourceDocuments } from "../../shared/schema";
 import { noticeIntentSql } from "../services/noticeIntent";
 import { itemSourceIdSql } from "../services/itemSources";
-import { COLLECTION_PROFILES, collectionDateSchema, collectionDayRange, kstDay } from "../../shared/collection";
+import { COLLECTION_PROFILES, collectionDateSchema, collectionDayRange, kstDay, nextCollectionAt } from "../../shared/collection";
 import { normalizeQuery, resolveDiscovery } from "../../shared/domain";
 import { ah, conflict, HttpError, loadChannel, parse, zVersion } from "./util";
 import { env } from "../env";
@@ -19,6 +19,7 @@ import { orderedChannels } from "../services/channelOrder";
 import { boardMatchesCategory } from "../services/officialCatalog";
 import { PUBLIC_NEWS_FEEDS } from "../services/newsSearch";
 import { secretStatuses } from "../secretStore";
+import { autoCollectEnabled } from "../services/autoCollection";
 
 export const collectionRoutes = Router();
 const processStartedAt = Date.now() - process.uptime() * 1000;
@@ -28,7 +29,7 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
   const db = getDb(), now = new Date(), date = q.date ?? kstDay(now);
   const { start, end } = collectionDayRange(date);
   const chs = (await orderedChannels(db)).filter(ch => q.channelId === "all" ? ch.active : ch.id === q.channelId);
-  const autoCollect = env.autoCollect || await getSetting(db, "auto_collect", false) === true;
+  const autoCollect = await autoCollectEnabled(db);
   const globalStop = await getSetting(db, "global_stop", false) === true;
   const [naverTest] = await db.select({ value: appSettings.value, at: appSettings.updatedAt }).from(appSettings).where(eq(appSettings.key, "conn_test:naver")).limit(1);
   const naverKeys = await secretStatuses(db, ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"]);
@@ -67,8 +68,8 @@ collectionRoutes.get("/collection/overview", ah(async (req, res) => {
       jobs: pendingJobs.map(j => ({ id: j.id, status: j.status, createdAt: j.createdAt, stale: j.status === "queued" ? now.getTime() - j.createdAt.getTime() > 120_000 : !j.leaseExpiresAt || j.leaseExpiresAt < now })),
       lastRun: lastRun ? { subcategory: typeof lastRun.snapshot.subcategory === "string" ? lastRun.snapshot.subcategory : null, id: lastRun.id, status: lastRun.status, startedAt: lastRun.startedAt, finishedAt: lastRun.finishedAt, counts: lastRun.counts, errors: lastRun.errors } : null };
   }));
-  // collect.yml has no schedule. A legacy saved toggle is not a future timer.
-  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "official_naver", collectionStrategy: "official_first", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, naverConnectionTest, inlineWorker: env.inlineWorker, nextAt: null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
+  // This is the next scheduled slot; GitHub may start the actual worker later.
+  res.json({ date, timezone: "Asia/Seoul", autoCollect, globalStop, searchReady: true, sourceMode: "official_naver", collectionStrategy: "official_first", publicFeeds: PUBLIC_NEWS_FEEDS.map(f => f.name), naverReady: !!env.naverClientId && !!env.naverClientSecret, naverConnectionTest, inlineWorker: env.inlineWorker, nextAt: autoCollect && !globalStop ? nextCollectionAt(now) : null, lastScheduledAt: scheduled?.startedAt ?? null, channels: rows });
 }));
 
 collectionRoutes.post("/channels/:cid/collection-profile", ah(async (req, res) => {

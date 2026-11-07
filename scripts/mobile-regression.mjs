@@ -1,6 +1,7 @@
 // Browser regression runs in GitHub Actions against the built app with synthetic API data.
 // No production credentials, database, AI requests, collection jobs or social posts are used.
 import assert from "node:assert/strict";
+import { closeChannelMenu, openChannelMenu, selectChannel } from './channel-picker.mjs';
 import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { preview } from "vite";
@@ -30,8 +31,12 @@ const profile = { label: "과학·시사", count: 2, missing: 0, active: 1, paus
   { query: "과학 뉴스", endpoint: "news", state: "active" }, { query: "인공지능", endpoint: "news", state: "paused" },
 ] };
 const row = { ...channels[1], queries: 1, discoveryQueries: 0, boards: 0, budget: 12, profile, newItems: 128, pending: 128, fetched: 0, jobs: [], lastRun: null };
+const emptyRow = { ...channels[2], queries: 0, discoveryQueries: 0, boards: 0, budget: 2, profile: null, newItems: 0, pending: 0, fetched: 0, jobs: [], lastRun: null, categories: [{ label: "웹툰", newItems: 0 }, { label: "미분류", newItems: 0 }] };
 const orphanApproval = { ap: { id: 5, revisionId: 2, scheduledAt: "2026-11-02T07:38:00.000Z", status: "active" }, item: { id: 12174, title: "승인은 저장됐지만 전송 예약이 없는 콘텐츠", channelId: 3 }, reason: "활성 게시 목적지가 없어 전송 예약이 만들어지지 않았습니다. 계정을 연결한 뒤 해당 콘텐츠에서 다시 승인해 주세요." };
 const overlap = (a, b) => Math.min(a.x + a.width, b.x + b.width) > Math.max(a.x, b.x) + 1 && Math.min(a.y + a.height, b.y + b.height) > Math.max(a.y, b.y) + 1;
+const nextScheduledCollection = new Date();
+nextScheduledCollection.setUTCHours(23, 0, 0, 0); // Every day at 08:00 Asia/Seoul.
+if (nextScheduledCollection <= new Date()) nextScheduledCollection.setUTCDate(nextScheduledCollection.getUTCDate() + 1);
 try {
   for (const width of [320, 360, 393, 430, 768, 1440]) {
     const context = await browser.newContext({ viewport: { width, height: 852 }, isMobile: width < 768, hasTouch: width < 768, locale: "ko-KR", timezoneId: "Asia/Seoul", reducedMotion: "reduce" });
@@ -49,7 +54,7 @@ try {
       else if (path === "/api/status") data = { globalStop: false, workerConnected: true, integrations: { flags: { dryRun: false, autoPublish: true } } };
       else if (path === "/api/deliveries") data = { items: [], total: 0, page: Number(url.searchParams.get("page") ?? 1), pageSize: Number(url.searchParams.get("pageSize") ?? 30), counts: { needsAttention: 0, overdue: 0 } };
       else if (path === "/api/publication-orphans") data = { items: [orphanApproval], total: 1, page: Number(url.searchParams.get("page") ?? 1), pageSize: Number(url.searchParams.get("pageSize") ?? 30) };
-      else if (path === "/api/collection/overview") data = { date: url.searchParams.get("date"), timezone: "Asia/Seoul", autoCollect, globalStop: false, searchReady: true, naverReady: false, sourceMode: "public_rss", publicFeeds: ["테스트신문"], inlineWorker: true, nextAt: null, lastScheduledAt: null, channels: [row] };
+      else if (path === "/api/collection/overview") data = { date: url.searchParams.get("date"), timezone: "Asia/Seoul", autoCollect, globalStop: false, searchReady: true, naverReady: false, sourceMode: "public_rss", publicFeeds: ["테스트신문"], inlineWorker: true, nextAt: autoCollect ? nextScheduledCollection.toISOString() : null, lastScheduledAt: null, channels: url.searchParams.get("channelId") === "all" ? [row, emptyRow] : [url.searchParams.get("channelId") === "106" ? emptyRow : row] };
       else if (path === "/api/settings/auto-collect") { autoCollect = req.postDataJSON().enabled; data = { ok: true }; }
       else if (path === "/api/collection/collect") data = { inline: true, requested: [{ channelId: req.postDataJSON().channelId }] };
       else if (path === "/api/studio/instagram/accounts") data = { accounts: channels.map(c => ({ channelId: c.id, channelName: c.name, expectedUsername: c.handle, destinations: [] })) };
@@ -65,22 +70,66 @@ try {
       for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert(!overlap(boxes[i], boxes[j]), `controls overlap at ${width}px`);
       await page.getByRole("button", { name: "새로고침", exact: true }).click();
       const checkbox = page.getByRole("checkbox", { name: "자동 수집 허용", exact: true });
+      assert.equal(await page.locator('.collection-metrics').getByRole('checkbox', { name: '자동 수집 허용', exact: true }).count(), 1, 'schedule control belongs beside the schedule status');
+      assert.equal(await page.locator('.collection-channels').count(), 0, 'one selected channel must not be rendered as a multi-channel grid');
+      const single = page.locator('.collection-channel-single [data-collection-scope="channel"]');
+      assert.equal(await single.count(), 1);
+      const singleBounds = await single.boundingBox(), panelBounds = await page.locator('.collection-summary').boundingBox();
+      assert(singleBounds.width >= panelBounds.width - 64, 'selected channel details must use the panel width');
+      assert.equal(await single.evaluate(node => getComputedStyle(node).borderTopWidth), '0px', 'selected channel has no nested card border');
       assert.equal(await checkbox.isChecked(), true);
-      assert.equal(await page.locator(".collection-next").textContent(), "예약 실행 설정 필요");
+      assert.match(await page.locator(".collection-next").textContent(), /08:00/);
       const checkBox = await checkbox.boundingBox();
       assert(checkBox.width >= 18 && checkBox.width <= 24 && checkBox.height <= 24, "checkbox has inherited full-size input dimensions");
-      await Promise.all([page.waitForResponse(r => r.url().endsWith("/settings/auto-collect") && r.status() === 200), checkbox.click()]);
+      const scheduleLabel = page.locator('.collection-schedule-controls .check');
+      const labelBox = await scheduleLabel.boundingBox();
+      assert(labelBox.width >= 48 && labelBox.height >= 48, 'schedule control preserves the 48px tap area');
+      const tapSchedulePadding = () => width < 768 ? scheduleLabel.tap({ position: { x: 8, y: 4 } }) : scheduleLabel.click({ position: { x: 8, y: 4 } });
+      await Promise.all([page.waitForResponse(r => r.url().endsWith("/settings/auto-collect") && r.status() === 200), tapSchedulePadding()]);
       await page.waitForFunction(() => document.querySelector('.collection-summary input[type="checkbox"]')?.checked === false);
       await page.locator(".collection-next").filter({ hasText: "자동 수집 꺼짐" }).waitFor();
       assert.equal(await page.locator(".collection-next").textContent(), "자동 수집 꺼짐");
+      assert.equal(writes.filter(w => w.path === '/api/settings/auto-collect').length, 1, 'one tap on label padding must save exactly once');
       await page.locator(".collection-preset summary").click();
       assert.equal(await page.getByRole("button", { name: /새 검색어 .*개 추가/ }).count(), 0);
       await page.getByRole("button", { name: "이 채널 지금 수집", exact: true }).click();
       await page.getByText("1개 채널의 수집을 시작했습니다.", { exact: false }).waitFor();
       assert(writes.some(w => w.path === "/api/settings/auto-collect" && w.body.enabled === false));
       assert(writes.some(w => w.path === "/api/collection/collect" && w.body.channelId === 3));
+      await Promise.all([page.waitForResponse(r => r.url().endsWith("/settings/auto-collect") && r.status() === 200), checkbox.click()]);
+      await page.waitForFunction(() => document.querySelector('.collection-summary input[type="checkbox"]')?.checked === true && document.querySelector('.collection-next')?.textContent?.includes('08:00'));
+      assert.equal(await checkbox.isChecked(), true);
+      assert.match(await page.locator(".collection-next").textContent(), /08:00/);
+      assert(writes.some(w => w.path === "/api/settings/auto-collect" && w.body.enabled === true));
+      await page.locator('.toasts').getByRole('button', { name: '닫기', exact: true }).click();
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `horizontal overflow at ${width}px`);
       await page.screenshot({ path: `test-results/mobile/collection-${width}.png`, fullPage: true });
+      const writesBeforeChannelViews = writes.length;
+      await selectChannel(page, '106');
+      await page.getByText('직접 창작하는 채널입니다.', { exact: false }).waitFor();
+      assert.equal(await page.locator('.collection-run').isDisabled(), true, 'a channel without collection inputs must explain how to set them up');
+      assert.equal(await page.getByRole('button', { name: '검색어 추가·재개', exact: true }).isEnabled(), true);
+      assert.equal(await page.locator('.collection-channel-single [data-collection-scope="channel"]').count(), 1);
+      assert.equal(await page.locator('.collection-channels').count(), 0);
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `empty channel overflow at ${width}px`);
+      await page.screenshot({ path: `test-results/mobile/collection-empty-${width}.png`, fullPage: true });
+      await selectChannel(page, 'all');
+      await page.locator('.collection-channels .collection-channel').nth(1).waitFor();
+      assert.equal(await page.locator('.collection-channels .collection-channel').count(), 2);
+      assert.equal(await page.locator('.collection-channel-single').count(), 0);
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `all-channel overflow at ${width}px`);
+      assert.equal(writes.length, writesBeforeChannelViews, 'changing channel views must not collect or change the global schedule');
+      await page.screenshot({ path: `test-results/mobile/collection-all-${width}.png`, fullPage: true });
+      await openChannelMenu(page);
+      assert.equal(await page.locator('.workspace-header .global-channel-select').count(), 0);
+      assert.equal(await page.locator('.sidebar .global-channel-select').count(), 1);
+      assert.equal(await page.locator('.sidebar a.brand').getAttribute('href'), '/');
+      assert.equal(await page.locator('.palette-trigger').count(), 0);
+      const pickerBounds = await page.getByRole('combobox', { name: '보기 채널', exact: true }).boundingBox();
+      assert(pickerBounds.x >= 0 && pickerBounds.x + pickerBounds.width <= width + 1, 'sidebar channel control stays in the viewport');
+      assert(pickerBounds.height >= 48, 'sidebar channel selection preserves a 48px touch target');
+      await page.screenshot({ path: `test-results/mobile/channel-menu-${width}.png` });
+      await closeChannelMenu(page);
       await page.goto("http://127.0.0.1:4173/settings?tab=instagram");
       await page.locator(".instagram-account").first().waitFor();
       assert.equal(await page.locator(".instagram-account").count(), 4);
@@ -105,7 +154,7 @@ try {
       assert.equal(writes.length, writesBeforePublication, "viewing publication history must not create approvals, retries, or social posts");
       await page.screenshot({ path: `test-results/mobile/publication-${width}.png`, fullPage: true });
       assert.deepEqual(errors, []);
-      results.push({ engine, width, errors, passed: true });
+      results.push({ engine, width, errors, passed: true, inlineScheduleControl: true, singleChannelUnified: true, emptyChannelCollectionDisabled: true, allChannelCards: 2, sidebarChannelPicker: true, brandHomeHref: true });
       await writeFile("test-results/mobile/results.json", JSON.stringify(results, null, 2));
       console.log(`${engine} ${width}px: date/buttons, checkbox tap, channel collection, four account routes, zero-delivery approval history passed`);
     } catch (e) {

@@ -437,8 +437,22 @@ fieldset legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
 .collection-metrics strong { font-size: 30px; line-height: 1.2; }
 .collection-metrics small { font-size: 13px; margin-left: 5px; font-weight: 400; }
 .collection-metrics .collection-next { font-size: 18px; }
+.collection-schedule-status { display:flex; flex-direction:column; gap:6px; min-width:0; }
+.collection-schedule-controls { display:flex; align-items:center; flex-wrap:wrap; column-gap:12px; row-gap:2px; min-width:0; }
+.collection-schedule-controls .check { min-height:48px; margin:0; gap:8px; font-size:13px; }
+.collection-schedule-controls input[type="checkbox"] { flex:0 0 18px; width:18px; height:18px; min-height:18px; max-height:18px; margin:0; padding:0; }
+.collection-metrics > .collection-schedule { gap:6px; }
+.collection-schedule-note { margin:0; line-height:1.6; }
+.collection-compact .collection-compact-metrics > .collection-compact-next { display:flex; flex-direction:column; align-items:stretch; gap:6px; }
+.collection-compact-next .collection-schedule-status { flex-direction:row; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:6px 12px; }
+.collection-compact-next .collection-schedule-controls { justify-content:space-between; }
+.collection-source-setup { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; }
+.collection-source-setup p { margin:0; }
+.collection-source-setup .btn { flex-shrink:0; }
 .collection-channels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .collection-channel { border: 1px solid var(--border); padding: 18px; border-radius: 12px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.collection-channel-single { width:100%; min-width:0; }
+.collection-channel-single > .collection-channel { width:100%; box-sizing:border-box; border:0; border-radius:0; padding:0; }
 .collection-channel h3, .collection-channel p { margin: 0; }
 .collection-channel h3 { font-size: 15px; }
 .collection-channel details { overflow-wrap: anywhere; }
@@ -451,6 +465,7 @@ fieldset legend { font-weight: 600; font-size: 14px; padding: 0 4px; }
   .collection-metrics { grid-template-columns: 1fr 1fr; }
   .collection-metrics > div:last-child { grid-column: 1 / -1; }
   .collection-summary > .row { align-items: flex-start; gap: 12px; }
+  .collection-source-setup { align-items:flex-start; flex-direction:column; }
 }
 
 /* Source-to-card workflow: controls follow the content they act on. */

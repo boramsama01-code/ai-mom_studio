@@ -1,4 +1,4 @@
-import { lazy, Suspense, StrictMode, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, StrictMode, useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Route, Switch, useLocation, Redirect } from "wouter";
@@ -16,7 +16,6 @@ import { ChannelProvider, DirtyGuardProvider, useChannel, useDirtyGuard, useMe }
 import { GuardedRouter } from "./GuardedRouter";
 import { DirtyModal, ErrorBox, GuardedLink, Loading } from "./ui";
 import { ToastProvider, useToast } from "./toast";
-import { CommandPalette } from "./palette";
 import { GlobalChannelSelect } from "./GlobalChannelSelect";
 import { ScreenErrorBoundary } from "./ScreenErrorBoundary";
 import { LoginPage } from "./pages/Login";
@@ -67,17 +66,32 @@ function NavigationGroup({ title, collapsible, expanded, children }: { title: st
   return collapsible ? <details className="nav-group nav-settings" open={expanded}><summary className="nav-group-label">{title}<Icon name="chevron" size={14} /></summary>{children}</details> : <div className="nav-group"><div className="nav-group-label">{title}</div>{children}</div>;
 }
 
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
-
-function Shell() {
+export function Shell() {
   const [loc] = useLocation();
   const guard = useDirtyGuard();
   const [open, setOpen] = useState(false);
-  const [palette, setPalette] = useState(false);
   const sidebar = useRef<HTMLElement>(null);
-  useFocusScope(sidebar, open, () => setOpen(false));
-  useEffect(() => { setOpen(false); }, [loc]);
+  const menuButton = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  const drawerConfirmation = useRef(false);
+  // The confirmation dialog owns focus while resolving a channel or home change.
+  useFocusScope(sidebar, open && !guard.pending && !guard.resolving, () => setOpen(false));
   const { selected } = useChannel();
+  useEffect(() => { setOpen(false); }, [loc, selected]);
+  useEffect(() => {
+    if (wasOpen.current && !open) menuButton.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
+  useEffect(() => {
+    if (guard.pending) {
+      if (open) drawerConfirmation.current = true;
+      setOpen(false);
+    } else if (!guard.resolving && drawerConfirmation.current) {
+      drawerConfirmation.current = false;
+      // The modal must not restore focus to the now-hidden sidebar selector.
+      menuButton.current?.focus();
+    }
+  }, [guard.pending, guard.resolving, open]);
   const me = useMe();
   const qc = useQueryClient();
   const toast = useToast();
@@ -107,27 +121,6 @@ function Shell() {
       location.href = "/";
     }).catch(error => toast("err", (error as Error).message));
   });
-  const collect = useCallback(async () => {
-    try {
-      const r = await api<{ inline: boolean }>("/collection/collect", { method: "POST", body: { channelId: selected } });
-      toast("ok", r.inline ? "자료 수집을 시작했습니다. 아침 수집 브리핑에서 결과를 확인하세요." : "수집 요청을 등록했습니다. 워커 실행을 기다립니다.");
-      qc.invalidateQueries({ queryKey: ["ch", selected] });
-      qc.invalidateQueries({ queryKey: ["collection"] });
-    } catch (e) {
-      toast("err", (e as Error).message);
-    }
-  }, [selected, toast, qc]);
-
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPalette((p) => !p);
-      }
-    };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, []);
   // Canva 연결 결과 안내(리디렉트 후)
   useEffect(() => {
     const p = new URLSearchParams(location.search);
@@ -146,23 +139,20 @@ function Shell() {
         본문으로 건너뛰기
       </a>
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
-      <aside ref={sidebar} className={`sidebar ${open ? "open" : ""}`} aria-label="주 메뉴" role={open ? "dialog" : undefined} aria-modal={open || undefined}>
+      <aside ref={sidebar} className={`sidebar ${open ? "open" : ""}`} aria-label="주 메뉴" role={open && !guard.pending ? "dialog" : undefined} aria-modal={open && !guard.pending || undefined}>
         <div className="row between">
-          <div className="brand">
+          <GuardedLink className="brand brand-home" href="/" onClick={() => setOpen(false)}>
             <img className="brand-penguin" src="/favicon.svg?v=20261018-2" alt="" width="40" height="40" />
             <span>
               우주펭귄상회
               <small>SPACE PENGUIN STUDIO</small>
             </span>
-          </div>
+          </GuardedLink>
           <button className="btn ghost icon only-mobile" aria-label="메뉴 닫기" onClick={() => setOpen(false)}>
             <Icon name="close" />
           </button>
         </div>
-        <button className="palette-trigger" onClick={() => { setOpen(false); setPalette(true); }}>
-          <span className="row"><Icon name="search" size={17} /> 빠른 이동</span>
-          <kbd>{isMac ? "⌘" : "Ctrl"} K</kbd>
-        </button>
+        <GlobalChannelSelect />
         <nav className="nav">
           {NAV.map((g) => (
             <NavigationGroup key={g.group} title={g.group} collapsible={g.collapsible} expanded={g.items.some(n => isActive(n.href))}>
@@ -195,12 +185,8 @@ function Shell() {
       <div className="workspace-body">
       <header className="workspace-bar workspace-header">
         <div className="workspace-header-left">
-          <button className="btn ghost icon only-mobile" aria-label="메뉴 열기" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" /></button>
+          <button ref={menuButton} className="btn ghost icon only-mobile" aria-label="메뉴 열기" aria-expanded={open} onClick={() => setOpen(true)}><Icon name="menu" /></button>
           <div className="workspace-breadcrumb"><span>우주펭귄상회</span><Icon name="chevron" size={14} /><strong>{activeNav?.label ?? "작업실"}</strong></div>
-        </div>
-        <div className="workspace-bar-right">
-          <button className="btn ghost icon workspace-search" aria-label="검색·이동" onClick={() => setPalette(true)}><Icon name="search" size={18} /></button>
-          <GlobalChannelSelect />
         </div>
       </header>
       <main className="main" id="main" tabIndex={-1} data-section={sectionName}>
@@ -229,7 +215,6 @@ function Shell() {
       </main>
       </div>
       <nav className="mobile-nav" aria-label="빠른 메뉴">{NAV.flatMap(g => g.items).filter(n => ["/", "/inbox", "/publish", "/settings"].includes(n.href)).map(n => <GuardedLink key={n.href} href={n.href} ariaCurrent={isActive(n.href)}><Icon name={n.icon} size={20} /><span>{n.label}</span></GuardedLink>)}</nav>
-      <CommandPalette open={palette} onClose={() => setPalette(false)} onCollect={collect} />
       <DirtyModal />
     </div>
   );
