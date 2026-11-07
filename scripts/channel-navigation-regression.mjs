@@ -3,6 +3,7 @@
 // Every API response is synthetic;
 // external requests are blocked, and no database, AI provider or social account is used.
 import assert from "node:assert/strict";
+import { closeChannelMenu, openChannelMenu, selectChannel } from './channel-picker.mjs';
 import { browserLayout } from "./browser-layout.mjs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -176,16 +177,32 @@ try {
   try {
     await page.goto(origin);await page.locator('a[href="/studio/25"]').first().waitFor();
     const selection=page.getByLabel("보기 채널",{exact:true});
-    await selection.selectOption("4");await page.locator('a[href="/studio/26"]').first().waitFor();
+    assert.equal(await page.locator('.workspace-header .global-channel-select').count(),0,'the picker belongs to the sidebar');
+    assert.equal(await page.locator('.sidebar .global-channel-select').count(),1);
+    assert.equal(await page.locator('.palette-trigger').count(),0,'quick navigation is replaced by the channel picker');
+    await selectChannel(page,"4");await page.locator('a[href="/studio/26"]').first().waitFor();
     const listWorks=await page.locator('a[href="/studio/25"]').count()===0;
-    await selection.selectOption("3");await page.locator('a[href="/studio/25"]').first().click();await ready(page);
+    await selectChannel(page,"3");await page.locator('a[href="/studio/25"]').first().click();await ready(page);
+    await openChannelMenu(page);
+    const brand=page.locator('.sidebar a.brand');
+    assert.equal(await brand.getAttribute('href'),'/');
+    await brand.click();await page.waitForURL(origin+'/');
+    assert.equal(await selection.inputValue(),'3','home navigation preserves the selected channel');
+    await page.locator('a[href="/studio/25"]').first().click();await ready(page);
     await field(page,"title").fill("채널을 바꾸기 전에 작성한 미저장 원고");
-    await selection.selectOption("4");
+    await openChannelMenu(page);await brand.click();
+    const homeDialog=page.getByRole('dialog',{name:'저장하지 않은 변경이 있습니다'});
+    await homeDialog.waitFor();
+    await homeDialog.getByRole('button',{name:'머무르기',exact:true}).click();await closeChannelMenu(page);
+    assert.equal(new URL(page.url()).pathname,'/studio/25');
+    assert.equal(await field(page,'title').inputValue(),'채널을 바꾸기 전에 작성한 미저장 원고');
+    await selectChannel(page,"4");
     const dialog=page.getByRole("dialog",{name:"저장하지 않은 변경이 있습니다"});
     await dialog.waitFor();assert.equal(await selection.inputValue(),"3");assert.equal(new URL(page.url()).pathname,"/studio/25");
     await dialog.getByRole("button",{name:"머무르기",exact:true}).click();
+    await closeChannelMenu(page);
     assert.equal(await field(page,"title").inputValue(),"채널을 바꾸기 전에 작성한 미저장 원고");
-    await selection.selectOption("4");await dialog.waitFor();await dialog.getByRole("button",{name:"버리고 이동",exact:true}).click();
+    await selectChannel(page,"4");await dialog.waitFor();await dialog.getByRole("button",{name:"버리고 이동",exact:true}).click();
     await page.locator('a[href="/studio/26"]').first().waitFor();
     assert.equal(new URL(page.url()).pathname,"/");assert.equal(await selection.inputValue(),"4");
     assert.equal(f.state.saved.copy.cover.title,"뉴스를 읽는 가족의 시간");
@@ -226,7 +243,7 @@ try {
     assert.equal(await page.locator('a[href="/studio/25"]').count(),0);assert.equal(await page.locator('a[href="/studio/26"]').count(),0);
     await noOverflow(page,"created-channel-list");
     assert(listWorks);assert.deepEqual(errors,[]);assert.deepEqual(blocked,[]);assert.deepEqual(mutations(f.state),[],"channel switching must not save, generate or publish a discarded draft");
-    const result={width,browserEngine,listWorks,dirtyCancelledPreserved:true,explicitDiscardNavigated:true,newChannelCreated:true,newChannelSelected:true,roleAiDefaults:true,roleModelsSaved:true,creates,aiSettingSaves,errors,blocked};
+    const result={width,browserEngine,listWorks,sidebarChannelPicker:true,brandHomeNavigated:true,brandHomeDirtyCancelledPreserved:true,dirtyCancelledPreserved:true,explicitDiscardNavigated:true,newChannelCreated:true,newChannelSelected:true,roleAiDefaults:true,roleModelsSaved:true,creates,aiSettingSaves,errors,blocked};
     out.push(result);await writeFile(`${outputDir}/results.json`,JSON.stringify(out,null,2));console.log(JSON.stringify(result));
   } catch(error) { await page.screenshot({path:`${outputDir}/after-failure-${width}.png`});const failure={width,errors,blocked,url:page.url(),creates,failure:String(error)};await writeFile(`${outputDir}/after-failure-${width}.json`,JSON.stringify(failure,null,2));failures.push(failure);console.log("CHANNEL_FAILURE "+JSON.stringify(failure)); }
   finally {await context.close();}

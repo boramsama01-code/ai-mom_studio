@@ -1,6 +1,7 @@
 // Browser regression runs in GitHub Actions against the built app with synthetic API data.
 // No production credentials, database, AI requests, collection jobs or social posts are used.
 import assert from "node:assert/strict";
+import { closeChannelMenu, openChannelMenu, selectChannel } from './channel-picker.mjs';
 import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { preview } from "vite";
@@ -104,7 +105,7 @@ try {
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `horizontal overflow at ${width}px`);
       await page.screenshot({ path: `test-results/mobile/collection-${width}.png`, fullPage: true });
       const writesBeforeChannelViews = writes.length;
-      await page.getByRole('combobox', { name: '보기 채널', exact: true }).selectOption('106');
+      await selectChannel(page, '106');
       await page.getByText('직접 창작하는 채널입니다.', { exact: false }).waitFor();
       assert.equal(await page.locator('.collection-run').isDisabled(), true, 'a channel without collection inputs must explain how to set them up');
       assert.equal(await page.getByRole('button', { name: '검색어 추가·재개', exact: true }).isEnabled(), true);
@@ -112,13 +113,23 @@ try {
       assert.equal(await page.locator('.collection-channels').count(), 0);
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `empty channel overflow at ${width}px`);
       await page.screenshot({ path: `test-results/mobile/collection-empty-${width}.png`, fullPage: true });
-      await page.getByRole('combobox', { name: '보기 채널', exact: true }).selectOption('all');
+      await selectChannel(page, 'all');
       await page.locator('.collection-channels .collection-channel').nth(1).waitFor();
       assert.equal(await page.locator('.collection-channels .collection-channel').count(), 2);
       assert.equal(await page.locator('.collection-channel-single').count(), 0);
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `all-channel overflow at ${width}px`);
       assert.equal(writes.length, writesBeforeChannelViews, 'changing channel views must not collect or change the global schedule');
       await page.screenshot({ path: `test-results/mobile/collection-all-${width}.png`, fullPage: true });
+      await openChannelMenu(page);
+      assert.equal(await page.locator('.workspace-header .global-channel-select').count(), 0);
+      assert.equal(await page.locator('.sidebar .global-channel-select').count(), 1);
+      assert.equal(await page.locator('.sidebar a.brand').getAttribute('href'), '/');
+      assert.equal(await page.locator('.palette-trigger').count(), 0);
+      const pickerBounds = await page.getByRole('combobox', { name: '보기 채널', exact: true }).boundingBox();
+      assert(pickerBounds.x >= 0 && pickerBounds.x + pickerBounds.width <= width + 1, 'sidebar channel control stays in the viewport');
+      assert(pickerBounds.height >= 48, 'sidebar channel selection preserves a 48px touch target');
+      await page.screenshot({ path: `test-results/mobile/channel-menu-${width}.png` });
+      await closeChannelMenu(page);
       await page.goto("http://127.0.0.1:4173/settings?tab=instagram");
       await page.locator(".instagram-account").first().waitFor();
       assert.equal(await page.locator(".instagram-account").count(), 4);
@@ -143,7 +154,7 @@ try {
       assert.equal(writes.length, writesBeforePublication, "viewing publication history must not create approvals, retries, or social posts");
       await page.screenshot({ path: `test-results/mobile/publication-${width}.png`, fullPage: true });
       assert.deepEqual(errors, []);
-      results.push({ engine, width, errors, passed: true, inlineScheduleControl: true, singleChannelUnified: true, emptyChannelCollectionDisabled: true, allChannelCards: 2 });
+      results.push({ engine, width, errors, passed: true, inlineScheduleControl: true, singleChannelUnified: true, emptyChannelCollectionDisabled: true, allChannelCards: 2, sidebarChannelPicker: true, brandHomeHref: true });
       await writeFile("test-results/mobile/results.json", JSON.stringify(results, null, 2));
       console.log(`${engine} ${width}px: date/buttons, checkbox tap, channel collection, four account routes, zero-delivery approval history passed`);
     } catch (e) {

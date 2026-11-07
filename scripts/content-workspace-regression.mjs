@@ -1,6 +1,7 @@
 // Browser regression against the built app. Every API response is synthetic;
 // external requests are blocked, and no database, AI provider or social account is used.
 import assert from "node:assert/strict";
+import { closeChannelMenu, selectChannel } from './channel-picker.mjs';
 import { mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -520,10 +521,11 @@ try {
       const secondTitle = "두 번째 카드의 별도 제목", secondBody = "둘째 카드에서만 고친 문구입니다. 첫 카드와 서로 섞이지 않습니다.";
       await page.getByRole("button", { name: /^1번째 본문 문구 편집/ }).click();
       await field(page, "title").fill(firstTitle); await field(page, "body").fill(firstBody);
-      await page.getByLabel("보기 채널", { exact: true }).selectOption("all");
+      await selectChannel(page, "all");
       await page.getByRole("dialog", { name: "저장하지 않은 변경이 있습니다" }).waitFor();
       assert.equal(await page.getByLabel("보기 채널", { exact: true }).inputValue(), "3");
       await page.getByRole("button", { name: "머무르기", exact: true }).click();
+      await closeChannelMenu(page);
       await waitValue(page, "body", firstBody);
       await page.goBack();
       await page.getByRole("dialog", { name: "저장하지 않은 변경이 있습니다" }).waitFor();
@@ -555,11 +557,11 @@ try {
       await saveCopy(page);
       assert.equal(mutations(state).filter(write => write.path === copyPath).length, 1);
       assert.equal(state.saved.copy.pages[0].body, firstBody); assert.equal(state.saved.copy.pages[1].body, secondBody);
-      await page.getByLabel("보기 채널", { exact: true }).selectOption("all");
+      await selectChannel(page, "all");
       await page.waitForURL(`${origin}/`);
       assert.equal(await page.getByLabel("보기 채널", { exact: true }).inputValue(), "all");
       await page.locator('a[href="/studio/25"]').first().click(); await ready(page);
-      await page.getByLabel("보기 채널", { exact: true }).selectOption("3");
+      await selectChannel(page, "3");
       await page.waitForURL(`${origin}/`);
       await page.locator('a[href="/studio/25"]').first().click(); await ready(page);
       await replaceWorkspaceDocument(page, () => page.reload());
