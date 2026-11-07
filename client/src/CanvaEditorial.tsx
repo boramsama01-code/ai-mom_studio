@@ -1,7 +1,7 @@
 import { ExternalDesignLink } from "./ExternalDesignLink";
 import { CanvaManualImport } from "./CanvaManualImport";
 import { canvaManualSnapshotSchema } from '@shared/canvaManualImport';
-import { useEffect,useRef,useState } from 'react';
+import { useEffect,useLayoutEffect,useRef,useState } from 'react';
 import { useMutation,useQuery,useQueryClient } from '@tanstack/react-query';
 import { api,ApiError } from './api';
 import { ErrorBox,GuardedLink } from './ui';
@@ -54,6 +54,11 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   const variant=canvaVariant(copy),available=masters.data?.items.filter(m=>m.status==='ready'&&!m.templateVersion.startsWith('canva-folder:')&&(readingProfile?m.templateVersion===readingProfile.templateVersion&&readingMasterSourceApproved(readingProfile,m.sourceId):!readingProfileForTemplateVersion(m.templateVersion)&&m.conceptMode===variant.conceptMode&&m.hasExternalActivity===variant.hasExternalActivity))??[];
   const [choice,setChoice]=useState<number|null>(null),selected=available.find(m=>m.id===choice)??available[0];
   const [focusedJobId,setFocusedJobId]=useState<number|null>(null);
+  const [reviewIntent,setReviewIntent]=useState<{scope:string;jobId:number}|null>(null);
+  const reviewDetails=useRef<HTMLDetailsElement>(null),reviewSummary=useRef<HTMLElement>(null);
+  const handledReviewIntent=useRef<typeof reviewIntent>(null);
+  const me=qc.getQueryData<{user?:string|null;recoveryScope?:string|null}>(['me']);
+  const reviewScope=JSON.stringify([me?.user??null,me?.recoveryScope??null,channelId,itemId,version,revisionId]);
   const [manualBlocking,setManualBlocking]=useState(false);
   const [manualOpenRequest,setManualOpenRequest]=useState(0),[automaticOpen,setAutomaticOpen]=useState(false);
   useEffect(()=>{if(connection.data?.autofill)setAutomaticOpen(true);},[connection.data?.autofill]);
@@ -128,6 +133,22 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   const selectLibrary=(item:CanvaLibraryItem)=>{if(disabled||drawing||lostRequest||unresolved)return;setLibraryDesignId(item.designId);setLibraryOpen(true);keepLibraryChoice(libraryChoiceKey,item.designId);};
   const useRegistered=()=>{setLibraryDesignId(null);keepLibraryChoice(libraryChoiceKey,null);};
   const reviewMatchesCurrent=current?.sourceVersion===version&&current?.sourceRevisionId===revisionId;
+  const reviewExisting=(jobId:number)=>{
+    const job=jobs.data?.items.find(value=>value.id===jobId);
+    if(!job||job.status!=='needs_review'||job.sourceVersion!==version||job.sourceRevisionId!==revisionId)return;
+    setFocusedJobId(job.id);setReviewIntent({scope:reviewScope,jobId:job.id});
+  };
+  useLayoutEffect(()=>{
+    if(!reviewIntent||handledReviewIntent.current===reviewIntent)return;
+    handledReviewIntent.current=reviewIntent;setReviewIntent(null);
+    if(reviewIntent.scope!==reviewScope||current?.id!==reviewIntent.jobId||current.status!=='needs_review'||!reviewMatchesCurrent)return;
+    const details=reviewDetails.current,summary=reviewSummary.current;
+    if(!details?.isConnected||!summary?.isConnected)return;
+    details.open=true;
+    const reduceMotion=window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    summary.scrollIntoView?.({block:'center',behavior:reduceMotion?'auto':'smooth'});
+    summary.focus({preventScroll:true});
+  },[reviewIntent,reviewScope,current?.id,current?.status,reviewMatchesCurrent]);
   const canReexport=current?.status==='failed'&&!!current.exportJobId&&(current.errorCode==='export_expired'||current.errorCode==='job_failed'&&current.phase==='export_polling');
   const manualRecommended=connection.data?.connected===true&&!connection.data.autofill;
   useEffect(()=>{if(manualRecommended)setLibraryOpen(true);},[manualRecommended]);
@@ -142,7 +163,7 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   const originalDesignIds=[...(masters.data?.items.map(master=>master.sourceId)??[]),...(library.data?.items.map(item=>item.designId)??[])];
   return <section className="canva-editorial stack" aria-label={preferLocal?'스튜디오 8장 디자인':'Canva 8장 디자인'}>
     <div className="row between"><div><h3>8장 디자인 완성</h3><p className="small muted">{manualRecommended?'Canva에서 이 콘텐츠용 사본을 직접 편집한 뒤 8장을 가져와 대조할 수 있습니다.':libraryDesignId?'Canva의 배치·이미지와 기본 사진 출처를 유지하고 저장된 원고를 채웁니다.':preferLocal?'저장한 문구와 사진으로 선택한 스타일의 8장을 만듭니다.':'저장한 문구와 페이지 이미지를 Canva 템플릿에 넣습니다.'}</p></div><span className="pill">{manualRecommended?'직접 편집 · Canva':`자동 · ${preferLocal?'스튜디오':'Canva'}`}</span></div>
-    <CanvaManualImport channelId={channelId} itemId={itemId} version={version} revisionId={revisionId} disabled={disabled} busy={!!automaticDrawing||!!lostRequest||!!unresolved} connected={connection.data?.connected===true} recommended={manualRecommended} openRequest={manualOpenRequest} jobs={jobs.data?.items??[]} originalDesignIds={originalDesignIds} onBlockingChange={setManualBlocking} onJob={job=>{setFocusedJobId(job.id);qc.setQueryData<{items:CanvaJobDto[]}>(key,old=>({items:[job,...(old?.items??[]).filter(item=>item.id!==job.id)]}));void qc.invalidateQueries({queryKey:key});}}/>
+    <CanvaManualImport channelId={channelId} itemId={itemId} version={version} revisionId={revisionId} disabled={disabled} busy={!jobs.isSuccess||!!automaticDrawing||!!lostRequest||!!unresolved} connected={connection.data?.connected===true} recommended={manualRecommended} openRequest={manualOpenRequest} jobs={jobs.data?.items??[]} originalDesignIds={originalDesignIds} onBlockingChange={setManualBlocking} onReviewExisting={reviewExisting} onJob={job=>{setFocusedJobId(job.id);qc.setQueryData<{items:CanvaJobDto[]}>(key,old=>({items:[job,...(old?.items??[]).filter(item=>item.id!==job.id)]}));void qc.invalidateQueries({queryKey:key});}}/>
     {manualTemplateDesignId&&<div className="canva-manual-template" data-testid="canva-manual-template-selection"><strong>직접 편집용 원본 · {manualTemplate?.title??'선택한 Canva 원본'}</strong><p className="small">Canva 원본을 보관하고 이 콘텐츠용 사본을 만들어 편집하세요. 완성한 사본 링크를 위 입력창에 넣어 가져옵니다.</p>{manualTemplateUrl?<a className="btn sm" href={manualTemplateUrl} target="_blank" rel="noopener noreferrer">Canva 원본 열기 ↗</a>:<p className="small muted">선택한 원본의 현재 상태를 확인할 수 없습니다. 폴더에서 다른 원본을 확인해 주세요.</p>}</div>}
     <details className="canva-library-entry" open={libraryOpen} onToggle={event=>{if(event.target===event.currentTarget)setLibraryOpen(event.currentTarget.open);}}>
       <summary>Canva 폴더 템플릿{library.data?.items.length?` · ${library.data.items.filter(item=>item.status!=='missing').length}종`:''}{selectedLibrary?` · ${selectedLibrary.title} 선택됨`:''}</summary>
@@ -179,7 +200,7 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
     {unresolved&&unresolved.id!==current?.id&&<div className="notice warn stack"><p>이전 Canva 요청의 결과를 확인해야 합니다. 중복 디자인을 막기 위해 새 생성은 잠시 멈췄습니다.</p><button className="btn" disabled={action.isPending} onClick={()=>action.mutate({name:'resume',id:unresolved.id})}>이전 작업 결과 확인</button></div>}
     {unresolved&&<CanvaRecovery key={`${channelId}:${itemId}:${unresolved.id}`} channelId={channelId} itemId={itemId} version={version} job={unresolved} disabled={disabled} connected={!!connection.data?.connected} busy={!!drawing} onRecovered={job=>{setFocusedJobId(job.id);qc.setQueryData<{items:CanvaJobDto[]}>(key,old=>({items:[job,...(old?.items??[]).filter(value=>value.id!==job.id)]}));void qc.invalidateQueries({queryKey:key});}}/>}
     {start.error&&<ErrorBox error={start.error}/>}{action.error&&<ErrorBox error={action.error}/>}{jobs.error&&<ErrorBox error={jobs.error} retry={()=>jobs.refetch()}/>}
-    {pages.length===8&&<details className="content-options" open={current?.status==='needs_review'}><summary>실제 Canva 출력 8장 {current?.outputRevisionId===revisionId?'· 현재 저장본':'· 결과 보관본'}</summary><div className="stack">
+    {pages.length===8&&<details ref={reviewDetails} className="content-options" open={current?.status==='needs_review'}><summary ref={reviewSummary} tabIndex={0}>실제 Canva 출력 8장 {current?.status==='needs_review'?'· 검토·저장 필요':current?.outputRevisionId===revisionId?'· 현재 저장본':'· 결과 보관본'}</summary><div className="stack">
       {manualOutput&&<p className="notice">직접 편집한 Canva 사본에서 가져온 8장입니다. 자동 채우기나 문구 동기화 결과가 아니므로 현재 저장본과 모든 문구를 대조해 주세요.</p>}
       {current?.result?.reconciled===true&&<p className="notice warn">결과 미확정 작업에 기존 디자인을 연결해 가져온 8장입니다. 제목·템플릿 필드가 같아도 원고 일치를 자동으로 보장하지 않으므로 현재 저장본과 모든 문구를 대조해 주세요.</p>}
       {current?.result?.reuseReason==='caption_only'&&<p className="notice">카드 내용은 같고 캡션만 바뀌어, 기존 8장 이미지와 원본 PNG를 그대로 재사용했습니다. Canva에 다시 생성·내보내기를 요청하지 않았습니다.</p>}

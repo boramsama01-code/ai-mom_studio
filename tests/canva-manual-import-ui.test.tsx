@@ -11,7 +11,7 @@ import type { CanvaManualImportRequest } from "../shared/canvaManualImport";
 import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
 import { canvaLibraryItemFixture, canvaLibraryStateFixture } from "./fixtures/canvaTemplateLibrary";
 
-const mocks = vi.hoisted(() => ({ api: vi.fn(), received: vi.fn(), blocking: vi.fn(), local: vi.fn() }));
+const mocks = vi.hoisted(() => ({ api: vi.fn(), received: vi.fn(), blocking: vi.fn(), local: vi.fn(), review: vi.fn() }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
 vi.mock("../client/src/ui", () => ({ GuardedLink: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>, ErrorBox: ({ error }: { error: Error }) => <div role="alert">{error.message}</div> }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -34,7 +34,7 @@ function imported(body: CanvaManualImportRequest, status = "queued", override: P
 beforeEach(() => {
   vi.clearAllMocks(); sessionStorage.clear(); jobs = []; enqueue = null;
   connectionMessage = undefined; libraryState = canvaLibraryStateFixture({ autofill: false });
-  props = { channelId: 3, itemId: 28, version: 3, revisionId: 30, disabled: false, busy: false, connected: true, recommended: true, jobs, originalDesignIds: ["Dmaster_test"], onJob: mocks.received, onBlockingChange: mocks.blocking };
+  props = { channelId: 3, itemId: 28, version: 3, revisionId: 30, disabled: false, busy: false, connected: true, recommended: true, jobs, originalDesignIds: ["Dmaster_test"], onJob: mocks.received, onBlockingChange: mocks.blocking, onReviewExisting: mocks.review };
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(["me"], { user: "editor-a", recoveryScope: "scope-a" });
   mocks.api.mockImplementation(async (path: string, options?: { method?: string; body?: any }) => {
@@ -67,6 +67,58 @@ async function confirm() { await act(async () => host.querySelectorAll<HTMLLabel
 const posts = () => mocks.api.mock.calls.filter(([, options]) => options?.method === "POST");
 
 describe("Canva에서 직접 편집한 8장 가져오기", () => {
+  it("기존 저장본의 검토 대기 8장이 있으면 새 요청 대신 검토 경로를 제공한다", async () => {
+    const review = imported({ version: 3, requestId: crypto.randomUUID(), designId: "Dmanual_existing", confirmed: true }, "needs_review");
+    await render({ jobs: [review] }); await input("Dmanual_other"); await confirm();
+    expect(button("이 사본의 8장 가져오기").disabled).toBe(true);
+    expect([...host.querySelectorAll<HTMLInputElement>(".canva-manual-confirm input")].every(node => node.disabled)).toBe(true);
+    await click("가져온 8장 검토·저장");
+    expect(mocks.review).toHaveBeenCalledExactlyOnceWith(review.id);
+    expect(posts()).toHaveLength(0); expect(mocks.received).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLInputElement>('[aria-label="가져올 Canva 사본 링크 또는 ID"]')!.value).toBe("Dmanual_other");
+  });
+
+  it.each([{ sourceVersion: 2 }, { sourceRevisionId: 29 }])("다른 저장본의 검토 기록은 현재 사본의 새 요청을 막지 않는다: %j", async different => {
+    const review = imported({ version: 3, requestId: crypto.randomUUID(), designId: "Dmanual_previous", confirmed: true }, "needs_review", different);
+    await render({ jobs: [review] }); await input("Dmanual_current"); await confirm();
+    expect(button("이 사본의 8장 가져오기").disabled).toBe(false);
+    expect(host.textContent).not.toContain("가져온 8장 검토·저장"); expect(posts()).toHaveLength(0);
+  });
+
+  it("현재 검토 대기 작업이 있어도 응답을 잃은 이전 UUID는 먼저 같은 본문으로 조회한다", async () => {
+    enqueue = async () => { throw new ApiError(0, "응답 유실", { resultUnknown: true }); };
+    await render(); await input("Dmanual_previous"); await confirm(); await click("이 사본의 8장 가져오기");
+    const previous = structuredClone(posts()[0][1].body);
+    const review = imported({ ...previous, version: 4, requestId: crypto.randomUUID(), designId: "Dmanual_current" }, "needs_review", { id: 12, sourceRevisionId: 31 });
+    await render({ version: 4, revisionId: 31, jobs: [review], disabled: true, busy: true, connected: false });
+    expect(button("수동 가져오기 요청 결과 확인").disabled).toBe(false);
+    expect(button("가져온 8장 검토·저장").disabled).toBe(true);
+    enqueue = async body => imported(body, "needs_review");
+    await click("수동 가져오기 요청 결과 확인");
+    expect(posts()).toHaveLength(2); expect(posts()[1][1].body).toEqual(previous);
+    expect(mocks.received).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: previous.requestId }));
+    expect(button("이 사본의 8장 가져오기").disabled).toBe(true);
+  });
+
+  it("새 요청과 기존 작업이 경합한 409는 오류를 유지하고 갱신한 기존 8장의 검토로 이어진다", async () => {
+    enqueue = async body => {
+      jobs = [imported({ ...body, requestId: crypto.randomUUID() }, "needs_review")];
+      throw new ApiError(409, "진행 중이거나 문구 대조를 기다리는 Canva 작업부터 확인해 주세요.", { code: "canva_import_active", jobId: 11 });
+    };
+    await act(async () => root.render(<QueryClientProvider client={client}><CanvaEditorial channelId={3} itemId={28} version={3} revisionId={30} copy={familyDialogueCardFixture()} disabled={false} /></QueryClientProvider>)); await settle();
+    await input("Dmanual_copy"); await confirm(); await click("이 사본의 8장 가져오기");
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("문구 대조를 기다리는 Canva 작업");
+    expect(mocks.api.mock.calls.filter(([path]) => path === jobEndpoint).length).toBeGreaterThan(1);
+    expect(button("이 사본의 8장 가져오기").disabled).toBe(true);
+    const summary = [...host.querySelectorAll<HTMLElement>("summary")].find(node => node.textContent?.startsWith("실제 Canva 출력 8장"))!;
+    const review = summary.parentElement as HTMLDetailsElement;
+    await act(async () => summary.click()); await settle(); expect(review.open).toBe(false);
+    await click("가져온 8장 검토·저장");
+    expect(review.open).toBe(true); expect(document.activeElement).toBe(summary);
+    expect(posts()).toHaveLength(1); expect(button("확인한 8장을 새 버전으로 저장").disabled).toBe(true);
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain("문구 대조를 기다리는 Canva 작업");
+  });
+
   it.each([false, true])('keeps the free manual form before automatic warnings and explicitly opens it without losing input or consent; restored library=%s', async selectedLibrary => {
     connectionMessage = '현재 연결한 Canva 계정·팀에서 자동 채우기를 사용할 수 없습니다. 원본 미리보기와 Canva 직접 편집은 사용할 수 있습니다.';
     const template = canvaLibraryItemFixture({ status: 'needs_fields', canCreate: false, reason: connectionMessage });

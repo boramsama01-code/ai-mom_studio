@@ -14,6 +14,7 @@ type Props = {
   openRequest?: number;
   jobs: CanvaJobDto[]; originalDesignIds: string[];
   onBlockingChange: (blocked: boolean) => void; onJob: (job: CanvaJobDto) => void;
+  onReviewExisting: (jobId: number) => void;
 };
 const pendingSchema = z.object({ request: canvaManualImportRequestSchema, revisionId: z.number().int().positive() }).strict();
 type Pending = z.infer<typeof pendingSchema>;
@@ -39,7 +40,7 @@ export function CanvaManualImport(props: Props) {
 }
 
 function ManualImportForm({ storageKey, persistent, ...props }: Props & { storageKey: string; persistent: boolean }) {
-  const { channelId, itemId, version, revisionId, disabled, busy, connected, recommended, openRequest = 0, jobs, originalDesignIds, onBlockingChange, onJob } = props;
+  const { channelId, itemId, version, revisionId, disabled, busy, connected, recommended, openRequest = 0, jobs, originalDesignIds, onBlockingChange, onJob, onReviewExisting } = props;
   const qc = useQueryClient();
   const [pending, setPending] = useState<Pending | null>(() => persistent ? readPending(storageKey) : null);
   const [designInput, setDesignInput] = useState(() => pending?.request.designId ?? (persistent ? readDesign(storageKey + ":design") : ""));
@@ -107,7 +108,8 @@ function ManualImportForm({ storageKey, persistent, ...props }: Props & { storag
   });
   useEffect(() => { onBlockingChange(!!pending || request.isPending); }, [pending, request.isPending, onBlockingChange]);
   useEffect(() => () => onBlockingChange(false), [onBlockingChange]);
-  const blocked = disabled || busy || !connected;
+  const existingReview = jobs.find(job => job.status === "needs_review" && job.sourceVersion === version && job.sourceRevisionId === revisionId);
+  const blocked = disabled || busy || !connected || !!existingReview;
   const submit = () => {
     if (submitting.current || request.isPending) return;
     let intent = pending;
@@ -123,6 +125,11 @@ function ManualImportForm({ storageKey, persistent, ...props }: Props & { storag
     {open && <form className="stack" aria-label="Canva 사본 8장 가져오기" onSubmit={event => { event.preventDefault(); submit(); }}>
       <p>원본 템플릿은 보관하고 Canva에서 이 콘텐츠용 사본을 만들어 8장을 완성하세요. 자동 채우기 권한 없이 사본의 이미지를 가져올 수 있습니다.</p>
       <p className="small muted">Canva 문구와 스튜디오 원고는 자동으로 동기화되지 않습니다. 문구가 다르면 먼저 스튜디오 원고를 수정·저장한 뒤, 가져온 8장을 다시 대조해 주세요.</p>
+      {existingReview && <div className="notice stack" role="status">
+        <strong>가져온 8장이 검토·저장을 기다리고 있습니다.</strong>
+        <p className="small">새로 가져오지 않고 기존 8장을 확인할 수 있습니다. 문구 대조 후 새 버전으로 저장해 주세요.</p>
+        <button type="button" className="btn" disabled={!!pending || request.isPending} onClick={() => onReviewExisting(existingReview.id)}>가져온 8장 검토·저장</button>
+      </div>}
       {!connected && <p className="notice warn small">새 가져오기는 Canva 계정 연결이 필요합니다. <GuardedLink href="/connections?service=canva">Canva 연결 확인</GuardedLink></p>}
       {disabled && <p className="notice small">현재 원고·이미지 설정을 먼저 저장해 주세요. 입력한 사본 링크와 기존 결과는 유지합니다.</p>}
       {busy && !pending && <p className="small muted">진행 중인 작업이나 결과 확인을 마친 뒤 새 사본을 가져올 수 있습니다.</p>}

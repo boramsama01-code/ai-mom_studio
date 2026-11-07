@@ -79,6 +79,36 @@ function reconciled(source: CanvaJobDto, body: any, status: string = 'needs_revi
 }
 
 describe("Canva editorial request and import UI", () => {
+  it("reopens an existing eight-page review without a new import or implicit acceptance", async () => {
+    connection = { ...connection, autofill: false, capabilities: [] };
+    jobs = [job(55, "needs_review")]; const original = structuredClone(props.copy);
+    const otherEditor = document.createElement("input"); document.body.append(otherEditor); otherEditor.focus();
+    const motion = Object.getOwnPropertyDescriptor(window, "matchMedia");
+    Object.defineProperty(window, "matchMedia", { configurable: true, value: () => ({ matches: true }) });
+    try {
+      await render(); expect(document.activeElement).toBe(otherEditor);
+      const summary = [...host.querySelectorAll<HTMLElement>("summary")].find(node => node.textContent === "실제 Canva 출력 8장 · 검토·저장 필요")!;
+      const details = summary.parentElement as HTMLDetailsElement, scroll = vi.fn();
+      Object.defineProperty(summary, "scrollIntoView", { configurable: true, value: scroll });
+      await loadImages(7); await act(async () => summary.click()); await settle(); expect(details.open).toBe(false);
+      expect(button("이 사본의 8장 가져오기").disabled).toBe(true);
+      await click("가져온 8장 검토·저장");
+      expect(details.open).toBe(true); expect(document.activeElement).toBe(summary);
+      expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: "center", behavior: "auto" });
+      const check = [...host.querySelectorAll<HTMLLabelElement>("label")].find(node => node.textContent?.includes("8장의 모든 문구가 현재 스튜디오 원고와 같은지 확인했습니다."))!.querySelector("input")!;
+      expect(check.checked).toBe(false); expect(check.disabled).toBe(true);
+      expect(button("확인한 8장을 새 버전으로 저장").disabled).toBe(true); expect(writes()).toHaveLength(0);
+      await loadImages(); expect(check.disabled).toBe(false); expect(check.checked).toBe(false);
+      otherEditor.focus(); await act(async () => { await client.invalidateQueries({ queryKey: ["canva-jobs", 3, 28] }); }); await settle();
+      expect(document.activeElement).toBe(otherEditor); expect(scroll).toHaveBeenCalledTimes(1); expect(writes()).toHaveLength(0);
+      await act(async () => summary.click()); await settle(); await click("가져온 8장 검토·저장");
+      expect(details.open).toBe(true); expect(document.activeElement).toBe(summary); expect(scroll).toHaveBeenCalledTimes(2);
+      await act(async () => check.click()); await settle(); await click("확인한 8장을 새 버전으로 저장");
+      expect(writes()).toEqual([[`${base}/55/accept`, { method: "POST", body: { version: 3, textConfirmedUnchanged: true } }]]);
+      expect(props.copy).toEqual(original); expect(mocks.local).not.toHaveBeenCalled();
+    } finally { otherEditor.remove(); if (motion) Object.defineProperty(window, "matchMedia", motion); else delete (window as any).matchMedia; }
+  });
+
   it("keeps the manuscript unchanged after external return, clipboard denial and an import failure", async () => {
     jobs = [job(11, "ready")];
     const savedCopy = structuredClone(props.copy), clipboard = vi.fn().mockRejectedValue(new Error("Permission denied"));
