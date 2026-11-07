@@ -49,7 +49,7 @@ try {
       else if (path === "/api/status") data = { globalStop: false, workerConnected: true, integrations: { flags: { dryRun: false, autoPublish: true } } };
       else if (path === "/api/deliveries") data = { items: [], total: 0, page: Number(url.searchParams.get("page") ?? 1), pageSize: Number(url.searchParams.get("pageSize") ?? 30), counts: { needsAttention: 0, overdue: 0 } };
       else if (path === "/api/publication-orphans") data = { items: [orphanApproval], total: 1, page: Number(url.searchParams.get("page") ?? 1), pageSize: Number(url.searchParams.get("pageSize") ?? 30) };
-      else if (path === "/api/collection/overview") data = { date: url.searchParams.get("date"), timezone: "Asia/Seoul", autoCollect, globalStop: false, searchReady: true, naverReady: false, sourceMode: "public_rss", publicFeeds: ["테스트신문"], inlineWorker: true, nextAt: "2026-11-02T20:13:00Z", lastScheduledAt: null, channels: [row] };
+      else if (path === "/api/collection/overview") data = { date: url.searchParams.get("date"), timezone: "Asia/Seoul", autoCollect, globalStop: false, searchReady: true, naverReady: false, sourceMode: "public_rss", publicFeeds: ["테스트신문"], inlineWorker: true, nextAt: null, lastScheduledAt: null, channels: [row] };
       else if (path === "/api/settings/auto-collect") { autoCollect = req.postDataJSON().enabled; data = { ok: true }; }
       else if (path === "/api/collection/collect") data = { inline: true, requested: [{ channelId: req.postDataJSON().channelId }] };
       else if (path === "/api/studio/instagram/accounts") data = { accounts: channels.map(c => ({ channelId: c.id, channelName: c.name, expectedUsername: c.handle, destinations: [] })) };
@@ -64,11 +64,15 @@ try {
       for (const box of boxes) assert(box && box.x >= 0 && box.x + box.width <= width + 1, `control outside ${width}px viewport`);
       for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) assert(!overlap(boxes[i], boxes[j]), `controls overlap at ${width}px`);
       await page.getByRole("button", { name: "새로고침", exact: true }).click();
-      const checkbox = page.getByRole("checkbox", { name: "매일 자동 수집" });
+      const checkbox = page.getByRole("checkbox", { name: "자동 수집 허용", exact: true });
+      assert.equal(await checkbox.isChecked(), true);
+      assert.equal(await page.locator(".collection-next").textContent(), "예약 실행 설정 필요");
       const checkBox = await checkbox.boundingBox();
       assert(checkBox.width >= 18 && checkBox.width <= 24 && checkBox.height <= 24, "checkbox has inherited full-size input dimensions");
       await Promise.all([page.waitForResponse(r => r.url().endsWith("/settings/auto-collect") && r.status() === 200), checkbox.click()]);
       await page.waitForFunction(() => document.querySelector('.collection-summary input[type="checkbox"]')?.checked === false);
+      await page.locator(".collection-next").filter({ hasText: "자동 수집 꺼짐" }).waitFor();
+      assert.equal(await page.locator(".collection-next").textContent(), "자동 수집 꺼짐");
       await page.locator(".collection-preset summary").click();
       assert.equal(await page.getByRole("button", { name: /새 검색어 .*개 추가/ }).count(), 0);
       await page.getByRole("button", { name: "이 채널 지금 수집", exact: true }).click();
