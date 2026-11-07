@@ -424,14 +424,36 @@ async function manualCanvaImport(page, state, width, lifecycle) {
   assert.equal(state.writes.filter(write => write.path === `${itemPath}/canva/manual-imports`).length, 1);
   assert.deepEqual(state.saved, before, 'import enqueue cannot change the manuscript or version');
   const queued = state.canvaJobs[0];
-  state.canvaJobs = [{ ...queued, status: 'needs_review', phase: 'complete', exportJobId: 'fixture-manual-export', outputAssetId: 9900, outputRevisionId: before.revisionId,
+  state.canvaJobs = [{ ...queued, status: 'needs_review', phase: 'complete', exportJobId: 'fixture-manual-export', outputAssetId: 9900, outputRevisionId: before.revisionId + 1,
     result: { ...queued.result, pages: Array.from({ length: 8 }, (_, index) => ({ id: 9900 + index, sha256: 'b'.repeat(64), title: `직접 편집한 사본 ${index + 1}` })), originals: Array.from({ length: 8 }, (_, index) => ({ id: 10000 + index, sha256: 'c'.repeat(64), page: index + 1 })) } }];
   await editorial.getByText('직접 편집한 Canva 사본에서 가져온 8장입니다.', { exact: false }).waitFor();
   const images = editorial.locator('.canva-export-grid img'); assert.equal(await images.count(), 8);
   await images.evaluateAll(nodes => Promise.all(nodes.map(node => node.decode())));
   for (const dimensions of await images.evaluateAll(nodes => nodes.map(node => [node.naturalWidth, node.naturalHeight]))) assert.deepEqual(dimensions, [1080, 1350]);
+  await editorial.getByText('이미지 8 / 8장 불러옴', { exact: true }).waitFor();
+  await reloadEditor(page, lifecycle, 'manual Canva existing review reopen');
+  await editorial.getByText('이미지 8 / 8장 불러옴', { exact: true }).waitFor();
+  await images.evaluateAll(nodes => Promise.all(nodes.map(node => node.decode())));
+  assert.equal(await submit.isDisabled(), true, 'an existing current-manuscript review must block a new import after reopening');
+  const reviewSummary = editorial.locator('summary').filter({ hasText: '실제 Canva 출력 8장' });
+  assert.match(await reviewSummary.innerText(), /검토·저장 필요/);
+  const reviewDetails = reviewSummary.locator('..');
+  await reviewSummary.click();
+  assert.equal(await reviewDetails.evaluate(node => node.open), false);
+  const resumeReview = manual.getByRole('button', { name: '가져온 8장 검토·저장', exact: true });
+  await resumeReview.scrollIntoViewIfNeeded();
+  if (width <= 900) assert((await resumeReview.boundingBox()).height >= 48, 'the existing-review action must be 48px high');
+  const writesBeforeReview = state.writes.filter(write => !write.path.endsWith('/preview')).length;
+  await resumeReview.click();
+  await page.waitForFunction(() => document.activeElement?.tagName === 'SUMMARY' && document.activeElement.textContent?.includes('실제 Canva 출력 8장'));
+  assert.equal(await reviewDetails.evaluate(node => node.open), true);
+  assert.equal(state.writes.filter(write => !write.path.endsWith('/preview')).length, writesBeforeReview, 'review navigation must not enqueue, accept or modify anything');
+  assert.equal(state.writes.filter(write => write.path === `${itemPath}/canva/manual-imports`).length, 1);
+  assert.equal(state.writes.filter(write => write.path === `${itemPath}/canva/jobs/902/accept`).length, 0);
+  assert.deepEqual(state.saved, before, 'reopening and finding an existing review must preserve the manuscript');
   const accept = editorial.getByRole('button', { name: '확인한 8장을 새 버전으로 저장', exact: true }); assert.equal(await accept.isDisabled(), true);
   const review = editorial.locator('label.check').filter({ hasText: '8장의 모든 문구가 현재 스튜디오 원고와 같은지 확인했습니다.' });
+  assert.equal(await review.locator('input').isChecked(), false, 'review navigation never supplies the final text confirmation');
   await activateConfirmation(page, review, width); await accept.scrollIntoViewIfNeeded();
   await layoutFits(page, `manual Canva import ${width}`);
   await manual.scrollIntoViewIfNeeded(); await page.screenshot({ path: `${outputDir}/canva-manual-form-${width}.png` });
@@ -814,7 +836,7 @@ try {
       results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', '14 style identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists', 'Canva folder sync preserves the mounted editor', 'Canva folder inner-page preview and reachable native creation preserve saved copy'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, mockNativeCreates: state.canvaJobs.length, requestFailures, actualPaidCalls: 0, publicationRequests: 0 });
       Object.assign(results.at(-1), { manualImports, manualImportReview: true, manualConfirmationPaddingHitTests: true });
       Object.assign(results.at(-1), { previewLifecycleSettled: true, diagnostics });
-      results.at(-1).checks.push('No-Autofill manual copy safe-ID import, eight real rendered assets, 48px confirmation padding and explicit new-version acceptance');
+      results.at(-1).checks.push('No-Autofill manual copy safe-ID import, existing review after reload without duplicate POST, 48px review navigation and explicit new-version acceptance');
       await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2)); console.log(`News editorial regression passed at ${width}px (${engine}).`);
     } catch (error) {
       scenarioError = error;
