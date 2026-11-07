@@ -7,6 +7,10 @@
 .canva-local-output { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 0; }
 .canva-local-output > div { flex:1 1 220px;min-width:0; }
 .canva-local-output p { margin:6px 0 0;line-height:1.6; }
+.canva-manual-template { border-left:3px solid var(--accent);padding:12px 14px;background:var(--surface-alt,#f5f7f4);min-width:0;overflow-wrap:anywhere; }
+.canva-manual-template p { margin:8px 0;line-height:1.6; }
+.canva-manual-template .btn { min-height:48px; }
+@media(max-width:900px) { .canva-editorial .canva-library-pages button { min-height:48px;min-width:48px; } }
 .canva-manual-import > summary { min-height:48px;display:flex;align-items:center;font-weight:600;cursor:pointer; }
 .canva-manual-import > form { margin-top:12px; }
 .canva-manual-import p { margin:0;line-height:1.7; }

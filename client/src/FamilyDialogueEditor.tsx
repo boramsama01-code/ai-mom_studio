@@ -5,7 +5,7 @@ import { defaultPageDesigns, familyCardCopySchema, familyDialogueMetadataSchema,
 import type { AiSelection } from "@shared/channelAi";
 import { familyDisplayContext, familyDisplayDescriptors, familyReadingTextValues, preserveFamilyDisplayOverrides, resolveFamilyDisplay, type FamilyDisplayKey } from "@shared/familyDisplay";
 import { resolvedReadingPageDesigns } from "@shared/readingPageImages";
-import { READING_CARD_PROFILES, READING_PROFILE_LOGO_ID, readingProfileForTemplateKey, readingProfileDesigns, readingDisplayDescriptors, readingImageSlot, readingArtworkPages } from "@shared/readingCardProfiles";
+import { READING_PROFILE_LOGO_ID, readingProfileForTemplateKey, readingProfileDesigns, readingDisplayDescriptors, readingImageSlot, readingArtworkPages } from "@shared/readingCardProfiles";
 import { familyCollectionDesign, familyCollectionPageDesigns } from "@shared/familyCollectionDesigns";
 import { FAMILY_PROFILE_ASSET, FAMILY_ENDING_ASSETS, FAMILY_ENDING_FIXED_TEXT, REGISTERED_PROFILE_ASSETS, isRegisteredProfileAssetId, familyEndingAsset, selectedFamilyEnding } from "@shared/characterVariantAssets";
 import type { FamilyEvidenceView } from "@shared/familyEvidence";
@@ -16,6 +16,7 @@ import { useDraftRecovery } from "./useDraftRecovery";
 import { RecoveryNotice } from "./RecoveryNotice";
 import { useGenerationRequest } from "./useGenerationRequest";
 import { PageBackgroundEditor, type PageArtworkResult } from "./PageBackgroundEditor";
+import { FamilyDesignPicker, FamilyPageLayout } from "./FamilyDesignControls";
 import type { CardCopyEditorProps, StoredCardCopyResponse } from "./CardCopyEditor";
 import "./familyDialogue.css";
 
@@ -193,7 +194,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const [saveError, setSaveError] = useState<Error | null>(null), [aiError, setAiError] = useState<Error | null>(null), [conflict, setConflict] = useState<StoredCardCopyResponse | null>(null);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null), [observedRuns, setObservedRuns] = useState<FamilyDialogueResponse["generationRuns"]>([]);
   const [instructions, setInstructions] = useState(""), [proposal, setProposal] = useState<{ result: FamilyProposal; baseline: string; baseVersion: number } | null>(null), [reviewFlags, setReviewFlags] = useState<ReviewFlag[]>([]);
-  const { preview, thumbs, receive: receivePreview } = useFamilyPreviewImages();
+  const { preview, receive: receivePreview } = useFamilyPreviewImages();
   const [previewError, setPreviewError] = useState<Error | null>(null), [previewBusy, setPreviewBusy] = useState(false), [previewRetry, setPreviewRetry] = useState(0);
   const [designHistory, setDesignHistory] = useState<Partial<Record<FamilyPageId, PageDesign[]>>>({});
   const [structureNotice, setStructureNotice] = useState<string | null>(null);
@@ -212,7 +213,6 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const page = draft.copy.pages[selected], design = draft.pageDesigns[page.id];
   const selectedEnding = selectedFamilyEnding(page.id, design);
   const readingProfile = readingProfileForTemplateKey(draft.copy.templateKey), readingSlot = readingProfile && readingImageSlot(readingProfile, page.id);
-  const collectionPalette = familyCollectionDesign(draft.copy.templateKey);
   const effectiveDesign = resolvedReadingPageDesigns(draft.copy,draft.pageDesigns)[page.id];
   const visibleDisplayFields = readingProfile ? readingDisplayDescriptors(readingProfile, page) : familyDisplayDescriptors(page);
   const retainedDisplayFields = readingProfile ? familyDisplayDescriptors(page).filter(descriptor => !visibleDisplayFields.some(visible => visible.key === descriptor.key) && Object.hasOwn(page.displayOverrides ?? {}, descriptor.key)) : [];
@@ -363,24 +363,6 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     }, 450);
     return () => { live = false; window.clearTimeout(timer); controller.abort(); };
   }, [signature, invalid, previewRetry]);
-  // Thumbnails are local raster previews, loaded serially only for a saved
-  // draft. Typing refreshes the selected page, never eight paid image jobs.
-  useEffect(() => {
-    if (dirty || invalid) return;
-    let live = true; const controller = new AbortController(), snapshot = draft;
-    const timer = window.setTimeout(async () => {
-      for (let index = 0; index < snapshot.copy.pages.length && live; index++) {
-        const id = snapshot.copy.pages[index].id, expected = signatureFor(snapshot, index);
-        if (index === selected || thumbs[id]?.signature === expected) continue;
-        try {
-          const blob = await apiBlob(`${path}/preview`, "image/jpeg", { method: "POST", body: { version: base.version, copy: snapshot.copy, pageDesigns: snapshot.pageDesigns, page: index }, signal: controller.signal });
-          if (!live) return;
-          receivePreview(id, expected, blob);
-        } catch { if (controller.signal.aborted) return; /* Selecting that page exposes its actionable error. */ }
-      }
-    }, 1200);
-    return () => { live = false; window.clearTimeout(timer); controller.abort(); };
-  }, [base.version, dirty, invalid, selected, previewRevision]);
   function updateField(descriptor: FamilyFieldDescriptor, value: string | null | string[]) {
     const current = draftRef.current, index = current.copy.pages.findIndex(value => value.id === descriptor.pageId);
     let next = invalidateDerived({ ...current, copy: { ...current.copy, pages: current.copy.pages.map((oldPage, i) => i === index ? replacePageField(oldPage, descriptor.path, value) : oldPage) } });
@@ -514,15 +496,13 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   return <section className="card-copy-editor family-dialogue-editor stack" aria-label="가족 대화 8장 카드 편집기">
     <div className="card-copy-heading"><div><span className="card-copy-kicker">가족 대화 · 8장</span><h3>카드 안의 문구와 디자인</h3><p>뉴스에서 출발해 한 가지 질문을 나눕니다. 선택한 장을 자세히 수정하고, 자동 제안은 확인한 뒤 적용하세요.</p></div><span className={`badge ${dirty ? "warn" : "ok"}`}>{saving ? "저장 중" : saveError ? "저장 실패" : dirty ? "미저장 변경" : `저장됨 · 버전 ${base.version}`}</span></div>
     <RecoveryNotice recovery={recovery} formatValue={value => copyText(value.copy, value)} />
-    <label className="field">카드뉴스 스타일<select aria-label="카드뉴스 스타일" value={readingProfile?.templateKey ?? (collectionPalette ? draft.copy.templateKey : "legacy")} disabled={busy || aiBusy || !!conflict} onChange={event => changeReadingStyle(event.target.value === "legacy" ? "builtin:classic" : event.target.value)}><option value="legacy">기존 8장 디자인</option>{collectionPalette && <option value={draft.copy.templateKey}>{collectionPalette.name}{collectionPalette.colorName ? ` · ${collectionPalette.colorName}` : ""} · 8장 컬러 적용</option>}{READING_CARD_PROFILES.map(profile => <option key={profile.id} value={profile.templateKey}>{profile.label}{profile.sourceStyleId ? "" : " · 기존"} · 사진 {profile.images.length - 1}장</option>)}</select><span className="hint">{collectionPalette ? "기본 세트에서 선택한 컬러를 8장 전용 배치에 적용합니다. 현재 원고의 8장 구성과 직접 지정한 배경색은 유지합니다." : "1080×1350 · 8장. 새 스타일의 미리보기와 문구 편집은 바로 사용할 수 있으며, Canva 자동 제작은 해당 마스터 검증·등록이 완료된 뒤 가능합니다."}</span></label>
     {structureNotice && <div className="notice small row between" role="status"><span>{structureNotice}</span><button className="btn sm ghost" onClick={() => setStructureNotice(null)}>안내 닫기</button></div>}
     {conflict && <div className="notice warn stack" role="alert"><strong>다른 곳에서 저장한 버전이 있습니다. 현재 입력은 유지했습니다.</strong><details><summary>저장본과 현재 입력 비교</summary><div className="card-copy-compare"><pre>{conflict.copy.version === 2 ? copyText(conflict.copy, conflict) : "다른 형식으로 저장된 원고입니다."}</pre><pre>{copyText(draft.copy, draft)}</pre></div><button className="btn" disabled={busy} onClick={() => { if (conflict.copy.version === 2) { recovery.clear(); adopt(conflict as FamilyDialogueResponse); } else { recovery.clear(); qc.setQueryData(queryKey, conflict); } }}>서버 저장본 불러오기</button></details></div>}
-    <nav className="family-page-strip" aria-label="카드 페이지 선택">{draft.copy.pages.map((value, index) => {
-      const thumb = thumbs[value.id], current = thumb?.signature === signatureFor(draft, index);
-      return <button key={value.id} type="button" aria-current={selected === index ? "step" : undefined} aria-label={`${index + 1}페이지 · ${FAMILY_PAGE_LABELS[value.id]}`} onClick={() => setSelected(index)}>
-        <span className="family-page-thumb">{thumb ? <img src={thumb.url} alt="" className={current ? "" : "is-stale"} /> : <span>{textOf(value.fields).slice(0, 34)}</span>}</span><strong>{index + 1} · {FAMILY_PAGE_LABELS[value.id]}</strong>{thumb && !current && <span className="hint">배치 갱신 필요</span>}
-      </button>;
-    })}</nav>
+    <div className="family-page-guide"><strong>페이지 구성</strong><span className="hint">장별 역할을 보여주는 배치도입니다. 페이지를 고르면 실제 원고를 편집할 수 있습니다.</span></div>
+    <nav className="family-page-strip" aria-label="카드 페이지 선택">{draft.copy.pages.map((value, index) => <button key={value.id} type="button" aria-current={selected === index ? "step" : undefined} aria-label={`${index + 1}페이지 · ${FAMILY_PAGE_LABELS[value.id]}`} onClick={() => setSelected(index)}>
+      <FamilyPageLayout pageId={value.id} /><strong>{index + 1} · {FAMILY_PAGE_LABELS[value.id]}</strong>
+    </button>)}</nav>
+    <FamilyDesignPicker templateKey={draft.copy.templateKey} disabled={busy || aiBusy || !!conflict} onChange={changeReadingStyle} />
     <div className="card-copy-workspace">
       <div className="card-copy-fields">
         <h4>{page.page}페이지 · {FAMILY_PAGE_LABELS[page.id]}</h4>

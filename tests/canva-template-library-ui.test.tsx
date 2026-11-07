@@ -8,7 +8,7 @@ import type { CanvaTemplateLibraryState } from "../shared/canvaTemplateLibrary";
 import { CANVA_READING_TEXT_FIELDS } from "../shared/canvaEditorial";
 import { canvaLibraryItemFixture, canvaLibraryStateFixture } from "./fixtures/canvaTemplateLibrary";
 
-const mocks = vi.hoisted(() => ({ api: vi.fn(), select: vi.fn() }));
+const mocks = vi.hoisted(() => ({ api: vi.fn(), select: vi.fn(), manualSelect: vi.fn() }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
 vi.mock("../client/src/ui", () => ({
   GuardedLink: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
@@ -45,6 +45,49 @@ async function refresh() { await act(async () => { await client.invalidateQuerie
 const writes = () => mocks.api.mock.calls.filter(([, options]) => ["POST", "PUT"].includes(options?.method));
 
 describe("Canva folder library UI", () => {
+  it.each(['ready', 'needs_fields'] as const)('allows explicit manual reference selection without autofill for a valid %s design, without invoking automatic selection or writes', async status => {
+    library.autofill = false;
+    library.items = [canvaLibraryItemFixture({ status, canCreate: false })];
+    await render({ onManualSelect: mocks.manualSelect, manualAvailable: true });
+    expect(button('직접 편집용으로 선택').disabled).toBe(false);
+    expect([...host.querySelectorAll('button')].some(node => node.textContent === '자동 채우기로 선택' || node.textContent === '이 Canva 템플릿 선택')).toBe(false);
+    expect(host.textContent).not.toContain('저장된 원고를 채웁니다.');
+    await click('직접 편집용으로 선택');
+    expect(mocks.manualSelect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ designId: 'Dlibrary_first', pageCount: 8 }));
+    expect(mocks.select).not.toHaveBeenCalled(); expect(writes()).toHaveLength(0);
+    expect(host.textContent).toContain('이 콘텐츠용 사본을 만들어 편집');
+  });
+
+  it.each([
+    { status: 'missing' as const }, { status: 'unavailable' as const }, { status: 'unsupported_pages' as const },
+    { pageCount: 7 }, { pageCount: null }, { previewStatus: 'unavailable' as const }, { previewStatus: 'failed' as const },
+    { pages: canvaLibraryItemFixture().pages.slice(0, 7) },
+    { pages: canvaLibraryItemFixture().pages.map((page, index) => index === 0 ? { ...page, width: 1079 } : page) },
+    { pages: canvaLibraryItemFixture().pages.map((page, index) => index === 7 ? { ...page, pageNumber: 7 } : page) },
+    { editUrl: 'https://canva.com.evil.test/design/Dlibrary_first/edit' },
+  ])('blocks manual reference selection for unsupported or unavailable metadata: %j', async invalid => {
+    library.autofill = false; library.items = [canvaLibraryItemFixture(invalid)];
+    await render({ onManualSelect: mocks.manualSelect, manualAvailable: true, manualSelectedDesignId: 'Dlibrary_first' });
+    expect(button('직접 편집용으로 선택').disabled).toBe(true);
+    await act(async () => button('직접 편집용으로 선택').click());
+    expect(mocks.manualSelect).not.toHaveBeenCalled(); expect(writes()).toHaveLength(0);
+  });
+
+  it.each([{ connected: false }, { configured: false }, { enabled: false }, { syncStatus: 'needs_reconnect' as const }])('requires the current library connection for manual reference selection: %j', async unavailable => {
+    library = { ...library, ...unavailable, autofill: false };
+    await render({ onManualSelect: mocks.manualSelect, manualAvailable: true });
+    expect(button('직접 편집용으로 선택').disabled).toBe(true);
+    expect(mocks.manualSelect).not.toHaveBeenCalled(); expect(writes()).toHaveLength(0);
+  });
+
+  it('requires explicit manual availability and keeps a disabled editor blocked', async () => {
+    await render({ onManualSelect: mocks.manualSelect });
+    expect(button('직접 편집용으로 선택').disabled).toBe(true);
+    await render({ onManualSelect: mocks.manualSelect, manualAvailable: true, disabled: true });
+    expect(button('직접 편집용으로 선택').disabled).toBe(true);
+    expect(mocks.manualSelect).not.toHaveBeenCalled(); expect(writes()).toHaveLength(0);
+  });
+
   it("adds new designs and refreshes an inner page without replacing the selection or page", async () => {
     await render({ selectedDesignId: "Dlibrary_first" }); await click("4");
     const before = host.querySelector(".canva-library-large img")?.getAttribute("src");

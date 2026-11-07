@@ -108,14 +108,14 @@ describe("Canva editorial request and import UI", () => {
     masters = []; library.items = [canvaLibraryItemFixture()];
     const savedCopy = structuredClone(props.copy);
     await render(); expect(button("Canva 8장 만들기").disabled).toBe(true);
-    await click("이 Canva 템플릿 선택"); expect(button("Canva 8장 만들기").disabled).toBe(false);
+    await click("자동 채우기로 선택"); expect(button("Canva 8장 만들기").disabled).toBe(false);
     expect(host.textContent).toContain("Canva의 배치·이미지와 기본 사진 출처를 유지");
     await click("Canva 8장 만들기");
     expect(writes()[0][1].body).toEqual({ version: 3, requestId: expect.any(String), libraryDesignId: "Dlibrary_first", expectedLibraryUpdatedAt: 1793836800 });
     expect(writes()[0][1].body).not.toHaveProperty("masterId"); expect(props.copy).toEqual(savedCopy); expect(mocks.local).not.toHaveBeenCalled();
   });
   it("blocks native creation while the selected design's changed preview is pending and uses the refreshed version after it is ready", async () => {
-    library.items = [canvaLibraryItemFixture()]; await render(); await click("이 Canva 템플릿 선택");
+    library.items = [canvaLibraryItemFixture()]; await render(); await click("자동 채우기로 선택");
     library.items = [canvaLibraryItemFixture({ updatedAt: 1793837000, previewStatus: "stale" }), canvaLibraryItemFixture({ designId: "Dother_design" })];
     await act(async () => { await client.invalidateQueries({ queryKey: CANVA_LIBRARY_QUERY_KEY }); }); await settle();
     expect(button("Canva 8장 만들기").disabled).toBe(true); expect(host.textContent).toContain("이전 미리보기");
@@ -126,7 +126,7 @@ describe("Canva editorial request and import UI", () => {
   });
   it("preserves the chosen native source across remounts and replays a lost response using its original source version", async () => {
     library.items = [canvaLibraryItemFixture()]; enqueue = async () => { throw new ApiError(0, "서버 응답을 받지 못했습니다."); };
-    await render(); await click("이 Canva 템플릿 선택"); await click("Canva 8장 만들기");
+    await render(); await click("자동 채우기로 선택"); await click("Canva 8장 만들기");
     const original = structuredClone(writes()[0][1].body);
     await act(async () => root.render(null)); client.clear();
     library.items = [canvaLibraryItemFixture({ updatedAt: 1793837200 })]; enqueue = null;

@@ -97,6 +97,44 @@ async function connectEvidence(path: string, evidenceId: string) {
 }
 
 describe("family dialogue v2 editor", () => {
+  it("uses eight role diagrams and renders only the selected manuscript page", async () => {
+    await render();
+    const navigation = host.querySelector('nav[aria-label="카드 페이지 선택"]')!;
+    expect(navigation.querySelectorAll('button')).toHaveLength(8);
+    expect(navigation.querySelectorAll('.family-page-layout')).toHaveLength(8);
+    expect(navigation.querySelectorAll('img')).toHaveLength(0);
+    expect(navigation.textContent).not.toContain(field('fields.headline').value);
+    await settle(1500);
+    expect(mocks.blob.mock.calls.map(([, , options]) => options.body.page)).toEqual([0]);
+    await selectPage("5페이지 · 두 가지 시선"); await settle(500);
+    expect(mocks.blob.mock.calls.map(([, , options]) => options.body.page)).toEqual([0, 4]);
+    expect(host.querySelector('nav [aria-current="step"]')?.getAttribute('aria-label')).toBe("5페이지 · 두 가지 시선");
+    expect(host.querySelector('.card-copy-fields h4')?.textContent).toBe("5페이지 · 두 가지 시선");
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method && options.method !== "GET")).toHaveLength(0);
+  });
+
+  it("applies a design example through the existing draft change without replacing text, blank labels or image history", async () => {
+    const initial = fresh(); initial.fieldLocks = { "pages.cover.fields.headline": true };
+    initial.pageDesigns.cover.background = { ...initial.pageDesigns.cover.background, kind: "image", assetId: 991 };
+    saved = initial;
+    await render(); await input('displayOverrides.kicker', '');
+    const originalHeadline = field('fields.headline').value;
+    const example = [...host.querySelectorAll<HTMLButtonElement>('.family-design-example')].find(node => node.getAttribute('aria-label') === `디자인 선택 · ${READING_CARD_PROFILES.find(profile => profile.templateKey === 'cardnews14-cinematic-v1')!.label}`)!;
+    await act(async () => example.click()); await settle();
+    expect(field('fields.headline').value).toBe(originalHeadline);
+    expect(field('displayOverrides.kicker').value).toBe('');
+    expect(lockFor('fields.headline').checked).toBe(true);
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')?.value).toBe('cardnews14-cinematic-v1');
+    expect(host.querySelector('.family-whole-design summary')?.textContent).toContain(READING_CARD_PROFILES.find(profile => profile.templateKey === 'cardnews14-cinematic-v1')!.label);
+    expect(example.getAttribute('aria-pressed')).toBe('true');
+    expect(mocks.api.mock.calls.filter(([, options]) => options?.method && options.method !== 'GET')).toHaveLength(0);
+    await click('문구·디자인 저장');
+    expect(saved.copy.templateKey).toBe('cardnews14-cinematic-v1');
+    expect((saved as FamilyDialogueResponse).fieldLocks).toEqual(initial.fieldLocks);
+    expect((saved as FamilyDialogueResponse).pageDesigns.cover.background.assetId).toBe(991);
+    expect(saved.copy.pages[0]).toMatchObject({ fields: { headline: originalHeadline }, displayOverrides: { kicker: '' } });
+  });
+
   it("acknowledges unchanged saves beside the button without creating duplicate revisions", async () => {
     await render(); await click("문구·디자인 저장");
     expect(host.querySelector('.card-copy-savebar [role="status"]')?.textContent).toContain("변경 내용이 없어 이미 저장된 버전 3");
@@ -193,7 +231,7 @@ describe("family dialogue v2 editor", () => {
     const choose=async(label:string,value:string)=>{const picker=host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;expect(picker).not.toBeNull();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(picker,value);picker.dispatchEvent(new Event('change',{bubbles:true}));});await settle();};
     await render();await selectPage('8페이지 · 닫는 표지');await input('fields.cta','다음 대화를 위해 저장해 주세요.');
     await choose('마지막 장 프로필',FAMILY_PROFILE_ASSET_ID);
-    await choose('카드뉴스 스타일','cardnews14-cinematic-v1');
+    await choose('전체 목록에서 선택','cardnews14-cinematic-v1');
     expect(host.querySelector<HTMLSelectElement>('[aria-label="마지막 장 프로필"]')!.value).toBe(FAMILY_PROFILE_ASSET_ID);
     const endingOptions=host.querySelector<HTMLSelectElement>('[aria-label="마지막 장 방식"]')!.options;
     expect([...endingOptions].filter(option=>option.textContent?.includes('전체 이미지로 적용'))).toHaveLength(3);
@@ -201,7 +239,7 @@ describe("family dialogue v2 editor", () => {
     await choose('마지막 장 방식',FAMILY_ENDING_ASSET_IDS[2]);await choose('마지막 장 방식',FAMILY_ENDING_ASSET_IDS[0]);
     expect(host.textContent).toContain('이미지 속 문구 고정');expect(host.textContent).toContain('@spacepenguin.co');
     expect(field('fields.cta').value).toBe('다음 대화를 위해 저장해 주세요.');
-    await choose('카드뉴스 스타일','cardnews14-ink-lime-v1');await click('문구·디자인 저장');
+    await choose('전체 목록에서 선택','cardnews14-ink-lime-v1');await click('문구·디자인 저장');
     expect((saved as FamilyDialogueResponse).pageDesigns.outro.outroPresentation).toEqual({mode:'full_image',assetId:FAMILY_ENDING_ASSET_IDS[0]});
     expect(saved.copy.pages[7]).toMatchObject({fields:{logoAssetId:FAMILY_PROFILE_ASSET_ID,cta:'다음 대화를 위해 저장해 주세요.'}});
     const copied=familyCopyText(saved.copy as FamilyDialogueResponse['copy'],saved as FamilyDialogueResponse);expect(copied).toContain('고정 문구: 구독 · 좋아요 · @spacepenguin.co');
@@ -215,7 +253,7 @@ describe("family dialogue v2 editor", () => {
   });
   it("saves and reopens the 14-style photo layouts without losing an edited field or an intentionally empty display label",async()=>{
     await render(); await input('fields.headline','내가 고친 제목');await input('displayOverrides.kicker','');
-    const choose=async(key:string)=>{const picker=host.querySelector<HTMLSelectElement>('[aria-label="카드뉴스 스타일"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(picker,key);picker.dispatchEvent(new Event('change',{bubbles:true}));});await settle();};
+    const choose=async(key:string)=>{const picker=host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(picker,key);picker.dispatchEvent(new Event('change',{bubbles:true}));});await settle();};
     await choose('cardnews14-cinematic-v1');await selectPage('2페이지 · 뉴스 요약');expect(host.querySelector('.page-background-editor')).not.toBeNull();
     await choose('cardnews14-swiss-modernism-v1');expect(host.querySelector('.page-background-editor')).toBeNull();expect(host.textContent).toContain('사진은 1·3·4·7장');
     await selectPage('3페이지 · 뉴스의 의미');expect(host.querySelector('.page-background-editor')).not.toBeNull();
@@ -225,7 +263,7 @@ describe("family dialogue v2 editor", () => {
   it("selects a reading profile, preserves manual text, exposes its photo slots, and reopens the saved style", async () => {
     await render();
     await input("fields.headline", "서로의 판단 기준");
-    const picker = host.querySelector<HTMLSelectElement>('[aria-label="카드뉴스 스타일"]')!;
+    const picker = host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(picker, READING_CARD_PROFILES[0].templateKey); picker.dispatchEvent(new Event("change", { bubbles: true })); }); await settle();
     expect(field("fields.headline").value).toBe("서로의 판단 기준");
     expect(host.querySelector('.page-background-editor')).not.toBeNull();
@@ -239,7 +277,7 @@ describe("family dialogue v2 editor", () => {
     expect(saved.copy.templateKey).toBe(READING_CARD_PROFILES[0].templateKey);
     expect(saved.copy.pages[7]).toMatchObject({fields:{logoAssetId:"brand:space-penguin-company:20261101",brandLine:"오늘 서로의 생각은?"}});
     await render(null);client.clear();await render();
-    expect(host.querySelector<HTMLSelectElement>('[aria-label="카드뉴스 스타일"]')!.value).toBe(READING_CARD_PROFILES[0].templateKey);
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')!.value).toBe(READING_CARD_PROFILES[0].templateKey);
     expect(field("fields.headline").value).toBe("서로의 판단 기준");
   });
 
