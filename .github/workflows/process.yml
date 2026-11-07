@@ -8,7 +8,7 @@ name: process
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 * * * *"
+    - cron: "57 * * * *"
 permissions:
   contents: read
 concurrency:
@@ -61,6 +61,8 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - name: 이미지 작업 참조 자산 준비
+        run: node scripts/restore-studio-assets.mjs
       - name: 대기 작업 처리
         run: npm run jobs:once
       - name: 예약 게시 처리
