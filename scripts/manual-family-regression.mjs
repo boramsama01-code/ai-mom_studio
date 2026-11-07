@@ -147,19 +147,18 @@ async function currentManualImagesReady() {
   if (editors.length !== 1 || !editors[0].matches('.family-dialogue-editor')) return false;
   const editor = editors[0], figure = editor.querySelector('.card-copy-preview'), image = figure?.querySelector('img');
   const buttons = [...editor.querySelectorAll('.family-page-strip > button')];
-  const thumbs = buttons.map(button => button.querySelector('.family-page-thumb img:not(.is-stale)'));
+  const layouts = buttons.map(button => button.querySelector('.family-page-layout'));
   const current = () => editor.isConnected && figure?.isConnected && figure.matches(':not(.is-stale)[aria-busy="false"]')
     && figure.querySelector('img') === image && image?.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
-  const thumbnailsCurrent = () => {
+  const layoutsCurrent = () => {
     const actual = [...editor.querySelectorAll('.family-page-strip > button')];
-    return buttons.length === 8 && actual.length === 8 && thumbs.every((thumb, index) => actual[index] === buttons[index]
-      && thumb?.isConnected && buttons[index].querySelector('.family-page-thumb img:not(.is-stale)') === thumb
-      && thumb.complete && thumb.naturalWidth === 1080 && thumb.naturalHeight === 1350);
+    return buttons.length === 8 && actual.length === 8 && layouts.every((layout, index) => actual[index] === buttons[index]
+      && layout?.isConnected && buttons[index].querySelector('.family-page-layout') === layout && !buttons[index].querySelector('img'));
   };
-  if (!current() || !thumbnailsCurrent()) return false;
+  if (!current() || !layoutsCurrent()) return false;
   const source = image.currentSrc || image.src;
   try { await image.decode(); } catch { return false; }
-  return document.querySelector('.card-copy-editor') === editor && current() && thumbnailsCurrent() && (image.currentSrc || image.src) === source;
+  return document.querySelector('.card-copy-editor') === editor && current() && layoutsCurrent() && (image.currentSrc || image.src) === source;
 }
 async function previewReady(page, deadline) {
   await page.waitForFunction(async () => {
@@ -174,8 +173,8 @@ async function settleEditorPreviews(page, state, lifecycle) {
   const deadline = Date.now() + 20_000;
   await previewReady(page, deadline);
   await page.waitForFunction(() => {
-    const images = [...document.querySelectorAll('.family-page-thumb img')];
-    return images.length === 8 && images.every(image => !image.classList.contains('is-stale') && image.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350);
+    const buttons = [...document.querySelectorAll('.family-page-strip > button')];
+    return buttons.length === 8 && buttons.every(button => !!button.querySelector('.family-page-layout') && !button.querySelector('img'));
   }, undefined, { timeout: settlementRemaining(deadline) });
   await page.waitForLoadState('networkidle', { timeout: settlementRemaining(deadline) });
   while (true) {
@@ -187,7 +186,7 @@ async function settleEditorPreviews(page, state, lifecycle) {
     if (!lifecycle.api.empty() || generation !== lifecycle.api.generation) continue;
     const dom = await page.evaluate(() => {
       const editor = document.querySelector('.family-dialogue-editor'), figure = editor?.querySelector('.card-copy-preview');
-      return { editorCount: document.querySelectorAll('.card-copy-editor').length, stale: figure?.classList.contains('is-stale'), busy: figure?.getAttribute('aria-busy'), currentThumbnails: editor?.querySelectorAll('.family-page-thumb img:not(.is-stale)').length };
+      return { editorCount: document.querySelectorAll('.card-copy-editor').length, stale: figure?.classList.contains('is-stale'), busy: figure?.getAttribute('aria-busy'), layoutDiagrams: editor?.querySelectorAll('.family-page-layout').length, navigationImages: editor?.querySelectorAll('.family-page-strip img').length };
     });
     await page.waitForFunction(currentManualImagesReady, undefined, { timeout: settlementRemaining(deadline) });
     if (!lifecycle.api.empty() || generation !== lifecycle.api.generation) continue;
@@ -204,6 +203,23 @@ async function assertCanonicalManualMode(page) {
   assert.equal(await page.locator('.family-ai').count(), 0, 'manual entry must not expose paid rewriting controls');
   assert.equal(await page.getByRole('button', { name: '저장 원고 자동 검수 제안', exact: true }).count(), 0, 'manual entry must not expose an AI review action');
   assert.equal(await page.getByRole('button', { name: '저장된 카드로 캡션 자동 제안', exact: true }).count(), 0, 'manual entry must not expose an AI caption action');
+}
+async function verifyAllEightManualPageRenders(page, state, lifecycle, width) {
+  const buttons = page.locator('.family-dialogue-editor .family-page-strip > button');
+  assert.equal(await buttons.count(), 8);
+  const selected = await buttons.evaluateAll(nodes => nodes.findIndex(node => node.getAttribute('aria-current') === 'step'));
+  const before = clone(state.saved), writesBefore = state.writes.length;
+  for (let index = 0; index < 8; index++) {
+    await buttons.nth(index).click();
+    await page.waitForFunction(pageNumber => document.querySelector('.family-dialogue-editor .card-copy-fields h4')?.textContent?.trim().startsWith(`${pageNumber}페이지 ·`), index + 1);
+    await settleEditorPreviews(page, state, lifecycle);
+    assert.match(await page.locator('.family-dialogue-editor .card-copy-preview img').getAttribute('alt'), new RegExp(`^${index + 1}페이지 `));
+    lifecycle.boundaries.push({ stage: 'actual manual page render verified', width, page: index + 1, dimensions: [1080, 1350] });
+  }
+  await buttons.nth(selected < 0 ? 0 : selected).click();
+  await settleEditorPreviews(page, state, lifecycle);
+  assert.deepEqual(state.saved, before);
+  assert.equal(state.writes.slice(writesBefore).filter(write => !write.pathname.endsWith('/preview')).length, 0, 'layout navigation may render previews without saving or calling AI');
 }
 let browser, engine = 'WebKit'; const results = [];
 try {
@@ -278,6 +294,9 @@ try {
       await page.screenshot({ path: `${output}/provided-form-${width}.png` }); await save.click();
       await page.waitForURL('**/studio/88?mode=manual'); await page.getByRole('region', { name: '가족 대화 8장 카드 편집기' }).waitFor();
       await assertCanonicalManualMode(page); lifecycle.mark('created manual editor'); await settleEditorPreviews(page, state, lifecycle);
+      await verifyAllEightManualPageRenders(page, state, lifecycle, width);
+      await page.locator('.family-page-strip').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${output}/page-layout-and-design-${width}.png` });
       assert.equal(await page.locator('.family-page-strip button').count(), 8); await page.getByRole('form', { name: 'Canva 사본 8장 가져오기' }).waitFor();
       const copySave = page.getByRole('button', { name: '문구·디자인 저장', exact: true }); await hit(page, copySave, width); await copySave.click();
       await page.locator('.card-copy-savebar [role="status"]').filter({ hasText: '변경 내용이 없어 이미 저장된 버전 2을 유지했습니다.' }).waitFor();

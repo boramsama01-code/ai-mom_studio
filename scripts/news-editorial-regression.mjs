@@ -12,6 +12,7 @@ import { isCardPageArtworkId } from "../shared/cardPageArtworkId.ts";
 import { planCarousel, renderCarouselPage } from "../server/services/cardCarousel.ts";
 import { discussionCardCopyFixture } from "../tests/fixtures/discussionCardCopy.ts";
 import { familyCardCopySchema } from "../shared/familyDialogue.ts";
+import { READING_CARD_PROFILES } from "../shared/readingCardProfiles.ts";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "../tests/fixtures/familyDialogueCard.ts";
 import { familyPageTitle } from "../server/services/familyDialogueCard.ts";
 import { familyEvidenceFixture } from "../tests/fixtures/familyEvidence.ts";
@@ -231,18 +232,18 @@ async function currentEditorImagesReady(expectedCopyVersion) {
     && figure.querySelector('img') === image && image?.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
   if (!current() || (expectedCopyVersion === 2 && !editor.matches('.family-dialogue-editor'))) return false;
   const buttons = expectedCopyVersion === 2 ? [...editor.querySelectorAll('.family-page-strip > button')] : [];
-  const thumbs = buttons.map(button => button.querySelector('.family-page-thumb img:not(.is-stale)'));
-  const thumbnailsCurrent = () => {
+  const layouts = buttons.map(button => button.querySelector('.family-page-layout'));
+  const layoutsCurrent = () => {
     if (expectedCopyVersion !== 2) return true;
     const currentButtons = [...editor.querySelectorAll('.family-page-strip > button')];
-    return buttons.length === 8 && currentButtons.length === 8 && thumbs.every((thumb, index) =>
-      currentButtons[index] === buttons[index] && thumb?.isConnected && buttons[index].querySelector('.family-page-thumb img:not(.is-stale)') === thumb
-        && thumb.complete && thumb.naturalWidth === 1080 && thumb.naturalHeight === 1350);
+    return buttons.length === 8 && currentButtons.length === 8 && layouts.every((layout, index) =>
+      currentButtons[index] === buttons[index] && layout?.isConnected && buttons[index].querySelector('.family-page-layout') === layout
+        && !buttons[index].querySelector('img'));
   };
-  if (!thumbnailsCurrent()) return false;
+  if (!layoutsCurrent()) return false;
   const source = image.currentSrc || image.src;
   try { await image.decode(); } catch { return false; }
-  return document.querySelector('.card-copy-editor') === editor && current() && thumbnailsCurrent() && (image.currentSrc || image.src) === source;
+  return document.querySelector('.card-copy-editor') === editor && current() && layoutsCurrent() && (image.currentSrc || image.src) === source;
 }
 async function previewReady(page, deadline) {
   // Observe the current image, rather than retain a decode() promise for a blob
@@ -262,17 +263,15 @@ async function settleEditorPreviews(page, lifecycle) {
   if (expectedCopyVersion === 2) await page.locator('.family-dialogue-editor').waitFor({ state: 'visible', timeout: settlementRemaining(deadline) });
   await previewReady(page, deadline);
   const familyCount = await page.locator('.family-dialogue-editor').count();
-  lifecycle.diagnostics.push({ kind: 'family-thumbnail-guard', stage: lifecycle.stage, at: Date.now(), expectedCopyVersion, familyCount, pendingPreviewRoutes: [...lifecycle.previewRoutes] });
-  await lifecycle.inspect('after-thumbnail-guard');
+  lifecycle.diagnostics.push({ kind: 'family-layout-guard', stage: lifecycle.stage, at: Date.now(), expectedCopyVersion, familyCount, pendingPreviewRoutes: [...lifecycle.previewRoutes] });
+  await lifecycle.inspect('after-layout-guard');
   if (expectedCopyVersion === 2) {
-    // The saved editor starts seven serial thumbnails after its selected page.
-    // A saved badge, or the selected image alone, does not mean those bodies
-    // have finished. Assert all eight CURRENT results before replacing a doc.
+    // Navigation now shows eight code-native layout diagrams. Real selected
+    // page pixels are verified above; all eight are visited explicitly below.
     await page.waitForFunction(() => {
       const buttons = [...document.querySelectorAll('.family-dialogue-editor .family-page-strip > button')];
       return buttons.length === 8 && buttons.every(button => {
-        const image = button.querySelector('.family-page-thumb img:not(.is-stale)');
-        return image?.complete && image.naturalWidth === 1080 && image.naturalHeight === 1350;
+        return !!button.querySelector('.family-page-layout') && !button.querySelector('img');
       });
     }, undefined, { timeout: settlementRemaining(deadline) });
   }
@@ -294,6 +293,25 @@ async function settleEditorPreviews(page, lifecycle) {
     lifecycle.diagnostics.push({ kind: 'previews-settled', at: Date.now(), url: page.url(), pendingPreviewRoutes: lifecycle.previewRoutes.size, quietWindowMs: 500, expectedCopyVersion, currentReady: true, dom, generation, settlementElapsedMs: Date.now() - (deadline - 20_000), ...lifecycle.api.snapshot() });
     return;
   }
+}
+async function verifyAllEightCurrentPageRenders(page, lifecycle, width) {
+  const editor = page.locator('.family-dialogue-editor'), buttons = editor.locator('.family-page-strip > button');
+  assert.equal(await buttons.count(), 8);
+  const picker = editor.getByLabel('전체 목록에서 선택', { exact: true });
+  const designArea = editor.locator('details.family-whole-design');
+  assert.equal(await designArea.count(), 1, 'one whole-deck design area must follow the page layout navigation');
+  assert.equal(await editor.getByLabel('카드뉴스 스타일', { exact: true }).count(), 0, 'the duplicate style selector must be removed');
+  assert(await designArea.evaluate(node => !!(node.closest('.family-dialogue-editor').querySelector('.family-page-strip').compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)), 'design selection must follow the page layout diagrams');
+  const selected = await buttons.evaluateAll(nodes => nodes.findIndex(node => node.getAttribute('aria-current') === 'step'));
+  for (let index = 0; index < 8; index++) {
+    await buttons.nth(index).click();
+    await page.waitForFunction(pageNumber => document.querySelector('.family-dialogue-editor .card-copy-fields h4')?.textContent?.trim().startsWith(`${pageNumber}페이지 ·`), index + 1);
+    await settleEditorPreviews(page, lifecycle);
+    assert.match(await page.locator('.family-dialogue-editor .card-copy-preview img').getAttribute('alt'), new RegExp(`^${index + 1}페이지 `));
+    lifecycle.diagnostics.push({ kind: 'actual-page-render-verified', width, page: index + 1, dimensions: [1080, 1350] });
+  }
+  await buttons.nth(selected < 0 ? 0 : selected).click();
+  await settleEditorPreviews(page, lifecycle);
 }
 async function reloadEditor(page, lifecycle, label) {
   lifecycle.mark(`${label}: settling previews`); await settleEditorPreviews(page, lifecycle);
@@ -327,14 +345,18 @@ async function pasteBackground(page) {
 }
 
 async function activateConfirmation(page, label, width) {
-  await label.scrollIntoViewIfNeeded();
+  // Protocol visibility excludes neither the fixed workspace header nor the
+  // saved-action bar. Use a normal centred scroll before checking the real hit.
+  await label.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
   const geometry = await label.evaluate(node => {
     const r = node.getBoundingClientRect(), checkbox = node.querySelector('input').getBoundingClientRect();
     const point = { x: r.right - 6, y: r.y + Math.min(r.height / 2, 24) }, hit = document.elementFromPoint(point.x, point.y);
-    return { width: r.width, height: r.height, point, reachable: !!hit && node.contains(hit), outsideCheckbox: point.x > checkbox.right };
+    return { width: r.width, height: r.height, top: r.top, bottom: r.bottom, point, reachable: !!hit && node.contains(hit), outsideCheckbox: point.x > checkbox.right,
+      hit: hit ? { tag: hit.tagName, className: String(hit.className), text: hit.textContent?.slice(0, 90) } : null,
+      viewport: { width: innerWidth, height: innerHeight }, checkbox: { left: checkbox.left, right: checkbox.right, top: checkbox.top, bottom: checkbox.bottom } };
   });
   if (width <= 900) assert(geometry.width >= 48 && geometry.height >= 48, 'Canva confirmation must have a 48px touch label');
-  assert(geometry.reachable && geometry.outsideCheckbox, 'Canva label padding must activate its native checkbox');
+  assert(geometry.reachable && geometry.outsideCheckbox, `Canva label padding must activate its native checkbox: ${JSON.stringify(geometry)}`);
   if (width < 768) await page.touchscreen.tap(geometry.point.x, geometry.point.y); else await page.mouse.click(geometry.point.x, geometry.point.y);
   assert.equal(await label.locator('input').isChecked(), true);
 }
@@ -343,6 +365,8 @@ async function manualCanvaImport(page, state, width, lifecycle) {
   // A fresh document observes the independently advertised no-Autofill account.
   // All job and image responses remain synthetic; this tests the built UI only.
   state.canvaJobs = []; state.canvaLibrary.autofill = false;
+  state.canvaLibrary.items = state.canvaLibrary.items.map(item => ({ ...item, status: 'needs_fields', canCreate: false,
+    reason: '현재 연결한 Canva 계정·팀에는 자동 채우기 기능이 없습니다.' }));
   await reloadEditor(page, lifecycle, 'manual Canva account capability');
   const editorial = page.locator('.canva-editorial'), manual = editorial.getByRole('form', { name: 'Canva 사본 8장 가져오기' }); await manual.waitFor();
   const before = clone(state.saved), writesBefore = state.writes.length;
@@ -351,6 +375,9 @@ async function manualCanvaImport(page, state, width, lifecycle) {
   assert(await manualDetails.evaluate(node => !!(node.compareDocumentPosition(node.parentElement.querySelector('.canva-library-entry')) & Node.DOCUMENT_POSITION_FOLLOWING)), 'manual import must precede the large folder preview');
   const automatic = editorial.locator('details.canva-automatic-tools');
   assert.equal(await automatic.evaluate(node => node.open), false, 'unavailable automatic production must not dominate the manual account path');
+  const library = editorial.locator('details.canva-library-entry');
+  assert.equal(await library.evaluate(node => node.open), true, 'a connected manual account can browse its source templates directly');
+  assert.equal(await library.evaluate(node => !!node.closest('.canva-automatic-tools')), false, 'shared template browsing must remain outside automatic-only settings');
   await automatic.locator(':scope > summary').click();
   assert.equal(await editorial.getByRole('button', { name: 'Canva 8장 만들기', exact: true }).isDisabled(), true);
   await manual.getByRole('textbox', { name: '가져올 Canva 사본 링크 또는 ID' }).fill('Dmanual_browser_copy');
@@ -362,8 +389,32 @@ async function manualCanvaImport(page, state, width, lifecycle) {
   assert.equal(await manual.getByRole('textbox', { name: '가져올 Canva 사본 링크 또는 ID' }).inputValue(), 'Dmanual_browser_copy');
   assert.equal(await manual.locator('label.canva-manual-confirm').nth(0).locator('input').isChecked(), true, 'opening the entry must preserve existing acknowledgement state');
   assert.equal(state.writes.slice(writesBefore).filter(write => !write.path.endsWith('/preview')).length, 0, 'the capability action opens the form without submitting a job');
+  const manualSource = state.canvaLibrary.items[1];
+  await manualDetails.locator(':scope > summary').click();
+  await library.getByRole('button', { name: `${manualSource.title} 미리보기`, exact: true }).click();
+  const innerPage = library.locator('.canva-library-pages button').nth(1);
+  await innerPage.scrollIntoViewIfNeeded();
+  const innerPageBounds = await innerPage.boundingBox();
+  if (width <= 900) assert(innerPageBounds.width >= 48 && innerPageBounds.height >= 48, 'Canva inner-page browsing needs a 48px touch target');
+  if (width < 768) await page.touchscreen.tap(innerPageBounds.x + innerPageBounds.width / 2, innerPageBounds.y + innerPageBounds.height / 2);
+  else await innerPage.click();
+  assert.equal(await innerPage.getAttribute('aria-pressed'), 'true');
+  assert.equal(await library.getByRole('button', { name: '자동 채우기로 선택', exact: true }).count(), 0, 'a manual-only account must not be presented a disabled automatic template choice');
+  const chooseManual = library.getByRole('button', { name: '직접 편집용으로 선택', exact: true });
+  assert.equal(await chooseManual.isEnabled(), true, 'no-Autofill and needs_fields must still allow direct-edit reference selection');
+  await chooseManual.scrollIntoViewIfNeeded();
+  if (width <= 900) { const target = await chooseManual.boundingBox(); assert(target.width >= 48 && target.height >= 48); }
+  await chooseManual.click();
+  await manual.waitFor();
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '가져올 Canva 사본 링크 또는 ID');
+  assert.equal(await manual.getByRole('textbox', { name: '가져올 Canva 사본 링크 또는 ID' }).inputValue(), 'Dmanual_browser_copy');
+  assert.equal(await manual.locator('label.canva-manual-confirm').nth(0).locator('input').isChecked(), true, 'manual template selection must preserve current copy acknowledgement');
+  assert((await editorial.locator('[data-testid="canva-manual-template-selection"]').innerText()).includes(manualSource.title));
+  assert.equal(state.writes.slice(writesBefore).filter(write => !write.path.endsWith('/preview')).length, 0, 'reference selection cannot create, edit, export or save a design');
+  assert.deepEqual(state.saved, before);
   await page.screenshot({ path: `${outputDir}/canva-manual-entry-${width}.png` });
   const input = manual.getByRole('textbox', { name: '가져올 Canva 사본 링크 또는 ID' }), submit = manual.getByRole('button', { name: '이 사본의 8장 가져오기', exact: true });
+  await input.fill(manualSource.designId); assert.equal(await submit.isDisabled(), true, 'the selected reference original can never be imported as a copy');
   await input.fill('https://www.canva.com.attacker.example/design/Dmanual_browser_copy/edit'); assert.equal(await submit.isDisabled(), true);
   await input.fill('https://www.canva.com/design/Dmanual_browser_copy/edit?utm_content=private-share-query');
   const confirmations = manual.locator('label.canva-manual-confirm'); await activateConfirmation(page, confirmations.nth(0), width);
@@ -442,10 +493,10 @@ try {
       const snapshot = () => {
         const editor = document.querySelector('.family-dialogue-editor'), strip = editor?.querySelector('.family-page-strip');
         const page5 = strip?.querySelector('button[aria-label="5페이지 · 두 가지 시선"]'), field = editor?.querySelector('textarea[id$="-fields.viewA.body"]');
-        const thumbs = [...(strip?.querySelectorAll('.family-page-thumb img') ?? [])], image = document.querySelector('.card-copy-editor .card-copy-preview img');
+        const layouts = [...(strip?.querySelectorAll('.family-page-layout') ?? [])], image = document.querySelector('.card-copy-editor .card-copy-preview img');
         return { documentId, browserAt: Date.now(), url: location.href, readyState: document.readyState, editorId: identity(editor), editorConnected: !!editor?.isConnected,
           familyCount: document.querySelectorAll('.family-dialogue-editor').length, copyEditorCount: document.querySelectorAll('.card-copy-editor').length, savedBadge: editor?.querySelector('.card-copy-heading .badge')?.textContent ?? null,
-          thumbnailCount: thumbs.length, currentLoadedThumbnailCount: thumbs.filter(node => !node.classList.contains('is-stale') && node.complete && node.naturalWidth === 1080 && node.naturalHeight === 1350).length,
+          layoutDiagramCount: layouts.length, navigationImageCount: strip?.querySelectorAll('img').length ?? 0,
           selectedPreview: image ? { nodeId: identity(image), src: image.currentSrc || image.src, complete: image.complete, width: image.naturalWidth, height: image.naturalHeight, stale: !!image.closest('.is-stale'), busy: image.closest('[aria-busy]')?.getAttribute('aria-busy') } : null,
           selected: strip?.querySelector('[aria-current="step"]')?.getAttribute('aria-label') ?? null,
           heading: editor?.querySelector('.card-copy-fields h4')?.textContent ?? null, scrollX, scrollY, scrollLeft: strip?.scrollLeft ?? null, stripRect: rect(strip), page5: describe(page5), viewA: field ? { nodeId: identity(field), id: field.id, connected: field.isConnected, rect: rect(field) } : null };
@@ -589,6 +640,12 @@ try {
       await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === copyPath && response.request().method() === 'PATCH' && response.ok()), convert.click()]);
       const family = page.locator('.family-dialogue-editor'); await family.waitFor();
       assert.equal(state.saved.copy.version, 2); assert.equal(await family.locator('.family-page-strip>button').count(), 8);
+      const beforeLayoutTour = clone(state.saved), beforeLayoutWrites = state.writes.length;
+      await verifyAllEightCurrentPageRenders(page, lifecycle, width);
+      assert.deepEqual(state.saved, beforeLayoutTour, 'layout navigation must not change the saved manuscript');
+      assert.equal(state.writes.slice(beforeLayoutWrites).filter(write => !write.path.endsWith('/preview')).length, 0, 'visiting all eight real page previews must not save or generate content');
+      await family.locator('.family-page-strip').scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `${outputDir}/page-layout-and-design-${width}.png` });
       await family.getByRole('button', { name: '5페이지 · 두 가지 시선', exact: true }).click();
       const viewA = family.locator('textarea[id$="-fields.viewA.body"]');
       await viewA.fill('내가 덧붙인 판단 기준도 저장하고 다시 확인할 수 있어요.');
@@ -658,9 +715,23 @@ try {
       await page.screenshot({ path: `${outputDir}/v2-activity-${width}.png` });
       // The source handoff adds profiles, never overwrites the accepted copy or a page photo.
       const beforeStyle=clone(state.saved.copy);
-      const stylePicker=family.getByLabel('카드뉴스 스타일',{exact:true});
+      const stylePicker=family.getByLabel('전체 목록에서 선택',{exact:true});
+      const designArea=family.locator('details.family-whole-design');
+      if(!await designArea.evaluate(node=>node.open))await designArea.locator(':scope > summary').click();
       assert.equal(await stylePicker.locator('option[value^="cardnews14-"]').count(),14);
-      await stylePicker.selectOption('cardnews14-cinematic-v1');
+      const gallery=family.getByRole('group',{name:'전체 8장 디자인 예시',exact:true});
+      assert.equal(await gallery.getByRole('button').count(),14);
+      const designWritesBefore=state.writes.length, cinematic=READING_CARD_PROFILES.find(profile=>profile.templateKey==='cardnews14-cinematic-v1');
+      const cinematicCard=gallery.getByRole('button',{name:`디자인 선택 · ${cinematic.label}`,exact:true});
+      await cinematicCard.click();
+      assert.equal(await cinematicCard.getAttribute('aria-pressed'),'true');
+      assert.equal(await stylePicker.inputValue(),'cardnews14-cinematic-v1');
+      await cinematicCard.locator('img').evaluate(image=>image.decode());
+      await settleEditorPreviews(page,lifecycle);
+      assert.equal(state.writes.slice(designWritesBefore).filter(write=>!write.path.endsWith('/preview')).length,0,'a visual design choice must not save or call AI');
+      assert.deepEqual(state.saved.copy,beforeStyle,'a design choice remains a draft until explicit save');
+      await designArea.locator(':scope > summary').scrollIntoViewIfNeeded();
+      await page.screenshot({path:`${outputDir}/whole-deck-design-choice-${width}.png`});
       await family.getByRole('button',{name:'1페이지 · 표지',exact:true}).click();
       await family.locator('textarea[id$="-displayOverrides.kicker"]').fill('');
       await openBackground(page);
@@ -717,7 +788,7 @@ try {
       await canvaEditorial.getByRole('button', { name: '4페이지', exact: true }).click();
       await canvaEditorial.locator('.canva-library-large img').evaluate(image => image.decode());
       assert.match(await canvaEditorial.locator('.canva-library-large img').getAttribute('src'), /page=3/);
-      const nativeSelect = canvaEditorial.getByRole('button', { name: '이 Canva 템플릿 선택', exact: true });
+      const nativeSelect = canvaEditorial.getByRole('button', { name: '자동 채우기로 선택', exact: true });
       await nativeSelect.scrollIntoViewIfNeeded(); assert.equal(await nativeSelect.isEnabled(), true);
       assert(await nativeSelect.evaluate(node => { const r = node.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!hit && (hit === node || node.contains(hit)); }), 'Canva template selection must be reachable');
       await nativeSelect.click();
@@ -751,10 +822,11 @@ try {
         const sample = image => image ? { src: image.currentSrc || image.getAttribute('src'), complete: image.complete, width: image.naturalWidth, height: image.naturalHeight, stale: image.classList.contains('is-stale'), top: image.getBoundingClientRect().top } : null;
         return { saved: document.querySelector('.family-dialogue-editor .card-copy-heading .badge')?.textContent,
           selected: sample(document.querySelector('.card-copy-preview img')),
-          thumbnails: [...document.querySelectorAll('.family-page-strip > button')].map(button => ({ label: button.getAttribute('aria-label'), image: sample(button.querySelector('img')) })) };
+          pageLayouts: [...document.querySelectorAll('.family-page-strip > button')].map(button => ({ label: button.getAttribute('aria-label'), diagramPresent: !!button.querySelector('.family-page-layout'), unexpectedImage: sample(button.querySelector('img')) })) };
       }).catch(() => null);
       results.push({ width, engine, passed: false, error: error.message, apiErrors: errors, requestFailures, diagnostics, previewState, pageClosed: page.isClosed(), pendingPreviewRoutes: lifecycle.previewRoutes.size, ...lifecycle.api.snapshot() }); await writeFile(`${outputDir}/results.json`, JSON.stringify(results, null, 2));
       if (!page.isClosed()) {
+        await page.screenshot({ path: `${outputDir}/failure-viewport-${width}.png` }).catch(() => {});
         await page.screenshot({ path: `${outputDir}/failure-${width}.png`, fullPage: true }).catch(() => {});
         const html = await page.content().catch(() => null);
         if (html !== null) await writeFile(`${outputDir}/failure-${width}.html`, html);

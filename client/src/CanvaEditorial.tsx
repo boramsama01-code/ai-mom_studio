@@ -16,7 +16,7 @@ import { READING_CARD_PROFILES,readingProfileForTemplateKey,readingProfileForTem
 import { cardnews14Source } from '../../shared/cardnews14Catalog';
 import { readingMasterSourceApproved } from '../../shared/readingCanvaMasters';
 import { selectedFamilyEnding } from '../../shared/characterVariantAssets';
-import { CanvaLibraryPanel, CANVA_LIBRARY_QUERY_KEY, useCanvaTemplateLibrary } from './CanvaTemplateLibrary';
+import { CanvaLibraryPanel, CANVA_LIBRARY_QUERY_KEY, canSelectCanvaManualTemplate, safeCanvaLink, useCanvaTemplateLibrary } from './CanvaTemplateLibrary';
 import type { CanvaLibraryItem } from '../../shared/canvaTemplateLibrary';
 
 const phaseLabels:Record<string,string>={validate:'템플릿 확인 중',images:'페이지 이미지 준비 중',autofill_prepare:'문구·이미지 연결 준비 중',autofill_submitting:'Canva에 새 디자인 요청 중',autofill_polling:'8장 디자인 만드는 중',folder_source_check:'Canva 원본 변경 확인 중',export_prepare:'완성된 디자인 확인 중',export_submitting:'8장 이미지 내보내는 중',export_polling:'내보내기 기다리는 중',download:'이미지 저장 중',complete:'8장 저장 완료'};
@@ -36,8 +36,10 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   const library=useCanvaTemplateLibrary(),libraryChoiceKey=`canva-library-choice:${channelId}:${itemId}`;
   const [libraryDesignId,setLibraryDesignId]=useState<string|null>(()=>readLibraryChoice(libraryChoiceKey).designId);
   const [libraryOpen,setLibraryOpen]=useState(()=>!!readLibraryChoice(libraryChoiceKey).designId);
+  const [manualTemplateDesignId,setManualTemplateDesignId]=useState<string|null>(null);
   const restoredLibraryChoice=useRef(false);
   const selectedLibrary=library.data?.items.find(item=>item.designId===libraryDesignId);
+  const manualTemplate=library.data?.items.find(item=>item.designId===manualTemplateDesignId);
   useEffect(()=>{
     if(restoredLibraryChoice.current||!jobs.isSuccess)return;
     restoredLibraryChoice.current=true;
@@ -128,18 +130,27 @@ export function CanvaEditorial({channelId,itemId,version,revisionId,copy,pageDes
   const reviewMatchesCurrent=current?.sourceVersion===version&&current?.sourceRevisionId===revisionId;
   const canReexport=current?.status==='failed'&&!!current.exportJobId&&(current.errorCode==='export_expired'||current.errorCode==='job_failed'&&current.phase==='export_polling');
   const manualRecommended=connection.data?.connected===true&&!connection.data.autofill;
+  useEffect(()=>{if(manualRecommended)setLibraryOpen(true);},[manualRecommended]);
+  const manualSelectionAvailable=connection.data?.connected===true&&library.isSuccess&&library.data.configured&&library.data.enabled&&library.data.connected&&library.data.syncStatus!=='needs_reconnect';
+  const selectManualLibrary=(item:CanvaLibraryItem)=>{
+    const fresh=library.data?.items.find(value=>value.designId===item.designId);
+    if(disabled||drawing||lostRequest||unresolved||!manualSelectionAvailable||!fresh||!canSelectCanvaManualTemplate(fresh))return;
+    setManualTemplateDesignId(fresh.designId);setManualOpenRequest(value=>value+1);
+  };
+  const manualTemplateUrl=manualTemplate&&canSelectCanvaManualTemplate(manualTemplate)?safeCanvaLink(manualTemplate.editUrl):null;
   const manualOutput=canvaManualSnapshotSchema.safeParse(current?.result?.manualImport).success;
   const originalDesignIds=[...(masters.data?.items.map(master=>master.sourceId)??[]),...(library.data?.items.map(item=>item.designId)??[])];
   return <section className="canva-editorial stack" aria-label={preferLocal?'스튜디오 8장 디자인':'Canva 8장 디자인'}>
     <div className="row between"><div><h3>8장 디자인 완성</h3><p className="small muted">{manualRecommended?'Canva에서 이 콘텐츠용 사본을 직접 편집한 뒤 8장을 가져와 대조할 수 있습니다.':libraryDesignId?'Canva의 배치·이미지와 기본 사진 출처를 유지하고 저장된 원고를 채웁니다.':preferLocal?'저장한 문구와 사진으로 선택한 스타일의 8장을 만듭니다.':'저장한 문구와 페이지 이미지를 Canva 템플릿에 넣습니다.'}</p></div><span className="pill">{manualRecommended?'직접 편집 · Canva':`자동 · ${preferLocal?'스튜디오':'Canva'}`}</span></div>
     <CanvaManualImport channelId={channelId} itemId={itemId} version={version} revisionId={revisionId} disabled={disabled} busy={!!automaticDrawing||!!lostRequest||!!unresolved} connected={connection.data?.connected===true} recommended={manualRecommended} openRequest={manualOpenRequest} jobs={jobs.data?.items??[]} originalDesignIds={originalDesignIds} onBlockingChange={setManualBlocking} onJob={job=>{setFocusedJobId(job.id);qc.setQueryData<{items:CanvaJobDto[]}>(key,old=>({items:[job,...(old?.items??[]).filter(item=>item.id!==job.id)]}));void qc.invalidateQueries({queryKey:key});}}/>
+    {manualTemplateDesignId&&<div className="canva-manual-template" data-testid="canva-manual-template-selection"><strong>직접 편집용 원본 · {manualTemplate?.title??'선택한 Canva 원본'}</strong><p className="small">Canva 원본을 보관하고 이 콘텐츠용 사본을 만들어 편집하세요. 완성한 사본 링크를 위 입력창에 넣어 가져옵니다.</p>{manualTemplateUrl?<a className="btn sm" href={manualTemplateUrl} target="_blank" rel="noopener noreferrer">Canva 원본 열기 ↗</a>:<p className="small muted">선택한 원본의 현재 상태를 확인할 수 없습니다. 폴더에서 다른 원본을 확인해 주세요.</p>}</div>}
+    <details className="canva-library-entry" open={libraryOpen} onToggle={event=>{if(event.target===event.currentTarget)setLibraryOpen(event.currentTarget.open);}}>
+      <summary>Canva 폴더 템플릿{library.data?.items.length?` · ${library.data.items.filter(item=>item.status!=='missing').length}종`:''}{selectedLibrary?` · ${selectedLibrary.title} 선택됨`:''}</summary>
+      <CanvaLibraryPanel query={library} selectedDesignId={libraryDesignId} manualSelectedDesignId={manualTemplateDesignId} disabled={disabled||!!drawing||!!lostRequest||!!unresolved} onSelect={selectLibrary} onManualSelect={selectManualLibrary} manualAvailable={manualSelectionAvailable}/>
+    </details>
     {preferLocal&&<div className="canva-local-output"><div><strong>스튜디오 자체 출력</strong><p className="small muted">선택한 스타일로 8장을 만듭니다. 스튜디오 자체 이미지로 보관합니다.</p></div><button className={`btn ${manualRecommended?'':'primary'}`} disabled={disabled||!!drawing||!jobs.isSuccess||!!lostRequest} onClick={onLocalRender}>스튜디오에서 8장 만들기</button></div>}
     <details className="canva-automatic-tools" open={automaticOpen} onToggle={event=>{if(event.target===event.currentTarget)setAutomaticOpen(event.currentTarget.open);}}>
     <summary>Canva 자동 제작</summary><div className="stack"><p className="small muted">저장된 원고를 템플릿에 자동으로 채워 새 디자인을 만듭니다.</p>
-    <details className="canva-library-entry" open={libraryOpen} onToggle={event=>{if(event.target===event.currentTarget)setLibraryOpen(event.currentTarget.open);}}>
-      <summary>Canva 폴더 템플릿{library.data?.items.length?` · ${library.data.items.filter(item=>item.status!=='missing').length}종`:''}{selectedLibrary?` · ${selectedLibrary.title} 선택됨`:''}</summary>
-      <CanvaLibraryPanel query={library} selectedDesignId={libraryDesignId} disabled={disabled||!!drawing||!!lostRequest||!!unresolved} onSelect={selectLibrary}/>
-    </details>
     {libraryDesignId&&<div className="canva-library-choice" data-testid="canva-library-selection"><strong>{selectedLibrary?.title??'선택한 Canva 템플릿'}</strong><p className="small muted">원본의 사진·프로필·배치와 기본 사진 출처는 그대로 두고, 저장한 원고로 새 디자인을 만듭니다. 직접 수정한 사진 출처 문구는 반영됩니다.</p>{!nativeReady&&<p className="small" role="status">{selectedLibrary?.previewStatus==='stale'?'Canva 수정 내용을 담은 최신 미리보기를 준비하고 있습니다.':selectedLibrary?.reason??'이 템플릿의 연결 상태와 최신 미리보기를 확인해 주세요.'}</p>}<button type="button" className="btn sm" disabled={disabled||!!drawing||!!lostRequest||!!unresolved} onClick={useRegistered}>등록된 마스터로 돌아가기</button></div>}
     {!libraryDesignId&&readingProfile && <p className={`notice ${available.length?'':'warn'}`} data-testid="reading-canva-readiness">{readingProfile.label} · {available.length?'검증된 같은 스타일 마스터를 선택할 수 있습니다.':`스튜디오 문구 편집·미리보기를 사용할 수 있습니다. Canva 자동 제작은 8장·46개 문구·${readingProfile.images.length}개 이미지의 연결과 실제 출력을 검증한 뒤 사용할 수 있습니다.`}</p>}
     {unsupportedOutro&&<p className="notice small" data-testid="canva-outro-support">{unsupportedOutro} 직접 작성한 마지막 장 문구는 보관합니다.</p>}
@@ -191,7 +202,7 @@ export function CanvaMasterSettings({channelId,showPreparedMasters=false}:{chann
   return <section className="panel stack"><h3>Canva 8장 마스터</h3><p className="small muted">계정 연결 후 실제 8장과 자동 채우기 필드를 검사해 등록합니다. 원본 마스터를 보존하고 콘텐츠마다 새 디자인을 만듭니다.</p><GuardedLink href="/connections?service=canva">Canva 연결 설정</GuardedLink>
     <div className="stack"><h4>카드뉴스 스타일 14종</h4><p className="small muted">8장 구성과 46개 문구는 그대로 두고 스타일을 고릅니다. 아래 사진은 디자인 설명용 AI 예시이며 실제 기사에 자동으로 넣지 않습니다.</p><div className="canva-style-grid">{READING_CARD_PROFILES.filter(profile=>profile.sourceStyleId).map(profile=>{const source=cardnews14Source(profile.sourceStyleId!);return <article className="canva-style-card" key={profile.id}>
       <a href={profile.previewUrl} target="_blank" rel="noopener noreferrer" aria-label={`${profile.label} 8장 샘플 보기`}><img src={`/cardnews14/${profile.sourceStyleId}-cover.webp`} loading="lazy" width="270" height="337" alt={`${profile.label} 표지 예시`}/></a><h5>{profile.label}</h5><p className="small">사진 {readingArtworkPages(profile)}장 · 마지막 장은 ALL 프로필</p><span className="pill">Canva 자동 출력 검증 대기</span><div className="row wrap"><a href={profile.previewUrl} target="_blank" rel="noopener noreferrer">8장 샘플 ↗</a><a href={source.editUrl} target="_blank" rel="noopener noreferrer">Canva 저장본 ↗</a></div>
-    </article>;})}</div><p className="hint">콘텐츠 편집기의 ‘카드뉴스 스타일’에서 선택합니다. 저장된 Canva 8장을 열어 볼 수 있으며, 자동 제작은 실제 채우기·출력 검증 후 사용할 수 있습니다.</p></div>
+    </article>;})}</div><p className="hint">콘텐츠 편집기의 ‘전체 8장 디자인’에서 선택합니다. 저장된 Canva 8장을 열어 볼 수 있으며, 자동 제작은 실제 채우기·출력 검증 후 사용할 수 있습니다.</p></div>
     <details className="content-options"><summary>기존 두 스타일</summary><div className="stack">{READING_CARD_PROFILES.filter(profile=>!profile.sourceStyleId).map(profile=><p key={profile.id}><strong>{profile.label}</strong> · 기존 문구·사진·저장본 유지</p>)}</div></details>
     {showPreparedMasters&&<div className="stack"><h4>알리고당 · 읽는 뉴스</h4><p className="small muted">사진 중심 표지, 차콜 바탕, 노란 포인트의 8장 디자인입니다. 연결한 계정에서 실제 필드와 권한을 검사한 마스터만 사용할 수 있습니다.</p>{CANVA_READING_MASTERS.map(master=>{const registered=list.data?.items.some(saved=>saved.sourceId===master.sourceId&&saved.templateVersion===CANVA_READING_TEMPLATE_VERSION&&saved.status==='ready');return <div className="row between wrap" key={master.sourceId}><a href={master.editUrl} target="_blank" rel="noopener noreferrer">{master.label} · 8장 보기 ↗</a><button className="btn sm" disabled={save.isPending||registered} onClick={()=>save.mutate(master)}>{registered?'등록됨':'이 마스터 검사·등록'}</button></div>;})}{save.error&&<ErrorBox error={save.error}/>}</div>}
     {list.data?.items.map(m=><div className="row between wrap" key={m.id}><span>{m.conceptMode==='value_definition'?'가치 정의':'과학 설명'} · {m.hasExternalActivity?'추가 자료 포함':'집 활동'} · {m.templateVersion} · {m.status==='ready'&&(!readingProfileForTemplateVersion(m.templateVersion)||readingMasterSourceApproved(readingProfileForTemplateVersion(m.templateVersion)!,m.sourceId))?'사용 가능':'재검사 필요'}</span>{m.editUrl&&<a href={m.editUrl} target="_blank" rel="noopener noreferrer">마스터 열기 ↗</a>}</div>)}

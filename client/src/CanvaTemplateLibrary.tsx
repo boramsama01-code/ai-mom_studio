@@ -141,18 +141,36 @@ function CanvaFieldHelp() {
   </details>;
 }
 
-export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false, onSelect, canCreate = true, autofillAvailable }: {
+/** UI reference selection only. The import endpoint revalidates the actual copy. */
+export function canSelectCanvaManualTemplate(item: CanvaLibraryItem): boolean {
+  return ['ready', 'needs_fields'].includes(item.status) && !['failed', 'unavailable'].includes(item.previewStatus) && item.pageCount === 8 && item.pages.length === 8
+    && item.pages.every((page, index) => page.pageNumber === index + 1 && page.width === 1080 && page.height === 1350)
+    && !!safeCanvaLink(item.editUrl);
+}
+
+export function CanvaLibraryBrowser({ items, selectedDesignId, manualSelectedDesignId, disabled = false, onSelect, onManualSelect, manualAvailable = false, canCreate = true, autofillAvailable }: {
   items: CanvaLibraryItem[];
   selectedDesignId?: string | null;
+  manualSelectedDesignId?: string | null;
   disabled?: boolean;
   onSelect?: (item: CanvaLibraryItem) => void;
+  onManualSelect?: (item: CanvaLibraryItem) => void;
+  manualAvailable?: boolean;
   canCreate?: boolean;
   autofillAvailable?: boolean;
 }) {
   const [search, setSearch] = useState("");
-  const [previewId, setPreviewId] = useState<string | null>(selectedDesignId ?? null);
+  const [previewId, setPreviewId] = useState<string | null>(manualSelectedDesignId ?? selectedDesignId ?? null);
   const [pageNumber, setPageNumber] = useState(1);
   const priorSelection = useRef(selectedDesignId);
+  const priorManualSelection = useRef(manualSelectedDesignId);
+  useEffect(() => {
+    if (manualSelectedDesignId !== priorManualSelection.current) {
+      setPreviewId(manualSelectedDesignId ?? selectedDesignId ?? null);
+      setPageNumber(1);
+      priorManualSelection.current = manualSelectedDesignId;
+    }
+  }, [manualSelectedDesignId, selectedDesignId]);
   useEffect(() => {
     if (selectedDesignId !== priorSelection.current) {
       setPreviewId(selectedDesignId ?? null);
@@ -161,7 +179,7 @@ export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false,
     }
   }, [selectedDesignId]);
   const normalized = search.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, "");
-  const visible = items.filter(item => (item.status !== "missing" || item.designId === selectedDesignId)
+  const visible = items.filter(item => (item.status !== "missing" || item.designId === selectedDesignId || item.designId === manualSelectedDesignId)
     && (!normalized || `${item.title} ${item.designId}`.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, "").includes(normalized)));
   const active = visible.find(item => item.designId === previewId)
     ?? visible.find(item => item.designId === selectedDesignId) ?? visible[0];
@@ -171,7 +189,9 @@ export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false,
   const editUrl = safeCanvaLink(active?.editUrl);
   const selectedMissing = !!selectedDesignId && !items.some(item => item.designId === selectedDesignId && item.status !== "missing");
   const autofillUnavailable = autofillAvailable === false;
+  const showAutomaticSelect = !!onSelect && !(onManualSelect && autofillUnavailable);
   const canSelect = !!active?.canCreate && active.status === "ready" && active.previewStatus === "ready" && canCreate;
+  const canSelectManual = !!active && manualAvailable && canSelectCanvaManualTemplate(active);
   const itemLabel = (item: CanvaLibraryItem) => item.status === "needs_fields" && autofillUnavailable ? "자동 채우기 제한" : statusLabels[item.status];
   const unavailable = active?.status === "needs_fields" && autofillUnavailable ? autofillUnavailableMessage : active?.reason ?? (active?.status !== "ready" ? statusLabels[active?.status ?? "unavailable"] : null);
   return <div className="canva-library-browser">
@@ -185,7 +205,7 @@ export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false,
         {visible.map(item => <button type="button" className="canva-library-card" key={item.designId} aria-pressed={active?.designId === item.designId} aria-label={`${item.title} 미리보기`} onClick={() => { setPreviewId(item.designId); setPageNumber(1); }}>
           <div className="canva-library-cover"><PreviewImage src={safeCanvaPreview(item.thumbnailUrl ?? item.pages[0]?.previewUrl)} alt="" small />
             <span className="canva-library-page-count">{item.pageCount === null ? "Canva" : `${item.pageCount}장`}</span>
-            {item.designId === selectedDesignId && <span className="canva-library-selected">선택됨</span>}
+            {item.designId === manualSelectedDesignId ? <span className="canva-library-selected">직접 편집용</span> : item.designId === selectedDesignId && <span className="canva-library-selected">선택됨</span>}
           </div>
           <strong>{item.title || "이름 없는 디자인"}</strong>
           <span className={`canva-library-item-status ${item.canCreate && item.previewStatus === "ready" ? "is-ready" : ""}`}>{item.previewStatus === "stale" ? "새 미리보기 갱신 중" : item.previewStatus === "pending" ? "미리보기 준비 중" : itemLabel(item)}</span>
@@ -207,21 +227,26 @@ export function CanvaLibraryBrowser({ items, selectedDesignId, disabled = false,
         {unavailable && <p className="notice small" role="status">{unavailable}</p>}
         {active.status === "needs_fields" && !autofillUnavailable && <><p className="small muted">기존 8장 템플릿을 복제해 수정하면 원고를 채우는 연결도 함께 유지할 수 있습니다.</p><CanvaFieldHelp key={active.designId} /></>}
         <div className="canva-library-actions">
-          {editUrl && <a className="btn" href={editUrl} target="_blank" rel="noopener noreferrer">Canva에서 편집 ↗</a>}
-          {onSelect && <button type="button" className="btn primary" disabled={disabled || !canSelect || selectedDesignId === active.designId} onClick={() => onSelect(active)}>{selectedDesignId === active.designId ? "선택한 Canva 템플릿" : "이 Canva 템플릿 선택"}</button>}
+          {editUrl && <a className="btn" href={editUrl} target="_blank" rel="noopener noreferrer">{onManualSelect ? 'Canva 원본 열기 ↗' : 'Canva에서 편집 ↗'}</a>}
+          {onManualSelect && <button type="button" className={`btn ${autofillAvailable === true ? '' : 'primary'}`} aria-pressed={manualSelectedDesignId === active.designId} disabled={disabled || !canSelectManual} onClick={() => onManualSelect(active)}>직접 편집용으로 선택</button>}
+          {showAutomaticSelect && <button type="button" className="btn primary" disabled={disabled || !canSelect || selectedDesignId === active.designId} onClick={() => onSelect!(active)}>{selectedDesignId === active.designId ? onManualSelect ? '자동 제작용으로 선택됨' : '선택한 Canva 템플릿' : onManualSelect ? '자동 채우기로 선택' : '이 Canva 템플릿 선택'}</button>}
         </div>
-        {onSelect && <p className="small muted">Canva의 배치·이미지와 기본 사진 출처를 유지하고 저장된 원고를 채웁니다.</p>}
+        {onManualSelect && <p className="small muted">1080×1350 크기의 8장 원본을 직접 편집할 참조로 고릅니다. Canva 원본을 보관하고 이 콘텐츠용 사본을 만들어 편집하세요. 실제 가져올 사본은 가져오기 요청에서 다시 확인합니다.</p>}
+        {showAutomaticSelect && <p className="small muted">Canva의 배치·이미지와 기본 사진 출처를 유지하고 저장된 원고를 채웁니다.</p>}
       </aside>}
     </div>}
   </div>;
 }
 
-export function CanvaLibraryPanel({ query, manageFolder = false, selectedDesignId, disabled = false, onSelect }: {
+export function CanvaLibraryPanel({ query, manageFolder = false, selectedDesignId, manualSelectedDesignId, disabled = false, onSelect, onManualSelect, manualAvailable = false }: {
   query: UseQueryResult<CanvaTemplateLibraryState, Error>;
   manageFolder?: boolean;
   selectedDesignId?: string | null;
+  manualSelectedDesignId?: string | null;
   disabled?: boolean;
   onSelect?: (item: CanvaLibraryItem) => void;
+  onManualSelect?: (item: CanvaLibraryItem) => void;
+  manualAvailable?: boolean;
 }) {
   const qc = useQueryClient();
   const state = query.data;
@@ -282,7 +307,7 @@ export function CanvaLibraryPanel({ query, manageFolder = false, selectedDesignI
     {notice && <p className="small canva-library-feedback" role="status">{notice}</p>}
     {sync.error && <ErrorBox error={sync.error} retry={() => sync.mutate()} />}
     {save.error && <ErrorBox error={save.error} />}
-    {state && <CanvaLibraryBrowser items={state.items} selectedDesignId={selectedDesignId} disabled={disabled || mutating} onSelect={onSelect} canCreate={state.enabled && state.connected && state.autofill && state.syncStatus !== "needs_reconnect"} autofillAvailable={state.connected ? state.autofill : undefined} />}
+    {state && <CanvaLibraryBrowser items={state.items} selectedDesignId={selectedDesignId} manualSelectedDesignId={manualSelectedDesignId} disabled={disabled || mutating} onSelect={onSelect} onManualSelect={onManualSelect} manualAvailable={manualAvailable && state.configured && state.enabled && state.connected && state.syncStatus !== "needs_reconnect"} canCreate={state.enabled && state.connected && state.autofill && state.syncStatus !== "needs_reconnect"} autofillAvailable={state.connected ? state.autofill : undefined} />}
   </div>;
 }
 
