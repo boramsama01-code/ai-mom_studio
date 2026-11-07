@@ -9,7 +9,7 @@ import { ApiError } from "../client/src/api";
 import type { CanvaJobDto } from "../shared/canvaEditorial";
 import type { CanvaManualImportRequest } from "../shared/canvaManualImport";
 import { familyDialogueCardFixture } from "./fixtures/familyDialogueCard";
-import { canvaLibraryStateFixture } from "./fixtures/canvaTemplateLibrary";
+import { canvaLibraryItemFixture, canvaLibraryStateFixture } from "./fixtures/canvaTemplateLibrary";
 
 const mocks = vi.hoisted(() => ({ api: vi.fn(), received: vi.fn(), blocking: vi.fn(), local: vi.fn() }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
@@ -18,6 +18,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 type Props = ComponentProps<typeof CanvaManualImport>;
 let root: Root, host: HTMLDivElement, client: QueryClient, props: Props, jobs: CanvaJobDto[];
 let enqueue: ((body: CanvaManualImportRequest) => Promise<unknown>) | null;
+let connectionMessage: string | undefined, libraryState: ReturnType<typeof canvaLibraryStateFixture>;
 const endpoint = "/channels/3/items/28/canva/manual-imports", jobEndpoint = "/channels/3/items/28/canva/jobs";
 function imported(body: CanvaManualImportRequest, status = "queued", override: Partial<CanvaJobDto> = {}): CanvaJobDto {
   const complete = status === "needs_review" || status === "ready";
@@ -32,6 +33,7 @@ function imported(body: CanvaManualImportRequest, status = "queued", override: P
 }
 beforeEach(() => {
   vi.clearAllMocks(); sessionStorage.clear(); jobs = []; enqueue = null;
+  connectionMessage = undefined; libraryState = canvaLibraryStateFixture({ autofill: false });
   props = { channelId: 3, itemId: 28, version: 3, revisionId: 30, disabled: false, busy: false, connected: true, recommended: true, jobs, originalDesignIds: ["Dmaster_test"], onJob: mocks.received, onBlockingChange: mocks.blocking };
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   client.setQueryData(["me"], { user: "editor-a", recoveryScope: "scope-a" });
@@ -40,8 +42,8 @@ beforeEach(() => {
       if (enqueue) return enqueue(options!.body);
       const job = imported(options!.body); jobs = [job]; return structuredClone(job);
     }
-    if (path === "/canva/editorial/status") return { configured: true, connected: true, autofill: false, capabilities: [], capabilityStatus: "unavailable", reason: "capability_missing" };
-    if (path === "/canva/template-library") return canvaLibraryStateFixture({ autofill: false });
+    if (path === "/canva/editorial/status") return { configured: true, connected: true, autofill: false, capabilities: [], capabilityStatus: "unavailable", reason: "capability_missing", message: connectionMessage };
+    if (path === "/canva/template-library") return libraryState;
     if (path === "/channels/3/canva/masters") return { items: [] };
     if (path === jobEndpoint) return { items: structuredClone(jobs) };
     if (path === `${jobEndpoint}/11/accept`) return { ok: true };
@@ -65,6 +67,62 @@ async function confirm() { await act(async () => host.querySelectorAll<HTMLLabel
 const posts = () => mocks.api.mock.calls.filter(([, options]) => options?.method === "POST");
 
 describe("Canva에서 직접 편집한 8장 가져오기", () => {
+  it.each([false, true])('keeps the free manual form before automatic warnings and explicitly opens it without losing input or consent; restored library=%s', async selectedLibrary => {
+    connectionMessage = '현재 연결한 Canva 계정·팀에서 자동 채우기를 사용할 수 없습니다. 원본 미리보기와 Canva 직접 편집은 사용할 수 있습니다.';
+    const template = canvaLibraryItemFixture({ status: 'needs_fields', canCreate: false, reason: connectionMessage });
+    libraryState = canvaLibraryStateFixture({ autofill: false, items: [template] });
+    if (selectedLibrary) sessionStorage.setItem('canva-library-choice:3:28', JSON.stringify({ designId: template.designId }));
+    const copy = familyDialogueCardFixture(); copy.templateKey = 'reading-ink-lime-v1';
+    const original = structuredClone(copy), otherEditor = document.createElement('input'); document.body.append(otherEditor); otherEditor.focus();
+    try {
+      await act(async () => root.render(<QueryClientProvider client={client}><CanvaEditorial channelId={3} itemId={28} version={3} revisionId={30} copy={copy} disabled={false} onLocalRender={mocks.local} /></QueryClientProvider>)); await settle();
+      const manual = host.querySelector<HTMLDetailsElement>('.canva-manual-import')!, automatic = host.querySelector<HTMLDetailsElement>('.canva-automatic-tools')!;
+      expect(host.querySelectorAll('.canva-manual-import')).toHaveLength(1);
+      expect(manual.open).toBe(true); expect(automatic.open).toBe(false);
+      expect(manual.compareDocumentPosition(host.querySelector('.canva-library-entry')!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+      expect(document.activeElement).toBe(otherEditor);
+      expect(host.querySelector('[data-testid="canva-capability-status"]')?.textContent).toContain(connectionMessage);
+      if (!selectedLibrary) expect(host.querySelector('[data-testid="reading-canva-readiness"]')?.textContent).toContain('8장·46개 문구·4개 이미지의 연결과 실제 출력을 검증한 뒤 사용할 수 있습니다.');
+      expect(button('Canva 8장 만들기').disabled).toBe(true);
+      await act(async () => automatic.querySelector('summary')!.click()); await settle();
+      await input('Dmanual_copy'); await confirm();
+      expect(button('이 사본의 8장 가져오기').disabled).toBe(false);
+      await act(async () => manual.querySelector('summary')!.click()); await settle();
+      expect(manual.open).toBe(false);
+      await click('직접 편집한 사본 가져오기');
+      const field = host.querySelector<HTMLInputElement>('[aria-label="가져올 Canva 사본 링크 또는 ID"]')!;
+      expect(manual.open).toBe(true); expect(field.value).toBe('Dmanual_copy'); expect(document.activeElement).toBe(field);
+      expect([...host.querySelectorAll<HTMLInputElement>('.canva-manual-confirm input')].every(checkbox => checkbox.checked)).toBe(true);
+      expect(posts()).toHaveLength(0); expect(mocks.local).not.toHaveBeenCalled(); expect(copy).toEqual(original);
+      await click('이 사본의 8장 가져오기');
+      expect(posts()).toHaveLength(1); expect(posts()[0][0]).toBe(endpoint);
+    } finally { otherEditor.remove(); }
+  });
+
+  it('opens on a capability response without taking focus and only focuses on a new explicit request', async () => {
+    const otherEditor = document.createElement('input'); document.body.append(otherEditor); otherEditor.focus();
+    try {
+      await render({ recommended: false });
+      await render({ recommended: true });
+      expect(host.querySelector<HTMLDetailsElement>('.canva-manual-import')!.open).toBe(true);
+      expect(document.activeElement).toBe(otherEditor);
+      await render({ openRequest: 1 });
+      expect(document.activeElement).toBe(host.querySelector('[aria-label="가져올 Canva 사본 링크 또는 ID"]'));
+      otherEditor.focus(); await render({ disabled: true });
+      expect(document.activeElement).toBe(otherEditor);
+      expect(posts()).toHaveLength(0);
+    } finally { otherEditor.remove(); }
+  });
+
+  it.each([{ disabled: true }, { busy: true }, { connected: false }])('an explicit open request never bypasses the original import blockers: %j', async blocked => {
+    await render(); await input('Dmanual_copy'); await confirm();
+    expect(button('이 사본의 8장 가져오기').disabled).toBe(false);
+    await render({ ...blocked, openRequest: 1 });
+    expect(button('이 사본의 8장 가져오기').disabled).toBe(true);
+    await act(async () => button('이 사본의 8장 가져오기').click());
+    expect(posts()).toHaveLength(0); expect(mocks.received).not.toHaveBeenCalled();
+  });
+
   it("안전한 사본 링크와 두 확인을 요구하고 자동 채우기 없이 디자인 ID만 전송한다", async () => {
     await render(); await input("https://www.canva.com.evil.test/design/Dwrong_copy/edit");
     expect(button("이 사본의 8장 가져오기").disabled).toBe(true); expect(posts()).toHaveLength(0);

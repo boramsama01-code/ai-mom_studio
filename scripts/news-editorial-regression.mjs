@@ -79,7 +79,7 @@ function fixture() {
     else if (pathname === "/api/status") data = { globalStop: false, workerConnected: true, integrations: { aiProvider: "gemini", gemini: true, openai: true, anthropic: false, flags: { dryRun: true, autoPublish: false } } };
     else if (pathname === "/api/studio/ai-status") data = ai;
     else if (pathname === "/api/canva/status") data = { connected: state.canvaLibrary.connected };
-    else if (pathname === "/api/canva/editorial/status") data = { configured: state.canvaLibrary.configured, connected: state.canvaLibrary.connected, autofill: state.canvaLibrary.autofill, capabilities: state.canvaLibrary.autofill ? ["autofill"] : [] };
+    else if (pathname === "/api/canva/editorial/status") data = { configured: state.canvaLibrary.configured, connected: state.canvaLibrary.connected, autofill: state.canvaLibrary.autofill, capabilities: state.canvaLibrary.autofill ? ["autofill"] : [], ...(!state.canvaLibrary.autofill ? { capabilityStatus: "unavailable", reason: "capability_missing", message: "현재 연결한 Canva 계정·팀에서 자동 채우기를 사용할 수 없습니다. 원본 미리보기와 Canva 직접 편집은 사용할 수 있습니다." } : {}) };
     else if (pathname === "/api/canva/template-library") data = clone(state.canvaLibrary);
     else if (pathname === "/api/canva/template-library/sync" && method === "POST") { assert.deepEqual(body, {}); data = clone(state.canvaLibrary); }
     else if (/^\/api\/canva\/template-library\/designs\/[^/]+\/preview$/.test(pathname)) return route.fulfill({ contentType: "image/png", body: uploadImage });
@@ -345,8 +345,24 @@ async function manualCanvaImport(page, state, width, lifecycle) {
   state.canvaJobs = []; state.canvaLibrary.autofill = false;
   await reloadEditor(page, lifecycle, 'manual Canva account capability');
   const editorial = page.locator('.canva-editorial'), manual = editorial.getByRole('form', { name: 'Canva 사본 8장 가져오기' }); await manual.waitFor();
-  assert.equal(await editorial.getByRole('button', { name: 'Canva 8장 만들기', exact: true }).isDisabled(), true);
   const before = clone(state.saved), writesBefore = state.writes.length;
+  const manualDetails = editorial.locator('.canva-manual-import');
+  assert.equal(await manualDetails.count(), 1, 'there must be only one manual request form');
+  assert(await manualDetails.evaluate(node => !!(node.compareDocumentPosition(node.parentElement.querySelector('.canva-library-entry')) & Node.DOCUMENT_POSITION_FOLLOWING)), 'manual import must precede the large folder preview');
+  const automatic = editorial.locator('details.canva-automatic-tools');
+  assert.equal(await automatic.evaluate(node => node.open), false, 'unavailable automatic production must not dominate the manual account path');
+  await automatic.locator(':scope > summary').click();
+  assert.equal(await editorial.getByRole('button', { name: 'Canva 8장 만들기', exact: true }).isDisabled(), true);
+  await manual.getByRole('textbox', { name: '가져올 Canva 사본 링크 또는 ID' }).fill('Dmanual_browser_copy');
+  await activateConfirmation(page, manual.locator('label.canva-manual-confirm').nth(0), width);
+  await manualDetails.locator(':scope > summary').click();
+  await editorial.getByRole('button', { name: '직접 편집한 사본 가져오기', exact: true }).click();
+  await manual.waitFor();
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '가져올 Canva 사본 링크 또는 ID');
+  assert.equal(await manual.getByRole('textbox', { name: '가져올 Canva 사본 링크 또는 ID' }).inputValue(), 'Dmanual_browser_copy');
+  assert.equal(await manual.locator('label.canva-manual-confirm').nth(0).locator('input').isChecked(), true, 'opening the entry must preserve existing acknowledgement state');
+  assert.equal(state.writes.slice(writesBefore).filter(write => !write.path.endsWith('/preview')).length, 0, 'the capability action opens the form without submitting a job');
+  await page.screenshot({ path: `${outputDir}/canva-manual-entry-${width}.png` });
   const input = manual.getByRole('textbox', { name: '가져올 Canva 사본 링크 또는 ID' }), submit = manual.getByRole('button', { name: '이 사본의 8장 가져오기', exact: true });
   await input.fill('https://www.canva.com.attacker.example/design/Dmanual_browser_copy/edit'); assert.equal(await submit.isDisabled(), true);
   await input.fill('https://www.canva.com/design/Dmanual_browser_copy/edit?utm_content=private-share-query');

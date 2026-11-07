@@ -1,6 +1,12 @@
 .canva-editorial{border:1px solid var(--border);border-radius:16px;padding:20px;background:var(--surface,#fff);margin-top:20px;min-width:0}.canva-editorial h3{margin:0}.canva-editorial .field select{max-width:100%;min-width:0}.canva-export-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.canva-export-grid figure{margin:0;min-width:0}.canva-export-grid img{display:block;width:100%;aspect-ratio:4/5;object-fit:contain;background:#eef1f4;border-radius:6px}.canva-export-grid figcaption{text-align:center;font-size:12px;padding:6px 0}.canva-editorial .notice{overflow-wrap:anywhere}.canva-editorial .wrap{flex-wrap:wrap}@media(max-width:700px){.canva-editorial{padding:14px}.canva-export-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.canva-editorial>.row{align-items:flex-start;gap:10px}.canva-editorial>.row .btn{flex:1 1 180px;min-height:44px}.canva-editorial input,.canva-editorial select{font-size:16px}}
 .canva-style-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:16px}.canva-style-card{min-width:0;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface,#fff)}.canva-style-card img{width:100%;height:auto;aspect-ratio:4/5;object-fit:cover;display:block;border-radius:6px}.canva-style-card h5{font-size:16px;margin:12px 0 4px}.canva-style-card .row{gap:14px;margin-top:8px}.canva-style-card .pill{white-space:normal}.canva-style-card a{overflow-wrap:anywhere;min-height:44px;display:inline-flex;align-items:center}@media(max-width:480px){.canva-style-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.canva-style-card{padding:8px}.canva-style-card .row{display:flex;flex-direction:column;align-items:flex-start;gap:0}.canva-style-card .small{font-size:12px}}
 .canva-manual-import { border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--surface-alt,#f5f7f4);min-width:0; }
+.canva-automatic-tools { min-width:0;border-top:1px solid var(--border);padding-top:12px; }
+.canva-automatic-tools > summary { min-height:48px;display:flex;align-items:center;font-weight:600;cursor:pointer; }
+.canva-automatic-tools > .stack { padding-top:12px; }
+.canva-local-output { display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 0; }
+.canva-local-output > div { flex:1 1 220px;min-width:0; }
+.canva-local-output p { margin:6px 0 0;line-height:1.6; }
 .canva-manual-import > summary { min-height:48px;display:flex;align-items:center;font-weight:600;cursor:pointer; }
 .canva-manual-import > form { margin-top:12px; }
 .canva-manual-import p { margin:0;line-height:1.7; }
@@ -9,3 +15,4 @@
 .canva-manual-import .canva-manual-confirm > input { flex:none;margin:2px 0 0;width:20px;height:20px; }
 .canva-manual-import .canva-manual-confirm > span { min-width:0;overflow-wrap:anywhere; }
 @media(max-width:900px) { .shell .canva-manual-import .btn { min-height:48px;min-width:48px; }.shell .canva-manual-import .field input { font-size:16px;min-height:48px; }.shell .canva-editorial label.check { min-height:48px;padding-top:12px;padding-bottom:12px;cursor:pointer; } }
+@media(max-width:700px) { .canva-automatic-tools .btn,.canva-local-output > .btn { min-height:48px; }.canva-local-output > .btn { width:100%; } }
