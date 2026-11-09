@@ -45,9 +45,10 @@ function Manuscript({ pages, coverTitle, label }: { pages: CopyPage[]; coverTitl
 
 function Photos({ photos, preview = false }: { photos: Array<{ name: string; url: string }>; preview?: boolean }) {
   return <section className="notion-photos" aria-label="첨부 사진"><h3>첨부 사진 <span className="badge">{photos.length}개</span></h3>
+    <p className="small muted">노션 게시물의 ‘사진 원본’에 올려 주세요. 첫 번째 파일이 표지, 두 번째부터는 내지에 순서대로 들어갑니다. A형 표지는 사진에 검은 페이드와 흰색 제목을 적용합니다.</p>
     {photos.length ? <ul>{photos.map((photo, index) => <li key={`${photo.name}-${index}`}>
       {!preview && <img src={photo.url} alt={photo.name || `첨부 사진 ${index + 1}`} loading="lazy" />}
-      <span>{photo.name || `사진 ${index + 1}`}</span>
+      <span className="badge">{index === 0 ? '표지' : `${index + 1}장`}</span><span>{photo.name || `사진 ${index + 1}`}</span>
     </li>)}</ul> : <p className="small muted">첨부된 사진이 없습니다.</p>}
     {preview && !!photos.length && <p className="small muted">가져온 뒤 사진 미리보기를 확인할 수 있습니다.</p>}
   </section>;
@@ -189,7 +190,7 @@ export function NotionLinkedDocument({ id }: { id: number }) {
     <header className="row between"><div><span className="studio-eyebrow">연결된 원고</span><h2>{data.link.title}</h2><p className="small muted">마지막 동기화 {dateLabel(data.link.lastSyncedAt)}</p></div><span className="badge">{data.link.status === "studio_changed" ? "스튜디오 원고 변경됨" : data.notion?.changed ? "노션 원고 변경됨" : "동기화됨"}</span></header>
     <div className="row notion-actions"><a className="btn" href={externalUrl(data.link.notionUrl)} target="_blank" rel="noreferrer">노션 원고 열기 ↗</a>{data.link.studioCardId && <GuardedLink className="btn" href={`/studio/${data.link.studioCardId}`}>스튜디오 원고 편집</GuardedLink>}<button className="btn" disabled={busy || detail.isFetching} onClick={() => void refresh()}>{detail.isFetching ? "변경 확인 중…" : "노션 변경 확인"}</button></div>
     {allChannels.some(channel=>channel.id===data.link.channelId&&studioKey(channel.slug)==='highscoop')&&<NotionCardEditor data={data} disabled={working||!!conflict} onDirtyChange={setEditorDirty}/>}
-    <div className="notice notion-auto-sync"><label className="notion-toggle"><input type="checkbox" checked={data.link.autoSync} disabled={busy} onChange={event => update.mutate({ kind: "autoSync", autoSync: event.target.checked })} /><strong>자동 동기화</strong></label><p className="small muted">원고 한쪽만 바뀌면 반대쪽에 반영합니다. 양쪽이 바뀌면 적용을 멈추고 비교를 기다립니다. 캔바 제작과 완성본 가져오기는 아래 버튼으로 진행하세요.</p>{data.link.lastCheckedAt && <p className="small muted">마지막 변경 확인 {dateLabel(data.link.lastCheckedAt)}</p>}</div>
+    <div className="notice notion-auto-sync"><label className="notion-toggle"><input type="checkbox" checked={data.link.autoSync} disabled={busy} onChange={event => update.mutate({ kind: "autoSync", autoSync: event.target.checked })} /><strong>자동 동기화</strong></label><p className="small muted">노션의 사진 변경도 함께 가져옵니다. 원고 한쪽만 바뀌면 반대쪽에 반영하고, 양쪽이 바뀌면 비교를 기다립니다. 사진을 바꾼 뒤 캔바 디자인은 아래 ‘현재 원고로 새 디자인 만들기’로 갱신하세요.</p>{data.link.lastCheckedAt && <p className="small muted">마지막 변경 확인 {dateLabel(data.link.lastCheckedAt)}</p>}</div>
     {detail.error && <ErrorBox error={detail.error} retry={() => void detail.refetch()} />}
     <div className="notion-comparison"><section><h3>노션 원고</h3><Manuscript label="현재 노션 원고" pages={notionPages} coverTitle={notionCoverTitle} /></section><section><h3>스튜디오 원고</h3><Manuscript label="현재 스튜디오 원고" pages={studioPages} coverTitle={data.copy.cover.title} /></section></div>
     <Photos photos={data.photos} />

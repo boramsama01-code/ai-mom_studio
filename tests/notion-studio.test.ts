@@ -1,6 +1,7 @@
 import {beforeAll,beforeEach,afterAll,describe,it,expect,vi} from 'vitest';
 import request from 'supertest';
 import sharp from 'sharp';
+import pg from 'pg';
 import {eq} from 'drizzle-orm';
 import {setTestEnv,resetDb,login} from './helpers';
 import type {NotionDocument} from '../shared/notionSync';
@@ -94,6 +95,80 @@ describe('Notion ↔ Studio durable integration',()=>{
  });
  it('stores one immutable photo when the files property and body reference identical bytes',async()=>{
   doc.photos.push({...doc.photos[0],key:'body-photo',name:'같은 사진.png'});const a=await imported();expect(a.photos).toHaveLength(1);expect(await db.select().from(schemas.notionSyncPhotos)).toHaveLength(1);
+ });
+ it('applies a replaced Notion cover when resolving a text conflict toward Studio and retains the original binary',async()=>{
+  const a=await imported(),service=await import('../server/services/notionStudio'),old=(await db.select().from(schemas.notionSyncPhotos))[0];
+  await edit(a.link.itemId,'Studio에서 선택한 최종 문구');
+  doc.sourceHash='b'.repeat(64);doc.photos=[{key:'replacement-cover',name:'새 표지.png',url:doc.photos[0].url.replace('photo.png','replacement.png')}];
+  const replacement=await sharp({create:{width:24,height:36,channels:3,background:'#ee4422'}}).png().toBuffer();api.photo.mockResolvedValue({buffer:replacement,mimeType:'image/png'});
+  const current=await service.notionStudioDetail(db,a.link.id),next=await service.pushNotionStudio(db,a.link.id,{version:current.link.version,itemVersion:current.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:true},'test');
+  expect(next.copy.pages[0].body).toBe('Studio에서 선택한 최종 문구');expect(doc.pages[1].body).toBe('Studio에서 선택한 최종 문구');expect(next.link.status).toBe('synced');
+  expect(next.photos).toHaveLength(1);expect(next.photos[0].id).not.toBe(old.id);expect(next.photos[0].name).toBe('새 표지.png');
+  const rows=await db.select().from(schemas.notionSyncPhotos);expect(rows.find(p=>p.id===next.photos[0].id)!.bytes).toEqual(replacement);expect(rows.find(p=>p.id===old.id)!.bytes).toEqual(old.bytes);
+  const [link]=await db.select().from(schemas.notionSyncLinks);expect(link.sourceHash).toBe(doc.sourceHash);expect(link.photoOrder).toEqual([next.photos[0].id]);expect(link.sourceSnapshot.photos).toEqual([{key:'replacement-cover',name:'새 표지.png'}]);
+  await db.update(schemas.notionSyncLinks).set({lastCheckedAt:null}).where(eq(schemas.notionSyncLinks.id,a.link.id));
+  expect(await (await import('../server/worker/notion')).syncNotionOnce(db)).toMatchObject({checked:1,pulled:0,pushed:0});expect((await service.notionStudioDetail(db,a.link.id)).photos[0].id).toBe(next.photos[0].id);
+ });
+ it.each([
+  {change:'reorders',start:['first','second'],next:['second','first']},
+  {change:'adds',start:['first'],next:['first','second']},
+  {change:'removes',start:['first','second'],next:['second']},
+  {change:'clears',start:['first'],next:[]},
+ ])('$change Notion photo slots while pushing the selected Studio text',async({start,next:keys})=>{
+  const photos=Object.fromEntries(['first','second'].map(key=>[key,{key,name:`${key}.png`,url:`https://prod-files-secure.s3.us-west-2.amazonaws.com/test/${key}.png`}]));
+  const buffers={first:await sharp({create:{width:20,height:30,channels:3,background:'#113355'}}).png().toBuffer(),second:await sharp({create:{width:25,height:35,channels:3,background:'#ddaa22'}}).png().toBuffer()};
+  api.photo.mockImplementation(async(url:string)=>({buffer:buffers[url.includes('second.png')?'second':'first'],mimeType:'image/png'}));doc.photos=start.map(key=>photos[key]);
+  const a=await imported(),service=await import('../server/services/notionStudio'),originals=await db.select().from(schemas.notionSyncPhotos);await edit(a.link.itemId,'선택한 Studio 문구');
+  doc.photos=keys.map(key=>photos[key]);doc.sourceHash='b'.repeat(64);const current=await service.notionStudioDetail(db,a.link.id);
+  const pushed=await service.pushNotionStudio(db,a.link.id,{version:current.link.version,itemVersion:current.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:true},'test');
+  expect(pushed.photos.map(p=>p.name)).toEqual(keys.map(key=>`${key}.png`));expect(pushed.copy.pages[0].body).toBe('선택한 Studio 문구');
+  const [link]=await db.select().from(schemas.notionSyncLinks),stored=await db.select().from(schemas.notionSyncPhotos);expect(link.photoOrder).toEqual(pushed.photos.map(p=>p.id));expect(link.sourceSnapshot.photos).toEqual(keys.map(key=>({key,name:`${key}.png`})));expect(link.sourceHash).toBe(doc.sourceHash);
+  for(const photo of pushed.photos)expect(stored.find(p=>p.id===photo.id)!.bytes).toEqual(buffers[photo.name==='second.png'?'second':'first']);
+  for(const photo of originals)expect(stored.find(p=>p.id===photo.id)!.bytes).toEqual(photo.bytes);
+ });
+ it('keeps stored photos usable when only a signed image URL renews during a text push',async()=>{
+  const a=await imported(),service=await import('../server/services/notionStudio');await edit(a.link.itemId,'원고만 변경');doc.photos[0].url=doc.photos[0].url.replace('secret=signed','secret=renewed');api.photo.mockRejectedValue(new Error('A renewed URL must not require a new image download'));
+  api.update.mockImplementationOnce(async input=>{doc={...doc,coverTitle:input.coverTitle,pages:doc.pages.map((p,i)=>({...p,...input.pages[i]})),photos:[{...doc.photos[0],url:doc.photos[0].url.replace('secret=renewed','secret=readback-renewed')}],sourceHash:'c'.repeat(64)};return structuredClone(doc);});
+  const current=await service.notionStudioDetail(db,a.link.id),pushed=await service.pushNotionStudio(db,a.link.id,{version:current.link.version,itemVersion:current.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:false},'test');
+  expect(pushed.copy.pages[0].body).toBe('원고만 변경');expect(pushed.photos).toEqual(a.photos);expect(pushed.link.status).toBe('synced');
+ });
+ it('refreshes a replaced body image even when its block key and caption stay the same',async()=>{
+  doc.photos[0].key='block:unchanged-image-block';doc.photos[0].name='그대로인 사진 설명';const a=await imported(),service=await import('../server/services/notionStudio');await edit(a.link.itemId,'Studio 최종 문구');
+  doc.sourceHash='b'.repeat(64);doc.photos[0].url=doc.photos[0].url.replace('photo.png','new-body-image.png');const replacement=await sharp({create:{width:23,height:31,channels:3,background:'#22bb44'}}).png().toBuffer();api.photo.mockResolvedValue({buffer:replacement,mimeType:'image/png'});
+  const current=await service.notionStudioDetail(db,a.link.id),pushed=await service.pushNotionStudio(db,a.link.id,{version:current.link.version,itemVersion:current.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:true},'test');
+  expect(pushed.photos[0].id).not.toBe(a.photos[0].id);expect(pushed.photos[0].name).toBe(a.photos[0].name);const [photo]=await db.select().from(schemas.notionSyncPhotos).where(eq(schemas.notionSyncPhotos.id,pushed.photos[0].id));expect(photo.bytes).toEqual(replacement);expect(pushed.link.status).toBe('synced');
+ });
+ it('keeps the previous photo and baseline without writing Notion if a replacement download fails',async()=>{
+  const a=await imported(),service=await import('../server/services/notionStudio'),[before]=await db.select().from(schemas.notionSyncLinks);await edit(a.link.itemId,'보존할 Studio 수정');
+  doc.sourceHash='b'.repeat(64);doc.photos=[{...doc.photos[0],key:'replacement',name:'읽지 못한 새 표지.png'}];api.photo.mockRejectedValue(new Error('replacement download failed'));
+  const current=await service.notionStudioDetail(db,a.link.id);await expect(service.pushNotionStudio(db,a.link.id,{version:current.link.version,itemVersion:current.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:true},'test')).rejects.toThrow('replacement download failed');
+  expect(api.update).not.toHaveBeenCalled();const [after]=await db.select().from(schemas.notionSyncLinks);expect(after.sourceHash).toBe(before.sourceHash);expect(after.sourceSnapshot).toEqual(before.sourceSnapshot);expect(after.photoOrder).toEqual(before.photoOrder);expect(after.operationToken).toBeNull();expect(await db.select().from(schemas.notionSyncPhotos)).toHaveLength(1);expect((await service.notionStudioDetail(db,a.link.id)).copy.pages[0].body).toBe('보존할 Studio 수정');
+ });
+ it('checks retained photo capacity before a Notion write without counting an already stored image twice',async()=>{
+  const a=await imported(),service=await import('../server/services/notionStudio'),[before]=await db.select().from(schemas.notionSyncLinks),[oldPhoto]=await db.select().from(schemas.notionSyncPhotos);await edit(a.link.itemId,'용량 확인 전 보존할 문구');
+  doc.sourceHash='b'.repeat(64);doc.photos=[{...doc.photos[0],key:'replacement-cover',name:'용량 초과 표지.png',url:doc.photos[0].url.replace('photo.png','replacement.png')}];
+  const replacement=await sharp({create:{width:24,height:36,channels:3,background:'#cc3344'}}).png().toBuffer();api.photo.mockResolvedValue({buffer:replacement,mimeType:'image/png'});
+  // Substitute only the aggregate byte count, keeping transactions, locks and
+  // persisted photos real. This tests the 200MB boundary without a 200MB blob.
+  let retainedBytes=200*1024*1024-replacement.length+1;const query=pg.Client.prototype.query;
+  const querySpy=vi.spyOn(pg.Client.prototype,'query').mockImplementation(function(this:pg.Client,...args:Parameters<typeof query>){
+   const config=args[0] as unknown as {text?:string;rowMode?:string};
+   if(config.text?.includes('sum(octet_length(')&&config.text.includes('notion_sync_photos'))return Promise.resolve({rows:config.rowMode==='array'?[[String(retainedBytes)]]:[{size:String(retainedBytes)}]});
+   return (query as Function).apply(this,args);
+  } as typeof query);
+  try{
+   const current=await service.notionStudioDetail(db,a.link.id),input={version:current.link.version,itemVersion:current.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:true};
+   await expect(service.pushNotionStudio(db,a.link.id,input,'test')).rejects.toMatchObject({status:413});expect(api.update).not.toHaveBeenCalled();
+   const [after]=await db.select().from(schemas.notionSyncLinks);expect(after.sourceHash).toBe(before.sourceHash);expect(after.sourceSnapshot).toEqual(before.sourceSnapshot);expect(after.photoOrder).toEqual(before.photoOrder);expect(after.operationToken).toBeNull();expect(await db.select().from(schemas.notionSyncPhotos)).toHaveLength(1);
+   retainedBytes=200*1024*1024;api.photo.mockResolvedValue({buffer:oldPhoto.bytes,mimeType:'image/png'});
+   const pushed=await service.pushNotionStudio(db,a.link.id,input,'test');expect(pushed.link.status).toBe('synced');expect(pushed.photos.map(p=>p.id)).toEqual(before.photoOrder);expect(await db.select().from(schemas.notionSyncPhotos)).toHaveLength(1);expect(doc.pages[1].body).toBe('용량 확인 전 보존할 문구');
+  }finally{querySpy.mockRestore();}
+ });
+ it.each(['key','path'])('does not acknowledge a different image %s changed during Notion text writeback',async(change)=>{
+  const a=await imported(),service=await import('../server/services/notionStudio'),[before]=await db.select().from(schemas.notionSyncLinks);await edit(a.link.itemId,'반영할 Studio 문구');doc.sourceHash='b'.repeat(64);doc.photos=[{...doc.photos[0],key:'prepared-replacement',name:'준비한 사진.png'}];
+  api.update.mockImplementationOnce(async input=>{doc={...doc,pages:doc.pages.map((p,i)=>({...p,...input.pages[i]})),photos:[change==='key'?{...doc.photos[0],key:'unprepared-racing-photo',name:'경합한 사진.png'}:{...doc.photos[0],url:doc.photos[0].url.replace('photo.png','unprepared-racing-photo.png')}],sourceHash:'c'.repeat(64)};return structuredClone(doc);});
+  const current=await service.notionStudioDetail(db,a.link.id);await expect(service.pushNotionStudio(db,a.link.id,{version:current.link.version,itemVersion:current.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:true},'test')).rejects.toMatchObject({status:409});
+  expect(doc.pages[1].body).toBe('반영할 Studio 문구');const [after]=await db.select().from(schemas.notionSyncLinks);expect(after.sourceHash).toBe(before.sourceHash);expect(after.sourceSnapshot).toEqual(before.sourceSnapshot);expect(after.photoOrder).toEqual(before.photoOrder);expect(after.operationToken).toBeNull();expect(after.lastError).toBeTruthy();expect(await db.select().from(schemas.notionSyncPhotos)).toHaveLength(1);
  });
  it('detects a revision race even if another writer did not bump item.version',async()=>{
   const a=await imported();doc.sourceHash='b'.repeat(64);doc.pages[1].body='새 노션 본문';
