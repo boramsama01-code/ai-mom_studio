@@ -60,7 +60,7 @@ const documentSchema = z.object({ title: copy.trim().min(1).max(255), coverStyle
 export type NotionCanvaDocument = z.infer<typeof documentSchema>;
 export type NotionCanvaSourceReference = z.infer<typeof sourceReferenceSchema>;
 export type NotionCanvaPhoto = { id: string; name?: string; bytes: Buffer; mimeType: string };
-export type NotionCanvaPptx = { bytes: Buffer; pageCount: number; sourcePageCount: number; width: 1080; height: 1350; warnings: string[] };
+export type NotionCanvaPptx = { bytes: Buffer; pageCount: number; sourcePageCount: number; width: 1080; height: 1350; warnings: string[]; previewSvg?: string };
 export type NotionCanvaImportedDesign = { designId: string; editUrl: string | null; viewUrl: string | null; pageCount: number | null };
 export type NotionCanvaImportResult = { designs: NotionCanvaImportedDesign[] };
 export type NotionCanvaExportResult = { urls: string[] };
@@ -319,7 +319,7 @@ async function readMedia(bytes:Buffer,file:string):Promise<Media> {
  * Keep all 2–10 manuscript pages, optional references and teaser, then the brand CTA.
  * Overflow is a validation error, never truncation or an unreadably small font.
  */
-export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[]):Promise<NotionCanvaPptx> {
+export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:{previewPage?:number}={}):Promise<NotionCanvaPptx> {
   const document=parse(documentSchema,value,true);
   const references=document.sourceReferences??[],referencePageCount=notionSourceReferencePageCount(references);
   if(document.pages.length+referencePageCount+(document.teaser?1:0)+1>NOTION_CANVA_MAX_OUTPUT_PAGES)invalid('원고·기관별 원문 QR·예고·채널 소개를 합쳐 13장 이내로 나눠 주세요. 원문 주소를 누락하지 않았습니다.');
@@ -354,9 +354,17 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   const teaserIndex=document.teaser?document.pages.length+referencePageCount:-1;
   const renderedPages:NotionCanvaDocument['pages']=[...document.pages,...Array.from({length:referencePageCount},()=>({title:NOTION_CANVA_SOURCE_TITLE})),...(document.teaser?[{title:document.teaser.title,body:document.teaser.body}]:[]),{title:NOTION_CANVA_OUTRO.title}];
   const followIndex=renderedPages.length-1;
+  if(options.previewPage!==undefined&&(!Number.isInteger(options.previewPage)||options.previewPage<0||options.previewPage>=renderedPages.length))invalid('미리볼 카드 번호를 확인해 주세요.');
+  let previewSvg:string|undefined;
   for(const [index,page] of renderedPages.entries()) {
     let nextId=2;const shapes:string[]=[];let relationships=rel('rIdLayout','slideLayout','../slideLayouts/slideLayout1.xml');let imageIndex=0;
-    const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover')=>{const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,item.file,rid,item,x,y,w,h,mode));};
+    const previewShapes:string[]=[],previewing=options.previewPage===index;
+    const visual=(name:string,markup:string)=>{if(previewing)previewShapes.push(`<g data-name="${xml(name)}">${markup}</g>`);};
+    const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover')=>{const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,item.file,rid,item,x,y,w,h,mode));if(previewing)visual(item.file,`<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden"><image width="${w}" height="${h}" preserveAspectRatio="xMidYMid ${mode==='contain'?'meet':'slice'}" href="data:image/${item.extension};base64,${item.bytes.toString('base64')}"/></svg>`);};
+    const rect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000)=>{
+      shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill,alpha));
+      visual(name,`${gradient?'<defs><linearGradient id="bottom-fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset=".5" stop-color="#000000" stop-opacity=".74"/><stop offset="1" stop-color="#000000"/></linearGradient></defs>':''}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${pill?Math.min(w,h)/2:0}" fill="${gradient?'url(#bottom-fade)':fill}" fill-opacity="${alpha/100000}"/>`);
+    };
     const text=(name:string,content:string,x:number,y:number,w:number,h:number,max:number,min:number,ink=INK,bold=false,emphasis?:string,align:'l'|'ctr'='l')=>{
       if(!content)return;
       const interior=index>0&&index<document.pages.length;
@@ -365,14 +373,23 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         for(const [lineIndex,line]of fitted.lines.entries()){
           let at=line.indexOf(emphasis),occurrence=0;
           while(at>=0){
-            shapes.push(rectangle(nextId++,`${name}-explicit-marker-${lineIndex}-${occurrence++}`,x+font.measure(line.slice(0,at),fitted.size),y+lineIndex*fitted.lineHeight+fitted.size*.7,font.measure(emphasis,fitted.size),fitted.size*.38,accent,false,false,35000));
+            rect(`${name}-explicit-marker-${lineIndex}-${occurrence++}`,x+font.measure(line.slice(0,at),fitted.size),y+lineIndex*fitted.lineHeight+fitted.size*.7,font.measure(emphasis,fitted.size),fitted.size*.38,accent,false,false,35000);
             at=line.indexOf(emphasis,at+emphasis.length);
           }
         }
       }
       shapes.push(box(nextId++,name,content,x,y,w,h,max,min,ink,bold,!interior&&emphasis?{phrase:emphasis,color:document.coverStyle==='B'?RED:accent}:undefined,align));
+      if(previewing){
+        const fitted=fit(content,w,h,max,min,bold,name),font=loadReadingFont('Noto Sans KR',bold?700:400);
+        const lines=fitted.lines.map((line,lineIndex)=>{
+          let left=x+(align==='ctr'?(w-font.measure(line,fitted.size))/2:0);
+          const at=!interior&&emphasis?line.indexOf(emphasis):-1;
+          const parts=at>=0?[{text:line.slice(0,at),ink},{text:emphasis!,ink:document.coverStyle==='B'?RED:accent},{text:line.slice(at+emphasis!.length),ink}]:[{text:line,ink}];
+          return parts.map(part=>{const outline=font.path(part.text,left,y+lineIndex*fitted.lineHeight+font.baseline(fitted.size,fitted.lineHeight),fitted.size);left+=font.measure(part.text,fitted.size);return `<path d="${outline}" fill="${part.ink}"/>`;}).join('');
+        }).join('');
+        visual(name,`<g aria-label="${xml(content)}">${lines}</g>`);
+      }
     };
-    const rect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false)=>shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill));
     /** Native vector modules, merged only along each row. Four-module quiet zone,
      * integer placement and >=4px modules survive 1080px export without blur.
      * No URL fetch, redirect, shortener, remote QR service or AI image is involved.
@@ -497,9 +514,10 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         for(const [step,label]of labels.entries()){
           const left=96+step*232,highlight=step===1||step===2;
           shapes.push(outlinedRectangle(nextId++,`application-step-${step+1}`,left,485,192,115,highlight?'#FFF0ED':'#FFFFFF',highlight?RED:'#B8B8B8'));
+          visual(`application-step-${step+1}`,`<rect x="${left}" y="485" width="192" height="115" rx="14" fill="${highlight?'#FFF0ED':'#FFFFFF'}" stroke="${highlight?RED:'#B8B8B8'}" stroke-width="1.5"/>`);
           text(`application-step-${step+1}-number`,String(step+1).padStart(2,'0'),left+18,499,156,26,20,18,highlight?RED:'#666666',true);
           text(`application-step-${step+1}-label`,label,left+18,538,156,38,28,24,highlight?RED:'#666666',true);
-          if(step<3)shapes.push(stepArrow(nextId++,`application-step-${step+1}-arrow`,left+202,525,20,32));
+          if(step<3){shapes.push(stepArrow(nextId++,`application-step-${step+1}-arrow`,left+202,525,20,32));visual(`application-step-${step+1}-arrow`,`<path d="M${left+202} 525l10 16-10 16h10l10-16-10-16Z" fill="#888888"/>`);}
         }
         text('application-step-guide','일반적인 흐름 · 기관별 절차·명칭은 원문 확인',96,613,888,26,18,18,'#666666');
         text(`page-${index+1}-body`,body,96,650,888,315,28,22,INK,false,page.emphasis);
@@ -509,6 +527,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       image(logo,96,1078,190,64,'contain');
       text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,840,1101,144,40,22,20,'#555555');
     }
+    if(previewing)previewSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350"><rect width="1080" height="1350" fill="${background}"/>${previewShapes.join('')}</svg>`;
     put(`ppt/slides/slide${index+1}.xml`,`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld ${namespaces}><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="${color(background)}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree>${group}${shapes.join('')}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`);
     put(`ppt/slides/_rels/slide${index+1}.xml.rels`,rels(relationships));
   }
@@ -526,5 +545,5 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   const overrides=[['/ppt/presentation.xml','presentationml.presentation.main'],['/ppt/slideMasters/slideMaster1.xml','presentationml.slideMaster'],['/ppt/slideLayouts/slideLayout1.xml','presentationml.slideLayout'],['/ppt/theme/theme1.xml','theme'],...Array.from({length:count},(_,i)=>[`/ppt/slides/slide${i+1}.xml`,'presentationml.slide'])].map(([file,type])=>`<Override PartName="${file}" ContentType="application/vnd.openxmlformats-officedocument.${type}+xml"/>`).join('');
   put('[Content_Types].xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>${overrides}</Types>`);
   const bytes=Buffer.from(zipSync(files,{level:6}));assertPptx(bytes);
-  return {bytes,pageCount:count,sourcePageCount:document.pages.length,width:1080,height:1350,warnings};
+  return {bytes,pageCount:count,sourcePageCount:document.pages.length,width:1080,height:1350,warnings,...(previewSvg?{previewSvg}:{})};
 }

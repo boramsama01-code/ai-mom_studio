@@ -294,6 +294,7 @@ function StudioDetail({ id }: { id: number }) {
   if (q.isLoading) return <Loading lines={5} />;
   if (!q.data) return <ErrorBox error={q.error} retry={() => q.refetch()} />;
   if (q.data.card.trashedAt) return <TrashedStudioDetail card={q.data.card} />;
+  if(q.data.card.notionLinkId&&q.data.card.channel==='highscoop')return <><SourceStudioCard key={q.data.card.id} card={q.data.card}/><SourceBoardNotes card={q.data.card}/></>;
   const history = !q.data.card.sourceReference && <StudioHistoryEntry card={q.data.card}/>;
   if (q.data.card.format === "릴스") return <>{history}<VideoEditor key={q.data.card.id} data={q.data} /></>;
   if (q.data.card.finishedDeck) return <>{history}<FinishedDeckEditor key={q.data.card.id} data={q.data} /></>;

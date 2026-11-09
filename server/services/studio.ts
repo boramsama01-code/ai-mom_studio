@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DB } from "../db";
-import { channels, creationReceipts, appSettings, approvals, deliveries, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioMedia, studioImages, studioRequests, studioRevisions } from "../../shared/schema";
+import { channels, creationReceipts, appSettings, approvals, deliveries, mediaAssets, contentItems, sourceDocuments, jobs, studioCards, studioMedia, studioImages, studioRequests, studioRevisions,notionSyncLinks } from "../../shared/schema";
 import { channelSlug, normalizeStudioChannel } from "../../shared/channelKeys";
 import { studioContentSchema, type StudioGeneration, type StudioContent, type StudioCard, type StudioJob, type StudioRevision } from "../../shared/studio";
 import { conflict, HttpError, parse } from "../routes/util";
@@ -26,12 +26,14 @@ export async function studioCardsWithOutput(db: DB, rows: Array<typeof studioCar
   const itemIds = rows.flatMap(row => row.sourceItemId ? [row.sourceItemId] : []);
   if (!itemIds.length) return rows.map(studioCardDto);
   const sourceItems = await db.select({ id: contentItems.id, channelId: contentItems.channelId, origin: contentItems.origin, title: contentItems.title, reviewStatus: contentItems.reviewStatus, publishStatus: contentItems.publishStatus }).from(contentItems).where(inArray(contentItems.id, itemIds));
+  const notionLinks=await db.select({id:notionSyncLinks.id,itemId:notionSyncLinks.contentItemId}).from(notionSyncLinks).where(inArray(notionSyncLinks.contentItemId,itemIds));
   const outputs = await db.select({ id: mediaAssets.id, channelId: mediaAssets.channelId, itemId: mediaAssets.contentItemId, revisionId: mediaAssets.revisionId, carousel: mediaAssets.carousel, currentRevisionId: contentItems.currentRevisionId })
     .from(mediaAssets).innerJoin(contentItems, eq(contentItems.id, mediaAssets.contentItemId))
     .where(and(inArray(mediaAssets.contentItemId, itemIds), eq(mediaAssets.kind, "card"))).orderBy(desc(mediaAssets.id));
   return rows.map(row => {
     const dto = studioCardDto(row);
     const source = sourceItems.find(item => item.id === row.sourceItemId);
+    const notionLink=notionLinks.find(link=>link.itemId===row.sourceItemId);if(notionLink)dto.notionLinkId=notionLink.id;
     if (source && source.origin !== "studio" && !row.importedMeta?.studioPublication) dto.sourceReference = { itemId: source.id, channelId: source.channelId };
     const own = outputs.filter(o => o.itemId === row.sourceItemId);
     const output = own.find(o => o.id === row.importedMeta?.generatedAssetId) ?? own[0];

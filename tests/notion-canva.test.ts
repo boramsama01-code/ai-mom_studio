@@ -57,6 +57,21 @@ beforeEach(()=>{
 afterEach(()=>{vi.unstubAllEnvs();vi.unstubAllGlobals();});
 
 describe('native editable Notion manuscript PPTX',()=>{
+  it('previews the same native photo/fade layout locally and keeps the PPTX unchanged',async()=>{
+    const input=document(2,'A');input.pages[0].imageId='original';
+    const photo=await sharp({create:{width:1080,height:1350,channels:3,background:'#72A7FF'}}).png().toBuffer(),photos=[{id:'original',bytes:photo,mimeType:'image/png'}];
+    const result=await buildNotionCanvaPptx(input,photos,{previewPage:0}),plain=await buildNotionCanvaPptx(input,photos);
+    expect(result.previewSvg).toContain('data-name="photo-1"');expect(result.previewSvg).toContain('linearGradient');expect(result.previewSvg).toContain('data-name="cover-title"');expect(result.previewSvg).toContain('<path d=');
+    expect(strFromU8(unzipSync(result.bytes)['ppt/slides/slide1.xml'])).toBe(strFromU8(unzipSync(plain.bytes)['ppt/slides/slide1.xml']));
+    const {data,info}=await sharp(Buffer.from(result.previewSvg!)).removeAlpha().raw().toBuffer({resolveWithObject:true});expect(info).toMatchObject({width:1080,height:1350});
+    const pixel=(x:number,y:number)=>[...data.subarray((y*info.width+x)*info.channels,(y*info.width+x)*info.channels+3)];expect(pixel(50,100)).toEqual([114,167,255]);expect(pixel(50,1200)).toEqual([0,0,0]);
+  });
+  it('renders the last grouped source QR as a scannable local preview with its real label and URL',async()=>{
+    const input=document(2);input.sourceReferences=Array.from({length:9},(_,i)=>({title:`기관 ${i+1}`,url:`https://ged.kedi.re.kr/notice/${i+1}`}));
+    const result=await buildNotionCanvaPptx(input,[],{previewPage:4});expect(result.previewSvg).toContain('source-qr-9-background');expect(result.previewSvg).not.toContain('source-qr-1-background');expect(result.previewSvg).toContain('aria-label="기관 9"');
+    const {data,info}=await sharp(Buffer.from(result.previewSvg!)).ensureAlpha().raw().toBuffer({resolveWithObject:true});expect(jsQR(new Uint8ClampedArray(data),info.width,info.height,{inversionAttempts:'dontInvert'})?.data).toBe(input.sourceReferences[8].url);
+    await expect(buildNotionCanvaPptx(input,[],{previewPage:6})).rejects.toThrow('미리볼 카드 번호');
+  });
   it('keeps Korean copy as native text, preserves the supplied logo bytes and safe foreground geometry',async()=>{
     const input=document();input.pages[1].body='첫 문장 & <중요>\n둘째 문장';input.pages[1].bullets=['확인할 내용'];
     const result=await buildNotionCanvaPptx(input);

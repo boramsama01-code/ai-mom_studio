@@ -26,6 +26,34 @@ afterAll(async()=>{await (await import('../server/db')).closeDb();});
 async function imported(){return (await import('../server/services/notionStudio')).importNotionStudio(db,{pageId,channelId:ch,expectedSourceHash:doc.sourceHash,coverStyle:'A'},'test');}
 async function edit(itemId:number,text:string){const [item]=await db.select().from(schemas.contentItems).where(eq(schemas.contentItems.id,itemId));const [rev]=await db.select().from(schemas.contentRevisions).where(eq(schemas.contentRevisions.id,item.currentRevisionId!));const payload=structuredClone(rev.payload) as any;payload.cardCopy.pages[0].body=text;await (await import('../server/content')).createRevision(db,{contentItemId:itemId,author:'operator',payload});await db.update(schemas.contentItems).set({version:item.version+1}).where(eq(schemas.contentItems.id,itemId));}
 describe('Notion ↔ Studio durable integration',()=>{
+ it('saves visual editor copy with CAS while keeping protected fields, extras, notes and previous revisions',async()=>{
+  doc.pages[1].cardFields={subtitle:'고정 소제목',body:'본문 원본',footnote:'공식 각주',sourceLabel:'교육청 원문'};doc.pages[1].body='고정 소제목\n\n본문 원본';doc.pages[1].emphasis='원본';doc.sourceReferences=[{title:'기관 원문',url:'https://ged.kedi.re.kr/notice/2027'}];doc.sourceCard={title:'원문 확인',body:'공식 요강 확인'};doc.teaser={title:'다음 원고',body:'댓글 안내'};
+  const a=await imported(),beforeLink=(await db.select().from(schemas.notionSyncLinks))[0],beforeRevision=(await db.select().from(schemas.contentRevisions))[0];
+  await db.update(schemas.contentRevisions).set({payload:{...beforeRevision.payload,internalReview:{memo:'보존할 내부 검토'}}}).where(eq(schemas.contentRevisions.id,beforeRevision.id));
+  const copy=structuredClone(a.copy);copy.pages[0].title='수정 제목';copy.pages[0].body='고정 소제목\n\n새 본문';const body={version:a.link.version,itemVersion:a.itemVersion,copy,designEdits:{emphasisByPage:{h2:'새 본문'}}};
+  const {agent,csrf}=await login(app);expect((await agent.patch(`/api/notion/links/${a.link.id}/copy`).send(body)).status).toBe(403);
+  const saved=await agent.patch(`/api/notion/links/${a.link.id}/copy`).set('x-csrf-token',csrf).send(body);expect(saved.status).toBe(200);expect(saved.body.copy).toEqual(copy);expect(saved.body.itemVersion).toBe(a.itemVersion+1);expect(saved.body.designEdits).toEqual(body.designEdits);
+  const afterLink=(await db.select().from(schemas.notionSyncLinks))[0];expect(afterLink.sourceSnapshot).toEqual(beforeLink.sourceSnapshot);expect(api.update).not.toHaveBeenCalled();
+  const revisions=await db.select().from(schemas.contentRevisions).where(eq(schemas.contentRevisions.contentItemId,a.link.itemId));expect(revisions).toHaveLength(2);expect(revisions.at(-1)!.payload.internalReview).toEqual({memo:'보존할 내부 검토'});expect(revisions.at(-1)!.payload.notionDesignEdits).toEqual(body.designEdits);
+  expect(saved.body.source.pages[1].cardFields).toMatchObject({subtitle:'고정 소제목',footnote:'공식 각주',sourceLabel:'교육청 원문'});expect(saved.body.source.sourceReferences).toEqual(doc.sourceReferences);expect(saved.body.source.teaser).toEqual(doc.teaser);
+  expect((await agent.patch(`/api/notion/links/${a.link.id}/copy`).set('x-csrf-token',csrf).send(body)).status).toBe(409);
+  const next={...body,itemVersion:saved.body.itemVersion};next.copy=structuredClone(copy);next.copy.pages[0].body='소제목을 지운 잘못된 본문';expect((await agent.patch(`/api/notion/links/${a.link.id}/copy`).set('x-csrf-token',csrf).send(next)).status).toBe(422);
+ });
+ it('returns local native photo/fade and source QR previews without writing or contacting Notion again',async()=>{
+  doc.sourceReferences=Array.from({length:5},(_,i)=>({title:`기관 ${i+1}`,url:`https://ged.kedi.re.kr/notice/${i+1}`}));const a=await imported(),{agent,csrf}=await login(app),body={version:a.link.version,itemVersion:a.itemVersion,copy:a.copy,designEdits:{emphasisByPage:{}},page:0},fetches=api.fetch.mock.calls.length;
+  expect((await request(app).post(`/api/notion/links/${a.link.id}/preview`).send(body)).status).toBe(401);
+  const preview=await agent.post(`/api/notion/links/${a.link.id}/preview`).set('x-csrf-token',csrf).send(body);expect(preview.status).toBe(200);expect(preview.headers['content-type']).toContain('image/jpeg');expect(preview.headers['cache-control']).toContain('no-store');expect(await sharp(preview.body).metadata()).toMatchObject({width:1080,height:1350});
+  const source=await agent.post(`/api/notion/links/${a.link.id}/preview`).set('x-csrf-token',csrf).send({...body,page:3});expect(source.status).toBe(200);expect(api.fetch).toHaveBeenCalledTimes(fetches);expect(api.update).not.toHaveBeenCalled();expect(await db.select().from(schemas.contentRevisions)).toHaveLength(1);
+  expect((await agent.post(`/api/notion/links/${a.link.id}/preview`).set('x-csrf-token',csrf).send({...body,itemVersion:a.itemVersion+1})).status).toBe(409);
+ });
+ it('exposes the linked main Studio editor and filters orphaned emphasis overrides on a later Notion pull',async()=>{
+  const a=await imported(),service=await import('../server/services/notionStudio');
+  const saved=await service.saveNotionStudioDraft(db,a.link.id,{version:a.link.version,itemVersion:a.itemVersion,copy:a.copy,designEdits:{emphasisByPage:{h1:'표지',h2:'본문'}}},'test');
+  const {agent}=await login(app),studio=await agent.get(`/api/studio/cards/${a.link.studioCardId}`);expect(studio.status).toBe(200);expect(studio.body.card.notionLinkId).toBe(a.link.id);
+  doc.sourceHash='b'.repeat(64);doc.pages[1].headingBlockId='replacement-row';
+  const next=await service.pullNotionStudio(db,a.link.id,{version:saved.link.version,itemVersion:saved.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:false},'test');expect(next.designEdits).toEqual({emphasisByPage:{h1:'표지'}});
+  await expect(service.saveNotionStudioDraft(db,a.link.id,{version:next.link.version,itemVersion:next.itemVersion,copy:next.copy,designEdits:next.designEdits!},'test')).resolves.toMatchObject({copy:next.copy});
+ });
  it('deduplicates import, preserves originals privately and never grants publication approval',async()=>{
   const a=await imported(),b=await imported();expect(a.link.id).toBe(b.link.id);expect(await db.select().from(schemas.notionSyncLinks)).toHaveLength(1);
   expect(a.link.studioCardId).toBeTypeOf('number');expect(a.photos[0].url).toMatch(/^\/api\/notion\/links/);
