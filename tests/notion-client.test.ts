@@ -133,12 +133,55 @@ describe("Notion source parsing and bounded queries", () => {
   });
   it("queries the data-source endpoint with channel/title filters and stops after two batches", async () => {
     const f = fixture(); let count = 0;
-    const transport = vi.fn(async (_u: any, init: any) => { count++; return Response.json({ results: Array.from({ length: 50 }, () => f.page), has_more: true, next_cursor: `cursor-${count}` }); });
+    const transport = vi.fn(async (_u: any, init: any) => {
+      if (init.method === "GET") return Response.json({ properties: { "채널": { type: "select", select: { options: [{ name: "HighScoop" }] } } } });
+      count++; return Response.json({ results: Array.from({ length: 50 }, () => f.page), has_more: true, next_cursor: `cursor-${count}` });
+    });
     const c = createNotionClient({ fetch: transport as typeof fetch, env: () => ({ NOTION_API_TOKEN: token }) });
-    const list = await c.queryNotionDocuments({ query: "서울", channel: "HighScoop" });
-    expect(list.documents).toHaveLength(100); expect(list).toMatchObject({ hasMore: true, nextCursor: "cursor-2" }); expect(transport).toHaveBeenCalledTimes(2);
+    const list = await c.queryNotionDocuments({ query: "서울", channel: "Highscoop", cursor: "previous-page" });
+    expect(list.documents).toHaveLength(100); expect(list).toMatchObject({ hasMore: true, nextCursor: "cursor-2" }); expect(transport).toHaveBeenCalledTimes(3);
+    expect(transport.mock.calls[0][0]).toBe(`https://api.notion.com/v1/data_sources/${DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID}`);
+    expect(transport.mock.calls[1][0]).toBe(`https://api.notion.com/v1/data_sources/${DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID}/query`);
+    expect(JSON.parse(String(transport.mock.calls[1][1].body))).toMatchObject({ start_cursor: "previous-page", filter: { and: [{ property: "제목", title: { contains: "서울" } }, { property: "채널", select: { equals: "HighScoop" } }] } });
+    expect(JSON.parse(String(transport.mock.calls[2][1].body)).start_cursor).toBe("cursor-1");
+  });
+  it.each([
+    ["Highscoop", "HighScoop"], ["Alligodang", "ALLigodang"], ["fryday", "Fryday"],
+    ["우주펭귄상회", "SpacePenguin"], ["future edit", "Future Edit"],
+  ])("resolves app channel %s to the real Notion option %s", async (channel, expected) => {
+    const transport = vi.fn(async (_url: any, init: any) => init.method === "GET"
+      ? Response.json({ properties: { "채널": { type: "select", select: { options: ["HighScoop", "ALLigodang", "Fryday", "SpacePenguin", "Future Edit"].map(name => ({ name })) } } } })
+      : Response.json({ results: [], has_more: false }));
+    const c = createNotionClient({ fetch: transport as typeof fetch, env: () => ({ NOTION_API_TOKEN: token }) });
+    expect(await c.queryNotionDocuments({ channel })).toEqual({ documents: [], hasMore: false });
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(transport.mock.calls[1][1].body)).filter).toEqual({ and: [{ property: "채널", select: { equals: expected } }] });
+  });
+  it("treats an unknown channel option as an empty result without querying an invalid option", async () => {
+    const transport = vi.fn(async (_url: any, _init: any) => Response.json({ properties: { "채널": { type: "select", select: { options: [{ name: "HighScoop" }] } } } }));
+    const c = createNotionClient({ fetch: transport as typeof fetch, env: () => ({ NOTION_API_TOKEN: token }) });
+    expect(await c.queryNotionDocuments({ channel: "없는 채널", cursor: "old-page" })).toEqual({ documents: [], hasMore: false });
+    expect(transport).toHaveBeenCalledTimes(1); expect(transport.mock.calls[0][1].method).toBe("GET");
+  });
+  it.each([{}, { query: "서울" }, { channel: " " }])("does not fetch the data-source schema without a channel filter: %j", async query => {
+    const f = fixture(), transport = vi.fn(async (_url: any, _init: any) => Response.json({ results: [f.page], has_more: false }));
+    const c = createNotionClient({ fetch: transport as typeof fetch, env: () => ({ NOTION_API_TOKEN: token }) });
+    expect((await c.queryNotionDocuments(query)).documents).toHaveLength(1);
+    expect(transport).toHaveBeenCalledTimes(1);
     expect(transport.mock.calls[0][0]).toBe(`https://api.notion.com/v1/data_sources/${DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID}/query`);
-    expect(JSON.parse(String(transport.mock.calls[0][1].body))).toMatchObject({ filter: { and: [{ property: "제목", title: { contains: "서울" } }, { property: "채널", select: { equals: "HighScoop" } }] } });
+    expect(transport.mock.calls[0][1].method).toBe("POST");
+  });
+  it.each([undefined, { type: "status" }, { type: "rich_text" }, { type: "multi_select" }, { type: "select", select: {} }])("reports an unsupported channel property format before querying: %j", async property => {
+    const transport = vi.fn(async () => Response.json({ properties: { "채널": property } }));
+    const c = createNotionClient({ fetch: transport as typeof fetch, env: () => ({ NOTION_API_TOKEN: token }) });
+    await expect(c.queryNotionDocuments({ channel: "Highscoop" })).rejects.toMatchObject({ status: 422, code: "NOTION_CHANNEL_SCHEMA_UNSUPPORTED" });
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+  it.each([403, 404])("preserves a real schema-access failure instead of reporting an empty channel: %i", async status => {
+    const transport = vi.fn(async () => Response.json({ message: token }, { status }));
+    const c = createNotionClient({ fetch: transport as typeof fetch, env: () => ({ NOTION_API_TOKEN: token }) });
+    await expect(c.queryNotionDocuments({ channel: "Highscoop" })).rejects.toMatchObject({ status, code: "NOTION_API_ERROR" });
+    expect(transport).toHaveBeenCalledTimes(1);
   });
   it("sanitizes upstream errors instead of returning token-bearing API responses", async () => {
     const c = createNotionClient({ env: () => ({ NOTION_API_TOKEN: token }), fetch: vi.fn(async () => Response.json({ message: token }, { status: 403 })) as typeof fetch });
