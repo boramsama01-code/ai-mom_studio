@@ -4,6 +4,7 @@ export type AdmissionsCalendar={intro:string;year:number;month:number;days:numbe
 export type InstitutionSchedule={intro:string;headers:string[];rows:string[][]};
 export type AdmissionsElement=
  | {kind:'rect';name:string;x:number;y:number;width:number;height:number;fill:string;pill?:boolean}
+ | {kind:'image';name:string;mediaKey:string;altText:string;x:number;y:number;width:number;height:number}
  | {kind:'text';name:string;content:string;x:number;y:number;width:number;height:number;max:number;min:number;ink:string;bold?:boolean;align?:'l'|'ctr';leading?:number};
 type Wrap=(text:string,size:number,width:number,bold:boolean)=>string[];
 // Keep region tokens intact and retain every separator on the preceding line.
