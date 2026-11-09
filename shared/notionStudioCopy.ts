@@ -21,7 +21,18 @@ export function notionCopyToPages(value:CardCopy,context?:WritebackContext){
  // A thumbnail-title property and the source's first-page headline are separate fields.
  // Preserve that headline unless the operator actually edited the Studio cover title.
  const coverHeadline=context&&copy.cover.title===baseCover?context.current.pages[0]?.title??copy.cover.title:copy.cover.title;
- const pages=[{index:1,title:coverHeadline,body:copy.cover.subtitle},...copy.pages.map((p,i)=>({index:i+2,title:p.title,body:[p.subtitle,p.body].filter(Boolean).join('\n\n')}))];
+ const pages:Array<{index:number;title:string;body:string;cardFields?:NonNullable<NotionDocument['pages'][number]['cardFields']>}>= [{index:1,title:coverHeadline,body:copy.cover.subtitle},...copy.pages.map((p,i)=>({index:i+2,title:p.title,body:[p.subtitle,p.body].filter(Boolean).join('\n\n')}))];
+ for(const page of pages){
+  const fields=context?.current.pages.find(p=>p.index===page.index)?.cardFields;
+  if(!fields)continue;
+  const previous=[fields.subtitle,fields.body].filter(x=>x.trim()).join('\n\n');
+  if(page.body===previous){page.cardFields={...fields};continue;}
+  // Keep notes in their original table columns. Studio edits the article body;
+  // changing subtitle/footnote/source columns is an explicit Notion-table edit.
+  const prefix=fields.subtitle.trim()?`${fields.subtitle}\n\n`:'';
+  if(prefix&&!page.body.startsWith(prefix))throw new Error('표의 소제목·각주·출처표시는 노션 카드 원고 표에서 수정한 뒤 다시 가져와 주세요.');
+  page.cardFields={...fields,body:page.body.slice(prefix.length)};
+ }
  if(pages.slice(1).some(page=>[...page.body].length>CARD_COPY_MANUAL_LIMITS.body))throw new Error('노션으로 반영할 내지 소제목과 본문을 합쳐 1000자 이내로 작성해 주세요.');
  return pages;
 }

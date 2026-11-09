@@ -14,6 +14,10 @@ Tokens are stored with the existing encrypted secret store and are never returne
 
 Upload phone photos to **사진 원본** (Files), or include images inside the public manuscript section. Write a **게시용 원고** section containing sequential **1장**, **2장**, … headings. Internal review sections and source paragraphs are kept out of card copy. The thumbnail title property may differ from the first chapter headline; unchanged writeback preserves the original headline.
 
+When **카드 원고** relates to rows in the existing **카드 원고 · Canva 입력표**, those current rows are authoritative. Archived prose is not imported. Rows must have consecutive **페이지** numbers, starting with 2–10 manuscript pages. **소제목**, **본문**, **각주**, and **출처표시** are preserved; Studio title/body edits write back to matching table rows. Change subtitle, footnote, and source-label columns in Notion, then pull them into Studio. An inaccessible or malformed related row fails explicitly instead of falling back to the archive.
+
+Append one **원문 확인** row and one next-article row after the manuscript. The existing teaser convention is **역할=일반**, **제목=다음 편｜…**; **다음 편 예고** is also accepted as an explicit role. **QR대상URL** contains 1–4 distinct public HTTPS official URLs, one per line; **출처표시** provides their labels in the same order (newline or ` / `). Uploaded **원문QR** PNGs remain in Notion; Canva creates native, scannable vector QR codes from the actual URLs, keeping them out of cover-photo selection. The teaser uses its row’s title, body and qualification footnote. Output order is manuscript → source QR → teaser → fixed HighScoop follow page, up to 13 pages total. Neither extra row is pushed back as an article paragraph.
+
 Open 노션 원고 연결, preview the article, select a destination channel and A/B/C cover, then import. Import is deduplicated by Notion page ID. Original photo bytes are private; compatible, rotated copies are embedded in PPTX. Expiring Notion photo links are not retained in source snapshots.
 
 Linked manuscripts opt into automatic two-way synchronization. The active web worker checks due links roughly every five minutes. The existing hourly process worker also checks them when configured; Render sleep and GitHub scheduling can delay execution. Disable the per-draft switch to use manual comparison only. Only already imported links participate.
@@ -28,6 +32,6 @@ No step generates paid AI text, approves publication, or publishes a post automa
 
 Source hashes, item versions, revision IDs and durable operation tokens protect concurrent writes. Notion writes renew their lease and check ownership before mutations. A partial remote write is reported with a comparison requirement. Canva POSTs are submitted once; an unknown result is retained for inspection, never automatically recreated. Completed outputs use immutable separate output revisions.
 
-Photos: up to 12 Notion images, 12 MB each, 100 MB per import. Local originals are capped at 200 MB per linked draft. Card manuscripts: 2–10 source chapters; native fixed HighScoop follow page is appended to the Canva design. Oversized text fails validation instead of being shortened.
+Photos: up to 12 Notion images, 12 MB each, 100 MB per import. Local originals are capped at 200 MB per linked draft. Card manuscripts: 2–10 source chapters; optional source QR and teaser plus the native fixed HighScoop follow page are appended to the Canva design. Oversized text or QR density fails validation instead of being shortened.
 
 Test only with an isolated PostgreSQL database. `tests/helpers.ts` drops schemas and must never be pointed at production. New integration suites mock all outbound Notion/Canva requests.

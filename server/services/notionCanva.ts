@@ -9,6 +9,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
+import QRCode from 'qrcode';
 import { strToU8, unzipSync, zipSync } from 'fflate';
 import { z } from 'zod';
 import type { DB } from '../db';
@@ -19,7 +20,11 @@ import { safeFetch } from './safeFetch';
 
 export const NOTION_CANVA_GEOMETRY = { width: 1080, height: 1350, safe: { x: 96, y: 207, width: 888, height: 936 } } as const;
 export const NOTION_CANVA_TEXT_SYNC = 'manual-confirmation-required' as const;
-export const NOTION_CANVA_MAX_OUTPUT_PAGES = 11;
+export const NOTION_CANVA_MAX_OUTPUT_PAGES = 13;
+export const NOTION_CANVA_SOURCE_TITLE = '원문 공고 확인';
+export const NOTION_CANVA_SOURCE_GUIDE = 'QR을 스캔해 공식 공고를 확인하세요.';
+export const NOTION_CANVA_TEASER_LABEL = '다음 편';
+export const NOTION_CANVA_TEASER_COMMENT = '궁금한 점은 댓글로 남겨 주세요';
 /** Added after every manuscript page; the source's final page is never replaced. */
 export const NOTION_CANVA_OUTRO = {
   title: 'HighScoop 채널 소개',
@@ -38,9 +43,21 @@ const EMU = 9525;
 const RED = '#FF493B', INK = '#171717';
 const idSchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9_-]+$/);
 const copy = z.string().refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value));
-const pageSchema = z.object({ title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional() }).strict();
-const documentSchema = z.object({ title: copy.trim().min(1).max(255), coverStyle: z.enum(['A','B','C']), category: copy.trim().max(24).optional(), categoryColor: z.string().regex(/^#[0-9a-f]{6}$/i).optional(), pages: z.array(pageSchema).min(2).max(10) }).strict();
+const pageSchema = z.object({ title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional(), footnote: copy.max(1000).optional(), sourceLabel: copy.max(300).optional(), infographic: z.literal('application_steps').optional() }).strict();
+const sourceUrl = z.string().trim().min(1).max(2048).refine(value=>{
+  try{
+    const url=new URL(value),host=url.hostname.toLowerCase();
+    return !/\s|[\u0000-\u001f\u007f]/.test(value)&&url.protocol==='https:'&&!url.username&&!url.password&&!url.port
+      &&/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(host)&&!/^\d+(?:\.\d+){3}$/.test(host)
+      &&!/(?:^|\.)(?:localhost|local|internal|test|invalid|example)$/.test(host);
+  }catch{return false;}
+});
+const sourceReferenceSchema=z.object({title:copy.trim().min(1).max(160),url:sourceUrl}).strict();
+const sourceCardSchema=z.object({title:copy.trim().min(1).max(300),body:copy.max(1200),footnote:copy.max(1000).optional()}).strict();
+const teaserSchema=z.object({title:copy.trim().min(1).max(200),body:copy.trim().min(1).max(500)}).strict();
+const documentSchema = z.object({ title: copy.trim().min(1).max(255), coverStyle: z.enum(['A','B','C']), category: copy.trim().max(24).optional(), categoryColor: z.string().regex(/^#[0-9a-f]{6}$/i).optional(), pages: z.array(pageSchema).min(2).max(10), sourceReferences:z.array(sourceReferenceSchema).max(4).optional(),sourceCard:sourceCardSchema.optional(),teaser:teaserSchema.optional() }).strict();
 export type NotionCanvaDocument = z.infer<typeof documentSchema>;
+export type NotionCanvaSourceReference = z.infer<typeof sourceReferenceSchema>;
 export type NotionCanvaPhoto = { id: string; name?: string; bytes: Buffer; mimeType: string };
 export type NotionCanvaPptx = { bytes: Buffer; pageCount: number; sourcePageCount: number; width: 1080; height: 1350; warnings: string[] };
 export type NotionCanvaImportedDesign = { designId: string; editUrl: string | null; viewUrl: string | null; pageCount: number | null };
@@ -152,7 +169,7 @@ function assertPptx(bytes: Buffer) {
       return ['[Content_Types].xml','ppt/presentation.xml'].includes(file.name) && file.originalSize < 1024*1024;
     }});
     const presentation = files['ppt/presentation.xml'] ? Buffer.from(files['ppt/presentation.xml']).toString('utf8') : '';
-    if (unsafe || !files['[Content_Types].xml'] || slides<1 || slides>NOTION_CANVA_MAX_OUTPUT_PAGES || !new RegExp(`<p:sldSz\\b[^>]*cx="${1080*EMU}"[^>]*cy="${1350*EMU}"`).test(presentation)) invalid('PPTX가 1080×1350 크기의 1~11장 문서인지 확인해 주세요.');
+    if (unsafe || !files['[Content_Types].xml'] || slides<1 || slides>NOTION_CANVA_MAX_OUTPUT_PAGES || !new RegExp(`<p:sldSz\\b[^>]*cx="${1080*EMU}"[^>]*cy="${1350*EMU}"`).test(presentation)) invalid('PPTX가 1080×1350 크기의 1~13장 문서인지 확인해 주세요.');
   } catch (error) { if(error instanceof CanvaRestError)throw error; invalid('PPTX 파일 구조를 읽을 수 없습니다. 원고에서 다시 만들어 주세요.'); }
 }
 export async function submitNotionCanvaImport(db: DB, input: {title:string;bytes:Buffer}, options: CanvaRestOptions = {}) {
@@ -162,7 +179,7 @@ export async function submitNotionCanvaImport(db: DB, input: {title:string;bytes
 export async function getNotionCanvaImportJob(db: DB, jobId: string, options: CanvaRestOptions = {}) {
   return importJob(await request(db,`/imports/${validId(jobId)}`,options),false,jobId);
 }
-/** Request one extra page to reject designs over eleven pages, without any eight-page gate. */
+/** Request one extra page to reject designs over thirteen pages, without any eight-page gate. */
 export async function getNotionCanvaPages(db: DB, designId: string, options: CanvaRestOptions = {}): Promise<NotionCanvaPage[]> {
   const page = z.object({page_number:z.number().int().min(1).max(NOTION_CANVA_MAX_OUTPUT_PAGES+1),dimensions:z.object({width:z.number().finite().positive(),height:z.number().finite().positive()})});
   const result = parse(z.object({items:z.array(page).min(1).max(NOTION_CANVA_MAX_OUTPUT_PAGES)}),await request(db,`/designs/${validId(designId)}/pages?offset=1&limit=${NOTION_CANVA_MAX_OUTPUT_PAGES+1}`,options));
@@ -254,8 +271,8 @@ function wrap(text:string,size:number,width:number,bold:boolean):string[] {
 }
 function fit(text:string,width:number,height:number,max:number,min:number,bold:boolean,label:string) {
   for(let size=max;size>=min;size-=2){const lines=wrap(text,size,width,bold);const lineHeight=size*1.3;if(lines.length*lineHeight<=height)return {lines,size,lineHeight};}
-  const page=/^page-(\d+)-(title|body)$/.exec(label);
-  const location=label==='cover-title'||label==='cover-question'?'표지 제목':label==='cover-caption'?'표지 설명':page?`${page[1]}장 ${page[2]==='title'?'제목':'본문'}`:'입력한';
+  const page=/^page-(\d+)-(title|body|footer)$/.exec(label);
+  const location=label==='cover-title'||label==='cover-question'?'표지 제목':label==='cover-caption'?'표지 설명':label==='cover-footer'?'표지 각주·출처':/^source-\d+-title$/.test(label)||label==='sources-heading'?'원문 제목':label==='sources-body'?'원문 확인 설명':label==='sources-footer'?'원문 확인 각주':label==='teaser-title'?'다음 편 제목':label==='teaser-body'?'다음 편 설명':page?`${page[1]}장 ${page[2]==='title'?'제목':page[2]==='footer'?'각주·출처':'본문'}`:'입력한';
   invalid(`${location} 원고가 페이지에 너무 깁니다. 문장을 줄이거나 장을 나눠 주세요. 원고를 자르지 않았습니다.`);
 }
 function box(id:number,name:string,text:string,x:number,y:number,w:number,h:number,max:number,min:number,ink:string,bold=false,accent?:{phrase:string;color:string},align:'l'|'ctr'='l') {
@@ -271,6 +288,12 @@ function box(id:number,name:string,text:string,x:number,y:number,w:number,h:numb
 function rectangle(id:number,name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000) {
   const paint=gradient?'<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="000000"><a:alpha val="0"/></a:srgbClr></a:gs><a:gs pos="50000"><a:srgbClr val="000000"><a:alpha val="74000"/></a:srgbClr></a:gs><a:gs pos="100000"><a:srgbClr val="000000"><a:alpha val="100000"/></a:srgbClr></a:gs></a:gsLst><a:lin ang="5400000" scaled="1"/></a:gradFill>':`<a:solidFill><a:srgbClr val="${color(fill)}"><a:alpha val="${alpha}"/></a:srgbClr></a:solidFill>`;
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="${pill?'roundRect':'rect'}"><a:avLst>${pill?'<a:gd name="adj" fmla="val 50000"/>':''}</a:avLst></a:prstGeom>${paint}<a:ln><a:noFill/></a:ln></p:spPr></p:sp>`;
+}
+function outlinedRectangle(id:number,name:string,x:number,y:number,w:number,h:number,fill:string,stroke:string) {
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val 12000"/></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val="${color(fill)}"/></a:solidFill><a:ln w="${emu(1.5)}"><a:solidFill><a:srgbClr val="${color(stroke)}"/></a:solidFill></a:ln></p:spPr></p:sp>`;
+}
+function stepArrow(id:number,name:string,x:number,y:number,w:number,h:number) {
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="chevron"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="888888"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>`;
 }
 function picture(id:number,name:string,relationship:string,media:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover') {
   let crop='';
@@ -292,7 +315,7 @@ async function readMedia(bytes:Buffer,file:string):Promise<Media> {
 }
 
 /** No remote calls. Every visible manuscript character is a native text run.
- * Keep all 2–10 manuscript pages in order, then append the fixed brand CTA.
+ * Keep all 2–10 manuscript pages, optional references and teaser, then the brand CTA.
  * Overflow is a validation error, never truncation or an unreadably small font.
  */
 export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[]):Promise<NotionCanvaPptx> {
@@ -307,6 +330,10 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     media.set(photo.id,item);if(item.normalized)warnings.push(`${index+1}번 사진의 형식·방향을 PPTX 호환 PNG로 정리했습니다. Studio 원본은 보존됩니다.`);
   }
   for(const page of document.pages)if(page.imageId&&!media.has(page.imageId))invalid('원고에서 지정한 사진을 찾을 수 없습니다. 사진을 다시 연결해 주세요.');
+  for(const [index,page]of document.pages.entries())if(page.infographic){
+    if(index===0)invalid('접수 단계 도식은 표지가 아닌 내지에만 사용할 수 있습니다.');
+    if(page.imageId)invalid('접수 단계 도식과 사진을 같은 장에 함께 배치할 수 없습니다. 사진을 보존하려면 별도 장으로 나눠 주세요.');
+  }
   const coverPhoto=document.pages[0].imageId?media.get(document.pages[0].imageId):undefined;
   if(document.coverStyle==='C'&&!coverPhoto)invalid('C 표지에는 실제 사진이 필요합니다. 표지 사진을 선택해 주세요.');
   if(document.coverStyle==='A'&&!coverPhoto)warnings.push('표지 사진이 없어 A 표지를 검정 정보형으로 만들었습니다.');
@@ -319,7 +346,12 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   const put=(name:string,contents:string)=>{files[name]=strToU8(contents);};
   allMedia.forEach(item=>{files[`ppt/media/${fileFor(item)}`]=item.bytes;});
   const accent=document.categoryColor??NOTION_CANVA_CATEGORY_COLORS[document.category??'']??RED;
-  const renderedPages:NotionCanvaDocument['pages']=[...document.pages,{title:NOTION_CANVA_OUTRO.title}];
+  const references=document.sourceReferences??[];
+  if(document.sourceCard&&!references.length)invalid('원문 확인 문구를 보존하려면 최소 한 개의 공식 원문 주소가 필요합니다.');
+  const referencesIndex=references.length?document.pages.length:-1;
+  const teaserIndex=document.teaser?document.pages.length+(references.length?1:0):-1;
+  const renderedPages:NotionCanvaDocument['pages']=[...document.pages,...(references.length?[{title:NOTION_CANVA_SOURCE_TITLE}]:[]),...(document.teaser?[{title:document.teaser.title,body:document.teaser.body}]:[]),{title:NOTION_CANVA_OUTRO.title}];
+  const followIndex=renderedPages.length-1;
   for(const [index,page] of renderedPages.entries()) {
     let nextId=2;const shapes:string[]=[];let relationships=rel('rIdLayout','slideLayout','../slideLayouts/slideLayout1.xml');let imageIndex=0;
     const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover')=>{const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,item.file,rid,item,x,y,w,h,mode));};
@@ -339,9 +371,32 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       shapes.push(box(nextId++,name,content,x,y,w,h,max,min,ink,bold,!interior&&emphasis?{phrase:emphasis,color:document.coverStyle==='B'?RED:accent}:undefined,align));
     };
     const rect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false)=>shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill));
+    /** Native vector modules, merged only along each row. Four-module quiet zone,
+     * integer placement and >=4px modules survive 1080px export without blur.
+     * No URL fetch, redirect, shortener, remote QR service or AI image is involved.
+     */
+    const qr=(number:number,url:string,x:number,y:number,available:number)=>{
+      let code:ReturnType<typeof QRCode.create>;
+      try{code=QRCode.create(url,{errorCorrectionLevel:'M'});}catch{invalid('원문 주소의 QR을 만들 수 없습니다. 공식 공고의 직접 주소를 확인해 주세요.');}
+      const quiet=4,modules=code.modules.size,total=modules+quiet*2,unit=Math.floor(available/total);
+      if(unit<4)invalid('원문 주소가 길어 QR을 충분히 크게 표시할 수 없습니다. 더 짧은 공식 원문 주소를 사용하거나 원문 개수를 줄여 주세요.');
+      const extent=total*unit,left=Math.round(x+(available-extent)/2),top=Math.round(y+(available-extent)/2);
+      rect(`source-qr-${number}-background`,left,top,extent,extent,'#FFFFFF');
+      for(let row=0;row<modules;row++){
+        let col=0;
+        while(col<modules){
+          if(!code.modules.data[row*modules+col]){col++;continue;}
+          const start=col;while(col<modules&&code.modules.data[row*modules+col])col++;
+          rect(`source-qr-${number}-r${row}-c${start}`,left+(start+quiet)*unit,top+(row+quiet)*unit,(col-start)*unit,unit,'#000000');
+        }
+      }
+    };
     const body=[page.body,...(page.bullets??[]).map(b=>`• ${b}`)].filter(Boolean).join('\n\n');
+    // Metadata stays distinct from editorial copy. Every supplied note/source is
+    // visible native text; an overfull footer fails instead of being discarded.
+    const footer=[page.footnote,page.sourceLabel].filter(value=>value?.trim()).join('\n');
     let background='#FFFFFF';
-    if(index===document.pages.length){
+    if(index===followIndex){
       background='#FFF8F0';
       text('outro-follow',NOTION_CANVA_OUTRO.follow,96,245,888,104,76,64,INK,true,undefined,'ctr');
       image(logo,108,370,864,292,'contain');
@@ -349,35 +404,102 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       text('outro-introduction',NOTION_CANVA_OUTRO.introduction,96,818,888,110,36,30,INK,false,undefined,'ctr');
       rect('outro-red-pill',108,1010,864,78,RED,false,true);
       text('outro-action',NOTION_CANVA_OUTRO.action,132,1027,816,44,28,24,'#FFFFFF',true,undefined,'ctr');
+    }else if(index===referencesIndex){
+      const sourceCard=document.sourceCard;
+      if(sourceCard){
+        const compact=references.length>2;
+        text('sources-heading',sourceCard.title,96,207,888,compact?64:100,48,compact?30:36,RED,true);
+        text('sources-body',sourceCard.body,96,compact?285:325,888,compact?75:190,compact?24:28,compact?18:22,INK);
+      }else{
+        text('sources-heading',NOTION_CANVA_SOURCE_TITLE,96,207,888,64,48,40,RED,true);
+        text('sources-guide',NOTION_CANVA_SOURCE_GUIDE,96,280,888,34,24,22,INK);
+      }
+      for(const [i,reference]of references.entries()){
+        if(sourceCard&&references.length<=2){
+          const single=references.length===1,left=single?96:96+i*468;
+          text(`source-${i+1}-title`,reference.title,left,535,single?888:420,64,30,22,INK,true,undefined,'ctr');
+          qr(i+1,reference.url,single?350:left+20,605,380);
+        }else if(sourceCard){
+          const left=references.length===3&&i===2?330:96+(i%2)*468,top=365+Math.floor(i/2)*340;
+          text(`source-${i+1}-title`,reference.title,left,top,420,60,24,18,INK,true,undefined,'ctr');
+          qr(i+1,reference.url,left+85,top+68,250);
+        }else if(references.length===1){
+          text('source-1-title',reference.title,96,365,888,120,40,26,INK,true,undefined,'ctr');
+          qr(1,reference.url,300,515,480);
+        }else if(references.length===2){
+          const left=96+i*468;
+          text(`source-${i+1}-title`,reference.title,left,365,420,150,32,22,INK,true,undefined,'ctr');
+          qr(i+1,reference.url,left+10,535,400);
+        }else{
+          const left=references.length===3&&i===2?330:96+(i%2)*468,top=320+Math.floor(i/2)*380;
+          text(`source-${i+1}-title`,reference.title,left,top,420,78,26,20,INK,true,undefined,'ctr');
+          qr(i+1,reference.url,left+64,top+84,292);
+        }
+      }
+      if(sourceCard)text('sources-footer',sourceCard.footnote??'',96,references.length>2?1040:1005,888,references.length>2?38:64,20,16,'#555555');
+      image(logo,96,1091,150,50,'contain');
+      text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,840,1101,144,40,22,20,'#555555');
+    }else if(index===teaserIndex){
+      const teaserFit=fit(document.teaser!.body,888,360,36,24,false,'teaser-body');
+      const teaserBodyHeight=Math.max(280,Math.ceil(teaserFit.lines.length*teaserFit.lineHeight));
+      const teaserBodyY=950-teaserBodyHeight;
+      text('teaser-label',NOTION_CANVA_TEASER_LABEL,96,207,888,56,36,30,RED,true);
+      rect('teaser-accent',96,293,64,7,RED);
+      text('teaser-title',document.teaser!.title,96,365,888,Math.min(280,teaserBodyY-25-365),72,48,INK,true);
+      text('teaser-body',document.teaser!.body,96,teaserBodyY,888,teaserBodyHeight,36,24,INK);
+      rect('teaser-comment-pill',108,974,864,78,RED,false,true);
+      text('teaser-comment',NOTION_CANVA_TEASER_COMMENT,132,991,816,44,28,24,'#FFFFFF',true,undefined,'ctr');
+      image(logo,96,1078,190,64,'contain');
+      text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,840,1101,144,40,22,20,'#555555');
     }else if(index===0) {
       if(document.coverStyle==='A') {
-        const captionFit=body?fit(body,888,128,28,24,false,'cover-caption'):undefined;
+        const captionFit=body?fit(body,888,footer?200:128,28,24,false,'cover-caption'):undefined;
         const captionHeight=Math.max(55,Math.ceil(captionFit?captionFit.lines.length*captionFit.lineHeight:0));
-        const captionY=captionHeight>55?1072-captionHeight:1012;
-        const titleHeight=captionHeight>55?Math.min(268,captionY-14-730):268;
+        const captionY=footer?980-captionHeight:captionHeight>55?1072-captionHeight:1012;
+        const titleY=footer?650:730;
+        const titleHeight=footer||captionHeight>55?Math.min(268,captionY-14-titleY):268;
         background='#000000';if(coverPhoto)image(coverPhoto,0,0,1080,1350);rect('bottom-black-fade',0,300,1080,778,'#000000',true);rect('bottom-black-base',0,1078,1080,272,'#000000');
-        if(document.category){rect('category-color',96,640,64,6,accent);text('cover-category',document.category,96,662,888,48,28,24,accent,true);}
-        text('cover-title',page.title,96,730,888,titleHeight,72,48,'#FFFFFF',true,page.emphasis);
+        if(document.category){rect('category-color',96,footer?560:640,64,6,accent);text('cover-category',document.category,96,footer?582:662,888,48,28,24,accent,true);}
+        text('cover-title',page.title,96,titleY,888,titleHeight,72,48,'#FFFFFF',true,page.emphasis);
         text('cover-caption',body,96,captionY,888,captionHeight,28,24,'#FFFFFF');image(darkLogo,96,1078,190,64,'contain');
+        text('cover-footer',footer,96,996,888,76,20,16,'#E5E5E5');
       } else if(document.coverStyle==='B') {
+        const captionFit=footer&&body?fit(body,888,200,34,24,false,'cover-caption'):undefined;
+        const captionHeight=Math.max(128,Math.ceil(captionFit?captionFit.lines.length*captionFit.lineHeight:0));
+        const captionY=1091-captionHeight;
         image(logo,96,207,270,92,'contain');rect('brand-accent',96,423,64,8,RED);
-        text('cover-question',page.title,96,490,888,440,88,56,INK,true,page.emphasis);
-        text('cover-caption',body,96,963,888,128,34,28,INK);
+        text('cover-question',page.title,96,490,888,footer?Math.min(440,captionY-14-490):440,88,56,INK,true,page.emphasis);
+        text('cover-caption',body,96,captionY,888,captionHeight,34,footer?24:28,INK);
+        text('cover-footer',footer,96,1098,888,44,18,16,'#555555');
       } else {
-        const captionFit=body?fit(body,888,128,26,24,false,'cover-caption'):undefined;
-        const extra=Math.max(0,Math.ceil(captionFit?captionFit.lines.length*captionFit.lineHeight:0)-36);
+        const captionFit=body?fit(body,888,footer?200:128,26,24,false,'cover-caption'):undefined;
+        const extra=Math.max(0,Math.ceil(captionFit?captionFit.lines.length*captionFit.lineHeight:0)-36)+(footer?80:0);
         image(coverPhoto!,0,0,1080,740-extra);rect('caption-background',0,740-extra,1080,610+extra,'#FFFFFF');
         if(document.category)text('cover-category',document.category,96,775-extra,888,48,28,24,accent,true);
         text('cover-title',page.title,96,845-extra,888,195,68,46,INK,true,page.emphasis);
-        text('cover-caption',body,96,1046-extra,888,36+extra,26,24,INK);image(logo,96,1091,150,50,'contain');
+        text('cover-caption',body,96,1046-extra,888,36+extra-(footer?80:0),26,24,INK);image(logo,96,1091,150,50,'contain');
+        text('cover-footer',footer,96,1014,888,64,20,16,'#555555');
       }
     } else {
       if(document.category)text('page-category',document.category,96,207,888,44,26,22,INK,true);
       rect('section-accent',96,273,64,7,accent);
-      text(`page-${index+1}-title`,page.title,96,315,888,200,58,40,INK,true,page.emphasis);
+      text(`page-${index+1}-title`,page.title,96,315,888,page.infographic?135:200,58,40,INK,true,page.emphasis);
       const photo=page.imageId?media.get(page.imageId):undefined;
-      if(photo){image(photo,96,550,390,500);text(`page-${index+1}-body`,body,530,550,454,504,36,28,INK,false,page.emphasis);}
-      else text(`page-${index+1}-body`,body,96,550,888,504,40,28,INK,false,page.emphasis);
+      if(page.infographic){
+        // A semantic sequence only: no ticks, completion state or inferred dates.
+        const labels=['학생 접수','교사 추천','학교 제출','평가'];
+        for(const [step,label]of labels.entries()){
+          const left=96+step*232,highlight=step===1||step===2;
+          shapes.push(outlinedRectangle(nextId++,`application-step-${step+1}`,left,485,192,115,highlight?'#FFF0ED':'#FFFFFF',highlight?RED:'#B8B8B8'));
+          text(`application-step-${step+1}-number`,String(step+1).padStart(2,'0'),left+18,499,156,26,20,18,highlight?RED:'#666666',true);
+          text(`application-step-${step+1}-label`,label,left+18,538,156,38,28,24,highlight?RED:'#666666',true);
+          if(step<3)shapes.push(stepArrow(nextId++,`application-step-${step+1}-arrow`,left+202,525,20,32));
+        }
+        text('application-step-guide','일반적인 흐름 · 기관별 절차·명칭은 원문 확인',96,613,888,26,18,18,'#666666');
+        text(`page-${index+1}-body`,body,96,650,888,315,28,22,INK,false,page.emphasis);
+      }else if(photo){image(photo,96,550,390,footer?420:500);text(`page-${index+1}-body`,body,530,550,454,footer?420:504,36,28,INK,false,page.emphasis);}
+      else text(`page-${index+1}-body`,body,96,550,888,footer?420:504,40,28,INK,false,page.emphasis);
+      text(`page-${index+1}-footer`,footer,96,980,888,78,20,16,'#555555');
       image(logo,96,1078,190,64,'contain');
       text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,840,1101,144,40,22,20,'#555555');
     }
