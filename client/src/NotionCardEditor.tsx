@@ -79,8 +79,8 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
     if(!valid||!protectedValid||remote){setPreviewBusy(false);return;}
     const controller=new AbortController();let live=true;setPreviewBusy(true);setPreviewError(null);
     const timer=window.setTimeout(async()=>{
-      try{const blob=await apiBlob(`/notion/links/${base.link.id}/preview`,'image/jpeg',{method:'POST',body:{version:base.link.version,itemVersion:base.itemVersion,...draft,page:pageIndex},signal:controller.signal});if(!live)return;const url=URL.createObjectURL(blob);if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);previewUrl.current=url;setPreview({url,signature});}
-      catch(error){if(live&&!controller.signal.aborted)setPreviewError(error);}finally{if(live)setPreviewBusy(false);}
+      try{const blob=await apiBlob(`/notion/links/${base.link.id}/preview`,'image/jpeg',{method:'POST',body:{version:base.link.version,itemVersion:base.itemVersion,...draft,page:pageIndex},signal:controller.signal,parseErrorJson:true});if(!live)return;const url=URL.createObjectURL(blob);if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);previewUrl.current=url;setPreview({url,signature});}
+      catch(error){if(live&&!controller.signal.aborted)setPreviewError(error instanceof ApiError&&error.message.startsWith('파일 요청 실패')?new Error(`카드 미리보기 응답을 받지 못했습니다 (HTTP ${error.status}). 원고는 유지했습니다. 잠시 후 다시 시도해 주세요.`):error);}finally{if(live)setPreviewBusy(false);}
     },450);return()=>{live=false;window.clearTimeout(timer);controller.abort();};
   },[signature,valid,protectedValid,remote,retry]);
   useEffect(()=>()=>{if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);},[]);

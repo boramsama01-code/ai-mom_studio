@@ -72,6 +72,18 @@ describe('native editable Notion manuscript PPTX',()=>{
     const {data,info}=await sharp(Buffer.from(result.previewSvg!)).ensureAlpha().raw().toBuffer({resolveWithObject:true});expect(jsQR(new Uint8ClampedArray(data),info.width,info.height,{inversionAttempts:'dontInvert'})?.data).toBe(input.sourceReferences[8].url);
     await expect(buildNotionCanvaPptx(input,[],{previewPage:6})).rejects.toThrow('미리볼 카드 번호');
   });
+  it('previews only the selected page without creating a PPTX or laying out unrelated cards',async()=>{
+    const input=document(5,'A');input.sourceReferences=Array.from({length:23},(_,i)=>({title:`기관 ${i+1}`,url:`https://ged.kedi.re.kr/notice/${i+1}`}));input.teaser={title:'연구계획서 다음 편',body:'댓글로 남겨주세요.'};
+    input.pages[0].imageId='original';const photo=await sharp({create:{width:1080,height:1350,channels:3,background:'#72A7FF'}}).png().toBuffer(),photos=[{id:'original',bytes:photo,mimeType:'image/png'}];
+    const full=await buildNotionCanvaPptx(input,photos,{previewPage:0}),fast=await buildNotionCanvaPptx(input,photos,{previewPage:0,previewOnly:true});expect(fast.pageCount).toBe(13);expect(fast.bytes.length).toBe(0);expect(fast.previewSvg).toBe(full.previewSvg);
+    input.pages[1].body='의도적으로 다른 장의 본문을 넘칩니다. '.repeat(60);
+    await expect(buildNotionCanvaPptx(input,photos)).rejects.toThrow('2장 본문');expect((await buildNotionCanvaPptx(input,photos,{previewPage:0,previewOnly:true})).previewSvg).toBe(full.previewSvg);
+    const last=await buildNotionCanvaPptx(input,photos,{previewPage:10,previewOnly:true});expect(last.previewSvg).toContain('source-qr-23-background');expect(last.previewSvg).toContain('원문 21–23 / 23');expect(last.previewSvg).not.toContain('source-qr-1-background');
+    const {data,info}=await sharp(Buffer.from(last.previewSvg!)).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+    const bounds=last.previewSvg!.match(/data-name="source-qr-23-background"><rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)"/)!;expect(bounds).toBeTruthy();const [left,top,width,height]=bounds.slice(1).map(Number);
+    const crop=await sharp(data,{raw:{width:info.width,height:info.height,channels:4}}).extract({left,top,width,height}).raw().toBuffer();expect(jsQR(new Uint8ClampedArray(crop),width,height,{inversionAttempts:'dontInvert'})?.data).toBe(input.sourceReferences[22].url);
+    await expect(buildNotionCanvaPptx(input,photos,{previewOnly:true})).rejects.toThrow('미리볼 카드 번호');
+  });
   it('keeps Korean copy as native text, preserves the supplied logo bytes and safe foreground geometry',async()=>{
     const input=document();input.pages[1].body='첫 문장 & <중요>\n둘째 문장';input.pages[1].bullets=['확인할 내용'];
     const result=await buildNotionCanvaPptx(input);
