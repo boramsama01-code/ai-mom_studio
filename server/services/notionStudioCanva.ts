@@ -90,7 +90,7 @@ async function prepareNotionStudioDeck(db:DB,before:State,copy:CardCopy=before.c
   return {...page,...(ordered[i]?{imageId:String(ordered[i].id)}:{}),...(sourcePage?.cardFields?{footnote:sourcePage.cardFields.footnote,sourceLabel:sourcePage.cardFields.sourceLabel}:{}),...(sourcePage?.infographic?{infographic:sourcePage.infographic}:{}),...(emphasis!==undefined?{emphasis}:{})};
  });
  // The builder validates fit before a durable reservation or external POST is made.
- const deck=await buildNotionCanvaPptx({title:before.item.title,coverStyle:before.link.coverStyle as 'A'|'B'|'C',category:source.category||undefined,pages,...extras(before)},photos,previewPage===undefined?{}:{previewPage});
+ const deck=await buildNotionCanvaPptx({title:before.item.title,coverStyle:before.link.coverStyle as 'A'|'B'|'C',category:source.category||undefined,pages,...extras(before)},photos,previewPage===undefined?{}:{previewPage,previewOnly:true});
  const unusedPhotos=before.link.photoOrder.length-ordered.length;
  const warnings=[...deck.warnings,...(unusedPhotos>0?[`사진 ${unusedPhotos}개는 원고 페이지 수에 맞춰 이번 디자인에 넣지 않았습니다. Studio 원본은 그대로 보존했습니다.`]:[])];
  return {...deck,warnings};

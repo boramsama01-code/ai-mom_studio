@@ -319,8 +319,9 @@ async function readMedia(bytes:Buffer,file:string):Promise<Media> {
  * Keep all 2–10 manuscript pages, optional references and teaser, then the brand CTA.
  * Overflow is a validation error, never truncation or an unreadably small font.
  */
-export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:{previewPage?:number}={}):Promise<NotionCanvaPptx> {
+export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:{previewPage?:number;previewOnly?:boolean}={}):Promise<NotionCanvaPptx> {
   const document=parse(documentSchema,value,true);
+  if(options.previewOnly&&options.previewPage===undefined)invalid('미리볼 카드 번호를 확인해 주세요.');
   const references=document.sourceReferences??[],referencePageCount=notionSourceReferencePageCount(references);
   if(document.pages.length+referencePageCount+(document.teaser?1:0)+1>NOTION_CANVA_MAX_OUTPUT_PAGES)invalid('원고·기관별 원문 QR·예고·채널 소개를 합쳐 13장 이내로 나눠 주세요. 원문 주소를 누락하지 않았습니다.');
   if(!Array.isArray(photos)||photos.length>10||new Set(photos.map(p=>p.id)).size!==photos.length||photos.some(p=>!idSchema.safeParse(p.id).success||!Buffer.isBuffer(p.bytes)||!p.bytes.length||p.bytes.length>MAX_PHOTO_BYTES||!['image/png','image/jpeg','image/webp','image/gif','image/avif','image/heif','image/heic'].includes(p.mimeType))||photos.reduce((n,p)=>n+p.bytes.length,0)>MAX_PHOTO_TOTAL_BYTES)invalid('사진은 서로 다른 ID의 단일 이미지 최대 10개, 개별 20MB·전체 60MB 이하여야 합니다.');
@@ -346,8 +347,8 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   const allMedia=[logo,darkLogo,...media.values()];
   const fileFor=(item:Media)=>`${item.file}.${item.extension}`;
   const files:Record<string,Uint8Array>={};
-  const put=(name:string,contents:string)=>{files[name]=strToU8(contents);};
-  allMedia.forEach(item=>{files[`ppt/media/${fileFor(item)}`]=item.bytes;});
+  const put=(name:string,contents:string)=>{if(!options.previewOnly)files[name]=strToU8(contents);};
+  if(!options.previewOnly)allMedia.forEach(item=>{files[`ppt/media/${fileFor(item)}`]=item.bytes;});
   const accent=document.categoryColor??NOTION_CANVA_CATEGORY_COLORS[document.category??'']??RED;
   if(document.sourceCard&&!references.length)invalid('원문 확인 문구를 보존하려면 최소 한 개의 공식 원문 주소가 필요합니다.');
   const referencesIndex=references.length?document.pages.length:-1;
@@ -357,12 +358,13 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   if(options.previewPage!==undefined&&(!Number.isInteger(options.previewPage)||options.previewPage<0||options.previewPage>=renderedPages.length))invalid('미리볼 카드 번호를 확인해 주세요.');
   let previewSvg:string|undefined;
   for(const [index,page] of renderedPages.entries()) {
+    if(options.previewOnly&&index!==options.previewPage)continue;
     let nextId=2;const shapes:string[]=[];let relationships=rel('rIdLayout','slideLayout','../slideLayouts/slideLayout1.xml');let imageIndex=0;
     const previewShapes:string[]=[],previewing=options.previewPage===index;
     const visual=(name:string,markup:string)=>{if(previewing)previewShapes.push(`<g data-name="${xml(name)}">${markup}</g>`);};
-    const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover')=>{const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,item.file,rid,item,x,y,w,h,mode));if(previewing)visual(item.file,`<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden"><image width="${w}" height="${h}" preserveAspectRatio="xMidYMid ${mode==='contain'?'meet':'slice'}" href="data:image/${item.extension};base64,${item.bytes.toString('base64')}"/></svg>`);};
+    const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover')=>{if(!options.previewOnly){const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,item.file,rid,item,x,y,w,h,mode));}if(previewing)visual(item.file,`<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden"><image width="${w}" height="${h}" preserveAspectRatio="xMidYMid ${mode==='contain'?'meet':'slice'}" href="data:image/${item.extension};base64,${item.bytes.toString('base64')}"/></svg>`);};
     const rect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000)=>{
-      shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill,alpha));
+      if(!options.previewOnly)shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill,alpha));
       visual(name,`${gradient?'<defs><linearGradient id="bottom-fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset=".5" stop-color="#000000" stop-opacity=".74"/><stop offset="1" stop-color="#000000"/></linearGradient></defs>':''}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${pill?Math.min(w,h)/2:0}" fill="${gradient?'url(#bottom-fade)':fill}" fill-opacity="${alpha/100000}"/>`);
     };
     const text=(name:string,content:string,x:number,y:number,w:number,h:number,max:number,min:number,ink=INK,bold=false,emphasis?:string,align:'l'|'ctr'='l')=>{
@@ -378,7 +380,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
           }
         }
       }
-      shapes.push(box(nextId++,name,content,x,y,w,h,max,min,ink,bold,!interior&&emphasis?{phrase:emphasis,color:document.coverStyle==='B'?RED:accent}:undefined,align));
+      if(!options.previewOnly)shapes.push(box(nextId++,name,content,x,y,w,h,max,min,ink,bold,!interior&&emphasis?{phrase:emphasis,color:document.coverStyle==='B'?RED:accent}:undefined,align));
       if(previewing){
         const fitted=fit(content,w,h,max,min,bold,name),font=loadReadingFont('Noto Sans KR',bold?700:400);
         const lines=fitted.lines.map((line,lineIndex)=>{
@@ -513,11 +515,11 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         const labels=['학생 접수','교사 추천','학교 제출','평가'];
         for(const [step,label]of labels.entries()){
           const left=96+step*232,highlight=step===1||step===2;
-          shapes.push(outlinedRectangle(nextId++,`application-step-${step+1}`,left,485,192,115,highlight?'#FFF0ED':'#FFFFFF',highlight?RED:'#B8B8B8'));
+          if(!options.previewOnly)shapes.push(outlinedRectangle(nextId++,`application-step-${step+1}`,left,485,192,115,highlight?'#FFF0ED':'#FFFFFF',highlight?RED:'#B8B8B8'));
           visual(`application-step-${step+1}`,`<rect x="${left}" y="485" width="192" height="115" rx="14" fill="${highlight?'#FFF0ED':'#FFFFFF'}" stroke="${highlight?RED:'#B8B8B8'}" stroke-width="1.5"/>`);
           text(`application-step-${step+1}-number`,String(step+1).padStart(2,'0'),left+18,499,156,26,20,18,highlight?RED:'#666666',true);
           text(`application-step-${step+1}-label`,label,left+18,538,156,38,28,24,highlight?RED:'#666666',true);
-          if(step<3){shapes.push(stepArrow(nextId++,`application-step-${step+1}-arrow`,left+202,525,20,32));visual(`application-step-${step+1}-arrow`,`<path d="M${left+202} 525l10 16-10 16h10l10-16-10-16Z" fill="#888888"/>`);}
+          if(step<3){if(!options.previewOnly)shapes.push(stepArrow(nextId++,`application-step-${step+1}-arrow`,left+202,525,20,32));visual(`application-step-${step+1}-arrow`,`<path d="M${left+202} 525l10 16-10 16h10l10-16-10-16Z" fill="#888888"/>`);}
         }
         text('application-step-guide','일반적인 흐름 · 기관별 절차·명칭은 원문 확인',96,613,888,26,18,18,'#666666');
         text(`page-${index+1}-body`,body,96,650,888,315,28,22,INK,false,page.emphasis);
@@ -528,10 +530,13 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,840,1101,144,40,22,20,'#555555');
     }
     if(previewing)previewSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350"><rect width="1080" height="1350" fill="${background}"/>${previewShapes.join('')}</svg>`;
+    if(options.previewOnly)continue;
     put(`ppt/slides/slide${index+1}.xml`,`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld ${namespaces}><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val="${color(background)}"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree>${group}${shapes.join('')}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`);
     put(`ppt/slides/_rels/slide${index+1}.xml.rels`,rels(relationships));
   }
   const count=renderedPages.length;
+  // Interactive preview needs one SVG only: no other slides, OOXML or ZIP.
+  if(options.previewOnly)return {bytes:Buffer.alloc(0),pageCount:count,sourcePageCount:document.pages.length,width:1080,height:1350,warnings,previewSvg};
   const slides=Array.from({length:count},(_,i)=>`<p:sldId id="${256+i}" r:id="rIdSlide${i+1}"/>`).join('');
   put('ppt/presentation.xml',`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation ${namespaces}><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rIdMaster"/></p:sldMasterIdLst><p:sldIdLst>${slides}</p:sldIdLst><p:sldSz cx="${1080*EMU}" cy="${1350*EMU}" type="custom"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`);
   put('ppt/_rels/presentation.xml.rels',rels(rel('rIdMaster','slideMaster','slideMasters/slideMaster1.xml')+Array.from({length:count},(_,i)=>rel(`rIdSlide${i+1}`,'slide',`slides/slide${i+1}.xml`)).join('')));

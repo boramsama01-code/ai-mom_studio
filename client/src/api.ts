@@ -41,7 +41,7 @@ export const qs = (o: Record<string, string | number | undefined | null>) =>
   new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)])).toString();
 
 /** Keep download failures in the editor instead of navigating away to a JSON error. */
-export async function apiBlob(path: string, expectedType: string, opts: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<Blob> {
+export async function apiBlob(path: string, expectedType: string, opts: { method?: string; body?: unknown; signal?: AbortSignal; parseErrorJson?:boolean } = {}): Promise<Blob> {
   const method = opts.method ?? "GET";
   const headers: Record<string, string> = {};
   if (opts.body !== undefined) headers["content-type"] = "application/json";
@@ -55,7 +55,7 @@ export async function apiBlob(path: string, expectedType: string, opts: { method
   }
   const type = res.headers.get("content-type")?.split(";")[0].trim();
   if (!res.ok) {
-    const body = type === "application/json" ? await res.json().catch(() => ({})) : {};
+    const body = type === "application/json" || opts.parseErrorJson ? await res.json().catch(() => ({})) : {};
     throw new ApiError(res.status, body.error || `파일 요청 실패 (HTTP ${res.status})`, body);
   }
   if (type !== expectedType) throw new ApiError(502, "파일 응답을 확인할 수 없습니다. 로그인 상태를 확인한 뒤 다시 시도하세요.");

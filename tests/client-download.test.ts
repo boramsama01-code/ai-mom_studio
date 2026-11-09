@@ -13,6 +13,10 @@ describe("Studio PNG download", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "대사가 너무 깁니다." }, { status: 400 })));
     await expect(apiBlob("/studio/cards/1/export.png", "image/png")).rejects.toThrow("대사가 너무 깁니다.");
   });
+  it('keeps the actual preview error detail when a proxy changes its JSON content type',async()=>{
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({error:'이미지 준비 시간이 초과되었습니다.'}),{status:503,headers:{'content-type':'application/problem+json'}})));
+    await expect(apiBlob('/notion/links/2/preview','image/jpeg',{method:'POST',parseErrorJson:true})).rejects.toThrow('이미지 준비 시간이 초과되었습니다.');
+  });
   it("does not download a login HTML page as a PNG", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>Login</html>", { headers: { "content-type": "text/html" } })));
     await expect(apiBlob("/studio/cards/1/export.png", "image/png")).rejects.toThrow("로그인 상태");
