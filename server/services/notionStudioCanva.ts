@@ -5,6 +5,7 @@ import {zipSync} from 'fflate';
 import type {DB} from '../db';
 import {channels,notionSyncLinks,notionSyncPhotos,mediaAssets,contentItems} from '../../shared/schema';
 import type {NotionCanvaState} from '../../shared/notionStudio';
+import {NOTION_SOURCE_REFERENCES_PER_PAGE,notionSourceReferencePageCount} from '../../shared/notionSync';
 import {studioKey} from '../../shared/channelKeys';
 import {notionPlainCardCopy} from '../../shared/notionStudioCopy';
 import {HttpError} from '../routes/util';
@@ -22,7 +23,7 @@ const sha=(b:Buffer)=>crypto.createHash('sha256').update(b).digest('hex');
 function valid(s:State,r:Request){if(s.link.version!==r.version||s.item.version!==r.itemVersion)throw new HttpError(409,'원고나 연결 설정이 바뀌었습니다. 최신 내용을 확인해 주세요.',{code:'studio_source_changed'});}
 function plainSource(s:State){try{notionPlainCardCopy(s.copy);}catch{throw new HttpError(409,'노션 연결은 일반 카드뉴스 원고용입니다. 원고 형식을 확인해 주세요.',{code:'notion_copy_format_changed'});}}
 function extras(s:State){const source=s.link.sourceSnapshot as {sourceReferences?:Array<{title:string;url:string}>;sourceCard?:{title:string;body:string;footnote?:string};teaser?:{title:string;body:string}};return {sourceReferences:source.sourceReferences,sourceCard:source.sourceCard,teaser:source.teaser};}
-function expectedOutputPages(s:State){const extra=extras(s);return s.copy.pages.length+2+(extra.sourceReferences?.length?1:0)+(extra.teaser?1:0);}
+function expectedOutputPages(s:State){const extra=extras(s);return s.copy.pages.length+2+notionSourceReferencePageCount(extra.sourceReferences)+(extra.teaser?1:0);}
 function fingerprint(s:State){return sha(Buffer.from(JSON.stringify({revisionId:s.revision.id,itemVersion:s.item.version,title:s.item.title,copy:s.copy,coverStyle:s.link.coverStyle,photoOrder:s.link.photoOrder,category:s.link.sourceSnapshot.category??null,...extras(s)})));}
 function currentSource(s:State,v:CanvaSnapshot){return v.sourceVersion===s.item.version&&v.sourceRevisionId===s.revision.id&&(!v.sourceFingerprint||v.sourceFingerprint===fingerprint(s));}
 const sourceChanged=()=>new HttpError(409,'Canva 제작 후 원고나 표지 설정이 바뀌었습니다. 최신 원고로 다시 제작한 뒤 결과를 가져오세요.',{code:'canva_source_changed'});
@@ -144,9 +145,12 @@ export async function pollNotionStudioCanva(db:DB,id:number){
    for(const [i,bytes]of images.entries()){
     const digest=sha(bytes);const [old]=await tx.select({id:mediaAssets.id}).from(mediaAssets).where(and(eq(mediaAssets.contentItemId,fresh.item.id),eq(mediaAssets.sha256,digest),eq(mediaAssets.revisionId,output.id))).limit(1);
     const [created]=old?[old]:await tx.insert(mediaAssets).values({channelId:link.channelId,contentItemId:fresh.item.id,revisionId:output.id,kind:i===0?'card':'card_page',source:'canva',sha256:digest,bytes,mime:'image/png',width:1080,height:1350}).returning({id:mediaAssets.id});
-    const extra=extras(fresh),titles=[fresh.copy.cover.title,...fresh.copy.pages.map(p=>p.title),...(extra.sourceReferences?.length?[extra.sourceCard?.title||'원문 공고 확인']:[]),...(extra.teaser?[extra.teaser.title]:[]),NOTION_CANVA_OUTRO.title];
+    const extra=extras(fresh),sourcePageCount=notionSourceReferencePageCount(extra.sourceReferences),sourceTitle=extra.sourceCard?.title||'원문 공고 확인';
+    const titles=[fresh.copy.cover.title,...fresh.copy.pages.map(p=>p.title),...Array.from({length:sourcePageCount},(_,page)=>sourcePageCount===1?sourceTitle:`${sourceTitle} (${page+1}/${sourcePageCount})`),...(extra.teaser?[extra.teaser.title]:[]),NOTION_CANVA_OUTRO.title];
     const last=i===images.length-1,title=titles[i];
-    manifest.pages.push({id:created.id,sha256:digest,title,altText:last?NOTION_CANVA_OUTRO.altText:extra.sourceReferences?.length&&i===fresh.copy.pages.length+1?`원문 공고 확인: ${extra.sourceReferences.map(ref=>ref.title).join(', ')}`:title});
+    const sourcePageIndex=i-fresh.copy.pages.length-1;
+    const sourceAlt=sourcePageIndex>=0&&sourcePageIndex<sourcePageCount?`원문 공고 확인: ${extra.sourceReferences!.slice(sourcePageIndex*NOTION_SOURCE_REFERENCES_PER_PAGE,(sourcePageIndex+1)*NOTION_SOURCE_REFERENCES_PER_PAGE).map(ref=>ref.title).join(', ')}`:title;
+    manifest.pages.push({id:created.id,sha256:digest,title,altText:last?NOTION_CANVA_OUTRO.altText:sourceAlt});
    }
    const outputAssetId=manifest.pages[0].id;await tx.update(mediaAssets).set({carousel:manifest}).where(eq(mediaAssets.id,outputAssetId));
    await tx.update(notionSyncLinks).set({canva:{...v,phase:'complete',outputAssetId,error:null,updatedAt:new Date().toISOString()},operationToken:null,operationUntil:null,version:link.version+1,updatedAt:new Date()}).where(eq(notionSyncLinks.id,id));return 'complete';

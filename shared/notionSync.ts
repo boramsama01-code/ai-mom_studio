@@ -3,6 +3,11 @@ import { z } from "zod";
 /** The data source inside the existing 콘텐츠 제작 database, not its database ID. */
 export const DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID = "e5a4b4f7-f2f6-4fad-b514-1602a2b12b2b";
 export const NOTION_CARD_DATA_SOURCE_ID = "58de23b2-4662-40d2-bf3e-d110ba9601e4";
+export const NOTION_SOURCE_REFERENCES_PER_PAGE = 4;
+export const NOTION_SOURCE_REFERENCES_MAX = 24;
+export function notionSourceReferencePageCount(references?: readonly unknown[]): number {
+  return Math.ceil((references?.length ?? 0) / NOTION_SOURCE_REFERENCES_PER_PAGE);
+}
 export const notionSourceReferenceSchema = z.object({ title: z.string().min(1).max(200), url: z.string().url().max(2048) });
 export const notionTableFieldsSchema = z.object({ subtitle: z.string(), body: z.string(), footnote: z.string(), sourceLabel: z.string() });
 
@@ -26,7 +31,7 @@ export const notionDocumentSummarySchema = z.object({
 export const notionDocumentSchema = notionDocumentSummarySchema.extend({
   caption: z.string(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
   pages: z.array(notionDocumentPageSchema).max(30), photos: z.array(notionPhotoSchema).max(12),
-  sourceReferences: z.array(notionSourceReferenceSchema).max(4).optional(),
+  sourceReferences: z.array(notionSourceReferenceSchema).max(NOTION_SOURCE_REFERENCES_MAX).optional(),
   sourceCard: z.object({title:z.string(),body:z.string(),footnote:z.string().optional()}).optional(),
   teaser: z.object({title:z.string().min(1).max(200),body:z.string().min(1).max(1000)}).optional(),
   editorialSource: z.literal("card_table").optional(),

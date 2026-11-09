@@ -103,7 +103,11 @@ describe("Notion manuscript and Canva workspace", () => {
   it("shows that source QR and the next-article teaser will appear before the channel introduction", async () => {
     detail.source.sourceReferences=[{title:'공식 모집 공고',url:'https://ged.kedi.re.kr/notice/2027'}];
     detail.source.teaser={title:'3일만에 쓰는 영재교육원 연구계획서',body:'궁금한 점을 댓글로 남겨주세요.'};
-    await renderLinked();expect(host.textContent).toContain('원문 확인 QR(1개) · 다음 편 예고 · 하이스쿱 소개');expect(writes()).toHaveLength(0);
+    await renderLinked();expect(host.textContent).toContain('원문 확인 QR(1개 · 1장) · 다음 편 예고 · 하이스쿱 소개');expect(writes()).toHaveLength(0);
+  });
+  it("shows six source pages for 23 institutional QRs without making a request to change the manuscript", async () => {
+    detail.source.sourceReferences=Array.from({length:23},(_,i)=>({title:`기관 ${i+1}`,url:`https://ged.kedi.re.kr/notice/${i}`}));
+    await renderLinked();expect(host.textContent).toContain('원문 확인 QR(23개 · 6장) · 하이스쿱 소개');expect(writes()).toHaveLength(0);
   });
   it("previews the selected manuscript and both photo names before importing the chosen channel and cover style with its source hash", async () => {
     await render(); expect(writes()).toHaveLength(0); await chooseSource();

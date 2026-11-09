@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID, NOTION_CARD_DATA_SOURCE_ID, notionDocumentQuerySchema, notionDocumentUpdateSchema,
+  DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID, NOTION_CARD_DATA_SOURCE_ID, NOTION_SOURCE_REFERENCES_MAX, notionDocumentQuerySchema, notionDocumentUpdateSchema,
   type NotionConnectionStatus, type NotionDocument, type NotionDocumentList,
   type NotionDocumentPage, type NotionDocumentQuery, type NotionDocumentSummary,
   type NotionDocumentUpdate, type NotionPhoto,
@@ -217,7 +217,7 @@ function parseTableDocument(page: Obj, rows: Obj[]): Snapshot {
     const source=sources[0], urls=(propertyText(source,'QR대상URL')||propertyText(source,'원문URL')).replace(/<br\s*\/?\s*>/gi,'\n').split(/\r?\n/).map(x=>{const line=x.trim();return /^\[[^\]]+\]\((https:\/\/[^)]+)\)$/.exec(line)?.[1]??line;}).filter(Boolean);
     let labels=propertyText(source,'출처표시').split(/\r?\n|\s+\/\s+/).map(x=>x.trim());
     if(labels.length===1&&urls.length>1){const parts=labels[0].split('/').map(x=>x.trim());if(parts.length===urls.length)labels=parts;}
-    if(!urls.length||urls.length>4||new Set(urls).size!==urls.length)throw new NotionSyncError('원문 확인 카드에 서로 다른 공식 원문 주소 1~4개를 한 줄씩 입력해 주세요.',422,'NOTION_QR_SOURCE_INVALID');
+    if(!urls.length||urls.length>NOTION_SOURCE_REFERENCES_MAX||new Set(urls).size!==urls.length)throw new NotionSyncError('원문 확인 카드에 서로 다른 공식 원문 주소 1~24개를 한 줄씩 입력해 주세요. 4개씩 여러 장에 배치합니다.',422,'NOTION_QR_SOURCE_INVALID');
     for(const [i,url]of urls.entries()){
       let parsed:URL;try{parsed=new URL(url);}catch{throw new NotionSyncError('원문 QR 주소를 확인해 주세요.',422,'NOTION_QR_SOURCE_INVALID');}
       if(parsed.protocol!=='https:'||parsed.username||parsed.password||parsed.port||!/^[-a-z0-9]+(?:\.[-a-z0-9]+)+$/i.test(parsed.hostname)||/^\d+(?:\.\d+){3}$/.test(parsed.hostname)||/(?:^|\.)(?:localhost|local|internal|test|invalid|example)$/i.test(parsed.hostname))throw new NotionSyncError('원문 QR에는 공개 HTTPS 공식 공고 주소를 입력해 주세요.',422,'NOTION_QR_SOURCE_INVALID');
