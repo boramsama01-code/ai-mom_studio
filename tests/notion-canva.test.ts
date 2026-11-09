@@ -93,6 +93,37 @@ describe('native editable Notion manuscript PPTX',()=>{
     const plain=unzipSync((await buildNotionCanvaPptx(input)).bytes);expect(strFromU8(plain['ppt/slides/slide2.xml'])).not.toContain('explicit-marker');
     expect(strFromU8(plain['ppt/slides/slide1.xml'])).not.toContain('srgbClr val="FF493B"/></a:solidFill><a:latin');
   });
+  it('keeps three-line Notion cover subtitles and dense four-line 120-character subtitles intact in A and C',async()=>{
+    smallPhoto??=await sharp({create:{width:600,height:400,channels:3,background:'#72A7FF'}}).png().toBuffer();
+    const photo={id:'cover_photo',bytes:smallPhoto,mimeType:'image/png'};
+    const denseThree=(count:number)=>{const n=count-2,a=Math.floor(n/3),b=Math.floor((n-a)/2);return ['원'.repeat(a),'고'.repeat(b),'문'.repeat(n-a-b)].join('\n');};
+    const denseFour=['가'.repeat(29),'나'.repeat(29),'다'.repeat(29),'라'.repeat(30)].join('\n');
+    expect(denseFour.length).toBe(120);
+    const captions=['2027학년도 서울 중등 영재교육원\n강남서초 사례\n2026년 기준',...([58,68,64].map(count=>{const value=denseThree(count);expect(value.length).toBe(count);return value;})),denseFour];
+    const shape=(source:string,name:string)=>{
+      const part=[...source.matchAll(/<p:sp>([\s\S]*?)<\/p:sp>/g)].find(match=>match[1].includes(`name="${name}"`))?.[1];expect(part).toBeTruthy();
+      const bounds=part!.match(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"/)!;
+      return {part:part!,x:Number(bounds[1])/9525,y:Number(bounds[2])/9525,w:Number(bounds[3])/9525,h:Number(bounds[4])/9525};
+    };
+    for(const style of ['A','C'] as const){
+      for(const caption of captions){
+        const input=document(2,style);input.pages[0]={title:'원서만 쓰면 끝? 전형료 납부까지 확인하세요',body:caption,imageId:photo.id};
+        const built=await buildNotionCanvaPptx(input,[photo]);expect(built.pageCount).toBe(3);
+        const source=strFromU8(unzipSync(built.bytes)['ppt/slides/slide1.xml']),title=shape(source,'cover-title'),sub=shape(source,'cover-caption');
+        expect([...sub.part.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)].map(match=>match[1])).toEqual(caption.split('\n'));
+        expect(sub.h).toBeGreaterThan(style==='A'?55:36);expect(sub.h).toBeLessThanOrEqual(128);
+        expect(title.y+title.h).toBeLessThanOrEqual(sub.y-(style==='A'?14:6)+.001);
+        expect(sub.y+sub.h).toBeLessThanOrEqual(style==='A'?1072:1082);
+        expect(source).toContain(`y="${(style==='A'?1078:1091)*9525}"`);
+        if(style==='A'){expect(title.y).toBe(730);expect(title.h).toBeLessThan(268);}
+        else{expect(title.y).toBeLessThan(845);expect(title.h).toBe(195);}
+      }
+      const short=document(2,style);short.pages[0]={title:'짧은 표지',body:'한 줄 설명',imageId:photo.id};
+      const source=strFromU8(unzipSync((await buildNotionCanvaPptx(short,[photo])).bytes)['ppt/slides/slide1.xml']),sub=shape(source,'cover-caption'),title=shape(source,'cover-title');
+      expect(sub).toMatchObject({y:style==='A'?1012:1046,h:style==='A'?55:36});
+      expect(title).toMatchObject({y:style==='A'?730:845,h:style==='A'?268:195});
+    }
+  });
 });
 
 describe('generic Canva import and export boundary',()=>{

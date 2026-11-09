@@ -351,19 +351,25 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       text('outro-action',NOTION_CANVA_OUTRO.action,132,1027,816,44,28,24,'#FFFFFF',true,undefined,'ctr');
     }else if(index===0) {
       if(document.coverStyle==='A') {
+        const captionFit=body?fit(body,888,128,28,24,false,'cover-caption'):undefined;
+        const captionHeight=Math.max(55,Math.ceil(captionFit?captionFit.lines.length*captionFit.lineHeight:0));
+        const captionY=captionHeight>55?1072-captionHeight:1012;
+        const titleHeight=captionHeight>55?Math.min(268,captionY-14-730):268;
         background='#000000';if(coverPhoto)image(coverPhoto,0,0,1080,1350);rect('bottom-black-fade',0,300,1080,778,'#000000',true);rect('bottom-black-base',0,1078,1080,272,'#000000');
         if(document.category){rect('category-color',96,640,64,6,accent);text('cover-category',document.category,96,662,888,48,28,24,accent,true);}
-        text('cover-title',page.title,96,730,888,268,72,48,'#FFFFFF',true,page.emphasis);
-        text('cover-caption',body,96,1012,888,55,28,24,'#FFFFFF');image(darkLogo,96,1078,190,64,'contain');
+        text('cover-title',page.title,96,730,888,titleHeight,72,48,'#FFFFFF',true,page.emphasis);
+        text('cover-caption',body,96,captionY,888,captionHeight,28,24,'#FFFFFF');image(darkLogo,96,1078,190,64,'contain');
       } else if(document.coverStyle==='B') {
         image(logo,96,207,270,92,'contain');rect('brand-accent',96,423,64,8,RED);
         text('cover-question',page.title,96,490,888,440,88,56,INK,true,page.emphasis);
         text('cover-caption',body,96,963,888,128,34,28,INK);
       } else {
-        image(coverPhoto!,0,0,1080,740);rect('caption-background',0,740,1080,610,'#FFFFFF');
-        if(document.category)text('cover-category',document.category,96,775,888,48,28,24,accent,true);
-        text('cover-title',page.title,96,845,888,195,68,46,INK,true,page.emphasis);
-        text('cover-caption',body,96,1046,888,36,26,24,INK);image(logo,96,1091,150,50,'contain');
+        const captionFit=body?fit(body,888,128,26,24,false,'cover-caption'):undefined;
+        const extra=Math.max(0,Math.ceil(captionFit?captionFit.lines.length*captionFit.lineHeight:0)-36);
+        image(coverPhoto!,0,0,1080,740-extra);rect('caption-background',0,740-extra,1080,610+extra,'#FFFFFF');
+        if(document.category)text('cover-category',document.category,96,775-extra,888,48,28,24,accent,true);
+        text('cover-title',page.title,96,845-extra,888,195,68,46,INK,true,page.emphasis);
+        text('cover-caption',body,96,1046-extra,888,36+extra,26,24,INK);image(logo,96,1091,150,50,'contain');
       }
     } else {
       if(document.category)text('page-category',document.category,96,207,888,44,26,22,INK,true);
