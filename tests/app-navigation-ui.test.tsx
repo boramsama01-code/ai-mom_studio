@@ -44,8 +44,8 @@ it("PC의 자산 메뉴와 모바일의 주요 메뉴 네 개를 제공하고 �
     await renderAt("/");
     const nav = host.querySelector(".sidebar .nav")!;
     const primaryPaths = ["/", "/inbox", "/publish", "/settings"];
-    expect([...nav.querySelectorAll(":scope > div.nav-group a")].map(a => a.getAttribute("href"))).toEqual(["/", "/inbox", "/assets", "/publish", "/settings"]);
-    expect([...nav.querySelectorAll(":scope > div.nav-group a .grow")].map(label => label.textContent)).toEqual(["내 콘텐츠", "수집함", "자산·템플릿", "발행 일정·기록", "설정"]);
+    expect([...nav.querySelectorAll(":scope > div.nav-group a")].map(a => a.getAttribute("href"))).toEqual(["/", "/inbox", "/assets", "/notion", "/publish", "/settings"]);
+    expect([...nav.querySelectorAll(":scope > div.nav-group a .grow")].map(label => label.textContent)).toEqual(["내 콘텐츠", "수집함", "자산·템플릿", "노션 원고 연결", "발행 일정·기록", "설정"]);
     expect([...host.querySelectorAll(".mobile-nav a")].map(a => a.getAttribute("href"))).toEqual(primaryPaths);
     expect(nav.querySelectorAll(":scope > details.nav-group")).toHaveLength(1);
     const tools = nav.querySelector('a[href="/today"]')!.closest("details")!;

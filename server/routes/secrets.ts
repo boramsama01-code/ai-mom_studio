@@ -13,7 +13,7 @@ import { expectedInstagramUsername, normalizeInstagramUsername } from "../../sha
 import { resolveSecrets } from "../services/secrets";
 import type { InstagramAuthMode } from "../services/instagram";
 import { deleteSecret, saveSecret, secretStatuses, SecretKeyMissing } from "../secretStore";
-import { testGemini, testOpenai, testAnthropic, testCloudinary, testInstagram, testNaver, testTelegram, type TestResult } from "../services/connectionTest";
+import { testGemini, testOpenai, testAnthropic, testCloudinary, testInstagram, testNaver, testTelegram, testNotion, type TestResult } from "../services/connectionTest";
 
 export const secretRoutes = Router();
 
@@ -99,6 +99,7 @@ secretRoutes.post(
     else if (service === "anthropic") r = await testAnthropic();
     else if (service === "telegram") r = await testTelegram();
     else if (service === "cloudinary") r = await testCloudinary();
+    else if (service === "notion") r = await testNotion();
     else if (service.startsWith("instagram:")) {
       const tokenKey = service.slice(10);
       if (!/_ACCESS_TOKEN$/.test(tokenKey) || !isAllowedSecretKey(tokenKey, await slugs())) throw new HttpError(400, "알 수 없는 항목");

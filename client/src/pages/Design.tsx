@@ -326,7 +326,7 @@ function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: 
         {s && <Badge kind={s.connected ? "ok" : "warn"}>{s.connected ? "Canva 연결됨" : s.configured ? "연결 전" : "앱 정보 필요"}</Badge>}
       </div>
       <p className="small muted" style={{ margin: 0 }}>
-        8장 원고는 아래의 Canva 마스터를 사용합니다. 연결한 계정의 실제 기능·권한을 확인하며, ChatGPT의 Canva 연결과 이 스튜디오의 연결은 별개입니다.
+        노션 원고와 사진은 <GuardedLink href="/notion">노션 원고 연결</GuardedLink>에서 새 Canva 디자인으로 가져옵니다. 기존 8장 템플릿 자동 채우기는 아래 마스터를 사용합니다. ChatGPT의 Canva 연결과 이 스튜디오의 연결은 별개입니다.
       </p>
       {!s ? (
         <Loading lines={1} />

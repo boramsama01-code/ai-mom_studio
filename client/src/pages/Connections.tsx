@@ -25,7 +25,7 @@ export function SourceBadge({ s }: { s: Status | undefined }) {
 /** 하나의 키 입력칸 — 비밀값은 저장 후 다시 보여주지 않음 */
 export function SecretInput({ k, label, hint, placeholder, options, secret, status, value, onChange }: { k: string; label: string; hint?: string; placeholder?: string; options?: SecretField["options"]; secret?: boolean; status: Status | undefined; value: string; onChange: (v: string) => void }) {
   const qc = useQueryClient();
-  const del = useMutation({ mutationFn: () => api(`/secrets/${k}`, { method: "DELETE" }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["secrets"] }); qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] }); qc.invalidateQueries({ queryKey: ["channels"] }); } });
+  const del = useMutation({ mutationFn: () => api(`/secrets/${k}`, { method: "DELETE" }), onSuccess: () => { qc.invalidateQueries({ queryKey: ["secrets"] }); qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] }); qc.invalidateQueries({ queryKey: ["channels"] }); if (k.startsWith("NOTION_")) qc.invalidateQueries({ predicate: query => String(query.queryKey[0]).startsWith("notion-") }); } });
   const envOwned = status?.source === "environment";
   const has = status && status.source !== "none";
   return (
@@ -128,6 +128,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
       guard.setDirty(`connection-${g.id}`, false);
       qc.invalidateQueries({ queryKey: ["secrets"] });
       qc.invalidateQueries({ queryKey: ["status"] }); qc.invalidateQueries({ queryKey: ["studio"] }); qc.invalidateQueries({ queryKey: ["channels"] });
+      if (g.id === "notion") qc.invalidateQueries({ predicate: query => String(query.queryKey[0]).startsWith("notion-") });
     },
   });
   const test = useMutation({
@@ -136,6 +137,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
   });
   const last = currentTest(g, data);
   const st = (k: string) => data.statuses.find((s) => s.key === k);
+  const notionKeyMissing = g.id === "notion" && !["screen", "environment"].includes(st("NOTION_API_TOKEN")?.source ?? "none");
   useEffect(() => {
     guard.setDirty(`connection-${g.id}`, changed.length > 0, async () => { try { await save.mutateAsync(); return true; } catch { return false; } });
     return () => guard.setDirty(`connection-${g.id}`, false);
@@ -158,6 +160,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
       {(g.id === "gemini" || g.id === "openai") && <AiUsageGuide provider={g.id} setup />}
       {g.id === "openai" && <p className="connection-help">아래 API 키 칸에 붙여 넣고 <strong>키 저장 → 연결 확인</strong> 순서로 누르세요.</p>}
       {g.id === "naver" && <p className="connection-help">네이버 뉴스·웹문서·블로그 검색에는 키가 필요합니다. NAVER API HUB → Application → 인증 정보에서 발급된 두 값을 입력한 뒤 <strong>키 저장 → 연결 확인</strong>을 누르세요. 키가 없어도 학교·기관 공지는 직접 수집하고 뉴스는 공개 RSS로 보완합니다.</p>}
+      {g.id === "notion" && <p className="connection-help">콘텐츠 제작표를 이 연결에 공유한 뒤 <strong>키 저장 → 연결 확인</strong>을 누르세요. 연결 확인은 제작표를 조회하며 원고를 수정하지 않습니다. <GuardedLink href="/notion">노션 원고 연결 열기 →</GuardedLink></p>}
       {last && <div className={`notice small ${last.ok ? "ok" : "err"}`} role="status"><strong>{last.ok ? "최근 연결 확인 성공" : "연결 확인 실패"}</strong><p style={{ margin: "6px 0" }}>{last.message}</p><span className="muted">{fmtDate(last.at)}</span></div>}
       {g.fields.filter(f => !f.key.endsWith("_MODEL")).map(input)}
       {!!modelFields.length && <details className="settings-details"><summary>모델 설정 · 선택 사항</summary><div className="stack" style={{ marginTop: 12 }}>{modelFields.map(input)}</div></details>}
@@ -166,7 +169,7 @@ function GroupPanel({ g, data }: { g: SecretGroup; data: Resp }) {
           {save.isPending ? "저장 중…" : "키 저장"}
         </button>
         {g.testable && (
-          <button type="button" className="btn" onClick={() => test.mutate()} disabled={test.isPending || save.isPending || changed.length > 0} title={changed.length ? "먼저 키를 저장하세요" : undefined}>
+          <button type="button" className="btn" onClick={() => test.mutate()} disabled={test.isPending || save.isPending || changed.length > 0 || notionKeyMissing} title={changed.length || notionKeyMissing ? "먼저 키를 저장하세요" : undefined}>
             {test.isPending ? "확인 중…" : sendsMessage ? "확인 메시지 보내기" : paidTest ? "테스트 호출 (유료)" : (g.id === "openai" || g.id === "gemini") ? "연결 확인 · 생성 비용 없음" : "연결 확인"}
           </button>
         )}
@@ -187,7 +190,8 @@ const SERVICE_INFO: Record<string, { title: string; use: string; mark: string; k
   gemini: { title: "Gemini", use: "글쓰기 · 무료 등급 지원", mark: "G", keys: ["GEMINI_API_KEY"] },
   openai: { title: "OpenAI", use: "GPT 글쓰기 · 웹툰 이미지", mark: "O", keys: ["OPENAI_API_KEY"] },
   anthropic: { title: "Claude", use: "글쓰기 · 원고 다듬기", mark: "A", keys: ["ANTHROPIC_API_KEY"] },
-  canva: { title: "Canva", use: "브랜드 템플릿 · 디자인", mark: "C", keys: ["CANVA_CLIENT_ID", "CANVA_CLIENT_SECRET"] },
+  canva: { title: "Canva", use: "원고·사진 디자인 · 완성본 가져오기", mark: "C", keys: ["CANVA_CLIENT_ID", "CANVA_CLIENT_SECRET"] },
+  notion: { title: "Notion", use: "원고·사진 동기화", mark: "N", keys: ["NOTION_API_TOKEN"] },
   naver: { title: "네이버", use: "뉴스 · 웹문서 · 블로그 검색", mark: "N", keys: ["NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"] },
   telegram: { title: "텔레그램", use: "검토 알림 · 채널 전송", mark: "T", keys: ["TELEGRAM_BOT_TOKEN"] },
   cloudinary: { title: "Cloudinary", use: "게시용 이미지 주소", mark: "C", keys: ["CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET"] },
