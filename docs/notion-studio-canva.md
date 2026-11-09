@@ -26,6 +26,12 @@ One-sided manuscript changes flow to the other side. If both sides changed, neit
 
 Canva creation imports native editable text, shapes, and photos. The operator can edit the design in Canva and explicitly import the finished PNG pages. **Canva does not provide arbitrary edited text extraction in this flow.** Reconcile changed wording in Studio, then confirm the visual copy before importing the output; push the reconciled Studio manuscript to Notion separately.
 
+The linked card editor is available directly in the main `/studio/:cardId` workspace as well as `/notion?link=:id`. It replaces the generic card renderer for linked Studio cards. Select the cover, manuscript, QR, teaser or Follow page to preview it. Title/body changes produce a debounced local JPEG using the same fitted text, original photos, bottom fade, native QR and layout primitives as the PPTX builder; Canva can still change line breaks on import or after manual editing. Preview does not call a paid AI or create a Canva design. A missing A-cover photo is shown as a prominent warning.
+
+Save writes an immutable Studio revision with CAS checks. Structured Notion subtitles, footnotes, source labels, source URLs, teaser and internal notes stay in their original fields. The editor exposes the article body separately from a protected subtitle. Per-card emphasis is a Studio-only design override stored under stable source card IDs; it is used by preview and later Canva creation without rewriting Notion's emphasis column. If a Notion pull replaces a card, its orphaned design override is removed while surviving card overrides are retained. Unsaved edits are guarded and checkpointed with the existing device draft recovery. A background refresh shows a version conflict rather than replacing local input. Existing opt-in automatic text sync still applies after a save; Canva regeneration remains an explicit button.
+
+While Canva import/export is pending, the 2.5-second status poll reads Studio's saved source snapshot instead of fetching every Notion row repeatedly. A fresh source check follows the settled phase, and manual source checks remain available.
+
 No step generates paid AI text, approves publication, or publishes a post automatically. Imported material still needs editorial and source review in the existing workflow.
 
 ## Recovery and validation

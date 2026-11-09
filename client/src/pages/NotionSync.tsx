@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import type { NotionConnectionStatus, NotionDocument, NotionDocumentList } from "@shared/notionSync";
@@ -7,6 +7,8 @@ import type { NotionStudioDetail, NotionStudioList, NotionStudioLink } from "@sh
 import { api, apiBlob, ApiError, qs } from "../api";
 import { useChannel } from "../state";
 import { ErrorBox, GuardedLink, Loading } from "../ui";
+import {NotionCardEditor} from '../NotionCardEditor';
+import {studioKey} from '@shared/channelKeys';
 import "../notionSync.css";
 
 type CoverStyle = "A" | "B" | "C";
@@ -129,15 +131,22 @@ function conflictDetail(error: ApiError): NotionStudioDetail | undefined {
 
 export function NotionLinkedDocument({ id }: { id: number }) {
   const qc = useQueryClient();
+  const {allChannels}=useChannel();
   const [exportConfirmed, setExportConfirmed] = useState(false);
   const [conflict, setConflict] = useState<{ detail: NotionStudioDetail; choice: "pull" | "push" | null } | null>(null);
   const [downloadError, setDownloadError] = useState<unknown>(null);
   const [downloading, setDownloading] = useState(false);
+  const [editorDirty,setEditorDirty]=useState(false);
   const detail = useQuery({
-    queryKey: ["notion-link", id], queryFn: ({ signal }) => api<NotionStudioDetail>(`/notion/links/${id}?refresh=1`, { signal }),
+    queryKey: ["notion-link", id], queryFn: ({ signal }) => {
+      const phase=qc.getQueryData<NotionStudioDetail>(["notion-link",id])?.link.canva.phase;
+      return api<NotionStudioDetail>(`/notion/links/${id}${phase&&["importing","exporting"].includes(phase)?'':'?refresh=1'}`, { signal });
+    },
     refetchInterval: query => ["importing", "exporting"].includes(query.state.data?.link.canva.phase || "") ? 2500 : query.state.data?.link.autoSync ? 60_000 : false,
   });
   const data = detail.data;
+  const previousPhase=useRef<string|undefined>(undefined);
+  useEffect(()=>{const previous=previousPhase.current,current=data?.link.canva.phase;previousPhase.current=current;if(previous&&["importing","exporting"].includes(previous)&&current&&!["importing","exporting"].includes(current))void detail.refetch();},[data?.link.canva.phase]);
   const signature = data ? `${data.link.version}:${data.itemVersion}:${data.notion?.sourceHash ?? data.link.sourceHash}:${data.link.canva.designId ?? ""}` : "";
   useEffect(() => { setExportConfirmed(false); setConflict(current => current ? { ...current, choice: null } : null); }, [signature]);
   const update = useMutation({
@@ -168,7 +177,8 @@ export function NotionLinkedDocument({ id }: { id: number }) {
   };
   if (detail.isPending) return <section className="panel"><Loading label="연결 원고 확인 중" /></section>;
   if (!data) return <section className="panel"><ErrorBox error={detail.error || new Error("연결된 원고를 찾지 못했습니다.")} retry={() => void detail.refetch()} /></section>;
-  const busy = update.isPending || ["importing", "exporting"].includes(data.link.canva.phase);
+  const working = update.isPending || ["importing", "exporting"].includes(data.link.canva.phase);
+  const busy = working || editorDirty;
   const canvaUrl = externalUrl(data.link.canva.editUrl) ?? externalUrl(data.link.canva.viewUrl);
   const studioPages = [{ index: 1, title: data.copy.cover.title, body: data.copy.cover.subtitle }, ...data.copy.pages.map((page, index) => ({ index: index + 2, title: page.title, body: [page.subtitle, page.body, ...(page.columns?.map(column => `${column.title}\n${column.body}`) ?? [])].filter(Boolean).join("\n\n") }))];
   const notionPages = data.notion?.pages ?? data.source.pages;
@@ -177,6 +187,7 @@ export function NotionLinkedDocument({ id }: { id: number }) {
   return <section className="panel notion-link-detail stack" aria-label="연결 원고 관리">
     <header className="row between"><div><span className="studio-eyebrow">연결된 원고</span><h2>{data.link.title}</h2><p className="small muted">마지막 동기화 {dateLabel(data.link.lastSyncedAt)}</p></div><span className="badge">{data.link.status === "studio_changed" ? "스튜디오 원고 변경됨" : data.notion?.changed ? "노션 원고 변경됨" : "동기화됨"}</span></header>
     <div className="row notion-actions"><a className="btn" href={externalUrl(data.link.notionUrl)} target="_blank" rel="noreferrer">노션 원고 열기 ↗</a>{data.link.studioCardId && <GuardedLink className="btn" href={`/studio/${data.link.studioCardId}`}>스튜디오 원고 편집</GuardedLink>}<button className="btn" disabled={busy || detail.isFetching} onClick={() => void refresh()}>{detail.isFetching ? "변경 확인 중…" : "노션 변경 확인"}</button></div>
+    {allChannels.some(channel=>channel.id===data.link.channelId&&studioKey(channel.slug)==='highscoop')&&<NotionCardEditor data={data} disabled={working||!!conflict} onDirtyChange={setEditorDirty}/>}
     <div className="notice notion-auto-sync"><label className="notion-toggle"><input type="checkbox" checked={data.link.autoSync} disabled={busy} onChange={event => update.mutate({ kind: "autoSync", autoSync: event.target.checked })} /><strong>자동 동기화</strong></label><p className="small muted">원고 한쪽만 바뀌면 반대쪽에 반영합니다. 양쪽이 바뀌면 적용을 멈추고 비교를 기다립니다. 캔바 제작과 완성본 가져오기는 아래 버튼으로 진행하세요.</p>{data.link.lastCheckedAt && <p className="small muted">마지막 변경 확인 {dateLabel(data.link.lastCheckedAt)}</p>}</div>
     {detail.error && <ErrorBox error={detail.error} retry={() => void detail.refetch()} />}
     <div className="notion-comparison"><section><h3>노션 원고</h3><Manuscript label="현재 노션 원고" pages={notionPages} coverTitle={notionCoverTitle} /></section><section><h3>스튜디오 원고</h3><Manuscript label="현재 스튜디오 원고" pages={studioPages} coverTitle={data.copy.cover.title} /></section></div>

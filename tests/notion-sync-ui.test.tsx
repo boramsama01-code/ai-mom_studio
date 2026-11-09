@@ -4,20 +4,23 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NotionSyncPage } from "../client/src/pages/NotionSync";
+import {SourceStudioCard} from '../client/src/pages/SourceStudioCard';
+import {studioContentSchema} from '../shared/studio';
+import {activateDraftRecoveryScope} from '../client/src/draftRecovery';
 import { ApiError } from "../client/src/api";
 import type { NotionDocument } from "../shared/notionSync";
 import type { NotionStudioDetail, NotionStudioLink } from "../shared/notionStudio";
 
-const mocks = vi.hoisted(() => ({ api: vi.fn(), navigate: vi.fn(), selected: 3 as number | "all" }));
+const mocks = vi.hoisted(() => ({ api: vi.fn(),blob:vi.fn(),guard:{setDirty:vi.fn(),confirmLeave:vi.fn((action:()=>void)=>action())}, navigate: vi.fn(), selected: 3 as number | "all" }));
 const channels = [
   { id: 3, name: "HighScoop", slug: "highscoop", active: true },
   { id: 5, name: "다른 채널", slug: "other-channel", active: true },
   { id: 9, name: "중지한 채널", slug: "inactive-channel", active: false },
 ];
-vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api }));
+vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api,apiBlob:mocks.blob }));
 vi.mock("../client/src/state", () => ({
   useChannel: () => ({ selected: mocks.selected, current: channels.find(channel => channel.id === mocks.selected) ?? null, channels: channels.filter(channel => channel.active), allChannels: channels, select: vi.fn(), isLoading: false, error: null, refresh: vi.fn() }),
-  useDirtyGuard: () => ({ confirmLeave: (action: () => void) => action() }),
+  useDirtyGuard: () => mocks.guard,
 }));
 vi.mock("wouter", async original => ({ ...await original<object>(), useLocation: () => ["/notion", mocks.navigate], useSearch: () => window.location.search }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -67,13 +70,18 @@ let manuscript: NotionDocument, detail: NotionStudioDetail, links: NotionStudioL
 let request: (path: string, options: RequestOptions) => Promise<unknown>;
 beforeEach(() => {
   vi.clearAllMocks(); mocks.selected = 3; sessionStorage.clear(); window.history.replaceState({}, "", "/notion");
+  mocks.blob.mockResolvedValue(new Blob(['preview'],{type:'image/jpeg'}));
+  Object.defineProperty(URL,'createObjectURL',{configurable:true,value:vi.fn(()=>`blob:preview-${mocks.blob.mock.calls.length}`)});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:vi.fn()});
   manuscript = documentFixture(); detail = detailFixture(); links = [];
   request = async (path, options) => {
     if (path === "/notion/status") return { configured: true, dataSourceId: "fixture-data-source", missing: [] };
     if (path.startsWith("/notion/documents?")) return { documents: [structuredClone(manuscript)], hasMore: false };
     if (path === `/notion/documents/${pageId}`) return structuredClone(manuscript);
     if (path === "/notion/links") return { links: structuredClone(links) };
-    if (path === "/notion/links/18?refresh=1") return structuredClone(detail);
+    if (path === "/notion/links/18?refresh=1"||path === "/notion/links/18"&&options.method!=='PATCH') return structuredClone(detail);
+    if(path==='/notion/links/18/copy'&&options.method==='PATCH'){
+      detail={...detail,copy:structuredClone(options.body.copy),designEdits:structuredClone(options.body.designEdits),itemVersion:detail.itemVersion+1,link:{...detail.link,status:'studio_changed'}};return structuredClone(detail);
+    }
     if (path === "/notion/links/18" && options.method === "PATCH") {
       detail = { ...detail, link: { ...detail.link, ...options.body, version: detail.link.version + 1 } };
       return structuredClone(detail);
@@ -91,8 +99,8 @@ async function settle() { for (let i = 0; i < 3; i++) await act(async () => { if
 async function render() { await act(async () => root.render(<QueryClientProvider client={client}><NotionSyncPage /></QueryClientProvider>)); await settle(); }
 function button(name: string) { const result = [...host.querySelectorAll<HTMLButtonElement>("button")].find(node => node.textContent?.trim() === name); if (!result) throw new Error("Missing button: " + name); return result; }
 async function click(name: string) { expect(button(name).disabled).toBe(false); await act(async () => button(name).click()); await settle(); }
-function field(name: string) { const result = host.querySelector<HTMLInputElement | HTMLSelectElement>(`[aria-label="${name}"]`) ?? [...host.querySelectorAll("label")].find(label => label.textContent?.trim().startsWith(name))?.querySelector<HTMLInputElement | HTMLSelectElement>("input,select"); if (!result) throw new Error("Missing field: " + name); return result; }
-async function fill(name: string, value: string) { const node = field(name); await act(async () => { Object.getOwnPropertyDescriptor(node instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(node, value); node.dispatchEvent(new Event(node instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); await settle(); }
+function field(name: string) { const result = host.querySelector<HTMLInputElement | HTMLSelectElement|HTMLTextAreaElement>(`[aria-label="${name}"]`) ?? [...host.querySelectorAll("label")].find(label => label.textContent?.trim().startsWith(name))?.querySelector<HTMLInputElement | HTMLSelectElement|HTMLTextAreaElement>("input,select,textarea"); if (!result) throw new Error("Missing field: " + name); return result; }
+async function fill(name: string, value: string) { const node = field(name); await act(async () => { Object.getOwnPropertyDescriptor(node instanceof HTMLSelectElement ? HTMLSelectElement.prototype : node instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype, "value")!.set!.call(node, value); node.dispatchEvent(new Event(node instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); await settle(); }
 const writes = () => mocks.api.mock.calls.filter(([, options]) => options?.method && options.method !== "GET");
 async function chooseSource() { const source = host.querySelector<HTMLButtonElement>(".notion-document-list button")!; expect(source).toBeTruthy(); await act(async () => source.click()); await settle(); }
 async function chooseRadio(selector: string) { const node = host.querySelector<HTMLInputElement>(selector)!; expect(node).toBeTruthy(); await act(async () => node.click()); await settle(); }
@@ -100,6 +108,45 @@ async function renderLinked() { links = [detail.link]; window.history.replaceSta
 const detailReads = () => mocks.api.mock.calls.filter(([path]) => path === "/notion/links/18?refresh=1");
 
 describe("Notion manuscript and Canva workspace", () => {
+  it('opens the same A/photo/fade editor directly in the linked main Studio workspace without the generic renderer',async()=>{
+    const card={...studioContentSchema.parse({title:'원문 연결 카드',channel:'highscoop',format:'카드뉴스'}),id:39,version:1,sourceItemId:28,sourceReference:{channelId:3,itemId:28},notionLinkId:18,createdAt:'2026-11-09',updatedAt:'2026-11-09'};
+    await act(async()=>root.render(<QueryClientProvider client={client}><SourceStudioCard card={card}/></QueryClientProvider>));await settle();
+    expect(host.textContent).toContain('하이스쿱 카드 편집');expect(host.querySelector('[aria-label="카드 보며 수정"]')).toBeTruthy();expect(host.querySelector('.card-copy-editor')).toBeNull();
+    expect(mocks.api.mock.calls.some(([path])=>String(path).includes('/card-copy'))).toBe(false);expect(writes()).toHaveLength(0);
+  });
+  it('previews unsaved title/body/emphasis edits and saves only core copy plus Studio design overrides',async()=>{
+    vi.useFakeTimers();detail.source.pages[1].key='row-body';detail.source.pages[1].cardFields={subtitle:'노션 소제목',body:'원문 본문',footnote:'확인 각주',sourceLabel:'공식 공고'};detail.source.pages[1].emphasis='원문';
+    detail.copy.pages[0].body='노션 소제목\n\n원문 본문';detail.source.sourceReferences=Array.from({length:23},(_,i)=>({title:`기관 ${i+1}`,url:`https://ged.kedi.re.kr/notice/${i}`}));detail.source.teaser={title:'연구계획서 예고',body:'댓글로 남겨주세요.'};
+    await renderLinked();expect(host.querySelectorAll('.notion-card-strip button')).toHaveLength(10);
+    await act(async()=>host.querySelectorAll<HTMLButtonElement>('.notion-card-strip button')[1].click());await settle();
+    expect(field('카드 본문').value).toBe('원문 본문');expect(host.textContent).toContain('노션 소제목');
+    await fill('카드 제목','고친 카드 제목');await fill('카드 본문','새로 정리한 원문 본문');await fill('강조문구','정리한');
+    expect(writes()).toHaveLength(0);expect(button('캔바로 제작').disabled).toBe(true);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(500);});await settle();
+    const [path,type,options]=mocks.blob.mock.calls.at(-1)!;expect(path).toBe('/notion/links/18/preview');expect(type).toBe('image/jpeg');expect(options.body).toMatchObject({version:4,itemVersion:7,page:1,copy:{pages:[{title:'고친 카드 제목',body:'노션 소제목\n\n새로 정리한 원문 본문'}]},designEdits:{emphasisByPage:{'row-body':'정리한'}}});
+    await click('스튜디오에 저장');expect(writes()).toHaveLength(1);expect(writes()[0][0]).toBe('/notion/links/18/copy');expect(writes()[0][1].body.copy.pages).toHaveLength(1);
+    expect(detail.source.pages[1].cardFields).toMatchObject({subtitle:'노션 소제목',footnote:'확인 각주',sourceLabel:'공식 공고'});expect(detail.source.sourceReferences).toHaveLength(23);expect(detail.source.teaser.title).toBe('연구계획서 예고');expect(host.textContent).toContain('스튜디오에 저장했습니다.');
+    expect(mocks.api.mock.calls.some(([endpoint])=>String(endpoint).endsWith('/canva'))).toBe(false);
+  });
+  it('keeps dirty input when an automatic query refresh receives a newer server revision',async()=>{
+    await renderLinked();await fill('카드 제목','아직 저장하지 않은 표지');
+    const next=detailFixture({itemVersion:8,copy:{...detail.copy,cover:{title:'다른 곳에서 저장한 제목',subtitle:''}}});
+    await act(async()=>client.setQueryData(['notion-link',18],next));await settle();
+    expect(field('카드 제목').value).toBe('아직 저장하지 않은 표지');expect(host.textContent).toContain('다른 곳에서 새 버전을 저장했습니다.');expect(button('스튜디오에 저장').disabled).toBe(true);expect(writes()).toHaveLength(0);
+  });
+  it('checkpoints an incomplete title and keeps the new saved baseline when a leave dialog saves first',async()=>{
+    localStorage.clear();activateDraftRecoveryScope('notion-visual-test');client.setQueryDefaults(['me'],{gcTime:Infinity});client.setQueryData(['me'],{user:'fixture',recoveryScope:'notion-visual-test'});await renderLinked();await fill('카드 제목','');
+    expect(host.textContent).toContain('이 기기에 임시 보관됨');expect(button('스튜디오에 저장').disabled).toBe(true);
+    await fill('카드 제목','확인 후 저장한 표지');
+    mocks.guard.confirmLeave.mockImplementationOnce(async action=>{const registration=mocks.guard.setDirty.mock.calls.filter(([key,dirty])=>key==='notion-visual-18'&&dirty).at(-1)!;expect(await registration[2]()).toBe(true);action();});
+    await click('수정 취소');expect(field('카드 제목').value).toBe('확인 후 저장한 표지');expect(button('스튜디오에 저장').disabled).toBe(true);expect(writes()).toHaveLength(1);localStorage.clear();
+  });
+  it('uses cached source for repeated pending-job polls then refreshes Notion once after settling',async()=>{
+    vi.useFakeTimers();detail.link.canva={phase:'importing',jobId:'known-job'};await renderLinked();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(7500);});await settle();
+    expect(detailReads()).toHaveLength(1);expect(mocks.api.mock.calls.filter(([path])=>path==='/notion/links/18')).toHaveLength(3);
+    detail.link.canva={phase:'ready',designId:'Dknown'};await act(async()=>{await vi.advanceTimersByTimeAsync(2500);});await settle();expect(detailReads()).toHaveLength(2);expect(writes()).toHaveLength(0);
+  });
   it("shows that source QR and the next-article teaser will appear before the channel introduction", async () => {
     detail.source.sourceReferences=[{title:'공식 모집 공고',url:'https://ged.kedi.re.kr/notice/2027'}];
     detail.source.teaser={title:'3일만에 쓰는 영재교육원 연구계획서',body:'궁금한 점을 댓글로 남겨주세요.'};

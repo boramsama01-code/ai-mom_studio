@@ -1,5 +1,5 @@
 /** Isolated PostgreSQL with mocked provider boundaries. Never contacts Notion or Canva. */
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {and,eq} from 'drizzle-orm';
 import {unzipSync} from 'fflate';
 import sharp from 'sharp';
@@ -19,7 +19,7 @@ vi.mock('../server/services/notionCanva',async original=>({...await original<obj
 vi.mock('../server/services/notionClient',async original=>({...await original<object>(),patchNotionDocumentProperties:provider.notionPatch}));
 const {getDb,closeDb}=await import('../server/db');
 const {createRevision}=await import('../server/content');
-const {notionCopyHash}=await import('../server/services/notionStudio');
+const {notionCopyHash,saveNotionStudioDraft}=await import('../server/services/notionStudio');
 const {createNotionStudioCanva,exportNotionStudioCanva,pollNotionStudioCanva,downloadNotionStudioOutput}=await import('../server/services/notionStudioCanva');
 const {CanvaRestError}=await import('../server/services/canvaRest');
 const {NOTION_CANVA_OUTRO}=await import('../server/services/notionCanva');
@@ -63,6 +63,20 @@ async function completed(f:Fixture,images=pngs.slice(0,3),jobId='export_1'){
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 
 describe('Notion -> Canva coordination on isolated PostgreSQL',()=>{
+ it('keeps legacy empty-override design fingerprints valid and detects design-only edits',async()=>{
+  const f=await fixture();await ready(f);const before=await saved(f);
+  const legacyFingerprint=createHash('sha256').update(JSON.stringify({revisionId:f.revision.id,itemVersion:f.item.version,title:f.item.title,copy:f.copy,coverStyle:'B',photoOrder:[],category:'영재원'})).digest('hex');
+  await f.db.update(notionSyncLinks).set({canva:{...before.canva,sourceFingerprint:legacyFingerprint} as typeof before.canva}).where(eq(notionSyncLinks.id,f.link.id));
+  await exportNotionStudioCanva(f.db,f.link.id,await request(f),'test');expect(provider.submitExport).toHaveBeenCalledTimes(1);
+  const other=await fixture();await ready(other);const [revision]=await other.db.select().from(contentRevisions).where(eq(contentRevisions.id,other.revision.id));
+  await other.db.update(contentRevisions).set({payload:{...revision.payload,notionDesignEdits:{emphasisByPage:{h1:'디자인만 변경'}}}}).where(eq(contentRevisions.id,revision.id));
+  await expect(exportNotionStudioCanva(other.db,other.link.id,await request(other),'test')).rejects.toMatchObject({status:409,extra:{code:'canva_source_changed'}});expect(provider.submitExport).toHaveBeenCalledTimes(1);
+ });
+ it('uses saved Studio emphasis overrides in later Canva creation without changing the source emphasis',async()=>{
+  const f=await fixture();f.doc.pages[1].emphasis='원본 강조';await f.db.update(notionSyncLinks).set({sourceSnapshot:f.doc as unknown as Record<string,unknown>}).where(eq(notionSyncLinks.id,f.link.id));
+  await saveNotionStudioDraft(f.db,f.link.id,{...await request(f),copy:f.copy,designEdits:{emphasisByPage:{h1:'표지',h2:'본문'}}},'test');
+  await createNotionStudioCanva(f.db,f.link.id,await request(f),'test');expect(provider.build.mock.calls[0][0].pages).toMatchObject([{emphasis:'표지'},{emphasis:'본문'}]);expect((await saved(f)).sourceSnapshot.pages).toEqual(f.doc.pages);
+ });
  it('keeps source QR and teaser pages between the current manuscript and the brand outro in the saved output',async()=>{
   const f=await fixture(),sourceReferences=[{title:'공식 모집 공고',url:'https://ged.kedi.re.kr/notice/2027'}],teaser={title:'3일만에 쓰는 영재교육원 연구계획서',body:'궁금한 점을 댓글로 남겨주세요.'};
   f.doc.pages[0].cardFields={subtitle:'',body:f.doc.pages[0].body,footnote:'확인된 기관 사례',sourceLabel:'공식 공고'};f.doc.pages[1].infographic='application_steps';

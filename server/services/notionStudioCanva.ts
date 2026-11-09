@@ -5,13 +5,17 @@ import {zipSync} from 'fflate';
 import type {DB} from '../db';
 import {channels,notionSyncLinks,notionSyncPhotos,mediaAssets,contentItems} from '../../shared/schema';
 import type {NotionCanvaState} from '../../shared/notionStudio';
+import type {NotionDesignEdits} from '../../shared/notionStudio';
+import type {CardCopy} from '../../shared/cardCopy';
+import type {NotionDocumentPage} from '../../shared/notionSync';
 import {NOTION_SOURCE_REFERENCES_PER_PAGE,notionSourceReferencePageCount} from '../../shared/notionSync';
 import {studioKey} from '../../shared/channelKeys';
 import {notionPlainCardCopy} from '../../shared/notionStudioCopy';
 import {HttpError} from '../routes/util';
 import {audit} from '../audit';
 import {createRevision} from '../content';
-import {loadNotionStudioState,notionStudioDetail} from './notionStudio';
+import {loadNotionStudioState,notionStudioDetail,notionDesignEdits,notionDesignPageKey,validateNotionStudioDraft} from './notionStudio';
+import {rasterizeReadingSvg} from './readingCardRaster';
 import {patchNotionDocumentProperties} from './notionClient';
 import {CanvaRestError} from './canvaRest';
 import {buildNotionCanvaPptx,submitNotionCanvaImport,getNotionCanvaImportJob,submitNotionCanvaExport,getNotionCanvaExportJob,downloadNotionCanvaExport,decodeNotionCanvaPngExport,NOTION_CANVA_OUTRO,NOTION_CANVA_MAX_OUTPUT_PAGES} from './notionCanva';
@@ -24,7 +28,7 @@ function valid(s:State,r:Request){if(s.link.version!==r.version||s.item.version!
 function plainSource(s:State){try{notionPlainCardCopy(s.copy);}catch{throw new HttpError(409,'노션 연결은 일반 카드뉴스 원고용입니다. 원고 형식을 확인해 주세요.',{code:'notion_copy_format_changed'});}}
 function extras(s:State){const source=s.link.sourceSnapshot as {sourceReferences?:Array<{title:string;url:string}>;sourceCard?:{title:string;body:string;footnote?:string};teaser?:{title:string;body:string}};return {sourceReferences:source.sourceReferences,sourceCard:source.sourceCard,teaser:source.teaser};}
 function expectedOutputPages(s:State){const extra=extras(s);return s.copy.pages.length+2+notionSourceReferencePageCount(extra.sourceReferences)+(extra.teaser?1:0);}
-function fingerprint(s:State){return sha(Buffer.from(JSON.stringify({revisionId:s.revision.id,itemVersion:s.item.version,title:s.item.title,copy:s.copy,coverStyle:s.link.coverStyle,photoOrder:s.link.photoOrder,category:s.link.sourceSnapshot.category??null,...extras(s)})));}
+function fingerprint(s:State){const designEdits=notionDesignEdits(s.revision.payload);return sha(Buffer.from(JSON.stringify({revisionId:s.revision.id,itemVersion:s.item.version,title:s.item.title,copy:s.copy,coverStyle:s.link.coverStyle,photoOrder:s.link.photoOrder,category:s.link.sourceSnapshot.category??null,...extras(s),...(Object.keys(designEdits.emphasisByPage).length?{designEdits}:{})})));}
 function currentSource(s:State,v:CanvaSnapshot){return v.sourceVersion===s.item.version&&v.sourceRevisionId===s.revision.id&&(!v.sourceFingerprint||v.sourceFingerprint===fingerprint(s));}
 const sourceChanged=()=>new HttpError(409,'Canva 제작 후 원고나 표지 설정이 바뀌었습니다. 최신 원고로 다시 제작한 뒤 결과를 가져오세요.',{code:'canva_source_changed'});
 async function begin(db:DB,id:number,r:Request,phase:'importing'|'exporting',expected:State,pageCount:number){
@@ -71,21 +75,42 @@ async function writeReadyLink(db:DB,s:State,v:CanvaSnapshot,editUrl:string){
  catch{await db.update(notionSyncLinks).set({lastError:'Canva 디자인은 만들었지만 노션 결과물 링크 기록은 완료하지 못했습니다. 노션 반영으로 다시 연결하세요.'}).where(and(eq(notionSyncLinks.id,s.link.id),eq(notionSyncLinks.operationToken,token)));}
  finally{await db.update(notionSyncLinks).set({operationToken:null,operationUntil:null}).where(and(eq(notionSyncLinks.id,s.link.id),eq(notionSyncLinks.operationToken,token)));}
 }
-export async function createNotionStudioCanva(db:DB,id:number,r:Request,actor:string){
- const before=await loadNotionStudioState(db,id);valid(before,r);plainSource(before);
+async function prepareNotionStudioDeck(db:DB,before:State,copy:CardCopy=before.copy,designEdits:NotionDesignEdits=notionDesignEdits(before.revision.payload),previewPage?:number){
+ const id=before.link.id;
  const [channel]=await db.select().from(channels).where(eq(channels.id,before.link.channelId));
  if(!channel||studioKey(channel.slug)!=='highscoop')throw new HttpError(422,'이번 A·B·C 표지는 하이스쿱용입니다. 하이스쿱 채널의 원고를 선택해 주세요.');
  const all=before.link.photoOrder.length?await db.select().from(notionSyncPhotos).where(and(eq(notionSyncPhotos.linkId,id),inArray(notionSyncPhotos.id,before.link.photoOrder))):[];
- const ordered=before.link.photoOrder.map(pid=>all.find(p=>p.id===pid)).filter((p):p is NonNullable<typeof p>=>!!p).slice(0,before.copy.pages.length+1);
+ const ordered=before.link.photoOrder.map(pid=>all.find(p=>p.id===pid)).filter((p):p is NonNullable<typeof p>=>!!p).slice(0,copy.pages.length+1);
  const photos=[];
  for(const p of ordered){const bytes=await sharp(p.bytes,{limitInputPixels:50_000_000}).rotate().resize({width:2000,height:2000,fit:'inside',withoutEnlargement:true}).png().toBuffer();photos.push({id:String(p.id),name:p.name,bytes,mimeType:'image/png'});}
  const source=before.link.sourceSnapshot as {category?:string};
- const sourcePages=(before.link.sourceSnapshot as unknown as {pages?:Array<{cardFields?:{footnote:string;sourceLabel:string};infographic?:'application_steps';emphasis?:string}>} ).pages??[];
- const pages=[{title:before.copy.cover.title,body:before.copy.cover.subtitle},...before.copy.pages.map(p=>({title:p.title,body:[p.subtitle,p.body].filter(Boolean).join('\n\n')}))].map((p,i)=>({...p,...(ordered[i]?{imageId:String(ordered[i].id)}:{}),...(sourcePages[i]?.cardFields?{footnote:sourcePages[i].cardFields!.footnote,sourceLabel:sourcePages[i].cardFields!.sourceLabel}:{}),...(sourcePages[i]?.infographic?{infographic:sourcePages[i].infographic}:{}),...(sourcePages[i]?.emphasis?{emphasis:sourcePages[i].emphasis}:{})}));
+ const sourcePages=(before.link.sourceSnapshot as unknown as {pages?:NotionDocumentPage[]} ).pages??[];
+ const pages=[{title:copy.cover.title,body:copy.cover.subtitle},...copy.pages.map(p=>({title:p.title,body:[p.subtitle,p.body].filter(Boolean).join('\n\n')}))].map((page,i)=>{
+  const sourcePage=sourcePages[i],key=sourcePage?notionDesignPageKey(sourcePage,i):`page:${i+1}`,emphasis=designEdits.emphasisByPage[key]??sourcePage?.emphasis;
+  return {...page,...(ordered[i]?{imageId:String(ordered[i].id)}:{}),...(sourcePage?.cardFields?{footnote:sourcePage.cardFields.footnote,sourceLabel:sourcePage.cardFields.sourceLabel}:{}),...(sourcePage?.infographic?{infographic:sourcePage.infographic}:{}),...(emphasis!==undefined?{emphasis}:{})};
+ });
  // The builder validates fit before a durable reservation or external POST is made.
- const deck=await buildNotionCanvaPptx({title:before.item.title,coverStyle:before.link.coverStyle as 'A'|'B'|'C',category:source.category||undefined,pages,...extras(before)},photos);
+ const deck=await buildNotionCanvaPptx({title:before.item.title,coverStyle:before.link.coverStyle as 'A'|'B'|'C',category:source.category||undefined,pages,...extras(before)},photos,previewPage===undefined?{}:{previewPage});
  const unusedPhotos=before.link.photoOrder.length-ordered.length;
  const warnings=[...deck.warnings,...(unusedPhotos>0?[`사진 ${unusedPhotos}개는 원고 페이지 수에 맞춰 이번 디자인에 넣지 않았습니다. Studio 원본은 그대로 보존했습니다.`]:[])];
+ return {...deck,warnings};
+}
+/** The same layout primitives as PPTX, rendered locally without a Canva/AI request. */
+export async function previewNotionStudioCard(db:DB,id:number,input:Request&{copy:CardCopy;designEdits:NotionDesignEdits;page:number},cancelled=()=>false){
+ const before=await loadNotionStudioState(db,id);valid(before,input);
+ const copy=validateNotionStudioDraft(before,input.copy,input.designEdits);
+ if(input.page<0||input.page>=expectedOutputPages(before))throw new HttpError(422,'미리볼 카드 번호를 확인해 주세요.');
+ return rasterizeReadingSvg(async()=>{
+  if(cancelled())throw new HttpError(499,'미리보기 요청이 취소되었습니다.');
+  const deck=await prepareNotionStudioDeck(db,before,copy,input.designEdits,input.page);
+  if(!deck.previewSvg)throw new HttpError(502,'카드 미리보기를 만들지 못했습니다. 원고는 유지했습니다.');
+  return deck.previewSvg;
+ });
+}
+export async function createNotionStudioCanva(db:DB,id:number,r:Request,actor:string){
+ const before=await loadNotionStudioState(db,id);valid(before,r);plainSource(before);
+ // The builder validates fit before a durable reservation or external POST is made.
+ const deck=await prepareNotionStudioDeck(db,before),warnings=deck.warnings;
  const s=await begin(db,id,r,'importing',before,deck.pageCount);let accepted:CanvaSnapshot|undefined;
  try{const job=await submitNotionCanvaImport(db,{title:before.item.title,bytes:deck.bytes});accepted={...s.canva,jobId:job.id,phase:job.status==='failed'?'failed':'importing',error:job.status==='failed'?'Canva 디자인 가져오기를 완료하지 못했습니다.':warnings.length?warnings.join(' '):null};
   await finishSubmit(db,id,s.token,accepted);await audit(db,{actor,action:'notion_canva_import',entity:'content_item',entityId:s.item.id,channelId:s.link.channelId,detail:{jobId:job.id,pages:deck.pageCount}});
