@@ -226,6 +226,24 @@ describe('native editable Notion manuscript PPTX',()=>{
     const onlyTeaser=document(2);onlyTeaser.teaser=input.teaser;expect((await buildNotionCanvaPptx(onlyTeaser)).pageCount).toBe(4);
     const legacy=document(2);legacy.sourceReferences=[];expect((await buildNotionCanvaPptx(legacy)).pageCount).toBe(3);
   });
+  it('keeps 23 direct institutional QRs in order across six safe source pages before teaser and Follow',async()=>{
+    const input=document(5),references=Array.from({length:23},(_,i)=>({title:`기관 ${i+1} 공식 모집 공고`,url:`https://ged.kedi.re.kr/inno/slctNotiInnoPop.do?stndYear=2027&seq=${26000+i}`}));
+    input.sourceReferences=references;input.sourceCard={title:'기관별 원문 공고',body:'기관명을 확인하고 해당 QR을 스캔하세요.',footnote:'2026.11.09 기준 · 변경 공고 우선'};
+    input.teaser={title:'3일 만에 쓰는 연구계획서',body:'궁금한 점을 댓글로 남겨주세요.'};
+    const result=await buildNotionCanvaPptx(input),files=unzipSync(result.bytes),decoded:string[]=[];expect(result).toMatchObject({sourcePageCount:5,pageCount:13});
+    for(let group=0;group<6;group++){
+      const source=strFromU8(files[`ppt/slides/slide${6+group}.xml`]),chunk=references.slice(group*4,group*4+4);
+      expect([...source.matchAll(/name="source-qr-\d+-background"/g)]).toHaveLength(chunk.length);
+      expect(nativePlain(nativeShape(source,'sources-heading').xml)).toBe(input.sourceCard.title.replaceAll(/\s/g,''));
+      expect(nativePlain(nativeShape(source,'sources-range').xml)).toBe(`원문${String(group*4+1).padStart(2,'0')}–${String(group*4+chunk.length).padStart(2,'0')}/23`);
+      for(const [i,reference]of chunk.entries()){
+        const number=group*4+i+1;expect(nativePlain(nativeShape(source,`source-${number}-title`).xml)).toBe(reference.title.replaceAll(/\s/g,''));decoded.push(decodedNativeQr(source,number).data);
+      }
+      const last=group*4+chunk.length,qrBounds=nativeShape(source,`source-qr-${last}-background`),footer=nativeShape(source,'sources-footer');expect(qrBounds.y+qrBounds.h).toBeLessThan(footer.y);
+    }
+    expect(decoded).toEqual(references.map(ref=>ref.url));expect(new Set(decoded).size).toBe(23);
+    expect(strFromU8(files['ppt/slides/slide12.xml'])).toContain(NOTION_CANVA_TEASER_COMMENT);expect(strFromU8(files['ppt/slides/slide13.xml'])).toContain(NOTION_CANVA_OUTRO.handle);
+  });
   it('keeps the original QR card title, description and footnote alongside one or two scannable official QRs',async()=>{
     const sourceCard={title:'원문에서 마지막으로 확인하세요',body:'GED → 선발공고 → 2027학년도 → 기관 검색\n\nQR로 GED 모집공고를 열어보세요.\n기관명·지원 학년·서류·시험·정정 공고를 확인하세요.\n기관별 원문 QR과 초등·중등 비교표는 노션 전국 안내에 모았습니다.',footnote:'2026.11.09 기준 · 2027학년도 · 확인된 기관 사례 · 변경 공고 우선'};
     for(const count of [1,2]){
@@ -247,9 +265,11 @@ describe('native editable Notion manuscript PPTX',()=>{
     for(const url of ['http://www.sen.go.kr/','javascript:alert(1)','https://user:password@ged.kedi.re.kr/','https://127.0.0.1/','https://localhost/','https://ged.kedi.re.kr:8443/','https://www.sen.go.kr/a\u0000b']){
       const input=document(2);input.sourceReferences=[{title:'공식 안내',url}];await expect(buildNotionCanvaPptx(input)).rejects.toMatchObject({code:'invalid_request'});
     }
-    const excess=document(2);excess.sourceReferences=Array.from({length:5},()=>({title:'공식 안내',url:officialUrls[0]}));await expect(buildNotionCanvaPptx(excess)).rejects.toMatchObject({code:'invalid_request'});
-    const dense=document(2);dense.sourceReferences=Array.from({length:4},()=>({title:'공식 안내',url:longUrlPrefix+'a'.repeat(1100)}));await expect(buildNotionCanvaPptx(dense)).rejects.toThrow('QR을 충분히 크게');
-    const longTitle=document(2);longTitle.sourceReferences=Array.from({length:4},()=>({title:'공식원문제목'.repeat(20),url:officialUrls[0]}));await expect(buildNotionCanvaPptx(longTitle)).rejects.toThrow('원고를 자르지 않았습니다');
+    const excess=document(2);excess.sourceReferences=Array.from({length:25},(_,i)=>({title:'공식 안내',url:`https://ged.kedi.re.kr/notice/${i}`}));await expect(buildNotionCanvaPptx(excess)).rejects.toMatchObject({code:'invalid_request'});
+    const duplicate=document(2);duplicate.sourceReferences=[{title:'공식 안내',url:officialUrls[0]},{title:'다른 이름으로 중복',url:officialUrls[0]}];await expect(buildNotionCanvaPptx(duplicate)).rejects.toMatchObject({code:'invalid_request'});
+    const overflowing=document(10);overflowing.sourceReferences=Array.from({length:5},(_,i)=>({title:'공식 안내',url:`https://ged.kedi.re.kr/notice/${i}`}));overflowing.teaser={title:'다음 편',body:'다음 편을 확인하세요.'};await expect(buildNotionCanvaPptx(overflowing)).rejects.toThrow('13장 이내');
+    const dense=document(2);dense.sourceReferences=Array.from({length:4},(_,i)=>({title:'공식 안내',url:longUrlPrefix+'a'.repeat(1100)+i}));await expect(buildNotionCanvaPptx(dense)).rejects.toThrow('QR을 충분히 크게');
+    const longTitle=document(2);longTitle.sourceReferences=Array.from({length:4},(_,i)=>({title:'공식원문제목'.repeat(20),url:officialUrls[i%3]+i}));await expect(buildNotionCanvaPptx(longTitle)).rejects.toThrow('원고를 자르지 않았습니다');
   });
 });
 

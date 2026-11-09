@@ -50,6 +50,16 @@ describe('current Notion card table',()=>{
   expect((await f.client.fetchNotionDocument(id(1))).sourceHash).toBe(base.sourceHash);
   f.rows[2].properties['QR대상URL']=text('https://ged.kedi.re.kr/notice/new');expect((await f.client.fetchNotionDocument(id(1))).sourceHash).not.toBe(base.sourceHash);
  });
+ it('preserves all 23 institutional URL and label pairs in one source row and fingerprints the last URL',async()=>{
+  const f=setup(),urls=Array.from({length:23},(_,i)=>`https://ged.kedi.re.kr/inno/slctNotiInnoPop.do?stndYear=2027&seq=${26000+i}`),labels=urls.map((_,i)=>`기관 ${i+1} 공식 공고`);
+  f.rows[2].properties['QR대상URL']=text(urls.join('\n'));f.rows[2].properties['출처표시']=text(labels.join('\n'));
+  const d=await f.client.fetchNotionDocument(id(1));expect(notionDocumentSchema.parse(d)).toEqual(d);expect(d.sourceReferences).toEqual(urls.map((url,i)=>({title:labels[i],url})));
+  urls[22]+='&revision=2';f.rows[2].properties['QR대상URL']=text(urls.join('\n'));expect((await f.client.fetchNotionDocument(id(1))).sourceHash).not.toBe(d.sourceHash);
+ });
+ it.each(['duplicate','over-limit'])('rejects invalid multi-page QR source rows: %s',async problem=>{
+  const f=setup(),urls=problem==='duplicate'?['https://ged.kedi.re.kr/one','https://ged.kedi.re.kr/one']:Array.from({length:25},(_,i)=>`https://ged.kedi.re.kr/notice/${i}`);
+  f.rows[2].properties['QR대상URL']=text(urls.join('\n'));await expect(f.client.fetchNotionDocument(id(1))).rejects.toMatchObject({code:'NOTION_QR_SOURCE_INVALID'});
+ });
  it('uses an explicit per-card infographic marker while preserving the exact article text',async()=>{
   const f=setup(),before=await f.client.fetchNotionDocument(id(1));f.rows[1].properties['확인메모']=text('기존 검토 기록\n도식: 접수 단계');
   const after=await f.client.fetchNotionDocument(id(1));expect(after.pages[1].infographic).toBe('application_steps');expect(after.pages[1].body).toBe(before.pages[1].body);expect(after.sourceHash).not.toBe(before.sourceHash);

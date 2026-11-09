@@ -17,6 +17,7 @@ import { accessToken, CANVA_API } from './canva';
 import { CanvaRestError, type CanvaRestOptions, type CanvaRestJob } from './canvaRest';
 import { loadReadingFont } from './readingCardFonts';
 import { safeFetch } from './safeFetch';
+import { NOTION_SOURCE_REFERENCES_MAX, NOTION_SOURCE_REFERENCES_PER_PAGE, notionSourceReferencePageCount } from '../../shared/notionSync';
 
 export const NOTION_CANVA_GEOMETRY = { width: 1080, height: 1350, safe: { x: 96, y: 207, width: 888, height: 936 } } as const;
 export const NOTION_CANVA_TEXT_SYNC = 'manual-confirmation-required' as const;
@@ -55,7 +56,7 @@ const sourceUrl = z.string().trim().min(1).max(2048).refine(value=>{
 const sourceReferenceSchema=z.object({title:copy.trim().min(1).max(160),url:sourceUrl}).strict();
 const sourceCardSchema=z.object({title:copy.trim().min(1).max(300),body:copy.max(1200),footnote:copy.max(1000).optional()}).strict();
 const teaserSchema=z.object({title:copy.trim().min(1).max(200),body:copy.trim().min(1).max(500)}).strict();
-const documentSchema = z.object({ title: copy.trim().min(1).max(255), coverStyle: z.enum(['A','B','C']), category: copy.trim().max(24).optional(), categoryColor: z.string().regex(/^#[0-9a-f]{6}$/i).optional(), pages: z.array(pageSchema).min(2).max(10), sourceReferences:z.array(sourceReferenceSchema).max(4).optional(),sourceCard:sourceCardSchema.optional(),teaser:teaserSchema.optional() }).strict();
+const documentSchema = z.object({ title: copy.trim().min(1).max(255), coverStyle: z.enum(['A','B','C']), category: copy.trim().max(24).optional(), categoryColor: z.string().regex(/^#[0-9a-f]{6}$/i).optional(), pages: z.array(pageSchema).min(2).max(10), sourceReferences:z.array(sourceReferenceSchema).max(NOTION_SOURCE_REFERENCES_MAX).refine(refs=>new Set(refs.map(ref=>ref.url)).size===refs.length).optional(),sourceCard:sourceCardSchema.optional(),teaser:teaserSchema.optional() }).strict();
 export type NotionCanvaDocument = z.infer<typeof documentSchema>;
 export type NotionCanvaSourceReference = z.infer<typeof sourceReferenceSchema>;
 export type NotionCanvaPhoto = { id: string; name?: string; bytes: Buffer; mimeType: string };
@@ -320,6 +321,8 @@ async function readMedia(bytes:Buffer,file:string):Promise<Media> {
  */
 export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[]):Promise<NotionCanvaPptx> {
   const document=parse(documentSchema,value,true);
+  const references=document.sourceReferences??[],referencePageCount=notionSourceReferencePageCount(references);
+  if(document.pages.length+referencePageCount+(document.teaser?1:0)+1>NOTION_CANVA_MAX_OUTPUT_PAGES)invalid('원고·기관별 원문 QR·예고·채널 소개를 합쳐 13장 이내로 나눠 주세요. 원문 주소를 누락하지 않았습니다.');
   if(!Array.isArray(photos)||photos.length>10||new Set(photos.map(p=>p.id)).size!==photos.length||photos.some(p=>!idSchema.safeParse(p.id).success||!Buffer.isBuffer(p.bytes)||!p.bytes.length||p.bytes.length>MAX_PHOTO_BYTES||!['image/png','image/jpeg','image/webp','image/gif','image/avif','image/heif','image/heic'].includes(p.mimeType))||photos.reduce((n,p)=>n+p.bytes.length,0)>MAX_PHOTO_TOTAL_BYTES)invalid('사진은 서로 다른 ID의 단일 이미지 최대 10개, 개별 20MB·전체 60MB 이하여야 합니다.');
   const warnings:string[]=[];
   const media=new Map<string,Media>();
@@ -346,11 +349,10 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   const put=(name:string,contents:string)=>{files[name]=strToU8(contents);};
   allMedia.forEach(item=>{files[`ppt/media/${fileFor(item)}`]=item.bytes;});
   const accent=document.categoryColor??NOTION_CANVA_CATEGORY_COLORS[document.category??'']??RED;
-  const references=document.sourceReferences??[];
   if(document.sourceCard&&!references.length)invalid('원문 확인 문구를 보존하려면 최소 한 개의 공식 원문 주소가 필요합니다.');
   const referencesIndex=references.length?document.pages.length:-1;
-  const teaserIndex=document.teaser?document.pages.length+(references.length?1:0):-1;
-  const renderedPages:NotionCanvaDocument['pages']=[...document.pages,...(references.length?[{title:NOTION_CANVA_SOURCE_TITLE}]:[]),...(document.teaser?[{title:document.teaser.title,body:document.teaser.body}]:[]),{title:NOTION_CANVA_OUTRO.title}];
+  const teaserIndex=document.teaser?document.pages.length+referencePageCount:-1;
+  const renderedPages:NotionCanvaDocument['pages']=[...document.pages,...Array.from({length:referencePageCount},()=>({title:NOTION_CANVA_SOURCE_TITLE})),...(document.teaser?[{title:document.teaser.title,body:document.teaser.body}]:[]),{title:NOTION_CANVA_OUTRO.title}];
   const followIndex=renderedPages.length-1;
   for(const [index,page] of renderedPages.entries()) {
     let nextId=2;const shapes:string[]=[];let relationships=rel('rIdLayout','slideLayout','../slideLayouts/slideLayout1.xml');let imageIndex=0;
@@ -404,40 +406,44 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       text('outro-introduction',NOTION_CANVA_OUTRO.introduction,96,818,888,110,36,30,INK,false,undefined,'ctr');
       rect('outro-red-pill',108,1010,864,78,RED,false,true);
       text('outro-action',NOTION_CANVA_OUTRO.action,132,1027,816,44,28,24,'#FFFFFF',true,undefined,'ctr');
-    }else if(index===referencesIndex){
+    }else if(referencesIndex>=0&&index>=referencesIndex&&index<referencesIndex+referencePageCount){
+      const referenceOffset=(index-referencesIndex)*NOTION_SOURCE_REFERENCES_PER_PAGE;
+      const pageReferences=references.slice(referenceOffset,referenceOffset+NOTION_SOURCE_REFERENCES_PER_PAGE);
       const sourceCard=document.sourceCard;
       if(sourceCard){
-        const compact=references.length>2;
+        const compact=pageReferences.length>2;
         text('sources-heading',sourceCard.title,96,207,888,compact?64:100,48,compact?30:36,RED,true);
         text('sources-body',sourceCard.body,96,compact?285:325,888,compact?75:190,compact?24:28,compact?18:22,INK);
       }else{
         text('sources-heading',NOTION_CANVA_SOURCE_TITLE,96,207,888,64,48,40,RED,true);
         text('sources-guide',NOTION_CANVA_SOURCE_GUIDE,96,280,888,34,24,22,INK);
       }
-      for(const [i,reference]of references.entries()){
-        if(sourceCard&&references.length<=2){
-          const single=references.length===1,left=single?96:96+i*468;
-          text(`source-${i+1}-title`,reference.title,left,535,single?888:420,64,30,22,INK,true,undefined,'ctr');
-          qr(i+1,reference.url,single?350:left+20,605,380);
+      for(const [i,reference]of pageReferences.entries()){
+        const number=referenceOffset+i+1;
+        if(sourceCard&&pageReferences.length<=2){
+          const single=pageReferences.length===1,left=single?96:96+i*468;
+          text(`source-${number}-title`,reference.title,left,535,single?888:420,64,30,22,INK,true,undefined,'ctr');
+          qr(number,reference.url,single?350:left+20,605,380);
         }else if(sourceCard){
-          const left=references.length===3&&i===2?330:96+(i%2)*468,top=365+Math.floor(i/2)*340;
-          text(`source-${i+1}-title`,reference.title,left,top,420,60,24,18,INK,true,undefined,'ctr');
-          qr(i+1,reference.url,left+85,top+68,250);
-        }else if(references.length===1){
-          text('source-1-title',reference.title,96,365,888,120,40,26,INK,true,undefined,'ctr');
-          qr(1,reference.url,300,515,480);
-        }else if(references.length===2){
+          const left=pageReferences.length===3&&i===2?330:96+(i%2)*468,top=365+Math.floor(i/2)*340;
+          text(`source-${number}-title`,reference.title,left,top,420,60,24,18,INK,true,undefined,'ctr');
+          qr(number,reference.url,left+85,top+68,250);
+        }else if(pageReferences.length===1){
+          text(`source-${number}-title`,reference.title,96,365,888,120,40,26,INK,true,undefined,'ctr');
+          qr(number,reference.url,300,515,480);
+        }else if(pageReferences.length===2){
           const left=96+i*468;
-          text(`source-${i+1}-title`,reference.title,left,365,420,150,32,22,INK,true,undefined,'ctr');
-          qr(i+1,reference.url,left+10,535,400);
+          text(`source-${number}-title`,reference.title,left,365,420,150,32,22,INK,true,undefined,'ctr');
+          qr(number,reference.url,left+10,535,400);
         }else{
-          const left=references.length===3&&i===2?330:96+(i%2)*468,top=320+Math.floor(i/2)*380;
-          text(`source-${i+1}-title`,reference.title,left,top,420,78,26,20,INK,true,undefined,'ctr');
-          qr(i+1,reference.url,left+64,top+84,292);
+          const left=pageReferences.length===3&&i===2?330:96+(i%2)*468,top=320+Math.floor(i/2)*380;
+          text(`source-${number}-title`,reference.title,left,top,420,78,26,20,INK,true,undefined,'ctr');
+          qr(number,reference.url,left+64,top+84,292);
         }
       }
-      if(sourceCard)text('sources-footer',sourceCard.footnote??'',96,references.length>2?1040:1005,888,references.length>2?38:64,20,16,'#555555');
+      if(sourceCard)text('sources-footer',sourceCard.footnote??'',96,pageReferences.length>2?1040:1005,888,pageReferences.length>2?38:64,20,16,'#555555');
       image(logo,96,1091,150,50,'contain');
+      if(referencePageCount>1)text('sources-range',`원문 ${String(referenceOffset+1).padStart(2,'0')}–${String(referenceOffset+pageReferences.length).padStart(2,'0')} / ${references.length}`,330,1101,450,40,20,18,'#555555');
       text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,840,1101,144,40,22,20,'#555555');
     }else if(index===teaserIndex){
       const teaserFit=fit(document.teaser!.body,888,360,36,24,false,'teaser-body');
