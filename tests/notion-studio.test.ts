@@ -1,6 +1,7 @@
 import {beforeAll,beforeEach,afterAll,describe,it,expect,vi} from 'vitest';
 import request from 'supertest';
 import sharp from 'sharp';
+import pg from 'pg';
 import {eq} from 'drizzle-orm';
 import {setTestEnv,resetDb,login} from './helpers';
 import type {NotionDocument} from '../shared/notionSync';
@@ -142,6 +143,26 @@ describe('Notion ↔ Studio durable integration',()=>{
   doc.sourceHash='b'.repeat(64);doc.photos=[{...doc.photos[0],key:'replacement',name:'읽지 못한 새 표지.png'}];api.photo.mockRejectedValue(new Error('replacement download failed'));
   const current=await service.notionStudioDetail(db,a.link.id);await expect(service.pushNotionStudio(db,a.link.id,{version:current.link.version,itemVersion:current.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:true},'test')).rejects.toThrow('replacement download failed');
   expect(api.update).not.toHaveBeenCalled();const [after]=await db.select().from(schemas.notionSyncLinks);expect(after.sourceHash).toBe(before.sourceHash);expect(after.sourceSnapshot).toEqual(before.sourceSnapshot);expect(after.photoOrder).toEqual(before.photoOrder);expect(after.operationToken).toBeNull();expect(await db.select().from(schemas.notionSyncPhotos)).toHaveLength(1);expect((await service.notionStudioDetail(db,a.link.id)).copy.pages[0].body).toBe('보존할 Studio 수정');
+ });
+ it('checks retained photo capacity before a Notion write without counting an already stored image twice',async()=>{
+  const a=await imported(),service=await import('../server/services/notionStudio'),[before]=await db.select().from(schemas.notionSyncLinks),[oldPhoto]=await db.select().from(schemas.notionSyncPhotos);await edit(a.link.itemId,'용량 확인 전 보존할 문구');
+  doc.sourceHash='b'.repeat(64);doc.photos=[{...doc.photos[0],key:'replacement-cover',name:'용량 초과 표지.png',url:doc.photos[0].url.replace('photo.png','replacement.png')}];
+  const replacement=await sharp({create:{width:24,height:36,channels:3,background:'#cc3344'}}).png().toBuffer();api.photo.mockResolvedValue({buffer:replacement,mimeType:'image/png'});
+  // Substitute only the aggregate byte count, keeping transactions, locks and
+  // persisted photos real. This tests the 200MB boundary without a 200MB blob.
+  let retainedBytes=200*1024*1024-replacement.length+1;const query=pg.Client.prototype.query;
+  const querySpy=vi.spyOn(pg.Client.prototype,'query').mockImplementation(function(this:pg.Client,...args:Parameters<typeof query>){
+   const config=args[0] as unknown as {text?:string;rowMode?:string};
+   if(config.text?.includes('sum(octet_length(')&&config.text.includes('notion_sync_photos'))return Promise.resolve({rows:config.rowMode==='array'?[[String(retainedBytes)]]:[{size:String(retainedBytes)}]});
+   return (query as Function).apply(this,args);
+  } as typeof query);
+  try{
+   const current=await service.notionStudioDetail(db,a.link.id),input={version:current.link.version,itemVersion:current.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:true};
+   await expect(service.pushNotionStudio(db,a.link.id,input,'test')).rejects.toMatchObject({status:413});expect(api.update).not.toHaveBeenCalled();
+   const [after]=await db.select().from(schemas.notionSyncLinks);expect(after.sourceHash).toBe(before.sourceHash);expect(after.sourceSnapshot).toEqual(before.sourceSnapshot);expect(after.photoOrder).toEqual(before.photoOrder);expect(after.operationToken).toBeNull();expect(await db.select().from(schemas.notionSyncPhotos)).toHaveLength(1);
+   retainedBytes=200*1024*1024;api.photo.mockResolvedValue({buffer:oldPhoto.bytes,mimeType:'image/png'});
+   const pushed=await service.pushNotionStudio(db,a.link.id,input,'test');expect(pushed.link.status).toBe('synced');expect(pushed.photos.map(p=>p.id)).toEqual(before.photoOrder);expect(await db.select().from(schemas.notionSyncPhotos)).toHaveLength(1);expect(doc.pages[1].body).toBe('용량 확인 전 보존할 문구');
+  }finally{querySpy.mockRestore();}
  });
  it.each(['key','path'])('does not acknowledge a different image %s changed during Notion text writeback',async(change)=>{
   const a=await imported(),service=await import('../server/services/notionStudio'),[before]=await db.select().from(schemas.notionSyncLinks);await edit(a.link.itemId,'반영할 Studio 문구');doc.sourceHash='b'.repeat(64);doc.photos=[{...doc.photos[0],key:'prepared-replacement',name:'준비한 사진.png'}];

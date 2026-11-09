@@ -64,6 +64,18 @@ async function preparePhotos(doc:NotionDocument):Promise<PreparedPhoto[]>{
  }
  return prepared;
 }
+async function assertPhotoCapacity(tx:DB,linkId:number,prepared:PreparedPhoto[]){
+ if(!prepared.length)return;
+ const usage=await tx.select({size:sql<number>`coalesce(sum(octet_length(${notionSyncPhotos.bytes})),0)::bigint`}).from(notionSyncPhotos).where(eq(notionSyncPhotos.linkId,linkId));
+ let size=Number(usage[0]?.size??0);
+ const existing=await tx.select({sha256:notionSyncPhotos.sha256}).from(notionSyncPhotos).where(and(eq(notionSyncPhotos.linkId,linkId),inArray(notionSyncPhotos.sha256,[...new Set(prepared.map(p=>p.sha256))])));
+ const known=new Set(existing.map(p=>p.sha256));
+ for(const p of prepared){
+  if(known.has(p.sha256))continue;
+  known.add(p.sha256);size+=p.bytes.length;
+  if(size>200*1024*1024)throw new HttpError(413,'이 원고의 사진 보관 한도를 넘었습니다. 새 콘텐츠로 나누어 주세요.');
+ }
+}
 async function storePhotos(tx:DB,linkId:number,prepared:PreparedPhoto[]){
  const ids:number[]=[];
  const usage=await tx.select({size:sql<number>`coalesce(sum(octet_length(${notionSyncPhotos.bytes})),0)::bigint`}).from(notionSyncPhotos).where(eq(notionSyncPhotos.linkId,linkId));let size=Number(usage[0]?.size??0);
@@ -138,6 +150,8 @@ export async function pushNotionStudio(db:DB,id:number,input:SyncRequest,actor:s
  const token=crypto.randomUUID();
  await db.transaction(async raw=>{const tx=raw as unknown as DB;await tx.select().from(contentItems).where(eq(contentItems.id,initial.item.id)).for('update');await tx.select().from(notionSyncLinks).where(eq(notionSyncLinks.id,id)).for('update');const current=await state(tx,id);assertVersion(current,input,initial.revision.id);
   if(current.link.operationToken&&current.link.operationUntil&&current.link.operationUntil>new Date())throw new HttpError(409,'동기화 작업이 이미 진행 중입니다.');
+  // Reject a full archive before changing Notion; storePhotos checks again at commit.
+  if(prepared!==undefined)await assertPhotoCapacity(tx,id,prepared);
   await tx.update(notionSyncLinks).set({operationToken:token,operationUntil:new Date(Date.now()+120_000)}).where(eq(notionSyncLinks.id,id));
  });
  try{
