@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { expect, it } from "vitest";
-import { FINAL_STUDIO_ASSETS, FINAL_POSE_VERSION, finalPose } from "../shared/studioFinalAssets";
+import { FINAL_STUDIO_ASSETS, FINAL_POSE_VERSION, PREVIOUS_POSE_VERSION, finalPose } from "../shared/studioFinalAssets";
 import { studioFinalAsset } from "../server/services/studioFinalAssets";
 import { studioPanelReferences, studioPoseReference } from "../server/services/studioCharacters";
 import { studioContentSchema } from "../shared/studio";
@@ -18,7 +18,7 @@ it("registers all 449 original RGBA PNGs byte-for-byte, including all 160 comic 
     expect(Array.from({ length: 100 }, (_, i) => finalPose(character, i + 1)).filter(a => a?.comic_face_type !== "normal")).toHaveLength(40);
   }
   for (const asset of manifest.files) {
-    const bytes = await studioFinalAsset(asset.id);
+    const bytes = await studioFinalAsset(asset.id, PREVIOUS_POSE_VERSION);
     expect(createHash("sha256").update(bytes).digest("hex"), asset.id).toBe(asset.sha256);
     const metadata = await sharp(bytes).metadata();
     expect(metadata.format, asset.id).toBe("png");
@@ -35,7 +35,7 @@ it("keeps old references distinct and preserves final IDs through serialization 
   expect(reopened.panels[0].poseRefs).toEqual(draft.panels[0].poseRefs);
   expect(studioPoseGuide(reopened.panels[0])).toContain("PP024");
   expect(studioPoseGuide(reopened.panels[0])).toContain("10×10 시트");
-  expect(studioPoseGuide(reopened.panels[0])).toContain("version=final-v1.4");
+  expect(studioPoseGuide(reopened.panels[0])).toContain(`version=${FINAL_POSE_VERSION}`);
   const final = await studioPoseReference("pengpeng", 24, FINAL_POSE_VERSION);
   const old = await studioPoseReference("pengpeng", 24);
   expect(final.equals(old)).toBe(false);
@@ -44,4 +44,27 @@ it("keeps old references distinct and preserves final IDs through serialization 
   expect(references).toHaveLength(3);
   expect(Buffer.from(references[1].split(",")[1], "base64").equals(final)).toBe(true);
   expect(Buffer.from(references[2].split(",")[1], "base64").equals(await studioPoseReference("pempem", 8))).toBe(true);
+});
+
+it("serves all 400 refreshed poses as flat vectors and transparent 1024px PNGs without replacing v1.4", async () => {
+  const manifest = JSON.parse(await fs.readFile("assets/studio-final-v15/manifest.json", "utf8"));
+  expect(manifest.files).toHaveLength(802);
+  for (const asset of manifest.files) {
+    const bytes = await studioFinalAsset(asset.id, FINAL_POSE_VERSION, asset.format);
+    expect(createHash("sha256").update(bytes).digest("hex"), asset.file).toBe(asset.sha256);
+    if (asset.format === "svg") {
+      const svg = bytes.toString();
+      expect(svg, asset.id).toContain("#56515B");
+      expect(svg, asset.id).not.toMatch(/<image|<filter|<linearGradient|<radialGradient|<script|href=/i);
+    } else {
+      const metadata = await sharp(bytes).metadata();
+      expect(metadata.hasAlpha, asset.id).toBe(true);
+      expect(Math.max(metadata.width!, metadata.height!), asset.id).toBeGreaterThanOrEqual(1023);
+    }
+  }
+  const current = await studioFinalAsset("PM005", FINAL_POSE_VERSION);
+  const previous = await studioFinalAsset("PM005", PREVIOUS_POSE_VERSION);
+  expect(current.equals(previous)).toBe(false);
+  expect((await studioPoseReference("pempem", 5, PREVIOUS_POSE_VERSION)).equals(previous)).toBe(true);
+  await expect(studioFinalAsset("PM005", PREVIOUS_POSE_VERSION, "svg")).rejects.toThrow();
 });

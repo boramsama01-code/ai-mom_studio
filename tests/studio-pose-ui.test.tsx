@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StudioCharacterArchive, StudioPosePicker, StudioRegisteredCharacters } from "../client/src/pages/StudioPosePicker";
 import { studioContentSchema, type StudioContent } from "../shared/studio";
 import { STUDIO_CHARACTERS, STUDIO_FAMILY_REFERENCE_URL, poseImageUrl, poseLabel } from "../shared/studioCharacters";
-import { FINAL_POSE_VERSION, FINAL_STUDIO_ASSETS, finalAssetUrl } from "../shared/studioFinalAssets";
+import { FINAL_POSE_VERSION, PREVIOUS_POSE_VERSION, FINAL_STUDIO_ASSETS, finalAssetUrl } from "../shared/studioFinalAssets";
 import { studioChatGptImagePrompt } from "../shared/studioImageImport";
 
 let container: HTMLDivElement;
@@ -31,6 +31,19 @@ function Harness({ disabled = false }: { disabled?: boolean }) {
 }
 
 describe("studio pose picker", () => {
+  it("reopens v1.4 unchanged and offers vectors only after choosing the refreshed version", async () => {
+    const onChange = vi.fn();
+    await act(async () => root.render(<StudioPosePicker cast={["pempem"]} value={[{ character: "pempem", pose: 5, assetVersion: PREVIOUS_POSE_VERSION }]} onChange={onChange} disabled={false} panelIndex={0} imageMode="chatgpt" />));
+    const version = container.querySelector<HTMLSelectElement>("select")!;
+    expect(version.value).toBe(PREVIOUS_POSE_VERSION);
+    expect(container.querySelector('a[download$=".svg"]')).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => { version.value = FINAL_POSE_VERSION; version.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(container.querySelector('a[download$=".svg"]')?.getAttribute("href")).toBe(`${poseImageUrl("pempem", 5, FINAL_POSE_VERSION)}&format=svg&download=1`);
+    expect(onChange).not.toHaveBeenCalled();
+    await click(button("이 컷에 적용"));
+    expect(onChange).toHaveBeenCalledExactlyOnceWith([{ character: "pempem", pose: 5, assetVersion: FINAL_POSE_VERSION }]);
+  });
   it("enlarges a final PNG without applying it and retains legacy references until explicitly replaced", async () => {
     const onChange = vi.fn();
     await act(async () => root.render(<StudioPosePicker cast={["pengpeng"]} value={[{ character: "pengpeng", pose: 41 }]} onChange={onChange} disabled={false} panelIndex={0} imageMode="chatgpt" />));

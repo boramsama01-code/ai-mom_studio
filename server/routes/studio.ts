@@ -24,7 +24,7 @@ import { renderCollectionPreview } from "../services/cardDesignSamples";
 import { zipImportRoutes } from "./zipImport";
 import { studioFamilyReference, studioPoseReference } from "../services/studioCharacters";
 import { STUDIO_CHARACTERS } from "../../shared/studioCharacters";
-import { FINAL_POSE_VERSION } from "../../shared/studioFinalAssets";
+import { FINAL_POSE_VERSION, POSE_ASSET_VERSIONS } from "../../shared/studioFinalAssets";
 import { studioFinalAsset } from "../services/studioFinalAssets";
 import { instagramOAuthRoutes } from "./instagramOAuth";
 import { studioPublicationDraftSaveSchema } from "../../shared/publicationDraft";
@@ -46,27 +46,30 @@ studioRoutes.get("/studio/brand-assets/:asset", ah(async (req, res) => {
 }));
 studioRoutes.get("/studio/characters", (_req, res) => { res.json({ characters: STUDIO_CHARACTERS, poseCount: 100 }); });
 studioRoutes.get("/studio/characters/reference", ah(async (req, res) => {
-  const version = parse(z.literal(FINAL_POSE_VERSION).optional(), req.query.version);
+  const version = parse(z.enum(POSE_ASSET_VERSIONS).optional(), req.query.version);
   const image = await studioFamilyReference(version);
   res.type("image/png").set("X-Content-Type-Options", "nosniff").set("Cache-Control", "private, max-age=300");
   if (req.query.download === "1") res.set("Content-Disposition", `attachment; filename="spacepenguin-family-${version ?? "v2"}.png"`);
   res.send(image);
 }));
 studioRoutes.get("/studio/characters/assets/:asset", ah(async (req, res) => {
-  parse(z.literal(FINAL_POSE_VERSION), req.query.version);
+  const version = parse(z.enum(POSE_ASSET_VERSIONS), req.query.version);
   const id = parse(z.string().regex(/^(?:PP|PM|KG|KK|FA|CP|SB|FX)\d{3}$/), req.params.asset);
-  const image = await studioFinalAsset(id);
-  res.type("image/png").set("X-Content-Type-Options", "nosniff").set("Cache-Control", "private, max-age=300");
-  if (req.query.download === "1") res.set("Content-Disposition", `attachment; filename="${id}.png"`);
+  const format = parse(z.enum(["png", "svg"]).default("png"), req.query.format);
+  const image = await studioFinalAsset(id, version, format);
+  res.type(format === "svg" ? "image/svg+xml" : "image/png").set("X-Content-Type-Options", "nosniff").set("Cache-Control", "private, max-age=300");
+  if (req.query.download === "1") res.set("Content-Disposition", `attachment; filename="${id}.${format}"`);
   res.send(image);
 }));
 studioRoutes.get("/studio/characters/:character/poses/:pose", ah(async (req, res) => {
   const character = parse(z.enum(studioCharacters), req.params.character);
   const pose = parse(z.coerce.number().int().min(1).max(100), req.params.pose);
-  const version = parse(z.literal(FINAL_POSE_VERSION).optional(), req.query.version);
-  const image = await studioPoseReference(character, pose, version);
-  res.type("image/png").set("X-Content-Type-Options", "nosniff").set("Cache-Control", "private, max-age=300");
-  if (req.query.download === "1") res.set("Content-Disposition", `attachment; filename="${character}-pose-${String(pose).padStart(3, "0")}.png"`);
+  const version = parse(z.enum(POSE_ASSET_VERSIONS).optional(), req.query.version);
+  const format = parse(z.enum(["png", "svg"]).default("png"), req.query.format);
+  if (format === "svg" && version !== FINAL_POSE_VERSION) throw new HttpError(404, "이 버전은 벡터 원본을 제공하지 않습니다.");
+  const image = format === "svg" ? await studioFinalAsset(`${({ pengpeng: "PP", pempem: "PM", penguin: "KG", pengki: "KK" } as const)[character]}${String(pose).padStart(3, "0")}`, version, format) : await studioPoseReference(character, pose, version);
+  res.type(format === "svg" ? "image/svg+xml" : "image/png").set("X-Content-Type-Options", "nosniff").set("Cache-Control", "private, max-age=300");
+  if (req.query.download === "1") res.set("Content-Disposition", `attachment; filename="${character}-pose-${String(pose).padStart(3, "0")}.${format}"`);
   res.send(image);
 }));
 studioRoutes.get("/studio/instagram/accounts", ah(async (_req, res) => { res.json(await instagramAccounts(getDb())); }));
