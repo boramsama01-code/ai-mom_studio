@@ -38,12 +38,17 @@ function linkDto(s:Awaited<ReturnType<typeof state>>):NotionStudioLink{
  return {id:link.id,version:link.version,pageId:link.notionPageId,notionUrl:link.notionUrl,channelId:link.channelId,itemId:item.id,studioCardId:card?.id??null,title:item.title,sourceHash:link.sourceHash,lastEditedAt:link.sourceEditedAt,lastSyncedAt:link.lastSyncedAt.toISOString(),autoSync:link.autoSync,lastCheckedAt:link.lastCheckedAt?.toISOString()??null,coverStyle:link.coverStyle as 'A'|'B'|'C',status:notionCopyHash(copy)===link.baseCopyHash?'synced':'studio_changed',studioUrl:`${env.baseUrl}/notion?link=${link.id}`,canva:link.canva,photoCount:link.photoOrder.length};
 }
 export async function notionStudioDetail(db:DB,id:number,refresh=false):Promise<NotionStudioDetail>{
- const s=await state(db,id),photos=s.link.photoOrder.length?await db.select({id:notionSyncPhotos.id,name:notionSyncPhotos.name,mimeType:notionSyncPhotos.mimeType,width:notionSyncPhotos.width,height:notionSyncPhotos.height}).from(notionSyncPhotos).where(and(eq(notionSyncPhotos.linkId,id),inArray(notionSyncPhotos.id,s.link.photoOrder))):[];
+ let s=await state(db,id);
+ // A remote Notion read can take seconds. Reload the CAS baseline afterwards:
+ // a concurrent sync/poll must not make a just-returned detail stale already.
+ const fresh=refresh?await fetchNotionDocument(s.link.notionPageId):undefined;
+ if(refresh)s=await state(db,id);
+ const photos=s.link.photoOrder.length?await db.select({id:notionSyncPhotos.id,name:notionSyncPhotos.name,mimeType:notionSyncPhotos.mimeType,width:notionSyncPhotos.width,height:notionSyncPhotos.height}).from(notionSyncPhotos).where(and(eq(notionSyncPhotos.linkId,id),inArray(notionSyncPhotos.id,s.link.photoOrder))):[];
  const doc=sourceSnapshot(s.link),warnings:string[]=[];
  if(!doc.verified)warnings.push('노션의 검증 상태를 확인해 주세요. 가져오기는 게시 승인과 별개입니다.');
  if(s.link.lastError)warnings.push(s.link.lastError);
  const detail:NotionStudioDetail={link:linkDto(s),itemVersion:s.item.version,copy:s.copy,designEdits:notionDesignEdits(s.revision.payload),photos:s.link.photoOrder.flatMap(pid=>{const p=photos.find(p=>p.id===pid);return p?[{...p,url:`/api/notion/links/${id}/photos/${p.id}`}]:[];}),source:{title:doc.title,coverTitle:doc.coverTitle,pages:doc.pages.map((page,i)=>({index:page.index,title:page.title,body:page.body,key:notionDesignPageKey(page,i),...(page.cardFields?{cardFields:page.cardFields}:{}),...(page.emphasis!==undefined?{emphasis:page.emphasis}:{}),...(page.infographic?{infographic:page.infographic}:{})})),...(doc.sourceCard?{sourceCard:doc.sourceCard}:{}),...(doc.sourceReferences?{sourceReferences:doc.sourceReferences}:{}),...(doc.teaser?{teaser:doc.teaser}:{})},warnings};
- if(refresh){const fresh=await fetchNotionDocument(s.link.notionPageId);detail.notion={sourceHash:fresh.sourceHash,lastEditedAt:fresh.lastEditedAt,coverTitle:fresh.coverTitle,changed:fresh.sourceHash!==s.link.sourceHash,pages:fresh.pages.map(({index,title,body})=>({index,title,body}))};}
+ if(fresh)detail.notion={sourceHash:fresh.sourceHash,lastEditedAt:fresh.lastEditedAt,coverTitle:fresh.coverTitle,changed:fresh.sourceHash!==s.link.sourceHash,pages:fresh.pages.map(({index,title,body})=>({index,title,body}))};
  return detail;
 }
 export async function listNotionStudioLinks(db:DB){const rows=await db.select({id:notionSyncLinks.id}).from(notionSyncLinks).orderBy(desc(notionSyncLinks.updatedAt)).limit(200);const links:NotionStudioLink[]=[];for(const row of rows){try{links.push(linkDto(await state(db,row.id)));}catch(e){if(!(e instanceof HttpError)||e.status!==409)throw e;}}return {links};}

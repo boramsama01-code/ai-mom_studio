@@ -222,6 +222,13 @@ describe("Notion manuscript and Canva workspace", () => {
     expect(writes()).toEqual([["/notion/links/18/canva/export", expect.objectContaining({ method: "POST", body: { version: 5, itemVersion: 8, confirmed: true } })]]);
     expect(checkbox().checked).toBe(false);
   });
+  it('refreshes the displayed baseline after an export CAS conflict without repeating its POST',async()=>{
+    detail.link.canva={phase:'ready',designId:'Dfixture'};await renderLinked();const original=request;
+    request=async(path,options)=>{if(path==='/notion/links/18/canva/export'){const current=detailFixture({link:{...detail.link,version:5},itemVersion:8});throw new ApiError(409,'원고나 연결 설정이 바뀌었습니다.',{code:'studio_source_changed',detail:current});}return original(path,options);};
+    const checkbox=()=>host.querySelector<HTMLInputElement>('.notion-export-confirm input')!;await act(async()=>checkbox().click());await settle();await click('완성본 가져오기');
+    expect(writes()).toHaveLength(1);expect(checkbox().checked).toBe(false);expect(button('완성본 가져오기').disabled).toBe(true);expect(host.querySelector('[aria-label="원고 충돌 해결"]')).toBeNull();
+    expect(client.getQueryData<NotionStudioDetail>(['notion-link',18])).toMatchObject({link:{version:5},itemVersion:8});
+  });
 
   it.each(["importing", "exporting"] as const)("polls an existing %s job until ready without posting another Canva request", async phase => {
     vi.useFakeTimers(); detail.link.canva = { phase, jobId: "import-fixture", ...(phase === "exporting" ? { designId: "Dfixture", exportJobId: "export-fixture" } : {}) };

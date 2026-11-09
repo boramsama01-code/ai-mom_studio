@@ -9,14 +9,14 @@ import type {NotionDocument} from '../shared/notionSync';
 import {notionDocumentToCopy} from '../shared/notionStudioCopy';
 import {studioKey} from '../shared/channelKeys';
 import {emptyPayload} from '../shared/payloads';
-import {resetDb,setTestEnv} from './helpers';
+import {resetDb,setTestEnv,login} from './helpers';
 
 const testUrl=process.env.TEST_DATABASE_URL;
 if(!testUrl||!['127.0.0.1','localhost','::1','[::1]'].includes(new URL(testUrl).hostname)||!new URL(testUrl).pathname.endsWith('_test'))throw Error('Explicit loopback PostgreSQL TEST_DATABASE_URL ending _test is required');
 setTestEnv();
-const provider=vi.hoisted(()=>({build:vi.fn(),submitImport:vi.fn(),pollImport:vi.fn(),submitExport:vi.fn(),pollExport:vi.fn(),download:vi.fn(),notionPatch:vi.fn()}));
+const provider=vi.hoisted(()=>({build:vi.fn(),submitImport:vi.fn(),pollImport:vi.fn(),submitExport:vi.fn(),pollExport:vi.fn(),download:vi.fn(),notionPatch:vi.fn(),notionFetch:vi.fn()}));
 vi.mock('../server/services/notionCanva',async original=>({...await original<object>(),buildNotionCanvaPptx:provider.build,submitNotionCanvaImport:provider.submitImport,getNotionCanvaImportJob:provider.pollImport,submitNotionCanvaExport:provider.submitExport,getNotionCanvaExportJob:provider.pollExport,downloadNotionCanvaExport:provider.download}));
-vi.mock('../server/services/notionClient',async original=>({...await original<object>(),patchNotionDocumentProperties:provider.notionPatch}));
+vi.mock('../server/services/notionClient',async original=>({...await original<object>(),patchNotionDocumentProperties:provider.notionPatch,fetchNotionDocument:provider.notionFetch}));
 const {getDb,closeDb}=await import('../server/db');
 const {createRevision}=await import('../server/content');
 const {notionCopyHash,saveNotionStudioDraft}=await import('../server/services/notionStudio');
@@ -63,6 +63,20 @@ async function completed(f:Fixture,images=pngs.slice(0,3),jobId='export_1'){
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 
 describe('Notion -> Canva coordination on isolated PostgreSQL',()=>{
+ it('returns the current link version after a slow Notion refresh so an explicit export can use it',async()=>{
+  const f=await fixture();await ready(f);const original=await saved(f);
+  provider.notionFetch.mockImplementation(async()=>structuredClone(f.doc));
+  provider.notionFetch.mockImplementationOnce(async()=>{await f.db.update(notionSyncLinks).set({version:original.version+1,autoSync:false}).where(eq(notionSyncLinks.id,f.link.id));return structuredClone(f.doc);});
+  const app=(await import('../server/app')).createApp(),{agent,csrf}=await login(app);
+  const response=await agent.get(`/api/notion/links/${f.link.id}?refresh=1`);expect(response.status).toBe(200);expect(response.body.link).toMatchObject({version:original.version+1,autoSync:false});expect(response.body.itemVersion).toBe(f.item.version);
+  const exported=await agent.post(`/api/notion/links/${f.link.id}/canva/export`).set('x-csrf-token',csrf).send({version:response.body.link.version,itemVersion:response.body.itemVersion,confirmed:true});expect(exported.status).toBe(200);expect(provider.submitExport).toHaveBeenCalledTimes(1);
+ });
+ it('returns the current item revision and copy after a concurrent edit while Notion is being read',async()=>{
+  const f=await fixture(),nextCopy=structuredClone(f.copy);nextCopy.pages[0].body='다른 창에서 저장한 본문';provider.notionFetch.mockImplementation(async()=>structuredClone(f.doc));
+  provider.notionFetch.mockImplementationOnce(async()=>{await createRevision(f.db,{contentItemId:f.item.id,author:'operator',payload:{...emptyPayload('notice',f.doc.title),cardCopy:nextCopy},note:'concurrent fixture edit'});await f.db.update(contentItems).set({version:f.item.version+1}).where(eq(contentItems.id,f.item.id));return structuredClone(f.doc);});
+  const app=(await import('../server/app')).createApp(),{agent,csrf}=await login(app),response=await agent.get(`/api/notion/links/${f.link.id}?refresh=1`);expect(response.status).toBe(200);expect(response.body.itemVersion).toBe(f.item.version+1);expect(response.body.copy.pages[0].body).toBe('다른 창에서 저장한 본문');
+  const copy=structuredClone(response.body.copy);copy.pages[0].body+='\n확인 후 수정';const result=await agent.patch(`/api/notion/links/${f.link.id}/copy`).set('x-csrf-token',csrf).send({version:response.body.link.version,itemVersion:response.body.itemVersion,copy,designEdits:{emphasisByPage:{}}});expect(result.status).toBe(200);expect(result.body.copy.pages[0].body).toBe(copy.pages[0].body);expect(provider.submitExport).not.toHaveBeenCalled();
+ });
  it('keeps legacy empty-override design fingerprints valid and detects design-only edits',async()=>{
   const f=await fixture();await ready(f);const before=await saved(f);
   const legacyFingerprint=createHash('sha256').update(JSON.stringify({revisionId:f.revision.id,itemVersion:f.item.version,title:f.item.title,copy:f.copy,coverStyle:'B',photoOrder:[],category:'영재원'})).digest('hex');

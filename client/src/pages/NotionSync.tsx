@@ -163,11 +163,12 @@ export function NotionLinkedDocument({ id }: { id: number }) {
     }, retry: false,
     onSuccess: result => { qc.setQueryData(["notion-link", id], result); setConflict(null); setExportConfirmed(false); void qc.invalidateQueries({ queryKey: ["notion-links"] }); void qc.invalidateQueries({ queryKey: ["studio"] }); void qc.invalidateQueries({ queryKey: ["notion-documents"] }); },
     onError: async (error, action) => {
-      if (!(error instanceof ApiError) || error.status !== 409 || !["pull", "push"].includes(action.kind)) return;
+      if (!(error instanceof ApiError) || error.status !== 409) return;
       let current = conflictDetail(error);
       if (!current) { try { current = await api<NotionStudioDetail>(`/notion/links/${id}?refresh=1`); } catch { /* Keep both displayed drafts and the conflict error. */ } }
       if (current) qc.setQueryData(["notion-link", id], current);
-      if (current || data) setConflict({ detail: current ?? data!, choice: null });
+      setExportConfirmed(false);
+      if (["pull", "push"].includes(action.kind)&&(current || data)) setConflict({ detail: current ?? data!, choice: null });
     },
   });
   const refresh = async () => { const result = await detail.refetch(); if (!result.error) { update.reset(); setDownloadError(null); } };
