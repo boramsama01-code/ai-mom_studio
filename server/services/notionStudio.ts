@@ -126,6 +126,15 @@ export async function pushNotionStudio(db:DB,id:number,input:SyncRequest,actor:s
  try{pages=notionCopyToPages(initial.copy,{baseline:sourceSnapshot(initial.link),current:fresh});}
  catch(e){throw new HttpError(422,(e as Error).message,{code:'notion_copy_limits'});}
  if(pages.length!==fresh.pages.length||!fresh.pages.every((page,i)=>page.index===i+1))throw new HttpError(409,'노션과 스튜디오의 장 구성이 다릅니다. 장 번호와 장 수를 확인해 주세요.',{code:'notion_structure_conflict'});
+ const photoSources=(document:NotionDocument)=>document.photos.map(({key,name})=>({key,name}));
+ const photoFiles=(document:NotionDocument)=>document.photos.map(({key,name,url})=>{const parsed=new URL(url);return {key,name,identity:`${parsed.hostname}${parsed.pathname}`};});
+ const freshPhotos=photoSources(fresh),freshFiles=photoFiles(fresh);
+ // Photo files belong to Notion even when Studio copy wins a conflict. Ignore
+ // renewed signed URLs, and validate changed files before any remote write.
+ // Legacy body images keep their block key when replaced, so a changed prose
+ // source must be rechecked; card-table photo keys already include file paths.
+ const prosePhotosMayHaveChanged=fresh.editorialSource!=='card_table'&&fresh.sourceHash!==initial.link.sourceHash;
+ const prepared=!prosePhotosMayHaveChanged&&isDeepStrictEqual(freshPhotos,photoSources(sourceSnapshot(initial.link)))?undefined:await preparePhotos(fresh);
  const token=crypto.randomUUID();
  await db.transaction(async raw=>{const tx=raw as unknown as DB;await tx.select().from(contentItems).where(eq(contentItems.id,initial.item.id)).for('update');await tx.select().from(notionSyncLinks).where(eq(notionSyncLinks.id,id)).for('update');const current=await state(tx,id);assertVersion(current,input,initial.revision.id);
   if(current.link.operationToken&&current.link.operationUntil&&current.link.operationUntil>new Date())throw new HttpError(409,'동기화 작업이 이미 진행 중입니다.');
@@ -137,8 +146,10 @@ export async function pushNotionStudio(db:DB,id:number,input:SyncRequest,actor:s
    const [renewed]=await db.update(notionSyncLinks).set({operationUntil:sql`greatest(${notionSyncLinks.operationUntil},${until.toISOString()}::timestamptz)`}).where(and(eq(notionSyncLinks.id,id),eq(notionSyncLinks.operationToken,token))).returning({id:notionSyncLinks.id});
    return !!renewed;
   },options=>updateNotionDocument({pageId:initial.link.notionPageId,expectedSourceHash:fresh.sourceHash,pages,coverTitle:initial.copy.cover.title,studioUrl:`${env.baseUrl}/notion?link=${id}`,...(initial.link.canva.editUrl?{outputUrl:initial.link.canva.editUrl}:{})},options));
+  if(!isDeepStrictEqual(freshFiles,photoFiles(updated)))throw new HttpError(409,'노션에 원고는 반영됐지만 사진이 바뀌었습니다. 최신 노션 사진을 다시 확인해 동기화해 주세요.',{code:'notion_source_changed'});
   await db.transaction(async raw=>{const tx=raw as unknown as DB;const [current]=await tx.select().from(notionSyncLinks).where(eq(notionSyncLinks.id,id)).for('update');if(current.operationToken!==token)throw new HttpError(409,'노션에는 반영됐지만 연결 상태가 바뀌었습니다. 양쪽 원고를 다시 확인하세요.');
-   await tx.update(notionSyncLinks).set({sourceHash:updated.sourceHash,baseCopyHash:notionCopyHash(initial.copy),sourceEditedAt:updated.lastEditedAt,sourceSnapshot:snapshot(updated),lastSyncedAt:new Date(),updatedAt:new Date(),version:current.version+1,operationToken:null,operationUntil:null,lastError:null}).where(eq(notionSyncLinks.id,id));
+   const photoOrder=prepared===undefined?current.photoOrder:await storePhotos(tx,id,prepared);
+   await tx.update(notionSyncLinks).set({sourceHash:updated.sourceHash,baseCopyHash:notionCopyHash(initial.copy),sourceEditedAt:updated.lastEditedAt,sourceSnapshot:snapshot(updated),photoOrder,lastSyncedAt:new Date(),updatedAt:new Date(),version:current.version+1,operationToken:null,operationUntil:null,lastError:null}).where(eq(notionSyncLinks.id,id));
    await audit(tx,{actor,action:'notion_push',entity:'content_item',entityId:initial.item.id,channelId:initial.link.channelId});
   });
  }catch(e){await db.update(notionSyncLinks).set({operationToken:null,operationUntil:null,lastError:(e as Error).message.slice(0,500)}).where(and(eq(notionSyncLinks.id,id),eq(notionSyncLinks.operationToken,token)));throw e;}
