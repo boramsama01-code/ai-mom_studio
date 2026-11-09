@@ -12,7 +12,7 @@ import {emptyPayload} from '../shared/payloads';
 import {resetDb,setTestEnv} from './helpers';
 
 const testUrl=process.env.TEST_DATABASE_URL;
-if(!testUrl||new URL(testUrl).hostname!=='127.0.0.1'||new URL(testUrl).port!=='5433'||!new URL(testUrl).pathname.endsWith('_test'))throw Error('Explicit task-local PostgreSQL TEST_DATABASE_URL on 127.0.0.1:5433 ending _test is required');
+if(!testUrl||!['127.0.0.1','localhost','::1','[::1]'].includes(new URL(testUrl).hostname)||!new URL(testUrl).pathname.endsWith('_test'))throw Error('Explicit loopback PostgreSQL TEST_DATABASE_URL ending _test is required');
 setTestEnv();
 const provider=vi.hoisted(()=>({build:vi.fn(),submitImport:vi.fn(),pollImport:vi.fn(),submitExport:vi.fn(),pollExport:vi.fn(),download:vi.fn(),notionPatch:vi.fn()}));
 vi.mock('../server/services/notionCanva',async original=>({...await original<object>(),buildNotionCanvaPptx:provider.build,submitNotionCanvaImport:provider.submitImport,getNotionCanvaImportJob:provider.pollImport,submitNotionCanvaExport:provider.submitExport,getNotionCanvaExportJob:provider.pollExport,downloadNotionCanvaExport:provider.download}));
@@ -103,6 +103,30 @@ describe('Notion -> Canva coordination on isolated PostgreSQL',()=>{
   expect((await saved(f)).canva.exportJobId).toBeUndefined();await pollNotionStudioCanva(f.db,f.link.id);expect(provider.pollExport).not.toHaveBeenCalled();
   receipt.resolve({id:'export_2',status:'in_progress'});await pending;
   expect((await saved(f)).canva).toMatchObject({phase:'exporting',exportJobId:'export_2'});expect(provider.pollExport).toHaveBeenCalledWith(expect.anything(),'export_2');
+ });
+ it('preserves a validated job ID from an incomplete POST response and keeps successful but mismatched results blocked',async()=>{
+  const f=await fixture();provider.submitImport.mockRejectedValueOnce(new CanvaRestError('Incomplete response',502,'invalid_response',true,'received_import'));
+  await expect(createNotionStudioCanva(f.db,f.link.id,await request(f),'test')).rejects.toMatchObject({jobId:'received_import'});
+  expect((await saved(f)).canva).toMatchObject({phase:'importing',jobId:'received_import'});
+  provider.pollImport.mockResolvedValueOnce({id:'received_import',status:'success',result:{designs:[{designId:'existing_design',editUrl:'https://www.canva.com/design/existing/edit',viewUrl:null,pageCount:2}]}});
+  expect((await pollNotionStudioCanva(f.db,f.link.id)).link.canva).toMatchObject({phase:'result_unknown',jobId:'received_import'});
+  await expect(createNotionStudioCanva(f.db,f.link.id,await request(f),'test')).rejects.toMatchObject({status:409,extra:{code:'canva_job_pending'}});expect(provider.submitImport).toHaveBeenCalledTimes(1);
+ });
+ it('does not attach an older import to a newer revision or write its URL back to Notion',async()=>{
+  const f=await fixture();await createNotionStudioCanva(f.db,f.link.id,await request(f),'test');
+  const revision=await createRevision(f.db,{contentItemId:f.item.id,author:'operator',payload:{...f.revision.payload,cardCopy:{...f.copy,cover:{...f.copy.cover,title:'최신 원고'}}}});
+  provider.pollImport.mockResolvedValueOnce({id:'import_1',status:'success',result:{designs:[{designId:'old_design',editUrl:'https://www.canva.com/design/old/edit',viewUrl:null,pageCount:3}]}});
+  await pollNotionStudioCanva(f.db,f.link.id);
+  const [item]=await f.db.select().from(contentItems).where(eq(contentItems.id,f.item.id));expect(item.currentRevisionId).toBe(revision.id);expect(item.canvaDesign).toBeNull();expect(provider.notionPatch).not.toHaveBeenCalled();
+  await expect(exportNotionStudioCanva(f.db,f.link.id,await request(f),'test')).rejects.toMatchObject({status:409,extra:{code:'canva_source_changed'}});
+ });
+ it('serializes Notion result-link writeback before a newer Canva design can be submitted',async()=>{
+  const f=await fixture();await createNotionStudioCanva(f.db,f.link.id,await request(f),'test');
+  provider.pollImport.mockResolvedValueOnce({id:'import_1',status:'success',result:{designs:[{designId:'design_1',editUrl:'https://www.canva.com/design/1/edit',viewUrl:null,pageCount:3}]}});
+  const started=deferred<void>(),finish=deferred<void>();provider.notionPatch.mockImplementationOnce(async()=>{started.resolve();return finish.promise;});
+  const polling=pollNotionStudioCanva(f.db,f.link.id);await started.promise;
+  await expect(createNotionStudioCanva(f.db,f.link.id,await request(f),'test')).rejects.toMatchObject({status:409});expect(provider.submitImport).toHaveBeenCalledTimes(1);
+  finish.resolve();await polling;expect((await saved(f)).operationToken).toBeNull();
  });
  it('rejects export after revision-only or cover-style changes',async()=>{
   const f=await fixture();await ready(f);

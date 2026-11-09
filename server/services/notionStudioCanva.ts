@@ -6,6 +6,7 @@ import type {DB} from '../db';
 import {channels,notionSyncLinks,notionSyncPhotos,mediaAssets,contentItems} from '../../shared/schema';
 import type {NotionCanvaState} from '../../shared/notionStudio';
 import {studioKey} from '../../shared/channelKeys';
+import {notionPlainCardCopy} from '../../shared/notionStudioCopy';
 import {HttpError} from '../routes/util';
 import {audit} from '../audit';
 import {createRevision} from '../content';
@@ -19,6 +20,7 @@ type State=Awaited<ReturnType<typeof loadNotionStudioState>>;
 type CanvaSnapshot=NotionCanvaState&{sourceFingerprint?:string};
 const sha=(b:Buffer)=>crypto.createHash('sha256').update(b).digest('hex');
 function valid(s:State,r:Request){if(s.link.version!==r.version||s.item.version!==r.itemVersion)throw new HttpError(409,'원고나 연결 설정이 바뀌었습니다. 최신 내용을 확인해 주세요.',{code:'studio_source_changed'});}
+function plainSource(s:State){try{notionPlainCardCopy(s.copy);}catch{throw new HttpError(409,'노션 연결은 일반 카드뉴스 원고용입니다. 원고 형식을 확인해 주세요.',{code:'notion_copy_format_changed'});}}
 function fingerprint(s:State){return sha(Buffer.from(JSON.stringify({revisionId:s.revision.id,itemVersion:s.item.version,title:s.item.title,copy:s.copy,coverStyle:s.link.coverStyle,photoOrder:s.link.photoOrder,category:s.link.sourceSnapshot.category??null})));}
 function currentSource(s:State,v:CanvaSnapshot){return v.sourceVersion===s.item.version&&v.sourceRevisionId===s.revision.id&&(!v.sourceFingerprint||v.sourceFingerprint===fingerprint(s));}
 const sourceChanged=()=>new HttpError(409,'Canva 제작 후 원고나 표지 설정이 바뀌었습니다. 최신 원고로 다시 제작한 뒤 결과를 가져오세요.',{code:'canva_source_changed'});
@@ -45,12 +47,29 @@ async function failedSubmit(db:DB,id:number,token:string,base:CanvaSnapshot,e:un
  const unknown=e instanceof CanvaRestError&&e.outcomeUnknown;
  const error=e instanceof CanvaRestError?e.message:'Canva 요청 상태를 저장하지 못했습니다. 새로 생성하지 말고 기존 작업 결과를 먼저 확인해 주세요.';
  // Receiving a job then failing to save its receipt is not a provider rejection.
- const canva:CanvaSnapshot=accepted??{...base,phase:unknown?'result_unknown':'failed',error:error.slice(0,600)};
+ const receipt=accepted??(unknown&&e instanceof CanvaRestError&&e.jobId?{...base,...(base.phase==='exporting'?{exportJobId:e.jobId}:{jobId:e.jobId}),error:error.slice(0,600)}:undefined);
+ const canva:CanvaSnapshot=receipt??{...base,phase:unknown?'result_unknown':'failed',error:error.slice(0,600)};
  await db.update(notionSyncLinks).set({canva,operationToken:null,operationUntil:null,version:sql`${notionSyncLinks.version}+1`,updatedAt:new Date()}).where(and(eq(notionSyncLinks.id,id),eq(notionSyncLinks.operationToken,token)));
 }
 async function failCurrentJob(db:DB,s:State,v:CanvaSnapshot,message:string){await db.update(notionSyncLinks).set({canva:{...v,phase:'failed',error:message},operationToken:null,operationUntil:null,version:s.link.version+1,updatedAt:new Date()}).where(and(eq(notionSyncLinks.id,s.link.id),eq(notionSyncLinks.version,s.link.version)));}
+async function writeReadyLink(db:DB,s:State,v:CanvaSnapshot,editUrl:string){
+ const token=crypto.randomUUID();
+ const reserved=await db.transaction(async raw=>{const tx=raw as unknown as DB;
+  await tx.select({id:contentItems.id}).from(contentItems).where(eq(contentItems.id,s.item.id)).for('update');
+  await tx.select({id:notionSyncLinks.id}).from(notionSyncLinks).where(eq(notionSyncLinks.id,s.link.id)).for('update');
+  const fresh=await loadNotionStudioState(tx,s.link.id);
+  if(fresh.link.version!==s.link.version+1||fresh.link.canva.designId!==v.designId||!currentSource(fresh,v)||(fresh.link.operationToken&&fresh.link.operationUntil&&fresh.link.operationUntil>new Date()))return false;
+  // Serialize secondary Notion link writes with the next Canva submission so
+  // a slow old writeback cannot replace the URL of a newer finished design.
+  await tx.update(notionSyncLinks).set({operationToken:token,operationUntil:new Date(Date.now()+120000)}).where(eq(notionSyncLinks.id,s.link.id));return true;
+ });
+ if(!reserved)return;
+ try{await patchNotionDocumentProperties(s.link.notionPageId,{outputUrl:editUrl});}
+ catch{await db.update(notionSyncLinks).set({lastError:'Canva 디자인은 만들었지만 노션 결과물 링크 기록은 완료하지 못했습니다. 노션 반영으로 다시 연결하세요.'}).where(and(eq(notionSyncLinks.id,s.link.id),eq(notionSyncLinks.operationToken,token)));}
+ finally{await db.update(notionSyncLinks).set({operationToken:null,operationUntil:null}).where(and(eq(notionSyncLinks.id,s.link.id),eq(notionSyncLinks.operationToken,token)));}
+}
 export async function createNotionStudioCanva(db:DB,id:number,r:Request,actor:string){
- const before=await loadNotionStudioState(db,id);valid(before,r);
+ const before=await loadNotionStudioState(db,id);valid(before,r);plainSource(before);
  const [channel]=await db.select().from(channels).where(eq(channels.id,before.link.channelId));
  if(!channel||studioKey(channel.slug)!=='highscoop')throw new HttpError(422,'이번 A·B·C 표지는 하이스쿱용입니다. 하이스쿱 채널의 원고를 선택해 주세요.');
  const all=before.link.photoOrder.length?await db.select().from(notionSyncPhotos).where(and(eq(notionSyncPhotos.linkId,id),inArray(notionSyncPhotos.id,before.link.photoOrder))):[];
@@ -70,7 +89,7 @@ export async function createNotionStudioCanva(db:DB,id:number,r:Request,actor:st
  return pollNotionStudioCanva(db,id);
 }
 export async function exportNotionStudioCanva(db:DB,id:number,r:Request,actor:string){
- const before=await loadNotionStudioState(db,id);valid(before,r);
+ const before=await loadNotionStudioState(db,id);valid(before,r);plainSource(before);
  if(!before.link.canva.designId)throw new HttpError(409,'Canva 디자인을 먼저 만들어 주세요.');
  if(!currentSource(before,before.link.canva))throw sourceChanged();
  const pageCount=before.link.canva.pageCount;if(!Number.isInteger(pageCount)||!pageCount||pageCount>11)throw new HttpError(409,'저장된 Canva 페이지 수를 확인할 수 없습니다. 새 디자인을 먼저 만들어 주세요.');
@@ -93,11 +112,11 @@ export async function pollNotionStudioCanva(db:DB,id:number){
   const designs=job.status==='success'?job.result?.designs:undefined;
   const candidate=designs?.length===1?designs[0]:undefined;
   const design=candidate&&(candidate.pageCount===null||candidate.pageCount===v.pageCount)?candidate:undefined;
-  const canva:CanvaSnapshot=design?{...v,phase:'ready',designId:design.designId,editUrl:design.editUrl,viewUrl:design.viewUrl,updatedAt:new Date().toISOString()}:{...v,phase:'failed',error:'Canva 디자인 가져오기를 완료하지 못했거나 원고의 페이지 수와 다릅니다.'};
+  const canva:CanvaSnapshot=design?{...v,phase:'ready',designId:design.designId,editUrl:design.editUrl,viewUrl:design.viewUrl,updatedAt:new Date().toISOString()}:{...v,phase:job.status==='failed'?'failed':'result_unknown',error:job.status==='failed'?'Canva 디자인 가져오기를 완료하지 못했습니다.':'Canva 디자인이 생성됐지만 결과나 페이지 수가 원고와 다릅니다. 새로 생성하지 말고 Canva 목록에서 기존 결과를 확인해 주세요.'};
   const saved=await db.update(notionSyncLinks).set({canva,version:s.link.version+1,updatedAt:new Date()}).where(and(eq(notionSyncLinks.id,id),eq(notionSyncLinks.version,s.link.version))).returning({id:notionSyncLinks.id});
   if(saved.length&&design?.editUrl&&currentSource(s,v)){
    const attached=await db.update(contentItems).set({canvaDesign:{designId:design.designId,editUrl:design.editUrl,viewUrl:design.viewUrl,revisionId:s.revision.id,createdAt:new Date().toISOString()}}).where(and(eq(contentItems.id,s.item.id),eq(contentItems.version,s.item.version),eq(contentItems.currentRevisionId,s.revision.id))).returning({id:contentItems.id});
-   if(attached.length){try{await patchNotionDocumentProperties(s.link.notionPageId,{outputUrl:design.editUrl});}catch{await db.update(notionSyncLinks).set({lastError:'Canva 디자인은 만들었지만 노션 결과물 링크 기록은 완료하지 못했습니다. 노션 반영으로 다시 연결하세요.'}).where(and(eq(notionSyncLinks.id,id),eq(notionSyncLinks.version,s.link.version+1)));}}
+   if(attached.length)await writeReadyLink(db,s,{...v,designId:design.designId},design.editUrl);
   }
  }
  if(v.phase==='exporting'&&v.exportJobId){
@@ -118,7 +137,7 @@ export async function pollNotionStudioCanva(db:DB,id:number){
    // Each result owns a non-current revision. Reusing an unchanged cover must
    // never replace the carousel attached to an earlier completed export.
    const output=await createRevision(tx,{contentItemId:fresh.item.id,author:'operator',payload:{...fresh.revision.payload,notionCanvaOutput:{designId:v.designId,exportJobId:v.exportJobId,sourceRevisionId:fresh.revision.id,sourceVersion:fresh.item.version}},makeCurrent:false,note:'Canva 완성본 가져오기 · 원고 원본과 이전 결과 보존'});
-   const manifest:NonNullable<typeof mediaAssets.$inferInsert.carousel>={version:1,altVersion:1,pages:[],cover:{kind:'typography',credit:'Canva · 노션 연결 원고'},rendererProvider:'canva',copy:fresh.copy};
+   const manifest:NonNullable<typeof mediaAssets.$inferInsert.carousel>={version:1,altVersion:1,pages:[],cover:{kind:'typography',credit:'Canva · 노션 연결 원고'},rendererProvider:'canva'};
    for(const [i,bytes]of images.entries()){
     const digest=sha(bytes);const [old]=await tx.select({id:mediaAssets.id}).from(mediaAssets).where(and(eq(mediaAssets.contentItemId,fresh.item.id),eq(mediaAssets.sha256,digest),eq(mediaAssets.revisionId,output.id))).limit(1);
     const [created]=old?[old]:await tx.insert(mediaAssets).values({channelId:link.channelId,contentItemId:fresh.item.id,revisionId:output.id,kind:i===0?'card':'card_page',source:'canva',sha256:digest,bytes,mime:'image/png',width:1080,height:1350}).returning({id:mediaAssets.id});

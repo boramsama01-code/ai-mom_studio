@@ -254,7 +254,9 @@ function wrap(text:string,size:number,width:number,bold:boolean):string[] {
 }
 function fit(text:string,width:number,height:number,max:number,min:number,bold:boolean,label:string) {
   for(let size=max;size>=min;size-=2){const lines=wrap(text,size,width,bold);const lineHeight=size*1.3;if(lines.length*lineHeight<=height)return {lines,size,lineHeight};}
-  invalid(`${label} 원고가 페이지에 너무 깁니다. 문장을 줄이거나 장을 나눠 주세요. 원고를 자르지 않았습니다.`);
+  const page=/^page-(\d+)-(title|body)$/.exec(label);
+  const location=label==='cover-title'||label==='cover-question'?'표지 제목':label==='cover-caption'?'표지 설명':page?`${page[1]}장 ${page[2]==='title'?'제목':'본문'}`:'입력한';
+  invalid(`${location} 원고가 페이지에 너무 깁니다. 문장을 줄이거나 장을 나눠 주세요. 원고를 자르지 않았습니다.`);
 }
 function box(id:number,name:string,text:string,x:number,y:number,w:number,h:number,max:number,min:number,ink:string,bold=false,accent?:{phrase:string;color:string},align:'l'|'ctr'='l') {
   const fitted=fit(text,w,h,max,min,bold,name);
