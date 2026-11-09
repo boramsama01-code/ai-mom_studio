@@ -64,6 +64,19 @@ describe('current Notion card table',()=>{
   const f=setup(),before=await f.client.fetchNotionDocument(id(1));f.rows[1].properties['확인메모']=text('기존 검토 기록\n도식: 접수 단계');
   const after=await f.client.fetchNotionDocument(id(1));expect(after.pages[1].infographic).toBe('application_steps');expect(after.pages[1].body).toBe(before.pages[1].body);expect(after.sourceHash).not.toBe(before.sourceHash);
  });
+ it.each([['모집 달력','admissions_calendar'],['기관별 일정표','institution_schedule']])('preserves the %s layout intent through the source snapshot',async(label,kind)=>{
+  const f=setup(),before=await f.client.fetchNotionDocument(id(1));f.rows[1].properties['확인메모']=text(`원문 대조\n도식: ${label}`);
+  const after=await f.client.fetchNotionDocument(id(1));expect(after.pages[1].infographic).toBe(kind);expect(after.pages[1].body).toBe(before.pages[1].body);expect(after.sourceHash).not.toBe(before.sourceHash);
+ });
+ it('imports and edits all twenty regional chapters while keeping source and teaser rows separate',async()=>{
+  const f=setup(),template=structuredClone(f.rows[1]);
+  const extra=Array.from({length:18},(_,i)=>{const row=structuredClone(template);row.id=id(100+i);row.properties['페이지'].number=i+3;row.properties['제목']=text(`교육청 ${i+3}`);row.properties['본문']=text(`보존할 기관별 일정 ${i+3}`);return row;});
+  f.rows.splice(2,0,...extra);f.rows[20].properties['페이지'].number=21;f.rows[21].properties['페이지'].number=22;f.parent.properties['카드 원고'].relation=f.rows.map(row=>({id:row.id}));
+  const before=await f.client.fetchNotionDocument(id(1));expect(before.pages).toHaveLength(20);expect(before.pages[19].cardFields?.body).toBe('보존할 기관별 일정 20');expect(before.sourceReferences).toHaveLength(2);expect(before.teaser?.title).toContain('연구계획서');
+  const copy=notionDocumentToCopy(before);copy.pages[18].body=copy.pages[18].body.replace('보존할 기관별 일정 20','수정한 마지막 시도');
+  const after=await f.client.updateNotionDocument({pageId:id(1),expectedSourceHash:before.sourceHash,pages:notionCopyToPages(copy,{baseline:before,current:before})});
+  expect(after.pages).toHaveLength(20);expect(after.pages[19].cardFields?.body).toBe('수정한 마지막 시도');expect(after.sourceReferences).toEqual(before.sourceReferences);expect(after.teaser).toEqual(before.teaser);
+ });
  it('writes the changed title/body to the matching table columns while preserving subtitle, notes, QR and teaser',async()=>{
   const f=setup(),before=await f.client.fetchNotionDocument(id(1)),copy=notionDocumentToCopy(before);copy.pages[0].title='수정한 내지';copy.pages[0].body=copy.pages[0].body.replace('현재 본문','수정한 본문');
   const pages=notionCopyToPages(copy,{baseline:before,current:before});const lease=vi.fn(async()=>{});

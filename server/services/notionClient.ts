@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID, NOTION_CARD_DATA_SOURCE_ID, NOTION_SOURCE_REFERENCES_MAX, notionDocumentQuerySchema, notionDocumentUpdateSchema,
+  DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID, NOTION_CARD_DATA_SOURCE_ID, NOTION_SOURCE_REFERENCES_MAX, NOTION_MANUSCRIPT_MAX_PAGES, notionDocumentQuerySchema, notionDocumentUpdateSchema,
   type NotionConnectionStatus, type NotionDocument, type NotionDocumentList,
   type NotionDocumentPage, type NotionDocumentQuery, type NotionDocumentSummary,
   type NotionDocumentUpdate, type NotionPhoto,
@@ -197,11 +197,11 @@ function parseTableDocument(page: Obj, rows: Obj[]): Snapshot {
   const isTeaser=(row:Obj)=>propertyText(row,'역할')==='다음 편 예고'||propertyText(row,'역할')==='일반'&&/^다음\s*편\s*[｜|:：]/.test(propertyText(row,'제목'));
   const summary=summaryOf(page), ordered=[...rows].sort((a,b)=>property(a,'페이지').number-property(b,'페이지').number);
   const indexes=ordered.map(row=>property(row,'페이지').number);
-  if(!ordered.length||ordered.length>12||indexes.some((n,i)=>!Number.isInteger(n)||n!==i+1))
+  if(!ordered.length||ordered.length>NOTION_MANUSCRIPT_MAX_PAGES+2||indexes.some((n,i)=>!Number.isInteger(n)||n!==i+1))
     throw new NotionSyncError('카드 원고 표의 페이지 번호를 1부터 빠짐없이 중복 없이 작성해 주세요.',422,'NOTION_TABLE_STRUCTURE');
   const core=ordered.filter(row=>propertyText(row,'역할')!=='원문 확인'&&!isTeaser(row));
-  if(core.length<2||core.length>10||core.some((row,i)=>property(row,'페이지').number!==i+1))
-    throw new NotionSyncError('본문 2~10장 다음에 원문 확인·다음 편 예고를 배치해 주세요.',422,'NOTION_TABLE_STRUCTURE');
+  if(core.length<2||core.length>NOTION_MANUSCRIPT_MAX_PAGES||core.some((row,i)=>property(row,'페이지').number!==i+1))
+    throw new NotionSyncError(`본문 2~${NOTION_MANUSCRIPT_MAX_PAGES}장 다음에 원문 확인·다음 편 예고를 배치해 주세요.`,422,'NOTION_TABLE_STRUCTURE');
   const sources=ordered.filter(row=>propertyText(row,'역할')==='원문 확인'), teasers=ordered.filter(isTeaser);
   if(sources.length>1||teasers.length>1||(sources.length&&teasers.length&&property(sources[0],'페이지').number>property(teasers[0],'페이지').number))
     throw new NotionSyncError('원문 확인과 다음 편 예고는 각각 한 장씩 순서대로 작성해 주세요.',422,'NOTION_TABLE_STRUCTURE');
@@ -209,7 +209,9 @@ function parseTableDocument(page: Obj, rows: Obj[]): Snapshot {
     if(propertyText(row,'이미지URL').trim())throw new NotionSyncError('카드 표의 이미지URL 대신 콘텐츠 제작표의 사진 원본에 파일을 올려 주세요. 그림을 누락한 채 가져오지 않았습니다.',422,'NOTION_TABLE_IMAGE_UNSUPPORTED');
     const cardFields={subtitle:propertyText(row,'소제목'),body:propertyText(row,'본문'),footnote:propertyText(row,'각주'),sourceLabel:propertyText(row,'출처표시')};
     const emphasis=propertyText(row,'강조문구');
-    return {index:i+1,title:propertyText(row,'제목'),body:[cardFields.subtitle,cardFields.body].filter(x=>x.trim()).join('\n\n'),headingBlockId:row.id,bodyBlockIds:[],cardRowId:row.id,cardFields,...(emphasis?{emphasis}:{}),...(/^도식:\s*접수 단계\s*$/m.test(propertyText(row,'확인메모'))?{infographic:'application_steps' as const}:{})};
+    const notes=propertyText(row,'확인메모');
+    const infographic=/^도식:\s*모집 달력\s*$/m.test(notes)?'admissions_calendar' as const:/^도식:\s*기관별 일정표\s*$/m.test(notes)?'institution_schedule' as const:/^도식:\s*접수 단계\s*$/m.test(notes)?'application_steps' as const:undefined;
+    return {index:i+1,title:propertyText(row,'제목'),body:[cardFields.subtitle,cardFields.body].filter(x=>x.trim()).join('\n\n'),headingBlockId:row.id,bodyBlockIds:[],cardRowId:row.id,cardFields,...(emphasis?{emphasis}:{}),...(infographic?{infographic}:{})};
   });
   if(pages.some(p=>!p.title.trim()))throw new NotionSyncError('카드 원고 표의 제목을 채워 주세요.',422,'NOTION_TABLE_STRUCTURE');
   const sourceReferences:NonNullable<NotionDocument['sourceReferences']>=[];
@@ -303,7 +305,7 @@ export function createNotionClient(options: ClientOptions = {}) {
     const id = normalizeNotionPageId(pageId), page = await request(`/pages/${id}`,"GET",undefined,signal); assertMembership(page);
     const relation=property(page,'카드 원고');
     if(relation.type==='relation'){
-      if(relation.has_more||!Array.isArray(relation.relation)||!relation.relation.length||relation.relation.length>12)throw new NotionSyncError('카드 원고 연결은 본문·원문·예고를 합쳐 2~12장으로 정리해 주세요.',422,'NOTION_TABLE_STRUCTURE');
+      if(relation.has_more||!Array.isArray(relation.relation)||!relation.relation.length||relation.relation.length>NOTION_MANUSCRIPT_MAX_PAGES+2)throw new NotionSyncError(`카드 원고 연결은 본문·원문·예고를 합쳐 2~${NOTION_MANUSCRIPT_MAX_PAGES+2}장으로 정리해 주세요.`,422,'NOTION_TABLE_STRUCTURE');
       const rows:Obj[]=[];
       for(const entry of relation.relation){
         if(!options.fetch)await abortable(pause(350),signal);

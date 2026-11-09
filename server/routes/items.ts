@@ -37,6 +37,7 @@ import {
   destinations,
   mediaAssets,
   jobs,
+  notionSyncLinks,
   officialSources,
   runs,
   sourceDocuments,
@@ -81,6 +82,7 @@ import { saveItemPublicationDraft } from "../services/publicationDraft";
 import { restoreSourceRevision } from "../services/sourceRevisionRestore";
 import { organizePublicationsSchema, publicationListStates } from "../../shared/publicationList";
 import { organizePublications, publicationListCondition } from "../services/publicationList";
+import { env } from "../env";
 
 export const itemRoutes = Router();
 
@@ -160,6 +162,14 @@ async function loadItem(cid: unknown, id: unknown) {
   const [item] = await getDb().select().from(contentItems).where(and(eq(contentItems.id, itemId), eq(contentItems.channelId, ch.id)));
   if (!item) throw new HttpError(404, "항목을 찾을 수 없습니다.");
   return { ch, item };
+}
+
+/** The generic editor cannot preserve Notion page IDs, metadata or long decks. */
+async function assertGenericCardEditor(itemId: number, db: Pick<ReturnType<typeof getDb>, "select"> = getDb()) {
+  const [link] = await db.select({ id: notionSyncLinks.id }).from(notionSyncLinks).where(eq(notionSyncLinks.contentItemId, itemId)).limit(1);
+  if (link) throw new HttpError(409, "노션 연결 원고는 전용 카드 편집 화면에서 수정·제작해 주세요. 저장된 원고는 유지했습니다.", {
+    code: "notion_editor_required", linkId: link.id, studioUrl: `${env.baseUrl}/notion?link=${link.id}`,
+  });
 }
 
 itemRoutes.patch("/channels/:cid/items/:id/subcategory", ah(async (req, res) => {
@@ -248,7 +258,9 @@ itemRoutes.post('/channels/:cid/items/manual-family',ah(async(req,res)=>{
   res.status(201).json(await initializeManualFamily(getDb(),channel.id,body,actorOf(req)));
 }));
 itemRoutes.post('/channels/:cid/items/:id/card-copy/manual-initialize',ah(async(req,res)=>{
-  const channel=await loadChannel(req.params.cid),body=parse(familyManualInitializeSchema,req.body);
+  const {ch:channel,item}=await loadItem(req.params.cid,req.params.id);
+  await assertGenericCardEditor(item.id);
+  const body=parse(familyManualInitializeSchema,req.body);
   res.status(201).json(await initializeManualFamily(getDb(),channel.id,body,actorOf(req),intParam(req.params.id)));
 }));
 itemRoutes.post(
@@ -311,6 +323,7 @@ itemRoutes.patch(
   "/channels/:cid/items/:id",
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
+    await assertGenericCardEditor(item.id);
     const body = parse(editSchema, req.body);
     let payload: Record<string, unknown> | null = null;
     if (body.payload) {
@@ -324,6 +337,7 @@ itemRoutes.patch(
     const db = getDb();
     const out = await db.transaction(async (tx) => {
       const [fresh] = await tx.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");
+      await assertGenericCardEditor(item.id, tx);
       if (fresh.version !== body.version) conflict(fresh);
       // Older editors/imports only know source fields. Omission is not a request
       // to erase separately edited card words or trusted analysis/model history.
@@ -504,6 +518,7 @@ itemRoutes.post(
   "/channels/:cid/items/:id/generate",
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
+    await assertGenericCardEditor(item.id);
     const db = getDb();
     const { provider, templateKey, version, requestId } = parse(z.object({ version: zVersion.optional(), requestId: z.string().uuid().optional(), provider: z.enum(aiProviders).optional(), templateKey: z.string().min(1).max(40).optional() }).strict(), req.body ?? {});
     const logicalRequestId = requestId ?? randomUUID();
@@ -566,6 +581,7 @@ function assertLegacyTemplate(key: string) {
 /** Editable image copy is separate from article facts and destination captions. */
 itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  await assertGenericCardEditor(item.id);
   const query = parse(z.object({ templateKey: z.string().min(1).max(40).optional() }).strict(), req.query);
   const revision = await cardCopyRevision(item);
   if ((revision.payload.cardCopy as { version?: unknown } | undefined)?.version === 2) {
@@ -611,6 +627,7 @@ itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
 /** A text edit becomes an immutable content revision; existing image files stay intact. */
 itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  await assertGenericCardEditor(item.id);
   if (req.body?.copy?.version === 2) {
     const body = parse(familySaveSchema, req.body);
     await resolveCardCopyStyle(body.copy.templateKey, ch.id);
@@ -623,6 +640,7 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   await resolveCardCopyStyle(body.copy.templateKey, ch.id);
   const result = await getDb().transaction(async tx => {
     const [fresh] = await tx.select().from(contentItems).where(and(eq(contentItems.id, item.id), eq(contentItems.channelId, ch.id))).for("update");
+    await assertGenericCardEditor(item.id, tx);
     if (!fresh || fresh.version !== body.version) conflict(fresh ?? item);
     const [board] = await tx.select().from(studioCards).where(eq(studioCards.sourceItemId, item.id));
     if (board) assertStudioActive(board);
@@ -663,6 +681,7 @@ itemRoutes.patch("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
 /** Explicit manual confirmation reads the already saved publication caption. */
 itemRoutes.post("/channels/:cid/items/:id/card-copy/caption-confirm", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  await assertGenericCardEditor(item.id);
   const body = parse(familyCaptionConfirmSchema, req.body);
   res.json(await confirmFamilyCaption(getDb(), item.id, ch.id, body, actorOf(req)));
 }));
@@ -670,6 +689,7 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/caption-confirm", ah(async (
 /** Explicit AI action returns a proposal; it never overwrites saved/operator copy. */
 itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  await assertGenericCardEditor(item.id);
   if (req.body?.formatId === "family_dialogue_8") {
     const body = parse(familyGenerateSchema, req.body), db = getDb();
     const configuration = familyExecutionPlan(ch, body.baseRevision);
@@ -726,6 +746,7 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/generate", ah(async (req, re
 /** Same layout/fonts as final JPEG; no source writes or image-generation calls. */
 itemRoutes.post("/channels/:cid/items/:id/card-copy/preview", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  await assertGenericCardEditor(item.id);
   if (req.body?.copy?.version === 2) {
     const body = parse(z.object({ version: zVersion, copy: familyCardCopySchema, pageDesigns: pageDesignsSchema, page: z.number().int().min(0).max(7), proposalJobId: z.number().int().positive().optional() }).strict(), req.body);
     if (item.version !== body.version) conflict(item);
@@ -764,6 +785,7 @@ itemRoutes.post(
   "/channels/:cid/items/:id/card",
   ah(async (req, res) => {
     const { ch, item } = await loadItem(req.params.cid, req.params.id);
+    await assertGenericCardEditor(item.id);
     const body = parse(z.object({
       version: zVersion.optional(), requestId: z.string().uuid().optional(), templateKey: z.string().max(40).nullable().optional(),
       coverMode: z.enum(["ai", "typography", "reuse"]).optional(), regenerateCover: z.boolean().optional(), coverInstruction: z.string().trim().max(2000).optional(),
@@ -1048,6 +1070,7 @@ import { resolvePublicationTiming } from "../../shared/publicationTiming";
 // Restore as a new revision; the service owns the row lock, version check and approval revocation.
 itemRoutes.post("/channels/:cid/items/:id/revisions/:rid/restore", ah(async (req, res) => {
   const { ch, item } = await loadItem(req.params.cid, req.params.id);
+  await assertGenericCardEditor(item.id);
   const body = parse(z.object({ version: zVersion }).strict(), req.body);
   res.json(await restoreSourceRevision(getDb(), { channelId: ch.id, itemId: item.id, revisionId: intParam(req.params.rid), version: body.version, actor: actorOf(req) }));
 }));

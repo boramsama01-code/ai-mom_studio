@@ -1,7 +1,7 @@
 import {Router,type Request,type Response,type NextFunction} from 'express';
 import {z} from 'zod';
 import {and,eq} from 'drizzle-orm';
-import {notionDocumentQuerySchema} from '../../shared/notionSync';
+import {NOTION_MAX_OUTPUT_PAGES,notionDocumentQuerySchema} from '../../shared/notionSync';
 import {notionCoverStyles,notionEditorRequestSchema,notionImportRequestSchema,notionPullRequestSchema,notionPushRequestSchema} from '../../shared/notionStudio';
 import {notionSyncPhotos} from '../../shared/schema';
 import {getDb} from '../db';
@@ -42,7 +42,7 @@ notionRoutes.get('/notion/links/:id',handle(async(req,res)=>{
 }));
 notionRoutes.patch('/notion/links/:id',handle(async(req,res)=>res.json(await setNotionStudioStyle(getDb(),intParam(req.params.id),parse(settings,req.body)))));
 notionRoutes.patch('/notion/links/:id/copy',handle(async(req,res)=>res.json(await saveNotionStudioDraft(getDb(),intParam(req.params.id),parse(notionEditorRequestSchema,req.body),actorOf(req)))));
-notionRoutes.post('/notion/links/:id/preview',handle(async(req,res)=>res.type('image/jpeg').set('X-Content-Type-Options','nosniff').send(await previewNotionStudioCard(getDb(),intParam(req.params.id),parse(notionEditorRequestSchema.extend({page:z.number().int().min(0).max(12)}).strict(),req.body),()=>req.aborted||res.destroyed))));
+notionRoutes.post('/notion/links/:id/preview',handle(async(req,res)=>res.type('image/jpeg').set('X-Content-Type-Options','nosniff').send(await previewNotionStudioCard(getDb(),intParam(req.params.id),parse(notionEditorRequestSchema.extend({page:z.number().int().min(0).max(NOTION_MAX_OUTPUT_PAGES-1)}).strict(),req.body),()=>req.aborted||res.destroyed))));
 notionRoutes.post('/notion/links/:id/pull',handle(async(req,res)=>res.json(await pullNotionStudio(getDb(),intParam(req.params.id),parse(notionPullRequestSchema,req.body),actorOf(req)))));
 notionRoutes.post('/notion/links/:id/push',handle(async(req,res)=>res.json(await pushNotionStudio(getDb(),intParam(req.params.id),parse(notionPushRequestSchema,req.body),actorOf(req)))));
 notionRoutes.post('/notion/links/:id/canva',handle(async(req,res)=>res.json(await createNotionStudioCanva(getDb(),intParam(req.params.id),parse(canvaRequest,req.body),actorOf(req)))));
