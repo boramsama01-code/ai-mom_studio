@@ -44,10 +44,26 @@ it("protects final individual, shared scene, balloon and family PNGs and serves 
     const response = await operator.get(resource);
     expect(response.status).toBe(200);
     expect(response.headers["cache-control"]).toContain("private");
-    expect(response.body.equals(await studioFinalAsset(id))).toBe(true);
+    expect(response.body.equals(await studioFinalAsset(id, "final-v1.4"))).toBe(true);
   }
   expect((await operator.get("/api/studio/characters/assets/PP101?version=final-v1.4")).status).toBe(404);
   expect((await operator.get("/api/studio/characters/pengpeng/poses/1?version=unknown")).status).toBe(400);
+});
+it("protects refreshed PNG and editable SVG downloads and serves the chosen version", async () => {
+  const app = createApp(), operator = request.agent(app);
+  await operator.post("/test-only/session");
+  for (const format of ["png", "svg"] as const) {
+    const url = `/api/studio/characters/pempem/poses/5?version=final-v1.5&format=${format}&download=1`;
+    expect((await request(app).get(url)).status).toBe(401);
+    const response = await operator.get(url).buffer(true).parse((res, callback) => {
+      const chunks: Buffer[] = []; res.on("data", chunk => chunks.push(Buffer.from(chunk))); res.on("end", () => callback(null, Buffer.concat(chunks)));
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toContain(format === "svg" ? "image/svg+xml" : "image/png");
+    expect(response.headers["content-disposition"]).toContain(`.${format}`);
+    expect(response.body.equals(await studioFinalAsset("PM005", "final-v1.5", format))).toBe(true);
+  }
+  expect((await operator.get("/api/studio/characters/pempem/poses/5?version=final-v1.4&format=svg")).status).toBe(404);
 });
 afterEach(async () => {
   vi.restoreAllMocks();

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { StudioCharacter, StudioPanel } from "@shared/studio";
 import { STUDIO_CHARACTERS, STUDIO_FAMILY_REFERENCE_URL, STUDIO_POSE_CATEGORIES, poseImageUrl, poseLabel } from "@shared/studioCharacters";
-import { FINAL_POSE_VERSION, FINAL_STUDIO_ASSETS, FINAL_FACE_FILTERS, finalAssetUrl, finalPose } from "@shared/studioFinalAssets";
+import { FINAL_POSE_VERSION, PREVIOUS_POSE_VERSION, type PoseAssetVersion, FINAL_STUDIO_ASSETS, FINAL_FACE_FILTERS, finalAssetUrl, finalPose } from "@shared/studioFinalAssets";
 
 type PoseReference = NonNullable<StudioPanel["poseRefs"]>[number];
 const poseNumber = (pose: number) => String(pose).padStart(3, "0");
@@ -39,7 +39,7 @@ export function CharacterPortrait({ character, className = "" }: { character: St
   </span>;
 }
 
-export function PoseThumbnail({ character, pose, assetVersion, className = "" }: { character: StudioCharacter; pose: number; assetVersion?: typeof FINAL_POSE_VERSION; className?: string }) {
+export function PoseThumbnail({ character, pose, assetVersion, className = "" }: { character: StudioCharacter; pose: number; assetVersion?: PoseAssetVersion; className?: string }) {
   // The packaged artwork has uneven cell margins. The authenticated image
   // endpoint uses measured bounds so helmets, feet and props stay intact.
   const artwork = useArtwork(poseImageUrl(character, pose, assetVersion));
@@ -85,25 +85,25 @@ function PoseBrowser({ character, currentReference, disabled, onApply }: {
   onApply?: (reference: PoseReference) => void;
 }) {
   const [previewPose, setPreviewPose] = useState(currentReference?.pose ?? 1);
-  const [version, setVersion] = useState(currentReference && !currentReference.assetVersion ? "legacy" : FINAL_POSE_VERSION);
+  const [version, setVersion] = useState<string>(currentReference ? currentReference.assetVersion ?? "legacy" : FINAL_POSE_VERSION);
   const [category, setCategory] = useState("all");
   const [query, setQuery] = useState("");
   const [enlarged, setEnlarged] = useState(false);
-  const assetVersion = version === FINAL_POSE_VERSION ? FINAL_POSE_VERSION : undefined;
+  const assetVersion: PoseAssetVersion | undefined = version === FINAL_POSE_VERSION ? FINAL_POSE_VERSION : version === PREVIOUS_POSE_VERSION ? PREVIOUS_POSE_VERSION : undefined;
   const characterInfo = STUDIO_CHARACTERS.find(c => c.id === character)!;
   const poses = Array.from({ length: 100 }, (_, index) => index + 1).filter(pose => {
-    const asset = finalPose(character, pose)!;
+    const asset = finalPose(character, pose, assetVersion)!;
     const categoryMatches = category === "all" || (assetVersion ? asset.comic_face_type === category : Math.floor((pose - 1) / 10) === Number(category));
     return categoryMatches && (!query.trim() || `${assetVersion ? `${asset.id} ${asset.title} ${asset.description}` : poseLabel(character, pose)} ${poseNumber(pose)}`.includes(query.trim()));
   });
-  const preview = assetVersion ? finalPose(character, previewPose) : undefined;
+  const preview = assetVersion ? finalPose(character, previewPose, assetVersion) : undefined;
   const label = poseLabel(character, previewPose, assetVersion);
   const source = poseImageUrl(character, previewPose, assetVersion);
   const isApplied = currentReference?.pose === previewPose && currentReference?.assetVersion === assetVersion;
   function changeVersion(next: string) { setVersion(next); setCategory("all"); setQuery(""); }
   return <div className="studio-pose-browser">
     <div className="studio-pose-browse-header">
-      <label className="field small">그림 버전<select value={version} disabled={disabled} onChange={event => changeVersion(event.target.value)}><option value={FINAL_POSE_VERSION}>최종 포즈 · 100개</option><option value="legacy">이전 포즈 · 기존 선택 유지</option></select></label>
+      <label className="field small">그림 버전<select value={version} disabled={disabled} onChange={event => changeVersion(event.target.value)}><option value={FINAL_POSE_VERSION}>새 얼굴·단색 포즈 · 100개</option><option value={PREVIOUS_POSE_VERSION}>이전 완성본 · 100개</option><option value="legacy">이전 포즈 · 기존 선택 유지</option></select></label>
       <label className="field small">{assetVersion ? "표정 모아보기" : "동작 모아보기"}<select value={category} disabled={disabled} onChange={event => setCategory(event.target.value)}>
         {assetVersion ? FINAL_FACE_FILTERS.map(([value, text]) => <option key={value} value={value}>{text}</option>) : <><option value="all">전체 100개</option>{STUDIO_POSE_CATEGORIES.map((name, index) => <option key={name} value={String(index)}>{name} · {index * 10 + 1}–{index * 10 + 10}</option>)}</>}
       </select></label>
@@ -114,8 +114,8 @@ function PoseBrowser({ character, currentReference, disabled, onApply }: {
       <div className="studio-pose-grid" role="group" aria-label={`${characterInfo.name} 포즈 목록`}>
         {poses.map(pose => <button type="button" key={pose} disabled={disabled} className={`studio-pose-tile ${currentReference?.pose === pose && currentReference?.assetVersion === assetVersion ? "applied" : ""}`} aria-pressed={previewPose === pose} aria-label={`${poseLabel(character, pose, assetVersion)} 미리보기`} onClick={() => setPreviewPose(pose)}>
           <PoseThumbnail character={character} pose={pose} assetVersion={assetVersion} />
-          <span className="studio-pose-number">{assetVersion ? finalPose(character, pose)!.id : poseNumber(pose)}</span>
-          {assetVersion && <span className="studio-pose-title">{finalPose(character, pose)!.title}</span>}
+          <span className="studio-pose-number">{assetVersion ? finalPose(character, pose, assetVersion)!.id : poseNumber(pose)}</span>
+          {assetVersion && <span className="studio-pose-title">{finalPose(character, pose, assetVersion)!.title}</span>}
         </button>)}
         {!poses.length && <p className="small muted">조건에 맞는 포즈가 없습니다.</p>}
       </div>
@@ -125,6 +125,7 @@ function PoseBrowser({ character, currentReference, disabled, onApply }: {
         <span className="small muted">{preview?.description ?? STUDIO_POSE_CATEGORIES[Math.floor((previewPose - 1) / 10)]}</span>
         <button type="button" className="btn" onClick={() => setEnlarged(true)}>크게 보기</button>
         <a className="btn sm ghost" href={source} download={`${label}.png`}>투명 PNG 다운로드</a>
+        {assetVersion === FINAL_POSE_VERSION && <a className="btn sm ghost" href={`${source}&format=svg&download=1`} download={`${label}.svg`}>벡터 SVG 다운로드</a>}
         {onApply && <button type="button" className="btn primary" disabled={disabled || isApplied} onClick={() => onApply({ character, pose: previewPose, ...(assetVersion ? { assetVersion } : {}) })}>{isApplied ? "이 컷에 선택됨" : "이 컷에 적용"}</button>}
       </aside>
     </div>

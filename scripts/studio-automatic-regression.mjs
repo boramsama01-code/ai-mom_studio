@@ -61,7 +61,7 @@ for(const width of widths){
    else if(p==='/api/studio/cards/8/publication')json={channelId:1,channelName:ch.name,expectedUsername:'spacepenguin.co',ready:false,blockers:[],dailyLimit:0,dryRun:true,autoPublish:false,destinations:[{id:20,label:'@spacepenguin.co',enabled:true,configured:true}],deliveries:[],publicationDraft:{version:1,options:{destinationIds:[20],timing:'now',scheduledAtKst:''}}};
    else if(p==='/api/studio/characters/reference')return route.fulfill({contentType:'image/png',body:await image(0)});
    else if(/^\/api\/studio\/characters\/(pengpeng|pempem|penguin|pengki)\/poses\/1$/.test(p)){
-     assert.equal(url.searchParams.get('version'),'final-v1.4');portraitRequests.add(p);
+     assert.equal(url.searchParams.get('version'),'final-v1.5');portraitRequests.add(p);
      return route.fulfill({contentType:'image/png',body:await image(0)});
    }
    else if(/^\/api\/studio\/images\/\d+$/.test(p))return route.fulfill({contentType:'image/png',body:await image(Number(p.split('/').at(-1)))});

@@ -1,5 +1,5 @@
 import type { StudioCharacter, StudioPanel } from "./studio";
-import { FINAL_POSE_VERSION, finalPose } from "./studioFinalAssets";
+import { FINAL_POSE_VERSION, PREVIOUS_POSE_VERSION, type PoseAssetVersion, finalPose } from "./studioFinalAssets";
 
 /** Stable IDs preserve existing cards. Display names and artwork reflect the approved family. */
 export const STUDIO_POSE_GRID = { columns: 10, rows: 10 } as const;
@@ -43,7 +43,7 @@ export const STUDIO_CHARACTERS: ReadonlyArray<{
 
 export const STUDIO_CHARACTER_GUIDE = `우주펭귄상회는 남극성-09에서 온 네 펭귄 가족이다.
 ${STUDIO_CHARACTERS.map(c => `${c.name}(${c.age}살, ${c.role}): ${c.appearance}`).join("\n")}
-네 명 모두 짙은 회색 얼굴에 작고 넓게 떨어진 흰 점눈, 길고 뾰족한 노란 부리, 단일 청록 윤곽과 테두리 없는 흰 반사광의 맑은 투명 유리헬멧을 유지한다. 빈 유리에는 배경이 비치고 얼굴과 몸통 사이에 목을 드러내지 않는다. 매끈한 펜 윤곽과 무광 페인트 채색, 큰 둥근 머리와 짧은 몸을 유지하며 연필 입자나 빗금을 넣지 않는다. 가족의 크기는 펭펭, 펨펨, 펭긴, 펭키 순으로 작아진다. 머리 위 꽁지는 막내만 있다. 펨펨에게 볼터치나 머리카락을 추가하지 않는다. 코믹 표정은 볼 눌림·납작함, 짝눈, 큰 굴곡 두세 개의 찌글찌글 놀람을 분명하게 표현하되 헬멧의 원형과 투명도는 유지한다. 네 가족 모두 감자튀김을 가장 좋아한다. 소품과 자세는 장면에 맞게 바꿀 수 있지만 캐릭터의 외형은 최종 기본 모델을 따른다. HighScoop의 입시 사실과 ALLligodang의 정보는 제공한 근거에서만 사용한다.`;
+네 명 모두 짙은 회색 얼굴에 작고 넓게 떨어진 흰 점눈, 길고 뾰족한 노란 부리, 단일 청록 윤곽과 테두리 없는 흰 반사광의 맑은 투명 유리헬멧을 유지한다. 빈 유리에는 배경이 비치고 얼굴과 몸통 사이에 목을 드러내지 않는다. 매끈하고 선명한 벡터 윤곽과 균일한 단색 면을 사용한다. 피부색은 #56515B, 윤곽은 #252426, 부리는 #FFD200, 헬멧은 #00C9D0로 고정하고 그라데이션·얼룩·질감·블러·빛 번짐을 넣지 않는다. 양 볼이 바깥으로 도톰하게 돌출된 얼굴, 높은 눈 위치와 넓은 미간을 유지한다. 기본은 작고 맹한 흰 점눈이며 기쁨·화남·슬픔은 몸짓과 자세로 표현한다. 분석·추리·반박·논리적인 척하는 장면에서만 작은 눈을 살짝 게슴츠레하거나 눈꼬리가 조금 올라가게 표현한다. 웃는 반달눈, 날카로운 악당 눈, 과하게 처진 불쌍한 눈은 쓰지 않는다. 큰 머리와 짧은 몸을 유지하며 연필 입자나 빗금을 넣지 않는다. 가족의 크기는 펭펭, 펨펨, 펭긴, 펭키 순으로 작아진다. 머리 위 꽁지는 막내만 있다. 펨펨에게 볼터치나 머리카락을 추가하지 않는다. 코믹 표정은 볼 눌림·납작함, 짝눈, 큰 굴곡 두세 개의 찌글찌글 놀람을 분명하게 표현하되 헬멧의 원형과 투명도는 유지한다. 네 가족 모두 감자튀김을 가장 좋아한다. 소품과 자세는 장면에 맞게 바꿀 수 있지만 캐릭터의 외형은 최종 기본 모델을 따른다. HighScoop의 입시 사실과 ALLligodang의 정보는 제공한 근거에서만 사용한다.`;
 
 export function studioCharacterById(character: StudioCharacter) {
   return STUDIO_CHARACTERS.find(c => c.id === character)!;
@@ -51,11 +51,11 @@ export function studioCharacterById(character: StudioCharacter) {
 export function poseSheetUrl(character: StudioCharacter): string {
   return studioCharacterById(character).sheetUrl;
 }
-export function poseImageUrl(character: StudioCharacter, pose: number, assetVersion?: typeof FINAL_POSE_VERSION): string {
+export function poseImageUrl(character: StudioCharacter, pose: number, assetVersion?: PoseAssetVersion): string {
   return `/api/studio/characters/${character}/poses/${pose}${assetVersion ? `?version=${assetVersion}` : ""}`;
 }
-export function poseLabel(character: StudioCharacter, pose: number, assetVersion?: typeof FINAL_POSE_VERSION): string {
-  if (assetVersion === FINAL_POSE_VERSION) return `${studioCharacterById(character).name} · ${finalPose(character, pose)!.id} ${finalPose(character, pose)!.title}`;
+export function poseLabel(character: StudioCharacter, pose: number, assetVersion?: PoseAssetVersion): string {
+  if (assetVersion) return `${studioCharacterById(character).name} · ${finalPose(character, pose, assetVersion)!.id} ${finalPose(character, pose, assetVersion)!.title}`;
   const category = STUDIO_POSE_CATEGORIES[Math.floor((pose - 1) / STUDIO_POSE_GRID.columns)];
   return `${studioCharacterById(character).name} · ${category ?? "포즈"} ${String(pose).padStart(2, "0")}`;
 }
@@ -65,7 +65,7 @@ export function studioPoseGuide(panel: Pick<StudioPanel, "poseRefs">): string {
   const refs = panel.poseRefs ?? [];
   if (!refs.length) return "";
   return `[선택한 포즈 참조]\n${refs.map(ref => {
-    const asset = ref.assetVersion === FINAL_POSE_VERSION ? finalPose(ref.character, ref.pose) : undefined;
+    const asset = ref.assetVersion ? finalPose(ref.character, ref.pose, ref.assetVersion) : undefined;
     const description = asset ? `${asset.description} 표정 연출: ${asset.expression_direction}` : `10×10 시트의 ${Math.floor((ref.pose - 1) / 10) + 1}행 ${(ref.pose - 1) % 10 + 1}열. 해당 캐릭터에 이 포즈의 몸짓·구도를 참고하고 장면에 맞게 조정한다.`;
     return `${poseLabel(ref.character, ref.pose, ref.assetVersion)} — ${description} 참조 이미지: ${poseImageUrl(ref.character, ref.pose, ref.assetVersion)}`;
   }).join("\n")}\n가족 기준 그림의 외형·비율을 우선 유지하며, 선택한 포즈의 동작과 표정을 참고한다. 전체 포즈 시트나 다른 포즈를 한 컷 안에 그리지 않는다.`;
