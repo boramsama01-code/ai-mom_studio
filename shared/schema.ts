@@ -595,6 +595,31 @@ export const studioMedia = pgTable("studio_media", {
   createdAt: createdAt(),
 }, t => [index("studio_media_card").on(t.cardId)]);
 
+/* Notion ↔ Studio bindings; source originals and imported photos remain separate. */
+export const notionSyncLinks = pgTable('notion_sync_links', {
+  id: serial('id').primaryKey(),
+  notionPageId: text('notion_page_id').notNull().unique(),
+  notionUrl: text('notion_url').notNull(),
+  channelId: integer('channel_id').notNull().references(()=>channels.id),
+  contentItemId: integer('content_item_id').notNull().references(()=>contentItems.id).unique(),
+  sourceHash: text('source_hash').notNull(),
+  baseCopyHash: text('base_copy_hash').notNull(),
+  sourceEditedAt: text('source_edited_at').notNull(),
+  sourceSnapshot: jsonb('source_snapshot').$type<Record<string,unknown>>().notNull(),
+  photoOrder: jsonb('photo_order').$type<number[]>().notNull().default([]),
+  coverStyle: text('cover_style').notNull().default('A'),
+  autoSync: boolean('auto_sync').notNull().default(true), lastCheckedAt:ts('last_checked_at'),
+  canva: jsonb('canva').$type<import('./notionStudio').NotionCanvaState>().notNull().default({phase:'idle'}),
+  operationToken: text('operation_token'), operationUntil: ts('operation_until'),
+  lastError: text('last_error'), version: integer('version').notNull().default(1),
+  lastSyncedAt: ts('last_synced_at').notNull().defaultNow(), createdAt:createdAt(),updatedAt:updatedAt(),
+}, t=>[index('notion_sync_links_channel').on(t.channelId)]);
+export const notionSyncPhotos=pgTable('notion_sync_photos',{
+ id:serial('id').primaryKey(),linkId:integer('link_id').notNull().references(()=>notionSyncLinks.id),
+ sourceKey:text('source_key').notNull(),name:text('name').notNull(),mimeType:text('mime_type').notNull(),
+ bytes:bytea('bytes').notNull(),sha256:text('sha256').notNull(),width:integer('width').notNull(),height:integer('height').notNull(),createdAt:createdAt(),
+},t=>[uniqueIndex('notion_sync_photos_source').on(t.linkId,t.sourceKey),index('notion_sync_photos_link').on(t.linkId)]);
+
 
 /* ───────────── Canva 8-page masters and durable render jobs ───────────── */
 export const canvaMasters = pgTable("canva_masters", {

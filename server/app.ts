@@ -18,6 +18,7 @@ import { canvaEditorialRoutes } from "./routes/canvaEditorial";
 import { canvaTemplateLibraryRoutes } from "./routes/canvaTemplateLibrary";
 import { cardPageArtworkRoutes } from "./routes/cardPageArtwork";
 import { assetLibraryRoutes } from './routes/assetLibrary';
+import { notionRoutes } from './routes/notion';
 import { HttpError } from "./routes/util";
 import { isPrivateStudioAssetPath } from "./studioAssetPath";
 
@@ -47,7 +48,7 @@ export function createApp() {
   // 공개: 헬스체크(비밀값 없음). Resolver version verifies the actual running backend.
   app.get("/api/health", async (_req, res) => {
     const db = await dbHealth();
-    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", revision: process.env.RENDER_GIT_COMMIT?.slice(0, 40) ?? null, sourceResolver: "publisher-identity-v5", studioDrafts: "persistent-workspace-v3", cardRenderer: "adaptive-body-v1", studioPublishing: "durable-attempts-v2", studioPoses: "family-v2-100" });
+    res.status(db.ok ? 200 : 503).json({ ok: db.ok, db: db.ok ? "connected" : db.error, auth: authConfigured() ? "configured" : "not_configured", revision: process.env.RENDER_GIT_COMMIT?.slice(0, 40) ?? null, sourceResolver: "publisher-identity-v5", studioDrafts: "persistent-workspace-v3", cardRenderer: "adaptive-body-v1", studioPublishing: "durable-attempts-v2", studioPoses: "family-v2-100", notionSync: "bidirectional-v1" });
   });
 
   const sessionOk = env.databaseUrl ? installSession(app) : false;
@@ -61,7 +62,7 @@ export function createApp() {
       if (!authConfigured() && !demoAllowed()) return res.status(503).json({ error: "운영자 인증이 설정되지 않아 운영 API를 차단했습니다.", code: "auth_not_configured" });
       next();
     });
-    app.use("/api", requireOperator, assetLibraryRoutes, captureRoutes, canvaTemplateLibraryRoutes, canvaEditorialRoutes, channelRoutes, ruleRoutes, cardPageArtworkRoutes, itemRoutes, opsRoutes, secretRoutes, templateRoutes, studioRoutes, collectionRoutes);
+    app.use("/api", requireOperator, notionRoutes, assetLibraryRoutes, captureRoutes, canvaTemplateLibraryRoutes, canvaEditorialRoutes, channelRoutes, ruleRoutes, cardPageArtworkRoutes, itemRoutes, opsRoutes, secretRoutes, templateRoutes, studioRoutes, collectionRoutes);
   }
   app.use("/api", (_req, res) => res.status(404).json({ error: "없는 API입니다." }));
 

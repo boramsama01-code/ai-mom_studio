@@ -183,6 +183,13 @@
       "when": 1794009600002,
       "tag": "0025_family_manual_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794182400000,
+      "tag": "0026_notion_sync",
+      "breakpoints": true
     }
   ]
 }

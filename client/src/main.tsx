@@ -32,6 +32,7 @@ const InstagramConnectionsPage = lazy(() => import("./pages/InstagramConnections
 const RunsPage = lazy(() => import("./pages/Runs").then(m => ({ default: m.RunsPage })));
 const DesignPage = lazy(() => import("./pages/Design").then(m => ({ default: m.DesignPage })));
 const StudioPage = lazy(() => import("./pages/Studio").then(m => ({ default: m.StudioPage })));
+const NotionSyncPage = lazy(() => import("./pages/NotionSync").then(m => ({ default: m.NotionSyncPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false, staleTime: 15_000 } },
@@ -44,6 +45,7 @@ const NAV: Array<{ group: string; collapsible?: boolean; items: Array<{ href: st
       { href: "/", label: "내 콘텐츠", icon: "grid" },
       { href: "/inbox", label: "수집함", icon: "inbox", count: "review" },
       { href: "/assets", label: "자산·템플릿", icon: "design" },
+      { href: "/notion", label: "노션 원고 연결", icon: "link" },
       { href: "/publish", label: "발행 일정·기록", icon: "send" },
       { href: "/settings", label: "설정", icon: "channels" },
     ],
@@ -204,6 +206,7 @@ export function Shell() {
           <Route path="/publish" component={PublishPage} />
           <Route path="/settings" component={ChannelSettingsPage} />
           <Route path="/connections" component={ConnectionsPage} />
+          <Route path="/notion" component={NotionSyncPage} />
           <Route path="/instagram" component={InstagramConnectionsPage} />
           <Route path="/account" component={AccountPage} />
           <Route path="/runs" component={RunsPage} />

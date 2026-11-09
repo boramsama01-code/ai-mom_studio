@@ -9,8 +9,27 @@ import { ensureCloudinary, CloudinaryNotConfigured } from "./cloudinary";
 import { openaiFailureMessage } from "./openaiError";
 import { geminiFailureMessage, geminiModelUrl } from "./gemini";
 import { accountIdentity, type InstagramAuthMode } from "./instagram";
+import { getNotionConnectionStatus, NOTION_API_VERSION } from "./notionClient";
 
 export type TestResult = { ok: boolean; message: string };
+
+/** One read-only data-source query. Does not import, edit or publish a document. */
+export async function testNotion(fetchImpl: typeof fetch = fetch): Promise<TestResult> {
+  const status = getNotionConnectionStatus();
+  if (!status.configured) return { ok: false, message: "노션 연결 키와 콘텐츠 제작표 설정을 먼저 확인해 주세요." };
+  try {
+    const response = await fetchImpl(`https://api.notion.com/v1/data_sources/${status.dataSourceId}/query`, {
+      method: "POST", redirect: "error", signal: AbortSignal.timeout(18_000),
+      headers: { Authorization: `Bearer ${process.env.NOTION_API_TOKEN!.trim()}`, "Notion-Version": NOTION_API_VERSION, "Content-Type": "application/json" },
+      body: JSON.stringify({ page_size: 1 }),
+    });
+    await response.body?.cancel();
+    if (!response.ok) return { ok: false, message: response.status === 401 || response.status === 403 ? "노션 연결 권한을 확인해 주세요. 콘텐츠 제작표를 이 연결에 공유해야 합니다."
+      : response.status === 404 ? "연결에서 콘텐츠 제작표를 찾지 못했습니다. 공유 여부와 데이터 소스 설정을 확인해 주세요."
+        : response.status === 429 ? "노션 요청이 잠시 많습니다. 잠시 후 다시 확인해 주세요." : "노션 제작표 조회를 완료하지 못했습니다. 잠시 후 다시 확인해 주세요." };
+    return { ok: true, message: "노션 제작표 조회에 성공했습니다. 원고·사진을 가져오거나 수정하지 않았습니다. 쓰기 권한은 원고 반영 시 확인합니다." };
+  } catch { return { ok: false, message: "노션에 연결할 수 없습니다. 연결 키와 네트워크 상태를 확인해 주세요." }; }
+}
 
 /** Model metadata only: does not generate tokens or verify billing/free-tier enrollment. */
 export async function testGemini(fetchImpl: typeof fetch = fetch): Promise<TestResult> {
