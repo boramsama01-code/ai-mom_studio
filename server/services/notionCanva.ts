@@ -19,6 +19,9 @@ import { loadReadingFont } from './readingCardFonts';
 import { safeFetch } from './safeFetch';
 import { NOTION_SOURCE_REFERENCES_MAX, NOTION_SOURCE_REFERENCES_PER_PAGE, NOTION_MANUSCRIPT_MAX_PAGES, NOTION_MAX_OUTPUT_PAGES, notionSourceReferencePageCount } from '../../shared/notionSync';
 import { admissionsCalendarElements, institutionScheduleElements, institutionScheduleGeometry, NotionAdmissionsLayoutError, parseAdmissionsCalendar, parseInstitutionSchedule } from './notionAdmissionsLayout';
+import { admissionsGuideElements, parseAdmissionsGuide } from './notionAdmissionsGuide';
+import { logoCalendarElements, parseLogoCalendar } from './notionLogoCalendar';
+import { loadEducationOfficeLogos, type EducationOfficeLogo } from './educationOfficeLogos';
 
 export const NOTION_CANVA_GEOMETRY = { width: 1080, height: 1350, safe: { x: 96, y: 207, width: 888, height: 936 } } as const;
 export const NOTION_CANVA_TEXT_SYNC = 'manual-confirmation-required' as const;
@@ -45,7 +48,7 @@ const EMU = 9525;
 const RED = '#FF493B', INK = '#171717';
 const idSchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9_-]+$/);
 const copy = z.string().refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value));
-const pageSchema = z.object({ title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional(), footnote: copy.max(1000).optional(), sourceLabel: copy.max(300).optional(), infographic: z.enum(['application_steps','admissions_calendar','institution_schedule']).optional() }).strict();
+const pageSchema = z.object({ title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional(), footnote: copy.max(1000).optional(), sourceLabel: copy.max(300).optional(), infographic: z.enum(['application_steps','admissions_calendar','institution_schedule','admissions_logo_calendar','admissions_guide']).optional() }).strict();
 const sourceUrl = z.string().trim().min(1).max(2048).refine(value=>{
   try{
     const url=new URL(value),host=url.hostname.toLowerCase();
@@ -337,7 +340,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   }
   for(const page of document.pages)if(page.imageId&&!media.has(page.imageId))invalid('원고에서 지정한 사진을 찾을 수 없습니다. 사진을 다시 연결해 주세요.');
   for(const [index,page]of document.pages.entries())if(page.infographic){
-    const label=page.infographic==='application_steps'?'접수 단계 도식':page.infographic==='admissions_calendar'?'모집 달력':'기관별 일정표';
+    const label=page.infographic==='application_steps'?'접수 단계 도식':page.infographic==='admissions_calendar'||page.infographic==='admissions_logo_calendar'?'모집 달력':page.infographic==='admissions_guide'?'모집 안내':'기관별 일정표';
     if(index===0)invalid(`${label}은 표지가 아닌 내지에만 사용할 수 있습니다.`);
     if(page.imageId)invalid(`${label}과 사진을 같은 장에 함께 배치할 수 없습니다. 사진을 보존하려면 별도 장으로 나눠 주세요.`);
   }
@@ -347,7 +350,18 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   if(document.coverStyle==='B'&&coverPhoto)warnings.push('B는 질문 타이포 표지이므로 표지 사진은 표시하지 않습니다. 원본 사진은 Studio에 보존됩니다.');
   const logo=await readMedia(await fs.readFile(path.resolve(process.cwd(),'assets/branding/highscoop-magazine-color.png')),'logo-color');
   const darkLogo=await readMedia(await fs.readFile(path.resolve(process.cwd(),'assets/branding/highscoop-magazine-dark.png')),'logo-dark');
-  const allMedia=[logo,darkLogo,...media.values()];
+  let educationLogos:EducationOfficeLogo[]=[];const educationMedia=new Map<string,Media>();
+  const logoPages=document.pages.filter((page,index)=>page.infographic==='admissions_logo_calendar'&&(!options.previewOnly||options.previewPage===index));
+  if(logoPages.length){
+    educationLogos=await loadEducationOfficeLogos();
+    const keys=new Set<string>();
+    for(const page of logoPages){
+      try{for(const event of parseLogoCalendar(page.body??'',page.title,educationLogos).events)keys.add(event.logoKey);}
+      catch(error){if(error instanceof NotionAdmissionsLayoutError)invalid(error.message);throw error;}
+    }
+    for(const key of keys){const asset=educationLogos.find(item=>item.key===key)!;educationMedia.set(key,await readMedia(asset.bytes,`education-${key}`));}
+  }
+  const allMedia=[logo,darkLogo,...media.values(),...educationMedia.values()];
   const fileFor=(item:Media)=>`${item.file}.${item.extension}`;
   const files:Record<string,Uint8Array>={};
   const put=(name:string,contents:string)=>{if(!options.previewOnly)files[name]=strToU8(contents);};
@@ -365,7 +379,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     let nextId=2;const shapes:string[]=[];let relationships=rel('rIdLayout','slideLayout','../slideLayouts/slideLayout1.xml');let imageIndex=0;
     const previewShapes:string[]=[],previewing=options.previewPage===index;
     const visual=(name:string,markup:string)=>{if(previewing)previewShapes.push(`<g data-name="${xml(name)}">${markup}</g>`);};
-    const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover')=>{if(!options.previewOnly){const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,item.file,rid,item,x,y,w,h,mode));}if(previewing)visual(item.file,`<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden"><image width="${w}" height="${h}" preserveAspectRatio="xMidYMid ${mode==='contain'?'meet':'slice'}" href="data:image/${item.extension};base64,${item.bytes.toString('base64')}"/></svg>`);};
+    const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover',altText?:string)=>{if(!options.previewOnly){const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,altText??item.file,rid,item,x,y,w,h,mode));}if(previewing)visual(item.file,`<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden"${altText?` aria-label="${xml(altText)}"`:''}><image width="${w}" height="${h}" preserveAspectRatio="xMidYMid ${mode==='contain'?'meet':'slice'}" href="data:image/${item.extension};base64,${item.bytes.toString('base64')}"/></svg>`);};
     const rect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000)=>{
       if(!options.previewOnly)shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill,alpha));
       visual(name,`${gradient?'<defs><linearGradient id="bottom-fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset=".5" stop-color="#000000" stop-opacity=".74"/><stop offset="1" stop-color="#000000"/></linearGradient></defs>':''}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${pill?Math.min(w,h)/2:0}" fill="${gradient?'url(#bottom-fade)':fill}" fill-opacity="${alpha/100000}"/>`);
@@ -509,11 +523,13 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         text('cover-footer',footer,96,1014,888,64,20,16,'#555555');
       }
     } else {
-     if(page.infographic==='admissions_calendar'||page.infographic==='institution_schedule'){
-      const calendar=page.infographic==='admissions_calendar';
+     if(page.infographic==='admissions_calendar'||page.infographic==='institution_schedule'||page.infographic==='admissions_logo_calendar'||page.infographic==='admissions_guide'){
+      const calendar=page.infographic==='admissions_calendar'||page.infographic==='admissions_logo_calendar',guide=page.infographic==='admissions_guide';
       let elements:ReturnType<typeof admissionsCalendarElements>,intro:string,footerY=1072;
       try{
-       if(calendar){const model=parseAdmissionsCalendar(body,page.title);intro=model.intro;elements=admissionsCalendarElements(model,wrap);}
+       if(page.infographic==='admissions_logo_calendar'){const model=parseLogoCalendar(body,page.title,educationLogos);intro=model.intro;elements=logoCalendarElements(model);}
+       else if(page.infographic==='admissions_calendar'){const model=parseAdmissionsCalendar(body,page.title);intro=model.intro;elements=admissionsCalendarElements(model,wrap);}
+       else if(guide){const model=parseAdmissionsGuide(body);intro=model.intro;elements=admissionsGuideElements(model,accent);}
        else{const model=parseInstitutionSchedule(body);intro=model.intro;elements=institutionScheduleElements(model);footerY=institutionScheduleGeometry(model).footerY;}
       }catch(error){if(error instanceof NotionAdmissionsLayoutError)invalid(`${index+1}장 ${error.message}`);throw error;}
       if(wrap(page.title,40,888,true).length>(calendar?1:2))invalid(`${index+1}장 ${calendar?'달력 제목은 한 줄':'일정표 제목은 두 줄 이내'}로 줄여 주세요. 제목을 자르지 않았습니다.`);
@@ -521,10 +537,11 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       if(document.category)text('page-category',document.category,96,207,470,32,22,20,INK,true);
       text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,625,207,150,32,20,20,'#555555');
       image(logo,794,207,190,40,'contain');rect('section-accent',96,247,64,5,accent);
-      text(`page-${index+1}-title`,page.title,96,266,888,calendar?60:120,46,40,INK,true,page.emphasis,'l',1.2);
-      text(calendar?'calendar-intro':'schedule-intro',intro,96,calendar?334:400,888,36,26,24,INK,false,page.emphasis,'l',1.2);
+      text(`page-${index+1}-title`,page.title,96,266,888,calendar?60:guide?100:120,46,40,INK,true,page.emphasis,'l',1.2);
+      text(calendar?'calendar-intro':guide?'guide-intro':'schedule-intro',intro,96,calendar?334:guide?370:400,888,36,26,24,INK,false,page.emphasis,'l',1.2);
       for(const element of elements){
        if(element.kind==='rect')rect(element.name,element.x,element.y,element.width,element.height,element.fill,false,element.pill);
+       else if(element.kind==='image'){const item=educationMedia.get(element.mediaKey);if(!item)invalid('교육청 로고를 불러오지 못했습니다.');image(item,element.x,element.y,element.width,element.height,'contain',element.altText);}
        else text(element.name,element.content,element.x,element.y,element.width,element.height,element.max,element.min,element.ink,element.bold,page.emphasis,element.align,element.leading);
       }
       text(`page-${index+1}-footer`,footer,96,footerY,888,70,20,16,'#555555');

@@ -21,7 +21,7 @@ export const notionDocumentPageSchema = z.object({
   headingBlockId: z.string(), bodyBlockIds: z.array(z.string()),
   titleBlockId: z.string().optional(),
   cardRowId: z.string().uuid().optional(), cardFields: notionTableFieldsSchema.optional(),
-  infographic: z.enum(['application_steps','admissions_calendar','institution_schedule']).optional(),
+  infographic: z.enum(['application_steps','admissions_calendar','institution_schedule','admissions_logo_calendar','admissions_guide']).optional(),
   emphasis: z.string().max(100).optional(),
 });
 export const notionDocumentSummarySchema = z.object({

@@ -49,3 +49,25 @@ Source hashes, item versions, revision IDs and durable operation tokens protect 
 Photos: up to 12 Notion images, 12 MB each, 100 MB per import. Local originals are capped at 200 MB per linked draft. Card manuscripts: 2–20 source chapters; optional source QR and teaser plus the native fixed HighScoop follow page are appended to the Canva design, up to 28 output pages. The generic AI card-copy limits remain unchanged. Oversized text or QR density fails validation instead of being shortened.
 
 Test only with an isolated PostgreSQL database. `tests/helpers.ts` drops schemas and must never be pointed at production. New integration suites mock all outbound Notion/Canva requests.
+
+## Logo calendars and institution guides
+
+**도식: 로고 모집 달력** uses the original bundled education-office CI PNGs in real month cells. Start the body with `2026년 11월 · 학생 지원 기준`, then use one region per line: `11/11 | 마감 | 서울`. Kinds are **시작**, **마감**, **사전** (a separate preliminary submission), and **조건부** (for example, an unfilled-course round). `의정부` uses the Gyeonggi logo while retaining its local label. Unknown aliases, duplicate events and excessive density fail explicitly. Week heights adapt to the events; images retain their original proportions. At most six events fit a date and 48 fit a calendar. A crowded month must be split into additional calendar pages.
+
+**도식: 모집 안내** uses this body contract, without adding a table-header row:
+
+```text
+2026년 현재 학년 · 공고별 지원 자격 확인
+[모집]
+수학·과학 | 초6 | 해당 신규 과정
+[전형]
+학생 지원 | ~11/11 | GED · 18시
+교사 추천 | ~11/12 | GED 추천
+평가 | 12/5 | 과정별 방식
+[서류]
+공통 | GED 온라인 지원서
+조건부 | 해당자 증빙 · 기관별 기한
+미확인 | 별도 연구계획서: 주요강 미기재
+```
+
+The first table has 1–6 rows, the process has 2–5 actual stages, and documents have 1–3 rows. **[기관별 모집]** replaces **[모집]** for comparisons; its three columns are institution/course, fields/current grades, and submission-stage deadlines. Document states are **공통**, **조건부**, **없음명시**, **미확인**, and **선택**. `없음명시` requires an explicit source statement for the named applicant group. A missing mention is `미확인`, never proof that a document is unnecessary. GED teacher nomination is separate from a paper recommendation, and a research plan is separate from a personal statement. Keep the source's current-grade versus education-year distinction; do not infer ages. Put material differences on supplementary cards or in another regional volume. All cells and process boxes are editable text/shapes in Canva; previews use the same layout and reject overflow without deleting words.
