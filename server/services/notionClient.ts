@@ -258,10 +258,33 @@ export function createNotionClient(options: ClientOptions = {}) {
     const id = normalizeNotionPageId(pageId), page = await request(`/pages/${id}`,"GET",undefined,signal); assertMembership(page);
     return parseDocument(page, await listBlocks(id, 0, { count: 0 },signal));
   }
+  async function resolveChannelOption(channel: string): Promise<string | undefined> {
+    const source = await request(`/data_sources/${configuration().dataSourceId}`);
+    const property = source.properties?.["채널"];
+    if (property?.type !== "select" || !Array.isArray(property.select?.options))
+      throw new NotionSyncError("제작표의 ‘채널’은 선택(select) 속성이어야 합니다. 노션 제작표의 속성 형식을 확인해 주세요.", 422, "NOTION_CHANNEL_SCHEMA_UNSUPPORTED");
+    const options = property.select.options as Obj[];
+    if (options.some(option => typeof option?.name !== "string" || !option.name.trim()))
+      throw new NotionSyncError("노션 채널의 선택 항목 응답을 확인할 수 없습니다.", 502, "NOTION_INVALID_RESPONSE");
+    const names = options.map(option => option.name as string), fold = (name: string) => name.trim().toLowerCase();
+    // Notion select filters require the stored option's exact spelling. Preserve
+    // custom channel names; only fall back to the app's known Korean brand alias.
+    const exact = names.find(name => name === channel);
+    if (exact !== undefined) return exact;
+    const matching = names.filter(name => fold(name) === fold(channel));
+    if (!matching.length && channel === "우주펭귄상회") matching.push(...names.filter(name => fold(name) === "spacepenguin"));
+    if (matching.length > 1)
+      throw new NotionSyncError("노션 채널의 선택 항목 이름이 겹칩니다. 정확한 이름으로 구분해 주세요.", 422, "NOTION_CHANNEL_SCHEMA_UNSUPPORTED");
+    return matching[0];
+  }
   async function queryNotionDocuments(input: NotionDocumentQuery = {}): Promise<NotionDocumentList> {
     const data = notionDocumentQuerySchema.parse(input), filters: Obj[] = [];
     if (data.query) filters.push({ property: "제목", title: { contains: data.query } });
-    if (data.channel) filters.push({ property: "채널", select: { equals: data.channel } });
+    if (data.channel) {
+      const channel = await resolveChannelOption(data.channel);
+      if (channel === undefined) return { documents: [], hasMore: false };
+      filters.push({ property: "채널", select: { equals: channel } });
+    }
     const documents: NotionDocumentSummary[] = []; let cursor = data.cursor, hasMore = false;
     for (let i = 0; i < 2; i++) {
       const result = await request(`/data_sources/${configuration().dataSourceId}/query`, "POST", {
