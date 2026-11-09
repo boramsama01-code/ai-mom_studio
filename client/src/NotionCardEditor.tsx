@@ -1,8 +1,9 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {useQueryClient} from '@tanstack/react-query';
-import {cardCopySchema,type CardCopy} from '@shared/cardCopy';
+import {type CardCopy} from '@shared/cardCopy';
+import {notionCardCopySchema} from '@shared/notionStudioCopy';
 import {notionDesignEditsSchema,type NotionDesignEdits,type NotionStudioDetail} from '@shared/notionStudio';
-import {notionSourceReferencePageCount} from '@shared/notionSync';
+import {NOTION_MANUSCRIPT_MAX_PAGES,notionSourceReferencePageCount} from '@shared/notionSync';
 import {api,apiBlob,ApiError} from './api';
 import {useDirtyGuard} from './state';
 import {useDraftRecovery} from './useDraftRecovery';
@@ -15,7 +16,7 @@ const initial=(data:NotionStudioDetail):Draft=>({copy:structuredClone(data.copy)
 const stable=(value:unknown):string=>JSON.stringify(value,(_key,entry)=>entry&&typeof entry==='object'&&!Array.isArray(entry)?Object.fromEntries(Object.entries(entry).sort(([a],[b])=>a.localeCompare(b))):entry);
 const same=(a:unknown,b:unknown)=>stable(a)===stable(b);
 // Checkpoint incomplete edits too; nonempty/length validation belongs to saving.
-const recoveryCopySchema=z.object({version:z.literal(1),templateKey:z.string(),cover:z.object({title:z.string(),subtitle:z.string()}),pages:z.array(z.object({id:z.string(),title:z.string(),subtitle:z.string(),body:z.string()})).min(1).max(9)});
+const recoveryCopySchema=z.object({version:z.literal(1),templateKey:z.string(),cover:z.object({title:z.string(),subtitle:z.string()}),pages:z.array(z.object({id:z.string(),title:z.string(),subtitle:z.string(),body:z.string()})).min(1).max(NOTION_MANUSCRIPT_MAX_PAGES-1)});
 const recoveryDraft=(value:unknown):Draft|null=>{
   if(!value||typeof value!=='object'||!('copy' in value)||!('designEdits' in value))return null;
   const copy=recoveryCopySchema.safeParse(value.copy),edits=notionDesignEditsSchema.safeParse(value.designEdits);
@@ -31,7 +32,7 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
   const [saveError,setSaveError]=useState<unknown>(null),[remote,setRemote]=useState<NotionStudioDetail|null>(null);
   const [preview,setPreview]=useState<{url:string;signature:string}|null>(null),previewUrl=useRef<string|null>(null);
   const [previewBusy,setPreviewBusy]=useState(false),[previewError,setPreviewError]=useState<unknown>(null),[retry,setRetry]=useState(0),[safeArea,setSafeArea]=useState(false);
-  const dirty=!same(draft,initial(base)),valid=cardCopySchema.safeParse(draft.copy).success;
+  const dirty=!same(draft,initial(base)),valid=notionCardCopySchema.safeParse(draft.copy).success;
   const put=(next:Draft)=>{draftRef.current=next;setDraft(next);setSavedMessage('');};
   const adopt=(next:NotionStudioDetail)=>{baseRef.current=next;setBase(next);put(initial(next));setRemote(null);setSaveError(null);};
   const recovery=useDraftRecovery<Draft>({recoveryKey:`notion:${data.link.id}:visual-copy`,label:'카드 편집',version:base.itemVersion,value:draft,serverValue:initial(base),dirty,ready:true,parse:recoveryDraft,onRestore:put});
@@ -61,7 +62,7 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
     const current=baseRef.current,snapshot=draftRef.current;
     if(recoveryRef.current.pending)throw new Error('기기 복구본을 먼저 확인해 주세요.');
     if(same(snapshot,initial(current)))return true;
-    if(!cardCopySchema.safeParse(snapshot.copy).success)throw new Error('제목·본문의 입력 길이를 확인해 주세요.');
+    if(!notionCardCopySchema.safeParse(snapshot.copy).success)throw new Error('제목·본문의 입력 길이를 확인해 주세요.');
     setSaving(true);setSaveError(null);
     try{
       const result=await api<NotionStudioDetail>(`/notion/links/${current.link.id}/copy`,{method:'PATCH',body:{version:current.link.version,itemVersion:current.itemVersion,...snapshot}});

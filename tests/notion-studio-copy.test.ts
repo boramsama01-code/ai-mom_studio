@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { notionCopyText, notionCopyToPages, notionDocumentToCopy, notionSyncChange, notionPlainCardCopy } from "../shared/notionStudioCopy";
+import { notionCopyText, notionCopyToPages, notionDocumentToCopy, notionSyncChange, notionPlainCardCopy, notionCardCopySchema } from "../shared/notionStudioCopy";
 import { cardCopySchema } from "../shared/cardCopy";
 import { NEWS_EDITORIAL_ROLES } from "../shared/newsEditorial";
 import type { NotionDocument } from "../shared/notionSync";
@@ -67,12 +67,20 @@ describe("Notion manuscript canonical card copy", () => {
     const source = manuscript(2); change(source); const before = structuredClone(source);
     expect(() => notionDocumentToCopy(source)).toThrow(); expect(source).toEqual(before);
   });
-  it.each([2, 10])("supports %i total pages without inserting or dropping a chapter", count => {
+  it.each([2, 10, 20])("supports %i total pages without inserting or dropping a chapter", count => {
     const source = manuscript(count), copy = notionDocumentToCopy(source);
     expect(copy.pages).toHaveLength(count - 1); expect(notionCopyToPages(copy)).toHaveLength(count);
   });
-  it.each([1, 11])("rejects %i total pages as an unsupported structure", count => {
-    expect(() => notionDocumentToCopy(manuscript(count))).toThrow(/2~10/);
+  it.each([1, 21])("rejects %i total pages as an unsupported structure", count => {
+    expect(() => notionDocumentToCopy(manuscript(count))).toThrow(/2~20/);
+  });
+  it("round-trips a full regional manuscript without relaxing other editors or duplicate-ID checks",()=>{
+    const source=manuscript(20),copy=notionDocumentToCopy(source);
+    expect(notionCardCopySchema.safeParse(copy).success).toBe(true);
+    expect(cardCopySchema.safeParse(copy).success).toBe(false);
+    expect(notionCopyToPages(copy,{baseline:source,current:source})).toEqual(source.pages.map(({index,title,body})=>({index,title,body})));
+    copy.pages[18].id=copy.pages[0].id;
+    expect(notionCardCopySchema.safeParse(copy).success).toBe(false);
   });
   it.each([[[2, 3]], [[1, 3]], [[2, 1]], [[1, 1]]])("rejects noncanonical source chapter numbers %j before any import", indexes => {
     const source = manuscript(2); source.pages.forEach((page, i) => { page.index = indexes[i]; });

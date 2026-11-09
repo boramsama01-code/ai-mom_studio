@@ -1,14 +1,15 @@
 import { z } from 'zod';
-import { cardCopySchema, type CardCopy } from './cardCopy';
-import type { NotionDocumentPage } from './notionSync';
+import { type CardCopy } from './cardCopy';
+import { NOTION_MANUSCRIPT_MAX_PAGES, type NotionDocumentPage } from './notionSync';
+import { notionCardCopySchema } from './notionStudioCopy';
 
 export const notionCoverStyles = ['A','B','C'] as const;
 export const notionImportRequestSchema=z.object({pageId:z.string().min(1).max(200),channelId:z.number().int().positive(),expectedSourceHash:z.string().min(1).max(128),coverStyle:z.enum(notionCoverStyles).default('A')}).strict();
 export const notionPullRequestSchema=z.object({version:z.number().int().positive(),itemVersion:z.number().int().positive(),expectedSourceHash:z.string().min(1).max(128),resolveConflict:z.boolean().default(false)}).strict();
 export const notionPushRequestSchema=z.object({version:z.number().int().positive(),itemVersion:z.number().int().positive(),expectedSourceHash:z.string().min(1).max(128),resolveConflict:z.boolean().default(false)}).strict();
-export const notionDesignEditsSchema=z.object({emphasisByPage:z.record(z.string().min(1).max(200),z.string().max(100)).refine(values=>Object.keys(values).length<=10)}).strict();
+export const notionDesignEditsSchema=z.object({emphasisByPage:z.record(z.string().min(1).max(200),z.string().max(100)).refine(values=>Object.keys(values).length<=NOTION_MANUSCRIPT_MAX_PAGES)}).strict();
 export type NotionDesignEdits=z.infer<typeof notionDesignEditsSchema>;
-export const notionEditorRequestSchema=z.object({version:z.number().int().positive(),itemVersion:z.number().int().positive(),copy:cardCopySchema,designEdits:notionDesignEditsSchema}).strict();
+export const notionEditorRequestSchema=z.object({version:z.number().int().positive(),itemVersion:z.number().int().positive(),copy:notionCardCopySchema,designEdits:notionDesignEditsSchema}).strict();
 export type NotionStudioPhoto={id:number;name:string;mimeType:string;width:number;height:number;url:string};
 export type NotionCanvaState={phase:'idle'|'importing'|'ready'|'exporting'|'complete'|'failed'|'result_unknown';jobId?:string;exportJobId?:string;designId?:string;editUrl?:string|null;viewUrl?:string|null;sourceVersion?:number;sourceRevisionId?:number;pageCount?:number;outputAssetId?:number;error?:string|null;updatedAt?:string};
 export type NotionStudioLink={id:number;version:number;pageId:string;notionUrl:string;channelId:number;itemId:number;studioCardId:number|null;title:string;sourceHash:string;lastEditedAt:string;lastSyncedAt:string;autoSync:boolean;lastCheckedAt:string|null;coverStyle:typeof notionCoverStyles[number];status:'synced'|'studio_changed';studioUrl:string;canva:NotionCanvaState;photoCount:number};

@@ -27,6 +27,15 @@ afterAll(async()=>{await (await import('../server/db')).closeDb();});
 async function imported(){return (await import('../server/services/notionStudio')).importNotionStudio(db,{pageId,channelId:ch,expectedSourceHash:doc.sourceHash,coverStyle:'A'},'test');}
 async function edit(itemId:number,text:string){const [item]=await db.select().from(schemas.contentItems).where(eq(schemas.contentItems.id,itemId));const [rev]=await db.select().from(schemas.contentRevisions).where(eq(schemas.contentRevisions.id,item.currentRevisionId!));const payload=structuredClone(rev.payload) as any;payload.cardCopy.pages[0].body=text;await (await import('../server/content')).createRevision(db,{contentItemId:itemId,author:'operator',payload});await db.update(schemas.contentItems).set({version:item.version+1}).where(eq(schemas.contentItems.id,itemId));}
 describe('Notion ↔ Studio durable integration',()=>{
+ it('saves every page of a long Notion deck and previews its final core and Follow cards',async()=>{
+  const template=doc.pages[1];doc.pages=[doc.pages[0],...Array.from({length:19},(_,i)=>({...template,index:i+2,title:`교육청 ${i+2}`,body:`기관별 학생 마감 ${i+2}`,headingBlockId:`h${i+2}`}))];
+  const a=await imported(),{agent,csrf}=await login(app);expect(a.copy.pages).toHaveLength(19);
+  const copy=structuredClone(a.copy);copy.pages[18].body='끝까지 보존할 시도 일정';
+  const saved=await agent.patch(`/api/notion/links/${a.link.id}/copy`).set('x-csrf-token',csrf).send({version:a.link.version,itemVersion:a.itemVersion,copy,designEdits:{emphasisByPage:{h20:'시도 일정'}}});
+  expect(saved.status).toBe(200);expect(saved.body.copy.pages[18].body).toBe('끝까지 보존할 시도 일정');
+  const body={version:saved.body.link.version,itemVersion:saved.body.itemVersion,copy:saved.body.copy,designEdits:saved.body.designEdits};
+  for(const page of [19,20]){const preview=await agent.post(`/api/notion/links/${a.link.id}/preview`).set('x-csrf-token',csrf).send({...body,page});expect(preview.status).toBe(200);expect(await sharp(preview.body).metadata()).toMatchObject({width:1080,height:1350});}
+ });
  it('saves visual editor copy with CAS while keeping protected fields, extras, notes and previous revisions',async()=>{
   doc.pages[1].cardFields={subtitle:'고정 소제목',body:'본문 원본',footnote:'공식 각주',sourceLabel:'교육청 원문'};doc.pages[1].body='고정 소제목\n\n본문 원본';doc.pages[1].emphasis='원본';doc.sourceReferences=[{title:'기관 원문',url:'https://ged.kedi.re.kr/notice/2027'}];doc.sourceCard={title:'원문 확인',body:'공식 요강 확인'};doc.teaser={title:'다음 원고',body:'댓글 안내'};
   const a=await imported(),beforeLink=(await db.select().from(schemas.notionSyncLinks))[0],beforeRevision=(await db.select().from(schemas.contentRevisions))[0];

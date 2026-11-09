@@ -17,11 +17,12 @@ import { accessToken, CANVA_API } from './canva';
 import { CanvaRestError, type CanvaRestOptions, type CanvaRestJob } from './canvaRest';
 import { loadReadingFont } from './readingCardFonts';
 import { safeFetch } from './safeFetch';
-import { NOTION_SOURCE_REFERENCES_MAX, NOTION_SOURCE_REFERENCES_PER_PAGE, notionSourceReferencePageCount } from '../../shared/notionSync';
+import { NOTION_SOURCE_REFERENCES_MAX, NOTION_SOURCE_REFERENCES_PER_PAGE, NOTION_MANUSCRIPT_MAX_PAGES, NOTION_MAX_OUTPUT_PAGES, notionSourceReferencePageCount } from '../../shared/notionSync';
+import { admissionsCalendarElements, institutionScheduleElements, institutionScheduleGeometry, NotionAdmissionsLayoutError, parseAdmissionsCalendar, parseInstitutionSchedule } from './notionAdmissionsLayout';
 
 export const NOTION_CANVA_GEOMETRY = { width: 1080, height: 1350, safe: { x: 96, y: 207, width: 888, height: 936 } } as const;
 export const NOTION_CANVA_TEXT_SYNC = 'manual-confirmation-required' as const;
-export const NOTION_CANVA_MAX_OUTPUT_PAGES = 13;
+export const NOTION_CANVA_MAX_OUTPUT_PAGES = NOTION_MAX_OUTPUT_PAGES;
 export const NOTION_CANVA_SOURCE_TITLE = '원문 공고 확인';
 export const NOTION_CANVA_SOURCE_GUIDE = 'QR을 스캔해 공식 공고를 확인하세요.';
 export const NOTION_CANVA_TEASER_LABEL = '다음 편';
@@ -44,7 +45,7 @@ const EMU = 9525;
 const RED = '#FF493B', INK = '#171717';
 const idSchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9_-]+$/);
 const copy = z.string().refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value));
-const pageSchema = z.object({ title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional(), footnote: copy.max(1000).optional(), sourceLabel: copy.max(300).optional(), infographic: z.literal('application_steps').optional() }).strict();
+const pageSchema = z.object({ title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional(), footnote: copy.max(1000).optional(), sourceLabel: copy.max(300).optional(), infographic: z.enum(['application_steps','admissions_calendar','institution_schedule']).optional() }).strict();
 const sourceUrl = z.string().trim().min(1).max(2048).refine(value=>{
   try{
     const url=new URL(value),host=url.hostname.toLowerCase();
@@ -56,7 +57,7 @@ const sourceUrl = z.string().trim().min(1).max(2048).refine(value=>{
 const sourceReferenceSchema=z.object({title:copy.trim().min(1).max(160),url:sourceUrl}).strict();
 const sourceCardSchema=z.object({title:copy.trim().min(1).max(300),body:copy.max(1200),footnote:copy.max(1000).optional()}).strict();
 const teaserSchema=z.object({title:copy.trim().min(1).max(200),body:copy.trim().min(1).max(500)}).strict();
-const documentSchema = z.object({ title: copy.trim().min(1).max(255), coverStyle: z.enum(['A','B','C']), category: copy.trim().max(24).optional(), categoryColor: z.string().regex(/^#[0-9a-f]{6}$/i).optional(), pages: z.array(pageSchema).min(2).max(10), sourceReferences:z.array(sourceReferenceSchema).max(NOTION_SOURCE_REFERENCES_MAX).refine(refs=>new Set(refs.map(ref=>ref.url)).size===refs.length).optional(),sourceCard:sourceCardSchema.optional(),teaser:teaserSchema.optional() }).strict();
+const documentSchema = z.object({ title: copy.trim().min(1).max(255), coverStyle: z.enum(['A','B','C']), category: copy.trim().max(24).optional(), categoryColor: z.string().regex(/^#[0-9a-f]{6}$/i).optional(), pages: z.array(pageSchema).min(2).max(NOTION_MANUSCRIPT_MAX_PAGES), sourceReferences:z.array(sourceReferenceSchema).max(NOTION_SOURCE_REFERENCES_MAX).refine(refs=>new Set(refs.map(ref=>ref.url)).size===refs.length).optional(),sourceCard:sourceCardSchema.optional(),teaser:teaserSchema.optional() }).strict();
 export type NotionCanvaDocument = z.infer<typeof documentSchema>;
 export type NotionCanvaSourceReference = z.infer<typeof sourceReferenceSchema>;
 export type NotionCanvaPhoto = { id: string; name?: string; bytes: Buffer; mimeType: string };
@@ -170,7 +171,7 @@ function assertPptx(bytes: Buffer) {
       return ['[Content_Types].xml','ppt/presentation.xml'].includes(file.name) && file.originalSize < 1024*1024;
     }});
     const presentation = files['ppt/presentation.xml'] ? Buffer.from(files['ppt/presentation.xml']).toString('utf8') : '';
-    if (unsafe || !files['[Content_Types].xml'] || slides<1 || slides>NOTION_CANVA_MAX_OUTPUT_PAGES || !new RegExp(`<p:sldSz\\b[^>]*cx="${1080*EMU}"[^>]*cy="${1350*EMU}"`).test(presentation)) invalid('PPTX가 1080×1350 크기의 1~13장 문서인지 확인해 주세요.');
+    if (unsafe || !files['[Content_Types].xml'] || slides<1 || slides>NOTION_CANVA_MAX_OUTPUT_PAGES || !new RegExp(`<p:sldSz\\b[^>]*cx="${1080*EMU}"[^>]*cy="${1350*EMU}"`).test(presentation)) invalid(`PPTX가 1080×1350 크기의 1~${NOTION_CANVA_MAX_OUTPUT_PAGES}장 문서인지 확인해 주세요.`);
   } catch (error) { if(error instanceof CanvaRestError)throw error; invalid('PPTX 파일 구조를 읽을 수 없습니다. 원고에서 다시 만들어 주세요.'); }
 }
 export async function submitNotionCanvaImport(db: DB, input: {title:string;bytes:Buffer}, options: CanvaRestOptions = {}) {
@@ -270,14 +271,15 @@ function wrap(text:string,size:number,width:number,bold:boolean):string[] {
   }
   return lines;
 }
-function fit(text:string,width:number,height:number,max:number,min:number,bold:boolean,label:string) {
-  for(let size=max;size>=min;size-=2){const lines=wrap(text,size,width,bold);const lineHeight=size*1.3;if(lines.length*lineHeight<=height)return {lines,size,lineHeight};}
+function fit(text:string,width:number,height:number,max:number,min:number,bold:boolean,label:string,leading=1.3) {
+  for(let size=max;size>=min;size-=2){const lines=wrap(text,size,width,bold);const lineHeight=size*leading;if(lines.length*lineHeight<=height)return {lines,size,lineHeight};}
   const page=/^page-(\d+)-(title|body|footer)$/.exec(label);
   const location=label==='cover-title'||label==='cover-question'?'표지 제목':label==='cover-caption'?'표지 설명':label==='cover-footer'?'표지 각주·출처':/^source-\d+-title$/.test(label)||label==='sources-heading'?'원문 제목':label==='sources-body'?'원문 확인 설명':label==='sources-footer'?'원문 확인 각주':label==='teaser-title'?'다음 편 제목':label==='teaser-body'?'다음 편 설명':page?`${page[1]}장 ${page[2]==='title'?'제목':page[2]==='footer'?'각주·출처':'본문'}`:'입력한';
-  invalid(`${location} 원고가 페이지에 너무 깁니다. 문장을 줄이거나 장을 나눠 주세요. 원고를 자르지 않았습니다.`);
+  const schedule=/^schedule-cell-(\d+)-(\d+)-text$/.exec(label);
+  invalid(`${schedule?`기관별 일정표 ${Number(schedule[1])===0?'머리글':`${schedule[1]}행`} ${Number(schedule[2])+1}열`:location} 원고가 페이지에 너무 깁니다. 문장을 줄이거나 장을 나눠 주세요. 원고를 자르지 않았습니다.`);
 }
-function box(id:number,name:string,text:string,x:number,y:number,w:number,h:number,max:number,min:number,ink:string,bold=false,accent?:{phrase:string;color:string},align:'l'|'ctr'='l') {
-  const fitted=fit(text,w,h,max,min,bold,name);
+function box(id:number,name:string,text:string,x:number,y:number,w:number,h:number,max:number,min:number,ink:string,bold=false,accent?:{phrase:string;color:string},align:'l'|'ctr'='l',leading=1.3) {
+  const fitted=fit(text,w,h,max,min,bold,name,leading);
   const run=(value:string,c:string)=>`<a:r><a:rPr lang="ko-KR" sz="${Math.round(fitted.size*75)}" b="${bold?1:0}" dirty="0"><a:solidFill><a:srgbClr val="${color(c)}"/></a:solidFill><a:latin typeface="Noto Sans KR"/><a:ea typeface="Noto Sans KR"/><a:cs typeface="Noto Sans KR"/></a:rPr><a:t xml:space="preserve">${xml(value)}</a:t></a:r>`;
   const paragraphs=fitted.lines.map(line=>{
     const at=accent?.phrase?line.indexOf(accent.phrase):-1;
@@ -316,15 +318,15 @@ async function readMedia(bytes:Buffer,file:string):Promise<Media> {
 }
 
 /** No remote calls. Every visible manuscript character is a native text run.
- * Keep all 2–10 manuscript pages, optional references and teaser, then the brand CTA.
+ * Keep all validated manuscript pages, optional references and teaser, then the brand CTA.
  * Overflow is a validation error, never truncation or an unreadably small font.
  */
 export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:{previewPage?:number;previewOnly?:boolean}={}):Promise<NotionCanvaPptx> {
   const document=parse(documentSchema,value,true);
   if(options.previewOnly&&options.previewPage===undefined)invalid('미리볼 카드 번호를 확인해 주세요.');
   const references=document.sourceReferences??[],referencePageCount=notionSourceReferencePageCount(references);
-  if(document.pages.length+referencePageCount+(document.teaser?1:0)+1>NOTION_CANVA_MAX_OUTPUT_PAGES)invalid('원고·기관별 원문 QR·예고·채널 소개를 합쳐 13장 이내로 나눠 주세요. 원문 주소를 누락하지 않았습니다.');
-  if(!Array.isArray(photos)||photos.length>10||new Set(photos.map(p=>p.id)).size!==photos.length||photos.some(p=>!idSchema.safeParse(p.id).success||!Buffer.isBuffer(p.bytes)||!p.bytes.length||p.bytes.length>MAX_PHOTO_BYTES||!['image/png','image/jpeg','image/webp','image/gif','image/avif','image/heif','image/heic'].includes(p.mimeType))||photos.reduce((n,p)=>n+p.bytes.length,0)>MAX_PHOTO_TOTAL_BYTES)invalid('사진은 서로 다른 ID의 단일 이미지 최대 10개, 개별 20MB·전체 60MB 이하여야 합니다.');
+  if(document.pages.length+referencePageCount+(document.teaser?1:0)+1>NOTION_CANVA_MAX_OUTPUT_PAGES)invalid(`원고·기관별 원문 QR·예고·채널 소개를 합쳐 ${NOTION_CANVA_MAX_OUTPUT_PAGES}장 이내로 나눠 주세요. 원문 주소를 누락하지 않았습니다.`);
+  if(!Array.isArray(photos)||photos.length>12||new Set(photos.map(p=>p.id)).size!==photos.length||photos.some(p=>!idSchema.safeParse(p.id).success||!Buffer.isBuffer(p.bytes)||!p.bytes.length||p.bytes.length>MAX_PHOTO_BYTES||!['image/png','image/jpeg','image/webp','image/gif','image/avif','image/heif','image/heic'].includes(p.mimeType))||photos.reduce((n,p)=>n+p.bytes.length,0)>MAX_PHOTO_TOTAL_BYTES)invalid('사진은 서로 다른 ID의 단일 이미지 최대 12개, 개별 20MB·전체 60MB 이하여야 합니다.');
   const warnings:string[]=[];
   const media=new Map<string,Media>();
   let embeddedPhotoBytes=0;
@@ -335,8 +337,9 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   }
   for(const page of document.pages)if(page.imageId&&!media.has(page.imageId))invalid('원고에서 지정한 사진을 찾을 수 없습니다. 사진을 다시 연결해 주세요.');
   for(const [index,page]of document.pages.entries())if(page.infographic){
-    if(index===0)invalid('접수 단계 도식은 표지가 아닌 내지에만 사용할 수 있습니다.');
-    if(page.imageId)invalid('접수 단계 도식과 사진을 같은 장에 함께 배치할 수 없습니다. 사진을 보존하려면 별도 장으로 나눠 주세요.');
+    const label=page.infographic==='application_steps'?'접수 단계 도식':page.infographic==='admissions_calendar'?'모집 달력':'기관별 일정표';
+    if(index===0)invalid(`${label}은 표지가 아닌 내지에만 사용할 수 있습니다.`);
+    if(page.imageId)invalid(`${label}과 사진을 같은 장에 함께 배치할 수 없습니다. 사진을 보존하려면 별도 장으로 나눠 주세요.`);
   }
   const coverPhoto=document.pages[0].imageId?media.get(document.pages[0].imageId):undefined;
   if(document.coverStyle==='C'&&!coverPhoto)invalid('C 표지에는 실제 사진이 필요합니다. 표지 사진을 선택해 주세요.');
@@ -367,11 +370,11 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       if(!options.previewOnly)shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill,alpha));
       visual(name,`${gradient?'<defs><linearGradient id="bottom-fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset=".5" stop-color="#000000" stop-opacity=".74"/><stop offset="1" stop-color="#000000"/></linearGradient></defs>':''}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${pill?Math.min(w,h)/2:0}" fill="${gradient?'url(#bottom-fade)':fill}" fill-opacity="${alpha/100000}"/>`);
     };
-    const text=(name:string,content:string,x:number,y:number,w:number,h:number,max:number,min:number,ink=INK,bold=false,emphasis?:string,align:'l'|'ctr'='l')=>{
+    const text=(name:string,content:string,x:number,y:number,w:number,h:number,max:number,min:number,ink=INK,bold=false,emphasis?:string,align:'l'|'ctr'='l',leading=1.3)=>{
       if(!content)return;
       const interior=index>0&&index<document.pages.length;
       if(interior&&emphasis){
-        const fitted=fit(content,w,h,max,min,bold,name),font=loadReadingFont('Noto Sans KR',bold?700:400);
+        const fitted=fit(content,w,h,max,min,bold,name,leading),font=loadReadingFont('Noto Sans KR',bold?700:400);
         for(const [lineIndex,line]of fitted.lines.entries()){
           let at=line.indexOf(emphasis),occurrence=0;
           while(at>=0){
@@ -380,9 +383,9 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
           }
         }
       }
-      if(!options.previewOnly)shapes.push(box(nextId++,name,content,x,y,w,h,max,min,ink,bold,!interior&&emphasis?{phrase:emphasis,color:document.coverStyle==='B'?RED:accent}:undefined,align));
+      if(!options.previewOnly)shapes.push(box(nextId++,name,content,x,y,w,h,max,min,ink,bold,!interior&&emphasis?{phrase:emphasis,color:document.coverStyle==='B'?RED:accent}:undefined,align,leading));
       if(previewing){
-        const fitted=fit(content,w,h,max,min,bold,name),font=loadReadingFont('Noto Sans KR',bold?700:400);
+        const fitted=fit(content,w,h,max,min,bold,name,leading),font=loadReadingFont('Noto Sans KR',bold?700:400);
         const lines=fitted.lines.map((line,lineIndex)=>{
           let left=x+(align==='ctr'?(w-font.measure(line,fitted.size))/2:0);
           const at=!interior&&emphasis?line.indexOf(emphasis):-1;
@@ -506,6 +509,26 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         text('cover-footer',footer,96,1014,888,64,20,16,'#555555');
       }
     } else {
+     if(page.infographic==='admissions_calendar'||page.infographic==='institution_schedule'){
+      const calendar=page.infographic==='admissions_calendar';
+      let elements:ReturnType<typeof admissionsCalendarElements>,intro:string,footerY=1072;
+      try{
+       if(calendar){const model=parseAdmissionsCalendar(body,page.title);intro=model.intro;elements=admissionsCalendarElements(model,wrap);}
+       else{const model=parseInstitutionSchedule(body);intro=model.intro;elements=institutionScheduleElements(model);footerY=institutionScheduleGeometry(model).footerY;}
+      }catch(error){if(error instanceof NotionAdmissionsLayoutError)invalid(`${index+1}장 ${error.message}`);throw error;}
+      if(wrap(page.title,40,888,true).length>(calendar?1:2))invalid(`${index+1}장 ${calendar?'달력 제목은 한 줄':'일정표 제목은 두 줄 이내'}로 줄여 주세요. 제목을 자르지 않았습니다.`);
+      if(intro&&wrap(intro,24,888,false).length>1)invalid(`${index+1}장 도식 소제목은 한 줄로 줄이고 날짜 기준·주의사항은 각주에 적어 주세요. 문구를 자르지 않았습니다.`);
+      if(document.category)text('page-category',document.category,96,207,470,32,22,20,INK,true);
+      text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,625,207,150,32,20,20,'#555555');
+      image(logo,794,207,190,40,'contain');rect('section-accent',96,247,64,5,accent);
+      text(`page-${index+1}-title`,page.title,96,266,888,calendar?60:120,46,40,INK,true,page.emphasis,'l',1.2);
+      text(calendar?'calendar-intro':'schedule-intro',intro,96,calendar?334:400,888,36,26,24,INK,false,page.emphasis,'l',1.2);
+      for(const element of elements){
+       if(element.kind==='rect')rect(element.name,element.x,element.y,element.width,element.height,element.fill,false,element.pill);
+       else text(element.name,element.content,element.x,element.y,element.width,element.height,element.max,element.min,element.ink,element.bold,page.emphasis,element.align,element.leading);
+      }
+      text(`page-${index+1}-footer`,footer,96,footerY,888,70,20,16,'#555555');
+     }else{
       if(document.category)text('page-category',document.category,96,207,888,44,26,22,INK,true);
       rect('section-accent',96,273,64,7,accent);
       text(`page-${index+1}-title`,page.title,96,315,888,page.infographic?135:200,58,40,INK,true,page.emphasis);
@@ -528,6 +551,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       text(`page-${index+1}-footer`,footer,96,980,888,78,20,16,'#555555');
       image(logo,96,1078,190,64,'contain');
       text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,840,1101,144,40,22,20,'#555555');
+     }
     }
     if(previewing)previewSvg=`<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350" viewBox="0 0 1080 1350"><rect width="1080" height="1350" fill="${background}"/>${previewShapes.join('')}</svg>`;
     if(options.previewOnly)continue;

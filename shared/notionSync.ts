@@ -5,6 +5,8 @@ export const DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID = "e5a4b4f7-f2f6-4fad-b514-16
 export const NOTION_CARD_DATA_SOURCE_ID = "58de23b2-4662-40d2-bf3e-d110ba9601e4";
 export const NOTION_SOURCE_REFERENCES_PER_PAGE = 4;
 export const NOTION_SOURCE_REFERENCES_MAX = 24;
+export const NOTION_MANUSCRIPT_MAX_PAGES = 20;
+export const NOTION_MAX_OUTPUT_PAGES = NOTION_MANUSCRIPT_MAX_PAGES + Math.ceil(NOTION_SOURCE_REFERENCES_MAX / NOTION_SOURCE_REFERENCES_PER_PAGE) + 2;
 export function notionSourceReferencePageCount(references?: readonly unknown[]): number {
   return Math.ceil((references?.length ?? 0) / NOTION_SOURCE_REFERENCES_PER_PAGE);
 }
@@ -19,7 +21,7 @@ export const notionDocumentPageSchema = z.object({
   headingBlockId: z.string(), bodyBlockIds: z.array(z.string()),
   titleBlockId: z.string().optional(),
   cardRowId: z.string().uuid().optional(), cardFields: notionTableFieldsSchema.optional(),
-  infographic: z.literal('application_steps').optional(),
+  infographic: z.enum(['application_steps','admissions_calendar','institution_schedule']).optional(),
   emphasis: z.string().max(100).optional(),
 });
 export const notionDocumentSummarySchema = z.object({

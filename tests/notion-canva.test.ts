@@ -111,15 +111,15 @@ describe('native editable Notion manuscript PPTX',()=>{
     }
     expect(NOTION_CANVA_TEXT_SYNC).toBe('manual-confirmation-required');
   });
-  it('preserves two to ten manuscript pages and appends one fixed CTA without replacing the last source page',async()=>{
+  it('preserves two to twenty manuscript pages and appends one fixed CTA without replacing the last source page',async()=>{
     expect((await buildNotionCanvaPptx(document(2))).pageCount).toBe(3);
-    const full=await buildNotionCanvaPptx(document(10));expect(full.pageCount).toBe(11);expect(full.sourcePageCount).toBe(10);
-    const files=unzipSync(full.bytes),lastSource=strFromU8(files['ppt/slides/slide10.xml']),outro=strFromU8(files['ppt/slides/slide11.xml']);
-    expect(lastSource).toContain('10장 제목');expect(lastSource).toContain('본문 10.');
+    const full=await buildNotionCanvaPptx(document(20));expect(full.pageCount).toBe(21);expect(full.sourcePageCount).toBe(20);
+    const files=unzipSync(full.bytes),lastSource=strFromU8(files['ppt/slides/slide20.xml']),outro=strFromU8(files['ppt/slides/slide21.xml']);
+    expect(lastSource).toContain('20장 제목');expect(lastSource).toContain('본문 20.');
     for(const text of [NOTION_CANVA_OUTRO.follow,NOTION_CANVA_OUTRO.handle,...NOTION_CANVA_OUTRO.introduction.split('\n'),NOTION_CANVA_OUTRO.action])expect(outro).toContain(text);
     expect(outro).toContain('name="outro-red-pill"');expect(outro).toContain('prst="roundRect"');expect(outro).toContain('srgbClr val="FF493B"');
     await expect(buildNotionCanvaPptx(document(1))).rejects.toMatchObject({code:'invalid_request'});
-    await expect(buildNotionCanvaPptx(document(11))).rejects.toMatchObject({code:'invalid_request'});
+    await expect(buildNotionCanvaPptx(document(21))).rejects.toMatchObject({code:'invalid_request'});
     const input=document(2);input.pages[1].body='한글 원고가 너무 길면 문장을 자르지 않습니다. '.repeat(45);
     await expect(buildNotionCanvaPptx(input)).rejects.toThrow('원고를 자르지 않았습니다');
   });
@@ -294,7 +294,7 @@ describe('native editable Notion manuscript PPTX',()=>{
     }
     const excess=document(2);excess.sourceReferences=Array.from({length:25},(_,i)=>({title:'공식 안내',url:`https://ged.kedi.re.kr/notice/${i}`}));await expect(buildNotionCanvaPptx(excess)).rejects.toMatchObject({code:'invalid_request'});
     const duplicate=document(2);duplicate.sourceReferences=[{title:'공식 안내',url:officialUrls[0]},{title:'다른 이름으로 중복',url:officialUrls[0]}];await expect(buildNotionCanvaPptx(duplicate)).rejects.toMatchObject({code:'invalid_request'});
-    const overflowing=document(10);overflowing.sourceReferences=Array.from({length:5},(_,i)=>({title:'공식 안내',url:`https://ged.kedi.re.kr/notice/${i}`}));overflowing.teaser={title:'다음 편',body:'다음 편을 확인하세요.'};await expect(buildNotionCanvaPptx(overflowing)).rejects.toThrow('13장 이내');
+    const extended=document(10);extended.sourceReferences=Array.from({length:5},(_,i)=>({title:'공식 안내',url:`https://ged.kedi.re.kr/notice/${i}`}));extended.teaser={title:'다음 편',body:'다음 편을 확인하세요.'};expect((await buildNotionCanvaPptx(extended)).pageCount).toBe(14);
     const dense=document(2);dense.sourceReferences=Array.from({length:4},(_,i)=>({title:'공식 안내',url:longUrlPrefix+'a'.repeat(1100)+i}));await expect(buildNotionCanvaPptx(dense)).rejects.toThrow('QR을 충분히 크게');
     const longTitle=document(2);longTitle.sourceReferences=Array.from({length:4},(_,i)=>({title:'공식원문제목'.repeat(20),url:officialUrls[i%3]+i}));await expect(buildNotionCanvaPptx(longTitle)).rejects.toThrow('원고를 자르지 않았습니다');
   });
@@ -336,27 +336,27 @@ describe('generic Canva import and export boundary',()=>{
     await expect(getNotionCanvaImportJob(db,'job_1',{fetchImpl,signal:controller.signal})).rejects.toMatchObject({code:'cancelled',outcomeUnknown:false});
     await expect(getNotionCanvaImportJob(db,'job/escape',{fetchImpl})).rejects.toMatchObject({code:'invalid_request'});expect(fetchImpl).not.toHaveBeenCalled();
   });
-  it('validates one through thirteen output pages at exact dimensions and checks live count before exporting',async()=>{
-    for(const count of [1,5,10,11,13]){
+  it('validates one through twenty-eight output pages at exact dimensions and checks live count before exporting',async()=>{
+    for(const count of [1,5,10,13,20,28]){
       const fetchImpl=vi.fn().mockResolvedValueOnce(response(providerPages(count))).mockResolvedValueOnce(response(pending));
       expect(await submitNotionCanvaExport(db,{designId:'design_1',pageCount:count},{fetchImpl})).toMatchObject({id:'job_1',status:'in_progress'});
-      expect(fetchImpl.mock.calls[0][0]).toContain('offset=1&limit=14');
+      expect(fetchImpl.mock.calls[0][0]).toContain('offset=1&limit=29');
       const body=JSON.parse(fetchImpl.mock.calls[1][1].body);expect(body.format).toEqual({type:'png',pages:Array.from({length:count},(_,i)=>i+1),width:1080,height:1350,as_single_image:false});
     }
     const wrong=providerPages(5);wrong.items[0].dimensions.height=1080;
     const dup=providerPages(5);dup.items[2].page_number=2;
-    for(const result of [providerPages(14),wrong,dup,{items:[]}]){
+    for(const result of [providerPages(29),wrong,dup,{items:[]}]){
       const fetchImpl=vi.fn().mockResolvedValue(response(result));
       await expect(getNotionCanvaPages(db,'design_1',{fetchImpl})).rejects.toMatchObject({code:'invalid_response'});
     }
     const changed=vi.fn().mockResolvedValueOnce(response(providerPages(4)));
     await expect(submitNotionCanvaExport(db,{designId:'design_1',pageCount:5},{fetchImpl:changed})).rejects.toMatchObject({code:'invalid_request'});expect(changed).toHaveBeenCalledTimes(1);
   });
-  it('supports PDF/PPTX exports without PNG-only options and accepts thirteen bounded export URLs',async()=>{
+  it('supports PDF/PPTX exports without PNG-only options and accepts twenty-eight bounded export URLs',async()=>{
     for(const format of ['pdf','pptx'] as const){const fetchImpl=vi.fn().mockResolvedValueOnce(response(providerPages(3))).mockResolvedValueOnce(response(pending));await submitNotionCanvaExport(db,{designId:'design_1',pageCount:3,format},{fetchImpl});expect(JSON.parse(fetchImpl.mock.calls[1][1].body).format).toEqual({type:format,pages:[1,2,3]});}
-    const urls=Array.from({length:13},(_,i)=>`https://document-export.canva.com/export/${i+1}.png?signature=signed`);
+    const urls=Array.from({length:28},(_,i)=>`https://document-export.canva.com/export/${i+1}.png?signature=signed`);
     const fetchImpl=vi.fn().mockResolvedValueOnce(response({job:{id:'job_1',status:'success',urls}})).mockResolvedValueOnce(response({job:{id:'job_1',status:'success',urls:['https://www.canva.com/other']}}));
-    expect((await getNotionCanvaExportJob(db,'job_1',{fetchImpl})).result?.urls).toHaveLength(13);
+    expect((await getNotionCanvaExportJob(db,'job_1',{fetchImpl})).result?.urls).toHaveLength(28);
     await expect(getNotionCanvaExportJob(db,'job_1',{fetchImpl})).rejects.toMatchObject({code:'invalid_response'});
   });
 });
