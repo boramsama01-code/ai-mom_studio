@@ -3,14 +3,50 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
 import sharp from 'sharp';
+import jsQR from 'jsqr';
 import type { DB } from '../server/db';
-import { buildNotionCanvaPptx, decodeNotionCanvaPngExport, downloadNotionCanvaExport, getNotionCanvaExportJob, getNotionCanvaImportJob, getNotionCanvaPages, NOTION_CANVA_OUTRO, NOTION_CANVA_TEXT_SYNC, submitNotionCanvaExport, submitNotionCanvaImport, type NotionCanvaDocument } from '../server/services/notionCanva';
+import { buildNotionCanvaPptx, decodeNotionCanvaPngExport, downloadNotionCanvaExport, getNotionCanvaExportJob, getNotionCanvaImportJob, getNotionCanvaPages, NOTION_CANVA_OUTRO, NOTION_CANVA_SOURCE_TITLE, NOTION_CANVA_TEASER_COMMENT, NOTION_CANVA_TEXT_SYNC, submitNotionCanvaExport, submitNotionCanvaImport, type NotionCanvaDocument } from '../server/services/notionCanva';
 
 const db={} as DB;
 const response=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json'}});
 const pending={job:{id:'job_1',status:'in_progress'}};
 const document=(count=5,coverStyle:'A'|'B'|'C'='B'):NotionCanvaDocument=>({title:'영재교육 안내',coverStyle,category:'체험',pages:Array.from({length:count},(_,i)=>({title:i===0?'내 아이는\n영재일까요?':`${i+1}장 제목`,body:i===0?'아이의 호기심을 함께 살펴봐요.':`본문 ${i+1}. 내 아이에게 맞는 배움의 기회를 찾아보세요.`,...(i===0?{emphasis:'영재'}:{})}))});
 const providerPages=(count:number)=>({items:Array.from({length:count},(_,i)=>({page_number:i+1,dimensions:{width:1080,height:1350}}))});
+const officialUrls=[
+  'https://ged.kedi.re.kr/eduIns/eduInsSub/eduInsViewPop1.do?pop1=Y&orgId=10117174002&stndYear=2025',
+  'https://www.sen.go.kr/www/office/symbol.jsp',
+  'https://www.jnu.ac.kr/MainIntro/Symbol/jnuUI',
+];
+const longUrlPrefix='https://www.sen.go.kr/notice?document=';
+const long252=longUrlPrefix+'a'.repeat(252-longUrlPrefix.length);
+function nativeShape(source:string,name:string){
+  const part=[...source.matchAll(/<p:sp>([\s\S]*?)<\/p:sp>/g)].find(match=>match[1].includes(`name="${name}"`))?.[1];expect(part).toBeTruthy();
+  const bounds=part!.match(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"/)!;
+  return {xml:part!,x:Number(bounds[1])/9525,y:Number(bounds[2])/9525,w:Number(bounds[3])/9525,h:Number(bounds[4])/9525};
+}
+const nativePlain=(source:string)=>[...source.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)].map(match=>match[1]).join('').replaceAll(/\s/g,'');
+/** Rasterize the actual native OOXML rectangles, then decode with an independent
+ * QR reader. This checks the exported geometry, not the encoder's own matrix. */
+function decodedNativeQr(source:string,number:number){
+  const shapes=[...source.matchAll(/<p:sp>([\s\S]*?)<\/p:sp>/g)].map(match=>{
+    const xml=match[1],name=xml.match(/name="([^"]+)"/)?.[1]??'',t=xml.match(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"/);
+    return {name,x:t?Number(t[1])/9525:0,y:t?Number(t[2])/9525:0,w:t?Number(t[3])/9525:0,h:t?Number(t[4])/9525:0};
+  });
+  const background=shapes.find(shape=>shape.name===`source-qr-${number}-background`)!;expect(background).toBeTruthy();
+  const ink=shapes.filter(shape=>shape.name.startsWith(`source-qr-${number}-r`));expect(ink.length).toBeGreaterThan(100);
+  const unit=ink[0].h,size=background.w;expect(unit).toBeGreaterThanOrEqual(4);expect(unit).toBe(Math.round(unit));expect(size).toBe(background.h);
+  const rgba=new Uint8ClampedArray(size*size*4).fill(255);
+  for(const block of ink){
+    const x=block.x-background.x,y=block.y-background.y;
+    for(const value of [x,y,block.w,block.h])expect(value).toBe(Math.round(value));
+    expect(x).toBeGreaterThanOrEqual(4*unit);expect(y).toBeGreaterThanOrEqual(4*unit);
+    expect(x+block.w).toBeLessThanOrEqual(size-4*unit);expect(y+block.h).toBeLessThanOrEqual(size-4*unit);
+    for(let py=y;py<y+block.h;py++)for(let px=x;px<x+block.w;px++){const offset=(py*size+px)*4;rgba[offset]=0;rgba[offset+1]=0;rgba[offset+2]=0;}
+  }
+  expect(background.x).toBeGreaterThanOrEqual(96);expect(background.x+size).toBeLessThanOrEqual(984);
+  expect(background.y).toBeGreaterThanOrEqual(207);expect(background.y+size).toBeLessThanOrEqual(1143);
+  const result=jsQR(rgba,size,size,{inversionAttempts:'dontInvert'});expect(result).not.toBeNull();return {data:result!.data,unit,size};
+}
 let smallPhoto:Buffer;
 beforeEach(()=>{
   vi.stubEnv('CANVA_CLIENT_ID','isolated-client');vi.stubEnv('CANVA_CLIENT_SECRET','private-client-secret');
@@ -124,6 +160,97 @@ describe('native editable Notion manuscript PPTX',()=>{
       expect(title).toMatchObject({y:style==='A'?730:845,h:style==='A'?268:195});
     }
   });
+  it('preserves separate footnotes and source labels with dedicated safe areas on A/B/C covers and photo/text interiors',async()=>{
+    smallPhoto??=await sharp({create:{width:600,height:400,channels:3,background:'#72A7FF'}}).png().toBuffer();
+    const photo={id:'cover_photo',bytes:smallPhoto,mimeType:'image/png'};
+    const footnote='2026.11.09 기준 · 2027학년도 · 확인된 기관 사례 · 변경 공고 우선',sourceLabel='각 기관 공식 모집요강·GED';
+    const caption='2027학년도 · 초등·중등 · 11월 9일 기준\n\n학생 접수 중인 곳부터\n추천·선교육이 진행 중인 곳까지.\n기관명과 접수 단계를 구분해 한눈에 확인하세요.';
+    for(const style of ['A','B','C']as const){
+      const input=document(3,style);input.pages[0]={title:'11월 전국 영재교육원 모집 일정 안내',body:caption,footnote,sourceLabel,imageId:style==='B'?undefined:photo.id};
+      input.pages[1]={title:'본문과 각주를 구분해요',body:'원본 본문은 그대로 유지합니다.',footnote,sourceLabel};
+      input.pages[2]={title:'사진 원본을 보존해요',body:'별도 사진과 편집 가능한 원고입니다.',footnote,sourceLabel,imageId:photo.id};
+      const built=await buildNotionCanvaPptx(input,[photo]),files=unzipSync(built.bytes);expect(built).toMatchObject({pageCount:4,sourcePageCount:3});
+      const cover=strFromU8(files['ppt/slides/slide1.xml']),title=nativeShape(cover,style==='B'?'cover-question':'cover-title'),sub=nativeShape(cover,'cover-caption'),note=nativeShape(cover,'cover-footer');
+      expect(nativePlain(sub.xml)).toBe(caption.replaceAll(/\s/g,''));expect(nativePlain(note.xml)).toBe((footnote+sourceLabel).replaceAll(/\s/g,''));
+      expect(title.y+title.h).toBeLessThanOrEqual(sub.y-6);expect(sub.y+sub.h).toBeLessThan(note.y);
+      expect(note.y+note.h).toBeLessThanOrEqual(style==='B'?1143:1078);expect(note.xml).toContain('typeface="Noto Sans KR"');
+      for(const i of [2,3]){
+        const source=strFromU8(files[`ppt/slides/slide${i}.xml`]),body=nativeShape(source,`page-${i}-body`),footer=nativeShape(source,`page-${i}-footer`);
+        expect(nativePlain(footer.xml)).toBe((footnote+sourceLabel).replaceAll(/\s/g,''));expect(body.y+body.h).toBeLessThan(footer.y);expect(footer.y+footer.h).toBeLessThan(1078);
+      }
+    }
+    const overfull=document(2);overfull.pages[0].footnote='각주 첫째 줄\n둘째 줄\n셋째 줄';await expect(buildNotionCanvaPptx(overfull)).rejects.toThrow('표지 각주·출처');
+    const interiorOverfull=document(2);interiorOverfull.pages[1].footnote='첫째 줄\n둘째 줄\n셋째 줄\n넷째 줄';await expect(buildNotionCanvaPptx(interiorOverfull)).rejects.toThrow('2장 각주·출처');
+  });
+  it('adds an opt-in native four-step infographic without altering five institutions, dates, notes or source page count',async()=>{
+    const body='11월 추천 기간을 신규 접수로 오해하지 마세요\n\n강릉교육지원청 부설영재교육원｜학교 추천 11/9~13\n제주융합과학연구원·제주과학고 영재교육원｜학교 제출 11/9~13\n대구과학영재교육원｜교사 추천 ~11/10 · 학교 추천 11/11~18\n인천교육청 과학영재교육원(중등)｜학교 추천 ~11/16 16시\n창원(창원)교육지원청 영재교육원｜교사 추천서 11/13~17 18시';
+    const input=document(2);input.pages[1]={title:'학생 접수는 끝, 추천 단계는 진행',body,footnote:'2026.11.09 기준 · 2027학년도 · 확인된 기관 사례 · 변경 공고 우선',sourceLabel:'각 기관 공식 모집요강·GED',infographic:'application_steps'};
+    const built=await buildNotionCanvaPptx(input),files=unzipSync(built.bytes),source=strFromU8(files['ppt/slides/slide2.xml']);
+    expect(built).toMatchObject({sourcePageCount:2,pageCount:3});expect(nativePlain(nativeShape(source,'page-2-body').xml)).toBe(body.replaceAll(/\s/g,''));
+    for(const [i,label]of ['학생 접수','교사 추천','학교 제출','평가'].entries()){
+      const shape=nativeShape(source,`application-step-${i+1}`),text=nativeShape(source,`application-step-${i+1}-label`);
+      expect(nativePlain(text.xml)).toBe(label.replaceAll(/\s/g,''));expect(shape.x).toBeGreaterThanOrEqual(96);expect(shape.x+shape.w).toBeLessThanOrEqual(984);
+      expect(shape.xml).toContain(i===1||i===2?'val="FF493B"':'val="B8B8B8"');
+    }
+    expect(source).toContain('일반적인 흐름 · 기관별 절차·명칭은 원문 확인');expect(source).not.toContain('완료');expect(source).not.toContain('<p:pic><p:nvPicPr><p:cNvPr id="2" name="photo');
+    const title=nativeShape(source,'page-2-title'),content=nativeShape(source,'page-2-body'),note=nativeShape(source,'page-2-footer');
+    expect(title.y+title.h).toBeLessThan(485);expect(content.y).toBe(650);expect(content.y+content.h).toBeLessThan(note.y);expect(note.y+note.h).toBeLessThan(1078);
+    smallPhoto??=await sharp({create:{width:600,height:400,channels:3,background:'#72A7FF'}}).png().toBuffer();
+    input.pages[1].imageId='photo_1';await expect(buildNotionCanvaPptx(input,[{id:'photo_1',bytes:smallPhoto,mimeType:'image/png'}])).rejects.toThrow('도식과 사진');
+    delete input.pages[1].imageId;input.pages[0].infographic='application_steps';await expect(buildNotionCanvaPptx(input)).rejects.toThrow('내지에만');
+    delete input.pages[0].infographic;input.pages[1].body=body.repeat(4);await expect(buildNotionCanvaPptx(input)).rejects.toThrow('2장 본문');
+  });
+  it('round-trips official URLs through the actual native QR shapes for one, two, three and four sources',async()=>{
+    expect(long252.length).toBe(252);
+    const urls=[...officialUrls,long252];
+    for(const count of [1,2,3,4]){
+      const input=document(2);input.sourceReferences=urls.slice(0,count).map((url,i)=>({title:`공식 안내 ${i+1}`,url}));
+      const result=await buildNotionCanvaPptx(input),files=unzipSync(result.bytes);expect(result).toMatchObject({sourcePageCount:2,pageCount:4});
+      const source=strFromU8(files['ppt/slides/slide3.xml']);expect(source).toContain(NOTION_CANVA_SOURCE_TITLE);
+      expect(Object.keys(files).filter(file=>file.startsWith('ppt/media/'))).toHaveLength(2);
+      for(let i=0;i<count;i++)expect(decodedNativeQr(source,i+1).data).toBe(urls[i]);
+      expect(strFromU8(files['ppt/slides/slide4.xml'])).toContain(NOTION_CANVA_OUTRO.handle);
+    }
+  });
+  it('keeps source manuscript -> QR -> exact teaser -> Follow order at the thirteen-page maximum',async()=>{
+    const input=document(10);input.sourceReferences=officialUrls.map((url,i)=>({title:`공식 원문 제목 ${i+1}`,url}));
+    input.teaser={title:'3일만에 쓰는 영재교육원 연구계획서',body:'주제 선정부터 초안 정리까지\n\n주제는 어떻게 정하고, 어디까지 써야 할까요?\n준비하면서 궁금한 점을 댓글로 남겨주세요.\n다음 편을 준비할 때 함께 살펴볼게요.\n\n연구계획서 제출 여부와 양식은 지원 기관·과정의 모집요강을 확인하세요.\n\nHighScoop · spacepenguin.co'};
+    const built=await buildNotionCanvaPptx(input),files=unzipSync(built.bytes);expect(built).toMatchObject({sourcePageCount:10,pageCount:13});
+    expect(strFromU8(files['ppt/slides/slide10.xml'])).toContain('10장 제목');
+    expect(strFromU8(files['ppt/slides/slide11.xml'])).toContain(NOTION_CANVA_SOURCE_TITLE);
+    const teaser=strFromU8(files['ppt/slides/slide12.xml']),plain=[...teaser.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)].map(m=>m[1]).join('').replaceAll(/\s/g,'');
+    expect(plain).toContain(input.teaser.title.replaceAll(/\s/g,''));expect(plain).toContain(input.teaser.body.replaceAll(/\s/g,''));
+    const teaserBody=nativeShape(teaser,'teaser-body'),teaserTitle=nativeShape(teaser,'teaser-title');expect(teaserBody.y).toBeGreaterThan(teaserTitle.y+teaserTitle.h);expect(teaserBody.y+teaserBody.h).toBeLessThan(974);
+    expect(teaser).toContain(NOTION_CANVA_TEASER_COMMENT);expect(teaser).toContain('teaser-comment-pill');
+    expect(strFromU8(files['ppt/slides/slide13.xml'])).toContain(NOTION_CANVA_OUTRO.action);
+    const onlyTeaser=document(2);onlyTeaser.teaser=input.teaser;expect((await buildNotionCanvaPptx(onlyTeaser)).pageCount).toBe(4);
+    const legacy=document(2);legacy.sourceReferences=[];expect((await buildNotionCanvaPptx(legacy)).pageCount).toBe(3);
+  });
+  it('keeps the original QR card title, description and footnote alongside one or two scannable official QRs',async()=>{
+    const sourceCard={title:'원문에서 마지막으로 확인하세요',body:'GED → 선발공고 → 2027학년도 → 기관 검색\n\nQR로 GED 모집공고를 열어보세요.\n기관명·지원 학년·서류·시험·정정 공고를 확인하세요.\n기관별 원문 QR과 초등·중등 비교표는 노션 전국 안내에 모았습니다.',footnote:'2026.11.09 기준 · 2027학년도 · 확인된 기관 사례 · 변경 공고 우선'};
+    for(const count of [1,2]){
+      const input=document(2);input.sourceReferences=officialUrls.slice(0,count).map((url,i)=>({title:`공식 기관 ${i+1}`,url}));input.sourceCard=sourceCard;
+      const built=await buildNotionCanvaPptx(input),source=strFromU8(unzipSync(built.bytes)['ppt/slides/slide3.xml']);
+      expect(built).toMatchObject({pageCount:4,sourcePageCount:2});
+      for(const [name,copy]of [['sources-heading',sourceCard.title],['sources-body',sourceCard.body],['sources-footer',sourceCard.footnote]])expect(nativePlain(nativeShape(source,name).xml)).toBe(copy.replaceAll(/\s/g,''));
+      expect(nativeShape(source,'sources-body').y+nativeShape(source,'sources-body').h).toBeLessThan(535);
+      expect(nativeShape(source,'sources-footer').y).toBeGreaterThan(985);
+      for(let i=0;i<count;i++)expect(decodedNativeQr(source,i+1).data).toBe(officialUrls[i]);
+      expect(source).not.toContain('name="sources-guide"');
+    }
+    const noUrl=document(2);noUrl.sourceCard=sourceCard;await expect(buildNotionCanvaPptx(noUrl)).rejects.toThrow('공식 원문 주소');
+    const dense=document(2);dense.sourceCard=sourceCard;dense.sourceReferences=officialUrls.map(url=>({title:'공식 원문',url}));await expect(buildNotionCanvaPptx(dense)).rejects.toThrow('원문 확인 설명');
+    dense.sourceCard={title:'공식 원문',body:'각 기관 공고를 확인하세요.',footnote:'공식 공고 우선'};
+    const source=strFromU8(unzipSync((await buildNotionCanvaPptx(dense)).bytes)['ppt/slides/slide3.xml']);for(let i=0;i<3;i++)expect(decodedNativeQr(source,i+1).data).toBe(officialUrls[i]);
+  });
+  it('rejects unsafe source URLs, too many sources, unreadably dense QRs and overflowing source titles without losing copy',async()=>{
+    for(const url of ['http://www.sen.go.kr/','javascript:alert(1)','https://user:password@ged.kedi.re.kr/','https://127.0.0.1/','https://localhost/','https://ged.kedi.re.kr:8443/','https://www.sen.go.kr/a\u0000b']){
+      const input=document(2);input.sourceReferences=[{title:'공식 안내',url}];await expect(buildNotionCanvaPptx(input)).rejects.toMatchObject({code:'invalid_request'});
+    }
+    const excess=document(2);excess.sourceReferences=Array.from({length:5},()=>({title:'공식 안내',url:officialUrls[0]}));await expect(buildNotionCanvaPptx(excess)).rejects.toMatchObject({code:'invalid_request'});
+    const dense=document(2);dense.sourceReferences=Array.from({length:4},()=>({title:'공식 안내',url:longUrlPrefix+'a'.repeat(1100)}));await expect(buildNotionCanvaPptx(dense)).rejects.toThrow('QR을 충분히 크게');
+    const longTitle=document(2);longTitle.sourceReferences=Array.from({length:4},()=>({title:'공식원문제목'.repeat(20),url:officialUrls[0]}));await expect(buildNotionCanvaPptx(longTitle)).rejects.toThrow('원고를 자르지 않았습니다');
+  });
 });
 
 describe('generic Canva import and export boundary',()=>{
@@ -162,27 +289,27 @@ describe('generic Canva import and export boundary',()=>{
     await expect(getNotionCanvaImportJob(db,'job_1',{fetchImpl,signal:controller.signal})).rejects.toMatchObject({code:'cancelled',outcomeUnknown:false});
     await expect(getNotionCanvaImportJob(db,'job/escape',{fetchImpl})).rejects.toMatchObject({code:'invalid_request'});expect(fetchImpl).not.toHaveBeenCalled();
   });
-  it('validates one through eleven output pages at exact dimensions and checks live count before exporting',async()=>{
-    for(const count of [1,5,10,11]){
+  it('validates one through thirteen output pages at exact dimensions and checks live count before exporting',async()=>{
+    for(const count of [1,5,10,11,13]){
       const fetchImpl=vi.fn().mockResolvedValueOnce(response(providerPages(count))).mockResolvedValueOnce(response(pending));
       expect(await submitNotionCanvaExport(db,{designId:'design_1',pageCount:count},{fetchImpl})).toMatchObject({id:'job_1',status:'in_progress'});
-      expect(fetchImpl.mock.calls[0][0]).toContain('offset=1&limit=12');
+      expect(fetchImpl.mock.calls[0][0]).toContain('offset=1&limit=14');
       const body=JSON.parse(fetchImpl.mock.calls[1][1].body);expect(body.format).toEqual({type:'png',pages:Array.from({length:count},(_,i)=>i+1),width:1080,height:1350,as_single_image:false});
     }
     const wrong=providerPages(5);wrong.items[0].dimensions.height=1080;
     const dup=providerPages(5);dup.items[2].page_number=2;
-    for(const result of [providerPages(12),wrong,dup,{items:[]}]){
+    for(const result of [providerPages(14),wrong,dup,{items:[]}]){
       const fetchImpl=vi.fn().mockResolvedValue(response(result));
       await expect(getNotionCanvaPages(db,'design_1',{fetchImpl})).rejects.toMatchObject({code:'invalid_response'});
     }
     const changed=vi.fn().mockResolvedValueOnce(response(providerPages(4)));
     await expect(submitNotionCanvaExport(db,{designId:'design_1',pageCount:5},{fetchImpl:changed})).rejects.toMatchObject({code:'invalid_request'});expect(changed).toHaveBeenCalledTimes(1);
   });
-  it('supports PDF/PPTX exports without PNG-only options and accepts eleven bounded export URLs',async()=>{
+  it('supports PDF/PPTX exports without PNG-only options and accepts thirteen bounded export URLs',async()=>{
     for(const format of ['pdf','pptx'] as const){const fetchImpl=vi.fn().mockResolvedValueOnce(response(providerPages(3))).mockResolvedValueOnce(response(pending));await submitNotionCanvaExport(db,{designId:'design_1',pageCount:3,format},{fetchImpl});expect(JSON.parse(fetchImpl.mock.calls[1][1].body).format).toEqual({type:format,pages:[1,2,3]});}
-    const urls=Array.from({length:11},(_,i)=>`https://document-export.canva.com/export/${i+1}.png?signature=signed`);
+    const urls=Array.from({length:13},(_,i)=>`https://document-export.canva.com/export/${i+1}.png?signature=signed`);
     const fetchImpl=vi.fn().mockResolvedValueOnce(response({job:{id:'job_1',status:'success',urls}})).mockResolvedValueOnce(response({job:{id:'job_1',status:'success',urls:['https://www.canva.com/other']}}));
-    expect((await getNotionCanvaExportJob(db,'job_1',{fetchImpl})).result?.urls).toHaveLength(11);
+    expect((await getNotionCanvaExportJob(db,'job_1',{fetchImpl})).result?.urls).toHaveLength(13);
     await expect(getNotionCanvaExportJob(db,'job_1',{fetchImpl})).rejects.toMatchObject({code:'invalid_response'});
   });
 });
@@ -198,10 +325,10 @@ describe('Canva export download and PNG validation',()=>{
     fetcher.mockResolvedValueOnce({finalUrl:'https://attacker.test/file',status:200,body:Buffer.from('data')});
     await expect(downloadNotionCanvaExport(url,{fetcher})).rejects.toMatchObject({code:'invalid_request'});
   });
-  it('checks eleven PNG pages in numeric order, exact size, count and zip paths',async()=>{
+  it('checks thirteen PNG pages in numeric order, exact size, count and zip paths',async()=>{
     const png=await sharp({create:{width:1080,height:1350,channels:3,background:'#FFFFFF'}}).png().toBuffer();
-    const archive=zipSync(Object.fromEntries(Array.from({length:11},(_,i)=>[`${11-i}.png`,png])));
-    expect(await decodeNotionCanvaPngExport([{name:'export.zip',bytes:Buffer.from(archive)}],11)).toHaveLength(11);
+    const archive=zipSync(Object.fromEntries(Array.from({length:13},(_,i)=>[`${13-i}.png`,png])));
+    expect(await decodeNotionCanvaPngExport([{name:'export.zip',bytes:Buffer.from(archive)}],13)).toHaveLength(13);
     expect(await decodeNotionCanvaPngExport([{name:'opaque.png',bytes:png,pageNumber:1}],1)).toHaveLength(1);
     await expect(decodeNotionCanvaPngExport([{name:'1.png',bytes:png}],5)).rejects.toThrow('이미지 수');
     await expect(decodeNotionCanvaPngExport([{name:'1.png',bytes:png},{name:'same.png',bytes:png,pageNumber:1}],2)).rejects.toThrow('순서');

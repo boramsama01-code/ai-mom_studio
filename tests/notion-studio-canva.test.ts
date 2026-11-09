@@ -63,6 +63,21 @@ async function completed(f:Fixture,images=pngs.slice(0,3),jobId='export_1'){
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 
 describe('Notion -> Canva coordination on isolated PostgreSQL',()=>{
+ it('keeps source QR and teaser pages between the current manuscript and the brand outro in the saved output',async()=>{
+  const f=await fixture(),sourceReferences=[{title:'공식 모집 공고',url:'https://ged.kedi.re.kr/notice/2027'}],teaser={title:'3일만에 쓰는 영재교육원 연구계획서',body:'궁금한 점을 댓글로 남겨주세요.'};
+  f.doc.pages[0].cardFields={subtitle:'',body:f.doc.pages[0].body,footnote:'확인된 기관 사례',sourceLabel:'공식 공고'};f.doc.pages[1].infographic='application_steps';
+  await f.db.update(notionSyncLinks).set({sourceSnapshot:{...f.doc,sourceReferences,teaser}}).where(eq(notionSyncLinks.id,f.link.id));
+  provider.build.mockResolvedValue({...deck(),pageCount:5});
+  await createNotionStudioCanva(f.db,f.link.id,await request(f),'test');
+  expect(provider.build.mock.calls[0][0]).toMatchObject({sourceReferences,teaser});
+  expect(provider.build.mock.calls[0][0].pages).toMatchObject([{footnote:'확인된 기관 사례',sourceLabel:'공식 공고'},{infographic:'application_steps'}]);
+  provider.pollImport.mockResolvedValueOnce({id:'import_1',status:'success',result:{designs:[{designId:'design_extras',editUrl:'https://www.canva.com/design/extras/edit',viewUrl:null,pageCount:5}]}});
+  await pollNotionStudioCanva(f.db,f.link.id);await completed(f,[pngs[0],pngs[1],pngs[2],pngs[3],pngs[0]]);
+  const link=await saved(f),[output]=await f.db.select().from(mediaAssets).where(eq(mediaAssets.id,link.canva.outputAssetId!));
+  expect(output.carousel!.pages.map(p=>p.title)).toEqual([f.copy.cover.title,f.copy.pages[0].title,'원문 공고 확인',teaser.title,NOTION_CANVA_OUTRO.title]);
+  expect((await f.db.select().from(contentItems).where(eq(contentItems.id,f.item.id)))[0].currentRevisionId).toBe(f.revision.id);
+  const zip=unzipSync(await downloadNotionStudioOutput(f.db,f.link.id));expect(Object.keys(zip)).toEqual(['01.png','02.png','03.png','04.png','05.png']);
+ });
  it('serializes double clicks, pins the real revision and includes exactly one brand outro',async()=>{
   const f=await fixture(),r=await request(f);
   const results=await Promise.allSettled([createNotionStudioCanva(f.db,f.link.id,r,'test'),createNotionStudioCanva(f.db,f.link.id,r,'test')]);

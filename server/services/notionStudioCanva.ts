@@ -13,7 +13,7 @@ import {createRevision} from '../content';
 import {loadNotionStudioState,notionStudioDetail} from './notionStudio';
 import {patchNotionDocumentProperties} from './notionClient';
 import {CanvaRestError} from './canvaRest';
-import {buildNotionCanvaPptx,submitNotionCanvaImport,getNotionCanvaImportJob,submitNotionCanvaExport,getNotionCanvaExportJob,downloadNotionCanvaExport,decodeNotionCanvaPngExport,NOTION_CANVA_OUTRO} from './notionCanva';
+import {buildNotionCanvaPptx,submitNotionCanvaImport,getNotionCanvaImportJob,submitNotionCanvaExport,getNotionCanvaExportJob,downloadNotionCanvaExport,decodeNotionCanvaPngExport,NOTION_CANVA_OUTRO,NOTION_CANVA_MAX_OUTPUT_PAGES} from './notionCanva';
 
 type Request={version:number;itemVersion:number};
 type State=Awaited<ReturnType<typeof loadNotionStudioState>>;
@@ -21,7 +21,9 @@ type CanvaSnapshot=NotionCanvaState&{sourceFingerprint?:string};
 const sha=(b:Buffer)=>crypto.createHash('sha256').update(b).digest('hex');
 function valid(s:State,r:Request){if(s.link.version!==r.version||s.item.version!==r.itemVersion)throw new HttpError(409,'원고나 연결 설정이 바뀌었습니다. 최신 내용을 확인해 주세요.',{code:'studio_source_changed'});}
 function plainSource(s:State){try{notionPlainCardCopy(s.copy);}catch{throw new HttpError(409,'노션 연결은 일반 카드뉴스 원고용입니다. 원고 형식을 확인해 주세요.',{code:'notion_copy_format_changed'});}}
-function fingerprint(s:State){return sha(Buffer.from(JSON.stringify({revisionId:s.revision.id,itemVersion:s.item.version,title:s.item.title,copy:s.copy,coverStyle:s.link.coverStyle,photoOrder:s.link.photoOrder,category:s.link.sourceSnapshot.category??null})));}
+function extras(s:State){const source=s.link.sourceSnapshot as {sourceReferences?:Array<{title:string;url:string}>;sourceCard?:{title:string;body:string;footnote?:string};teaser?:{title:string;body:string}};return {sourceReferences:source.sourceReferences,sourceCard:source.sourceCard,teaser:source.teaser};}
+function expectedOutputPages(s:State){const extra=extras(s);return s.copy.pages.length+2+(extra.sourceReferences?.length?1:0)+(extra.teaser?1:0);}
+function fingerprint(s:State){return sha(Buffer.from(JSON.stringify({revisionId:s.revision.id,itemVersion:s.item.version,title:s.item.title,copy:s.copy,coverStyle:s.link.coverStyle,photoOrder:s.link.photoOrder,category:s.link.sourceSnapshot.category??null,...extras(s)})));}
 function currentSource(s:State,v:CanvaSnapshot){return v.sourceVersion===s.item.version&&v.sourceRevisionId===s.revision.id&&(!v.sourceFingerprint||v.sourceFingerprint===fingerprint(s));}
 const sourceChanged=()=>new HttpError(409,'Canva 제작 후 원고나 표지 설정이 바뀌었습니다. 최신 원고로 다시 제작한 뒤 결과를 가져오세요.',{code:'canva_source_changed'});
 async function begin(db:DB,id:number,r:Request,phase:'importing'|'exporting',expected:State,pageCount:number){
@@ -77,9 +79,10 @@ export async function createNotionStudioCanva(db:DB,id:number,r:Request,actor:st
  const photos=[];
  for(const p of ordered){const bytes=await sharp(p.bytes,{limitInputPixels:50_000_000}).rotate().resize({width:2000,height:2000,fit:'inside',withoutEnlargement:true}).png().toBuffer();photos.push({id:String(p.id),name:p.name,bytes,mimeType:'image/png'});}
  const source=before.link.sourceSnapshot as {category?:string};
- const pages=[{title:before.copy.cover.title,body:before.copy.cover.subtitle},...before.copy.pages.map(p=>({title:p.title,body:[p.subtitle,p.body].filter(Boolean).join('\n\n')}))].map((p,i)=>({...p,...(ordered[i]?{imageId:String(ordered[i].id)}:{})}));
+ const sourcePages=(before.link.sourceSnapshot as unknown as {pages?:Array<{cardFields?:{footnote:string;sourceLabel:string};infographic?:'application_steps';emphasis?:string}>} ).pages??[];
+ const pages=[{title:before.copy.cover.title,body:before.copy.cover.subtitle},...before.copy.pages.map(p=>({title:p.title,body:[p.subtitle,p.body].filter(Boolean).join('\n\n')}))].map((p,i)=>({...p,...(ordered[i]?{imageId:String(ordered[i].id)}:{}),...(sourcePages[i]?.cardFields?{footnote:sourcePages[i].cardFields!.footnote,sourceLabel:sourcePages[i].cardFields!.sourceLabel}:{}),...(sourcePages[i]?.infographic?{infographic:sourcePages[i].infographic}:{}),...(sourcePages[i]?.emphasis?{emphasis:sourcePages[i].emphasis}:{})}));
  // The builder validates fit before a durable reservation or external POST is made.
- const deck=await buildNotionCanvaPptx({title:before.item.title,coverStyle:before.link.coverStyle as 'A'|'B'|'C',category:source.category||undefined,pages},photos);
+ const deck=await buildNotionCanvaPptx({title:before.item.title,coverStyle:before.link.coverStyle as 'A'|'B'|'C',category:source.category||undefined,pages,...extras(before)},photos);
  const unusedPhotos=before.link.photoOrder.length-ordered.length;
  const warnings=[...deck.warnings,...(unusedPhotos>0?[`사진 ${unusedPhotos}개는 원고 페이지 수에 맞춰 이번 디자인에 넣지 않았습니다. Studio 원본은 그대로 보존했습니다.`]:[])];
  const s=await begin(db,id,r,'importing',before,deck.pageCount);let accepted:CanvaSnapshot|undefined;
@@ -92,7 +95,7 @@ export async function exportNotionStudioCanva(db:DB,id:number,r:Request,actor:st
  const before=await loadNotionStudioState(db,id);valid(before,r);plainSource(before);
  if(!before.link.canva.designId)throw new HttpError(409,'Canva 디자인을 먼저 만들어 주세요.');
  if(!currentSource(before,before.link.canva))throw sourceChanged();
- const pageCount=before.link.canva.pageCount;if(!Number.isInteger(pageCount)||!pageCount||pageCount>11)throw new HttpError(409,'저장된 Canva 페이지 수를 확인할 수 없습니다. 새 디자인을 먼저 만들어 주세요.');
+ const pageCount=before.link.canva.pageCount;if(!Number.isInteger(pageCount)||!pageCount||pageCount>NOTION_CANVA_MAX_OUTPUT_PAGES||pageCount!==expectedOutputPages(before))throw new HttpError(409,'저장된 Canva 페이지 수를 확인할 수 없습니다. 새 디자인을 먼저 만들어 주세요.');
  const s=await begin(db,id,r,'exporting',before,pageCount);let accepted:CanvaSnapshot|undefined;
  try{const job=await submitNotionCanvaExport(db,{designId:before.link.canva.designId,pageCount,format:'png'});accepted={...s.canva,exportJobId:job.id,phase:job.status==='failed'?'failed':'exporting',error:job.status==='failed'?'Canva 내보내기를 완료하지 못했습니다.':null};await finishSubmit(db,id,s.token,accepted);
   await audit(db,{actor,action:'notion_canva_export',entity:'content_item',entityId:s.item.id,channelId:s.link.channelId,detail:{jobId:job.id}});
@@ -126,7 +129,7 @@ export async function pollNotionStudioCanva(db:DB,id:number){
   if(!job.result?.urls.length){await failCurrentJob(db,s,v,'Canva 출력 주소를 확인할 수 없습니다.');throw new HttpError(502,'Canva 출력 주소를 확인할 수 없습니다.');}
   const downloads=[];for(const [i,url]of job.result.urls.entries())downloads.push({name:`page-${i+1}.png`,pageNumber:i+1,bytes:await downloadNotionCanvaExport(url)});
   let images:Buffer[];
-  try{images=await decodeNotionCanvaPngExport(downloads,v.pageCount??0);if(images.length!==s.copy.pages.length+2)throw new HttpError(502,'원고와 브랜드 마지막 장의 페이지 수가 다릅니다.');}
+  try{images=await decodeNotionCanvaPngExport(downloads,v.pageCount??0);if(images.length!==expectedOutputPages(s))throw new HttpError(502,'원고·원문 QR·예고·브랜드 마지막 장의 페이지 수가 다릅니다.');}
   catch(e){await failCurrentJob(db,s,v,'Canva 출력 파일의 페이지 수·순서·크기를 확인해 주세요. 기존 완성본은 유지했습니다.');throw e;}
   const imported=await db.transaction(async raw=>{const tx=raw as unknown as DB;
    await tx.select({id:contentItems.id}).from(contentItems).where(eq(contentItems.id,s.item.id)).for('update');
@@ -141,8 +144,9 @@ export async function pollNotionStudioCanva(db:DB,id:number){
    for(const [i,bytes]of images.entries()){
     const digest=sha(bytes);const [old]=await tx.select({id:mediaAssets.id}).from(mediaAssets).where(and(eq(mediaAssets.contentItemId,fresh.item.id),eq(mediaAssets.sha256,digest),eq(mediaAssets.revisionId,output.id))).limit(1);
     const [created]=old?[old]:await tx.insert(mediaAssets).values({channelId:link.channelId,contentItemId:fresh.item.id,revisionId:output.id,kind:i===0?'card':'card_page',source:'canva',sha256:digest,bytes,mime:'image/png',width:1080,height:1350}).returning({id:mediaAssets.id});
-    const last=i===images.length-1,title=last?NOTION_CANVA_OUTRO.title:i===0?fresh.copy.cover.title:fresh.copy.pages[i-1].title;
-    manifest.pages.push({id:created.id,sha256:digest,title,altText:last?NOTION_CANVA_OUTRO.altText:title});
+    const extra=extras(fresh),titles=[fresh.copy.cover.title,...fresh.copy.pages.map(p=>p.title),...(extra.sourceReferences?.length?[extra.sourceCard?.title||'원문 공고 확인']:[]),...(extra.teaser?[extra.teaser.title]:[]),NOTION_CANVA_OUTRO.title];
+    const last=i===images.length-1,title=titles[i];
+    manifest.pages.push({id:created.id,sha256:digest,title,altText:last?NOTION_CANVA_OUTRO.altText:extra.sourceReferences?.length&&i===fresh.copy.pages.length+1?`원문 공고 확인: ${extra.sourceReferences.map(ref=>ref.title).join(', ')}`:title});
    }
    const outputAssetId=manifest.pages[0].id;await tx.update(mediaAssets).set({carousel:manifest}).where(eq(mediaAssets.id,outputAssetId));
    await tx.update(notionSyncLinks).set({canva:{...v,phase:'complete',outputAssetId,error:null,updatedAt:new Date().toISOString()},operationToken:null,operationUntil:null,version:link.version+1,updatedAt:new Date()}).where(eq(notionSyncLinks.id,id));return 'complete';

@@ -39,7 +39,7 @@ export async function notionStudioDetail(db:DB,id:number,refresh=false):Promise<
  const doc=sourceSnapshot(s.link),warnings:string[]=[];
  if(!doc.verified)warnings.push('노션의 검증 상태를 확인해 주세요. 가져오기는 게시 승인과 별개입니다.');
  if(s.link.lastError)warnings.push(s.link.lastError);
- const detail:NotionStudioDetail={link:linkDto(s),itemVersion:s.item.version,copy:s.copy,photos:s.link.photoOrder.flatMap(pid=>{const p=photos.find(p=>p.id===pid);return p?[{...p,url:`/api/notion/links/${id}/photos/${p.id}`}]:[];}),source:{title:doc.title,coverTitle:doc.coverTitle,pages:doc.pages.map(({index,title,body})=>({index,title,body}))},warnings};
+ const detail:NotionStudioDetail={link:linkDto(s),itemVersion:s.item.version,copy:s.copy,photos:s.link.photoOrder.flatMap(pid=>{const p=photos.find(p=>p.id===pid);return p?[{...p,url:`/api/notion/links/${id}/photos/${p.id}`}]:[];}),source:{title:doc.title,coverTitle:doc.coverTitle,pages:doc.pages.map(({index,title,body})=>({index,title,body})),...(doc.sourceReferences?{sourceReferences:doc.sourceReferences}:{}),...(doc.teaser?{teaser:doc.teaser}:{})},warnings};
  if(refresh){const fresh=await fetchNotionDocument(s.link.notionPageId);detail.notion={sourceHash:fresh.sourceHash,lastEditedAt:fresh.lastEditedAt,coverTitle:fresh.coverTitle,changed:fresh.sourceHash!==s.link.sourceHash,pages:fresh.pages.map(({index,title,body})=>({index,title,body}))};}
  return detail;
 }

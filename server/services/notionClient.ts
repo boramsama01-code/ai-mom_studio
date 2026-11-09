@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID, notionDocumentQuerySchema, notionDocumentUpdateSchema,
+  DEFAULT_NOTION_CONTENT_DATA_SOURCE_ID, NOTION_CARD_DATA_SOURCE_ID, notionDocumentQuerySchema, notionDocumentUpdateSchema,
   type NotionConnectionStatus, type NotionDocument, type NotionDocumentList,
   type NotionDocumentPage, type NotionDocumentQuery, type NotionDocumentSummary,
   type NotionDocumentUpdate, type NotionPhoto,
@@ -43,7 +43,7 @@ export function normalizeNotionPageId(value: string): string {
 type Obj = Record<string, any>;
 type Block = { id: string; type: string; has_children?: boolean; [key: string]: any };
 type PageLayout = { page: NotionDocumentPage; heading: Block; title?: Block; body: Block[]; writable: boolean };
-type Snapshot = { document: NotionDocument; layouts: PageLayout[] };
+type Snapshot = { document: NotionDocument; layouts: PageLayout[]; tableRows?: Obj[] };
 export type NotionPropertyPatch = { coverTitle?: string; studioUrl?: string; outputUrl?: string };
 type ClientOptions = {
   fetch?: typeof globalThis.fetch; safeFetch?: typeof safeFetch;
@@ -192,6 +192,51 @@ export function assertNotionPhotoUrl(value: string): URL {
   return u;
 }
 
+/** The current input table is authoritative; archived prose is never a fallback for linked rows. */
+function parseTableDocument(page: Obj, rows: Obj[]): Snapshot {
+  const isTeaser=(row:Obj)=>propertyText(row,'역할')==='다음 편 예고'||propertyText(row,'역할')==='일반'&&/^다음\s*편\s*[｜|:：]/.test(propertyText(row,'제목'));
+  const summary=summaryOf(page), ordered=[...rows].sort((a,b)=>property(a,'페이지').number-property(b,'페이지').number);
+  const indexes=ordered.map(row=>property(row,'페이지').number);
+  if(!ordered.length||ordered.length>12||indexes.some((n,i)=>!Number.isInteger(n)||n!==i+1))
+    throw new NotionSyncError('카드 원고 표의 페이지 번호를 1부터 빠짐없이 중복 없이 작성해 주세요.',422,'NOTION_TABLE_STRUCTURE');
+  const core=ordered.filter(row=>propertyText(row,'역할')!=='원문 확인'&&!isTeaser(row));
+  if(core.length<2||core.length>10||core.some((row,i)=>property(row,'페이지').number!==i+1))
+    throw new NotionSyncError('본문 2~10장 다음에 원문 확인·다음 편 예고를 배치해 주세요.',422,'NOTION_TABLE_STRUCTURE');
+  const sources=ordered.filter(row=>propertyText(row,'역할')==='원문 확인'), teasers=ordered.filter(isTeaser);
+  if(sources.length>1||teasers.length>1||(sources.length&&teasers.length&&property(sources[0],'페이지').number>property(teasers[0],'페이지').number))
+    throw new NotionSyncError('원문 확인과 다음 편 예고는 각각 한 장씩 순서대로 작성해 주세요.',422,'NOTION_TABLE_STRUCTURE');
+  const pages=core.map((row,i)=>{
+    if(propertyText(row,'이미지URL').trim())throw new NotionSyncError('카드 표의 이미지URL 대신 콘텐츠 제작표의 사진 원본에 파일을 올려 주세요. 그림을 누락한 채 가져오지 않았습니다.',422,'NOTION_TABLE_IMAGE_UNSUPPORTED');
+    const cardFields={subtitle:propertyText(row,'소제목'),body:propertyText(row,'본문'),footnote:propertyText(row,'각주'),sourceLabel:propertyText(row,'출처표시')};
+    const emphasis=propertyText(row,'강조문구');
+    return {index:i+1,title:propertyText(row,'제목'),body:[cardFields.subtitle,cardFields.body].filter(x=>x.trim()).join('\n\n'),headingBlockId:row.id,bodyBlockIds:[],cardRowId:row.id,cardFields,...(emphasis?{emphasis}:{}),...(/^도식:\s*접수 단계\s*$/m.test(propertyText(row,'확인메모'))?{infographic:'application_steps' as const}:{})};
+  });
+  if(pages.some(p=>!p.title.trim()))throw new NotionSyncError('카드 원고 표의 제목을 채워 주세요.',422,'NOTION_TABLE_STRUCTURE');
+  const sourceReferences:NonNullable<NotionDocument['sourceReferences']>=[];
+  if(sources.length){
+    const source=sources[0], urls=(propertyText(source,'QR대상URL')||propertyText(source,'원문URL')).replace(/<br\s*\/?\s*>/gi,'\n').split(/\r?\n/).map(x=>{const line=x.trim();return /^\[[^\]]+\]\((https:\/\/[^)]+)\)$/.exec(line)?.[1]??line;}).filter(Boolean);
+    let labels=propertyText(source,'출처표시').split(/\r?\n|\s+\/\s+/).map(x=>x.trim());
+    if(labels.length===1&&urls.length>1){const parts=labels[0].split('/').map(x=>x.trim());if(parts.length===urls.length)labels=parts;}
+    if(!urls.length||urls.length>4||new Set(urls).size!==urls.length)throw new NotionSyncError('원문 확인 카드에 서로 다른 공식 원문 주소 1~4개를 한 줄씩 입력해 주세요.',422,'NOTION_QR_SOURCE_INVALID');
+    for(const [i,url]of urls.entries()){
+      let parsed:URL;try{parsed=new URL(url);}catch{throw new NotionSyncError('원문 QR 주소를 확인해 주세요.',422,'NOTION_QR_SOURCE_INVALID');}
+      if(parsed.protocol!=='https:'||parsed.username||parsed.password||parsed.port||!/^[-a-z0-9]+(?:\.[-a-z0-9]+)+$/i.test(parsed.hostname)||/^\d+(?:\.\d+){3}$/.test(parsed.hostname)||/(?:^|\.)(?:localhost|local|internal|test|invalid|example)$/i.test(parsed.hostname))throw new NotionSyncError('원문 QR에는 공개 HTTPS 공식 공고 주소를 입력해 주세요.',422,'NOTION_QR_SOURCE_INVALID');
+      sourceReferences.push({title:labels[i]||`공식 공고 ${i+1}`,url});
+    }
+  }
+  const sourceCard=sources.length?{title:propertyText(sources[0],'제목'),body:[propertyText(sources[0],'소제목'),propertyText(sources[0],'본문')].filter(Boolean).join('\n\n'),footnote:propertyText(sources[0],'각주')}:undefined;
+  const teaser=teasers.length?{title:propertyText(teasers[0],'제목').replace(/^다음\s*편\s*[｜|:：]\s*/,''),body:[propertyText(teasers[0],'소제목'),propertyText(teasers[0],'본문'),propertyText(teasers[0],'각주'),propertyText(teasers[0],'출처표시')].filter(Boolean).join('\n\n')}:undefined;
+  if(teaser&&(!teaser.title.trim()||!teaser.body.trim()))throw new NotionSyncError('다음 편 예고의 제목과 댓글 안내를 입력해 주세요.',422,'NOTION_TABLE_STRUCTURE');
+  const photos:NotionPhoto[]=[];
+  for(const name of ['사진원본','사진 원본'])for(const file of property(page,name).files??[]){const url=file.file?.url??file.external?.url;if(typeof url==='string'){assertNotionPhotoUrl(url);photos.push({key:`property:${hash([file.name,stableFileIdentity(url)]).slice(0,24)}`,name:file.name||'사진',url});}}
+  if(photos.length>12)throw new NotionSyncError('사진은 한 원고에 12개 이하로 올려 주세요.',422,'NOTION_DOCUMENT_TOO_LARGE');
+  const caption=propertyText(page,'캡션');
+  const sourceHash=hash({...summary,lastEditedAt:undefined,caption,verificationNotes:propertyText(page,'확인메모'),sourceUrl:propertyText(page,'원문링크'),
+    rows:ordered.map(row=>({id:row.id,index:property(row,'페이지').number,fields:Object.fromEntries(['역할','제목','소제목','본문','각주','출처표시','강조문구','카테고리','원문URL','QR대상URL','이미지URL','대체텍스트','검증상태','확인메모'].map(key=>[key,propertyText(row,key)]))})),
+    photos:photos.map(({key,name})=>({key,name}))});
+  return {document:{...summary,caption,sourceHash,pages,photos,editorialSource:'card_table',...(sourceReferences.length?{sourceReferences,sourceCard}:{}),...(teaser?{teaser}:{})},layouts:[],tableRows:ordered};
+}
+
 export function createNotionClient(options: ClientOptions = {}) {
   const transport = options.fetch ?? ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args));
   const mediaFetch = options.safeFetch ?? safeFetch;
@@ -256,6 +301,20 @@ export function createNotionClient(options: ClientOptions = {}) {
   }
   async function snapshot(pageId: string,signal?:AbortSignal): Promise<Snapshot> {
     const id = normalizeNotionPageId(pageId), page = await request(`/pages/${id}`,"GET",undefined,signal); assertMembership(page);
+    const relation=property(page,'카드 원고');
+    if(relation.type==='relation'){
+      if(relation.has_more||!Array.isArray(relation.relation)||!relation.relation.length||relation.relation.length>12)throw new NotionSyncError('카드 원고 연결은 본문·원문·예고를 합쳐 2~12장으로 정리해 주세요.',422,'NOTION_TABLE_STRUCTURE');
+      const rows:Obj[]=[];
+      for(const entry of relation.relation){
+        if(!options.fetch)await abortable(pause(350),signal);
+        const row=await request(`/pages/${normalizeNotionPageId(entry.id)}`,'GET',undefined,signal);
+        const back=property(row,'콘텐츠');
+        if(row.archived||row.in_trash||row.parent?.data_source_id!==NOTION_CARD_DATA_SOURCE_ID||back.has_more||!Array.isArray(back.relation)||back.relation.length!==1||normalizeNotionPageId(back.relation[0].id)!==id)
+          throw new NotionSyncError('카드 원고 행이 다른 제작표 또는 휴지통에 있습니다. 연결 관계를 확인해 주세요.',403,'NOTION_CARD_OUTSIDE_DATA_SOURCE');
+        row.id=normalizeNotionPageId(row.id);rows.push(row);
+      }
+      return parseTableDocument(page,rows);
+    }
     return parseDocument(page, await listBlocks(id, 0, { count: 0 },signal));
   }
   async function resolveChannelOption(channel: string): Promise<string | undefined> {
@@ -322,6 +381,31 @@ export function createNotionClient(options: ClientOptions = {}) {
     const data = notionDocumentUpdateSchema.parse(input), id = normalizeNotionPageId(data.pageId), before = await snapshot(id,options.signal);
     if (before.document.sourceHash !== data.expectedSourceHash)
       throw new NotionSyncError("노션 원고가 바뀌었습니다. 최신 원고를 비교한 뒤 다시 반영해 주세요.", 409, "NOTION_SOURCE_CONFLICT", { current: before.document });
+    if(before.tableRows){
+      if(before.document.pages.length!==data.pages.length||before.document.pages.some((p,i)=>p.index!==data.pages[i].index))throw new NotionSyncError('노션 카드 원고 표와 스튜디오의 장 수가 다릅니다.',409,'NOTION_STRUCTURE_CONFLICT');
+      const mutations:Array<{id:string;properties:Obj}>=[];
+      for(const [i,old]of before.document.pages.entries()){
+        const next=data.pages[i],changes:Obj={};
+        if(next.title!==old.title)changes['제목']={rich_text:makeRichText(next.title,property(before.tableRows.find(r=>r.id===old.cardRowId)!,'제목').rich_text??[])};
+        if(next.body!==old.body){
+          if(!next.cardFields||[next.cardFields.subtitle,next.cardFields.body].filter(x=>x.trim()).join('\n\n')!==next.body)throw new NotionSyncError('표의 소제목·각주·출처표시를 보존할 필드 정보가 없습니다. 노션 표에서 문구를 수정해 주세요.',409,'NOTION_STRUCTURE_CONFLICT');
+          if((['subtitle','footnote','sourceLabel'] as const).some(key=>next.cardFields![key]!==old.cardFields?.[key]))throw new NotionSyncError('소제목·각주·출처표시는 노션 표의 원본을 유지해야 합니다. 해당 열은 노션에서 수정한 뒤 다시 가져와 주세요.',409,'NOTION_STRUCTURE_CONFLICT');
+          if(next.cardFields.body!==old.cardFields?.body)changes['본문']={rich_text:makeRichText(next.cardFields.body,property(before.tableRows.find(r=>r.id===old.cardRowId)!,'본문').rich_text??[])};
+        }
+        if(Object.keys(changes).length)mutations.push({id:old.cardRowId!,properties:changes});
+      }
+      const parentProperties=propertyChanges(data);if(Object.keys(parentProperties).length)mutations.push({id,properties:parentProperties});
+      const appliedPageIds:string[]=[];let attemptedPageId:string|undefined;
+      const snapshots=mutations.flatMap(m=>{const row=before.tableRows!.find(r=>r.id===m.id);return row?[{pageId:m.id,properties:Object.fromEntries(Object.keys(m.properties).map(key=>[key,row.properties[key]]))}]:[];});
+      try{
+        for(const mutation of mutations){if(appliedPageIds.length)await abortable(pause(350),options.signal);await options.beforeWrite?.();checkSignal(options.signal);attemptedPageId=mutation.id;await request(`/pages/${mutation.id}`,'PATCH',{properties:mutation.properties},options.signal);appliedPageIds.push(mutation.id);}
+      }catch(error){
+        const rejected=error instanceof NotionSyncError&&error.code==='NOTION_API_ERROR'&&[400,401,403,404,429].includes(Number(error.details?.upstreamStatus));
+        if(!appliedPageIds.length&&rejected)throw error;
+        throw new NotionSyncError('노션 표의 일부 수정 결과를 확인하지 못했습니다. 표를 다시 불러와 비교해 주세요.',502,'NOTION_PARTIAL_WRITE',{appliedPageIds,attemptedPageId,snapshots});
+      }
+      try{return(await snapshot(id,options.signal)).document;}catch{throw new NotionSyncError('노션 표 수정은 완료됐지만 결과를 다시 읽지 못했습니다.',502,'NOTION_WRITE_READBACK_FAILED',{appliedPageIds,snapshots});}
+    }
     if (before.layouts.length !== data.pages.length || before.layouts.some((p, i) => p.page.index !== data.pages[i].index || !p.writable))
       throw new NotionSyncError("노션과 스튜디오의 장 구성 또는 본문 구조가 다릅니다. 같은 장 수의 원고만 다시 반영할 수 있습니다.", 409, "NOTION_STRUCTURE_CONFLICT");
     const changes: Array<{ block: Block; text: string }> = [];
