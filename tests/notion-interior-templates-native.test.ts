@@ -25,6 +25,27 @@ beforeEach(()=>vi.stubGlobal('fetch',vi.fn(()=>{throw Error('Interior choice mus
 afterEach(()=>{expect(fetch).not.toHaveBeenCalled();vi.unstubAllGlobals();});
 
 describe('page-specific native interior templates',()=>{
+ it('reserves multi-line notes for all interiors and preserves the real national deadline table footer',async()=>{
+  const note=['* 첫 번째 대상의 안내입니다.','** 두 번째 대상의 안내입니다.','세 번째 조건을 보존합니다.','네 번째 날짜 기준을 보존합니다.','다섯 번째 확인 사항을 보존합니다.'].join('\n');
+  for(const [template,body]of cases){
+   const d=input(template,body);d.pages[1].footnote=note;
+   const photos=template==='image_text'?[{id:'picked',bytes:await sharp({create:{width:30,height:40,channels:3,background:'#72A7FF'}}).png().toBuffer(),mimeType:'image/png'}]:[];
+   const full=await buildNotionCanvaPptx(d,photos,{previewPage:1}),fast=await buildNotionCanvaPptx(d,photos,{previewPage:1,previewOnly:true}),source=xml(full.bytes),footer=shape(source,'page-2-footer');
+   expect(fast.previewSvg).toBe(full.previewSvg);for(const line of note.split('\n'))expect(plain(source)).toContain(line.replace(/\s/g,''));expect(plain(source)).toContain('공식공고');
+   expect(footer.h).toBeGreaterThan(70);expect(footer.y+footer.h).toBeLessThanOrEqual(1286.001);expect(Math.min(...[...footer.source.matchAll(/<a:rPr[^>]*sz="(\d+)"/g)].map(m=>Number(m[1])/75))).toBeGreaterThanOrEqual(16);
+   for(const m of source.matchAll(/<p:(?:sp|pic)>([\s\S]*?)<\/p:(?:sp|pic)>/g)){
+    if(m[1].includes('name="page-2-footer"'))continue;
+    const bounds=m[1].match(/<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"/);if(!bounds)continue;
+    const [,xs,ys,ws,hs]=bounds,[x,y,w,h]=[xs,ys,ws,hs].map(v=>Number(v)/9525);expect(x).toBeGreaterThanOrEqual(63.999);expect(x+w).toBeLessThanOrEqual(1016.001);if(y>=336)expect(y+h).toBeLessThanOrEqual(footer.y-19.99);
+   }
+  }
+  const body='추가로 확인할 학생 GED 지원 마감\n지역 | 마감일 | 해당 기관\n전남 | 11/10 | 보성\n전남 | 11/11 | 완도\n전남 | 11/13 | 목포·영암\n경북 | 11/11 | 칠곡\n경북 | 11/12 | 안동**\n경북 | 11/13 | 김천·문경·영양* 등\n경북 | 11/15 | 구미';
+  const footnote='경북 11/13: 김천·문경·영양·의성·청송·울진·울릉·예술김천.\n* 영양: GED 지원 전에 희망서를 11/10까지 담임·담당교사에게 제출.\n** 안동: 정원이 미달된 과정만 11/13~19 추가접수 예정. 실제 공고 확인.\n';
+  const d=input('table',body);d.pages[1]={title:'이 지역은 마감일을\n먼저 확인하세요',body,interiorTemplate:'table',footnote,sourceLabel:'GED 선발공고·공식 모집요강 · 2026.11.10 기준'};
+  const full=await buildNotionCanvaPptx(d,[],{previewPage:1}),fast=await buildNotionCanvaPptx(d,[],{previewPage:1,previewOnly:true}),source=xml(full.bytes);
+  expect(fast.previewSvg).toBe(full.previewSvg);for(const line of [footnote,d.pages[1].sourceLabel!].join('\n').split('\n').filter(Boolean))expect(plain(source)).toContain(line.replace(/\s/g,''));
+  expect(source).not.toContain('name="schedule-cell-2-0-text"');expect(shape(source,'schedule-grid').y+shape(source,'schedule-grid').h).toBeLessThan(shape(source,'page-2-footer').y);
+ });
  it.each(cases)('keeps all %s content editable with identical selected/full previews',async(template,body,expected)=>{
   const photos=template==='image_text'?[{id:'picked',bytes:await sharp({create:{width:30,height:40,channels:3,background:'#72A7FF'}}).png().toBuffer(),mimeType:'image/png'}]:[];
   const d=input(template,body),full=await buildNotionCanvaPptx(d,photos,{previewPage:1}),fast=await buildNotionCanvaPptx(d,photos,{previewPage:1,previewOnly:true}),source=xml(full.bytes),copy=plain(source);
