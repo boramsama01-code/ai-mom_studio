@@ -34,7 +34,7 @@ describe('official education-office logos and actual date cells',()=>{
   const files=unzipSync(full.bytes),source=xml(full.bytes),media=Object.keys(files).filter(n=>n.startsWith('ppt/media/education-'));
   expect(media).toHaveLength(10);expect(source.match(/교육청 대표 로고/g)).toHaveLength(parseLogoCalendar(calendar,'11월',await loadEducationOfficeLogos()).events.length);
   expect(source).toContain('11/10 사전');expect(source).toContain('11/19 조건부');expect(source).toContain('11/30 시작');
-  for(const b of bounds(source)){expect(b.x).toBeGreaterThanOrEqual(95.999);expect(b.y).toBeGreaterThanOrEqual(206.999);expect(b.x+b.w).toBeLessThanOrEqual(984.001);expect(b.y+b.h).toBeLessThanOrEqual(1143.001);}
+  for(const b of bounds(source)){expect(b.x).toBeGreaterThanOrEqual(63.999);expect(b.y).toBeGreaterThanOrEqual(63.999);expect(b.x+b.w).toBeLessThanOrEqual(1016.001);expect(b.y+b.h).toBeLessThanOrEqual(1286.001);}
   expect(await sharp(Buffer.from(full.previewSvg!)).metadata()).toMatchObject({width:1080,height:1350});
  });
 });
@@ -46,7 +46,7 @@ describe('eligibility, actual stages and scoped documents',()=>{
   expect(fast.previewSvg).toBe(full.previewSvg);
   for(const value of [...parsed.courses.flat(),...parsed.steps.flat(),...parsed.documents.flat(),input.pages[1].footnote!,input.pages[1].sourceLabel!])expect(plain(source)).toContain(value.replace(/\s/g,''));
   expect(source).not.toContain('영재성검사');expect(source).toContain('기관별 확인');
-  for(const b of bounds(source)){expect(b.x).toBeGreaterThanOrEqual(95.999);expect(b.y).toBeGreaterThanOrEqual(206.999);expect(b.x+b.w).toBeLessThanOrEqual(984.001);expect(b.y+b.h).toBeLessThanOrEqual(1143.001);}
+  for(const b of bounds(source)){expect(b.x).toBeGreaterThanOrEqual(63.999);expect(b.y).toBeGreaterThanOrEqual(63.999);expect(b.x+b.w).toBeLessThanOrEqual(1016.001);expect(b.y+b.h).toBeLessThanOrEqual(1286.001);}
  });
  it('supports institution comparison rows without implying shared deadlines',async()=>{
   const body=guide.replace('[모집]\n수학·과학 | 초6·중1 | 원문에 명시된 과정만\n정보 | 중1 | 조건부 지원 경로','[기관별 모집]\n기관A | 수학·과학 / 초4·5 | 학생 ~11/13 · 교사 ~11/20\n기관B | 정보 / 중1 | 학생 ~11/17 · 교사 ~11/23');

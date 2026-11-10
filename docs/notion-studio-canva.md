@@ -71,3 +71,22 @@ Test only with an isolated PostgreSQL database. `tests/helpers.ts` drops schemas
 ```
 
 The first table has 1–6 rows, the process has 2–5 actual stages, and documents have 1–3 rows. **[기관별 모집]** replaces **[모집]** for comparisons; its three columns are institution/course, fields/current grades, and submission-stage deadlines. Document states are **공통**, **조건부**, **없음명시**, **미확인**, and **선택**. `없음명시` requires an explicit source statement for the named applicant group. A missing mention is `미확인`, never proof that a document is unnecessary. GED teacher nomination is separate from a paper recommendation, and a research plan is separate from a personal statement. Keep the source's current-grade versus education-year distinction; do not infer ages. Put material differences on supplementary cards or in another regional volume. All cells and process boxes are editable text/shapes in Canva; previews use the same layout and reject overflow without deleting words.
+
+## Full-page interiors and actual admission periods
+
+Cover A/B/C keeps its original geometry and safe area (x96–984, y207–1143). All later manuscript, source QR, teaser and Follow pages use the larger interior frame x64–1016, y64–1286. Real institution-table and guide-table cells are horizontally centred; their fitted line block is vertically centred using the same layout in SVG and editable PPTX. QR symbols are rebuilt at integer pixel positions and module sizes inside the expanded frame, rather than stretching their modules.
+
+**도식: 모집 기간표** opts a card into `admissions_timeline`. Its optional first line is a subtitle. Then enter this exact header and 1–10 real periods:
+
+The optional **지역** column merges adjacent matching region cells vertically while keeping each institution and period on its own row. An empty institution cell is allowed with a region and spans the left label columns. The original four-column header without **지역** remains supported. Each date label sits beneath its own bar, centred on that period and constrained inside the date columns.
+
+```text
+2027학년도 모집 · 실제 접수일은 2026년
+지역 | 기관·과정 | 시작일 | 마감일 | 구분
+서울 | | 2026-11-04 | 2026-11-11 18:00 | 학생 접수
+대전 | 동·서부 글로벌 | 2026-11-02 | 2026-11-13 | 학생 접수
+대전 | 창의융합 | 2026-11-04 | 2026-11-16 | 학생 접수
+의정부 | | 2026-11-30 | 2026-12-04 | 학생 접수
+```
+
+The four kinds are **학생 접수**, **추가 모집**, **사전 제출**, and **연계 접수**. Dates must be actual `YYYY-MM-DD` values, with `HH:mm` only when the source states a time; `24:00` is permitted only as an explicit end time. The axis and bars show calendar-date positions, and each row prints its exact supplied date/time labels. A missing time stays missing. Each input row remains a separate bar: do not merge disjoint periods merely because their region is the same. Unknown start dates belong in a separate institution table; this parser rejects missing endpoints instead of inferring them. Split more than ten periods into additional pages. Every bar, label and date tick remains editable, and overflow fails without truncating the source copy.

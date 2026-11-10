@@ -5,7 +5,7 @@ export type InstitutionSchedule={intro:string;headers:string[];rows:string[][]};
 export type AdmissionsElement=
  | {kind:'rect';name:string;x:number;y:number;width:number;height:number;fill:string;pill?:boolean}
  | {kind:'image';name:string;mediaKey:string;altText:string;x:number;y:number;width:number;height:number}
- | {kind:'text';name:string;content:string;x:number;y:number;width:number;height:number;max:number;min:number;ink:string;bold?:boolean;align?:'l'|'ctr';leading?:number};
+ | {kind:'text';name:string;content:string;x:number;y:number;width:number;height:number;max:number;min:number;ink:string;bold?:boolean;align?:'l'|'ctr';verticalAlign?:'top'|'middle';leading?:number};
 type Wrap=(text:string,size:number,width:number,bold:boolean)=>string[];
 // Keep region tokens intact and retain every separator on the preceding line.
 function regionLines(value:string,size:number,width:number,wrap:Wrap):string|null{
@@ -109,7 +109,7 @@ export function institutionScheduleElements(model:InstitutionSchedule):Admission
   let left=x;
   values.forEach((content,col)=>{
    out.push({kind:'rect',name:`schedule-cell-${rowIndex}-${col}-background`,x:left+.5,y:top+.5,width:widths[col]-1,height:height-1,fill:header?'#F0EEEA':rowIndex%2?'#FFFFFF':'#FAF9F7'});
-   out.push({kind:'text',name:`schedule-cell-${rowIndex}-${col}-text`,content,x:left+12,y:top+8,width:widths[col]-24,height:height-16,max:header?26:28,min:26,ink:INK,bold:header||col===0,leading:1.2});
+   out.push({kind:'text',name:`schedule-cell-${rowIndex}-${col}-text`,content,x:left+12,y:top+8,width:widths[col]-24,height:height-16,max:header?26:28,min:26,ink:INK,bold:header||col===0,align:'ctr',verticalAlign:'middle',leading:1.2});
    left+=widths[col];
   });
  };

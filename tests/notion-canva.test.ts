@@ -43,8 +43,8 @@ function decodedNativeQr(source:string,number:number){
     expect(x+block.w).toBeLessThanOrEqual(size-4*unit);expect(y+block.h).toBeLessThanOrEqual(size-4*unit);
     for(let py=y;py<y+block.h;py++)for(let px=x;px<x+block.w;px++){const offset=(py*size+px)*4;rgba[offset]=0;rgba[offset+1]=0;rgba[offset+2]=0;}
   }
-  expect(background.x).toBeGreaterThanOrEqual(96);expect(background.x+size).toBeLessThanOrEqual(984);
-  expect(background.y).toBeGreaterThanOrEqual(207);expect(background.y+size).toBeLessThanOrEqual(1143);
+  expect(background.x).toBeGreaterThanOrEqual(64);expect(background.x+size).toBeLessThanOrEqual(1016);
+  expect(background.y).toBeGreaterThanOrEqual(64);expect(background.y+size).toBeLessThanOrEqual(1286);
   const result=jsQR(rgba,size,size,{inversionAttempts:'dontInvert'});expect(result).not.toBeNull();return {data:result!.data,unit,size};
 }
 let smallPhoto:Buffer;
@@ -100,13 +100,13 @@ describe('native editable Notion manuscript PPTX',()=>{
     expect(interior).toContain('첫 문장 &amp; &lt;중요&gt;');expect(interior).toContain('둘째 문장');expect(interior).toContain('• 확인할 내용');
     expect(strFromU8(archive['ppt/presentation.xml'])).toContain('cx="10287000" cy="12858750"');
     expect(Buffer.from(archive['ppt/media/logo-color.png'])).toEqual(await fs.readFile(path.resolve('assets/branding/highscoop-magazine-color.png')));
-    // All text boxes and logo pictures stay inside the approved square/profile-safe inset.
+    // The cover keeps its inset; interiors use the larger full-page frame.
     for(let i=1;i<=6;i++){
       const source=strFromU8(archive[`ppt/slides/slide${i}.xml`]);
       for(const match of source.matchAll(/<a:xfrm><a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/><\/a:xfrm>/g)){
         const [x,y,w,h]=match.slice(1).map(Number);
-        expect(x).toBeGreaterThanOrEqual(96*9525);expect(y).toBeGreaterThanOrEqual(207*9525);
-        expect(x+w).toBeLessThanOrEqual(984*9525+1);expect(y+h).toBeLessThanOrEqual(1143*9525+1);
+        expect(x).toBeGreaterThanOrEqual((i===1?96:64)*9525);expect(y).toBeGreaterThanOrEqual((i===1?207:64)*9525);
+        expect(x+w).toBeLessThanOrEqual((i===1?984:1016)*9525+1);expect(y+h).toBeLessThanOrEqual((i===1?1143:1286)*9525+1);
       }
     }
     expect(NOTION_CANVA_TEXT_SYNC).toBe('manual-confirmation-required');
@@ -203,11 +203,11 @@ describe('native editable Notion manuscript PPTX',()=>{
       expect(note.y+note.h).toBeLessThanOrEqual(style==='B'?1143:1078);expect(note.xml).toContain('typeface="Noto Sans KR"');
       for(const i of [2,3]){
         const source=strFromU8(files[`ppt/slides/slide${i}.xml`]),body=nativeShape(source,`page-${i}-body`),footer=nativeShape(source,`page-${i}-footer`);
-        expect(nativePlain(footer.xml)).toBe((footnote+sourceLabel).replaceAll(/\s/g,''));expect(body.y+body.h).toBeLessThan(footer.y);expect(footer.y+footer.h).toBeLessThan(1078);
+        expect(nativePlain(footer.xml)).toBe((footnote+sourceLabel).replaceAll(/\s/g,''));expect(body.y+body.h).toBeLessThan(footer.y);expect(footer.y+footer.h).toBeLessThan(1202);
       }
     }
     const overfull=document(2);overfull.pages[0].footnote='각주 첫째 줄\n둘째 줄\n셋째 줄';await expect(buildNotionCanvaPptx(overfull)).rejects.toThrow('표지 각주·출처');
-    const interiorOverfull=document(2);interiorOverfull.pages[1].footnote='첫째 줄\n둘째 줄\n셋째 줄\n넷째 줄';await expect(buildNotionCanvaPptx(interiorOverfull)).rejects.toThrow('2장 각주·출처');
+    const interiorOverfull=document(2);interiorOverfull.pages[1].footnote=Array.from({length:8},(_,i)=>`${i+1}번째 줄`).join('\n');await expect(buildNotionCanvaPptx(interiorOverfull)).rejects.toThrow('2장 각주·출처');
   });
   it('adds an opt-in native four-step infographic without altering five institutions, dates, notes or source page count',async()=>{
     const body='11월 추천 기간을 신규 접수로 오해하지 마세요\n\n강릉교육지원청 부설영재교육원｜학교 추천 11/9~13\n제주융합과학연구원·제주과학고 영재교육원｜학교 제출 11/9~13\n대구과학영재교육원｜교사 추천 ~11/10 · 학교 추천 11/11~18\n인천교육청 과학영재교육원(중등)｜학교 추천 ~11/16 16시\n창원(창원)교육지원청 영재교육원｜교사 추천서 11/13~17 18시';
@@ -216,12 +216,12 @@ describe('native editable Notion manuscript PPTX',()=>{
     expect(built).toMatchObject({sourcePageCount:2,pageCount:3});expect(nativePlain(nativeShape(source,'page-2-body').xml)).toBe(body.replaceAll(/\s/g,''));
     for(const [i,label]of ['학생 접수','교사 추천','학교 제출','평가'].entries()){
       const shape=nativeShape(source,`application-step-${i+1}`),text=nativeShape(source,`application-step-${i+1}-label`);
-      expect(nativePlain(text.xml)).toBe(label.replaceAll(/\s/g,''));expect(shape.x).toBeGreaterThanOrEqual(96);expect(shape.x+shape.w).toBeLessThanOrEqual(984);
+      expect(nativePlain(text.xml)).toBe(label.replaceAll(/\s/g,''));expect(shape.x).toBeGreaterThanOrEqual(64);expect(shape.x+shape.w).toBeLessThanOrEqual(1016);
       expect(shape.xml).toContain(i===1||i===2?'val="FF493B"':'val="B8B8B8"');
     }
     expect(source).toContain('일반적인 흐름 · 기관별 절차·명칭은 원문 확인');expect(source).not.toContain('완료');expect(source).not.toContain('<p:pic><p:nvPicPr><p:cNvPr id="2" name="photo');
     const title=nativeShape(source,'page-2-title'),content=nativeShape(source,'page-2-body'),note=nativeShape(source,'page-2-footer');
-    expect(title.y+title.h).toBeLessThan(485);expect(content.y).toBe(650);expect(content.y+content.h).toBeLessThan(note.y);expect(note.y+note.h).toBeLessThan(1078);
+    expect(title.y+title.h).toBeLessThan(nativeShape(source,'application-step-1').y);expect(content.y).toBeCloseTo(64+(650-207)*1222/936,3);expect(content.y+content.h).toBeLessThan(note.y);expect(note.y+note.h).toBeLessThan(1202);
     smallPhoto??=await sharp({create:{width:600,height:400,channels:3,background:'#72A7FF'}}).png().toBuffer();
     input.pages[1].imageId='photo_1';await expect(buildNotionCanvaPptx(input,[{id:'photo_1',bytes:smallPhoto,mimeType:'image/png'}])).rejects.toThrow('도식과 사진');
     delete input.pages[1].imageId;input.pages[0].infographic='application_steps';await expect(buildNotionCanvaPptx(input)).rejects.toThrow('내지에만');
@@ -247,7 +247,7 @@ describe('native editable Notion manuscript PPTX',()=>{
     expect(strFromU8(files['ppt/slides/slide11.xml'])).toContain(NOTION_CANVA_SOURCE_TITLE);
     const teaser=strFromU8(files['ppt/slides/slide12.xml']),plain=[...teaser.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)].map(m=>m[1]).join('').replaceAll(/\s/g,'');
     expect(plain).toContain(input.teaser.title.replaceAll(/\s/g,''));expect(plain).toContain(input.teaser.body.replaceAll(/\s/g,''));
-    const teaserBody=nativeShape(teaser,'teaser-body'),teaserTitle=nativeShape(teaser,'teaser-title');expect(teaserBody.y).toBeGreaterThan(teaserTitle.y+teaserTitle.h);expect(teaserBody.y+teaserBody.h).toBeLessThan(974);
+    const teaserBody=nativeShape(teaser,'teaser-body'),teaserTitle=nativeShape(teaser,'teaser-title');expect(teaserBody.y).toBeGreaterThan(teaserTitle.y+teaserTitle.h);expect(teaserBody.y+teaserBody.h).toBeLessThan(nativeShape(teaser,'teaser-comment-pill').y);
     expect(teaser).toContain(NOTION_CANVA_TEASER_COMMENT);expect(teaser).toContain('teaser-comment-pill');
     expect(strFromU8(files['ppt/slides/slide13.xml'])).toContain(NOTION_CANVA_OUTRO.action);
     const onlyTeaser=document(2);onlyTeaser.teaser=input.teaser;expect((await buildNotionCanvaPptx(onlyTeaser)).pageCount).toBe(4);
