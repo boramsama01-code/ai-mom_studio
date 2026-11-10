@@ -13,6 +13,7 @@ const shape=(source:string,name:string)=>{
 };
 const plain=(source:string)=>[...source.matchAll(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g)].map(m=>m[1]).join('').replace(/\s/g,'');
 const slide=(bytes:Buffer,page=2)=>strFromU8(unzipSync(bytes)[`ppt/slides/slide${page}.xml`]);
+const expandedX=(x:number)=>64+(x-96)*952/888,expandedY=(y:number)=>64+(y-207)*1222/936;
 beforeEach(()=>vi.stubGlobal('fetch',vi.fn(()=>{throw Error('Native diagrams must not contact an external service');})));
 afterEach(()=>vi.unstubAllGlobals());
 
@@ -53,9 +54,9 @@ describe('editable native calendar and institution tables',()=>{
  it('places November dates in real weekday cells and preserves every event in PPTX and identical SVG preview',async()=>{
   const input=document('admissions_calendar'),full=await buildNotionCanvaPptx(input,[],{previewPage:1}),fast=await buildNotionCanvaPptx(input,[],{previewPage:1,previewOnly:true}),source=slide(full.bytes);
   expect(full.pageCount).toBe(3);expect(fast.previewSvg).toBe(full.previewSvg);expect(fast.bytes.length).toBe(0);
-  expect(shape(source,'calendar-day-1')).toMatchObject({x:104,y:417});
-  expect(shape(source,'calendar-day-10').x).toBeCloseTo(96+2*888/7+8,3);expect(shape(source,'calendar-day-10').y).toBe(547);
-  expect(shape(source,'calendar-day-30').x).toBeCloseTo(96+888/7+8,3);expect(shape(source,'calendar-day-30').y).toBe(937);expect(source).not.toContain('name="calendar-day-31"');
+  expect(shape(source,'calendar-day-1').x).toBeCloseTo(expandedX(104),3);expect(shape(source,'calendar-day-1').y).toBeCloseTo(expandedY(417),3);
+  expect(shape(source,'calendar-day-10').x).toBeCloseTo(expandedX(96+2*888/7+8),3);expect(shape(source,'calendar-day-10').y).toBeCloseTo(expandedY(547),3);
+  expect(shape(source,'calendar-day-30').x).toBeCloseTo(expandedX(96+888/7+8),3);expect(shape(source,'calendar-day-30').y).toBeCloseTo(expandedY(937),3);expect(source).not.toContain('name="calendar-day-31"');
   for(const text of ['2026년11월·학생신규/추가접수','부산·전북','전남','서울·울산','충남·부산','대전·충북·전남·경북','시간미기재는확인필요','현재학년과내년도과정구분','2026.11.10확인·학생지원기준'])expect(plain(source)).toContain(text);
   for(const name of ['calendar-event-10-0-description','calendar-event-10-1-description','calendar-event-13-0-description']){
    const text=shape(source,name);expect(Math.min(...[...text.xml.matchAll(/sz="(\d+)"/g)].map(m=>Number(m[1])))).toBeGreaterThanOrEqual(22*75);
@@ -66,9 +67,9 @@ describe('editable native calendar and institution tables',()=>{
   for(const day of [10,13]){const value=shape(source,`calendar-event-${day}-0-description`).xml;const lines=[...value.matchAll(/<a:t[^>]*>(.*?)<\/a:t>/g)].map(m=>m[1]);expect(lines.every(line=>!line.startsWith('·')&&line!=='북')).toBe(true);}
   const {data,info}=await sharp(Buffer.from(full.previewSvg!)).raw().toBuffer({resolveWithObject:true});expect(info).toMatchObject({width:1080,height:1350});expect(data.length).toBeGreaterThan(0);
   for(const match of source.matchAll(/<a:xfrm><a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/><\/a:xfrm>/g)){
-   const [x,y,w,h]=match.slice(1).map(n=>Number(n)/9525);expect(x).toBeGreaterThanOrEqual(96-.001);expect(y).toBeGreaterThanOrEqual(207-.001);expect(x+w).toBeLessThanOrEqual(984+.001);expect(y+h).toBeLessThanOrEqual(1143+.001);
+   const [x,y,w,h]=match.slice(1).map(n=>Number(n)/9525);expect(x).toBeGreaterThanOrEqual(64-.001);expect(y).toBeGreaterThanOrEqual(64-.001);expect(x+w).toBeLessThanOrEqual(1016+.001);expect(y+h).toBeLessThanOrEqual(1286+.001);
   }
-  expect(shape(source,'page-2-footer').y).toBeGreaterThanOrEqual(1072);expect(shape(source,'calendar-cell-34').y+shape(source,'calendar-cell-34').h).toBeLessThan(shape(source,'page-2-footer').y);
+  expect(shape(source,'page-2-footer').y).toBeCloseTo(expandedY(1072),3);expect(shape(source,'calendar-cell-34').y+shape(source,'calendar-cell-34').h).toBeLessThan(shape(source,'page-2-footer').y);
  });
  it.each([2,3,4])('renders %i real editable table columns without losing notes or shared intro',async count=>{
   const headers=count===2?'교육지원청 부설 | 별도 교육원':count===3?'기관 | 학생 지원 | 교사 추천':'기관 | 학생 지원 | 교사 추천 | 확인 사항';
@@ -77,15 +78,15 @@ describe('editable native calendar and institution tables',()=>{
   for(let row=1;row<=7;row++)for(let col=0;col<count;col++)expect(shape(source,`schedule-cell-${row}-${col}-text`).xml).toContain('sz="');
   expect(plain(source)).toContain('학생지원기간·2026년기준');expect(plain(source)).toContain('동부·서부7');expect(plain(source)).toContain('시간미기재는확인필요');
   for(const value of values.slice(1))expect(plain(source)).toContain(value.replace(/\s/g,''));
-  expect(shape(source,`schedule-cell-7-${count-1}-text`).y+shape(source,`schedule-cell-7-${count-1}-text`).h).toBeLessThan(1072);
+  expect(shape(source,`schedule-cell-7-${count-1}-text`).y+shape(source,`schedule-cell-7-${count-1}-text`).h).toBeLessThan(shape(source,'page-2-footer').y);
   expect(result.previewSvg).toContain(`schedule-cell-7-${count-1}-text`);
-  expect(shape(source,'page-2-footer').y).toBe(1072);
+  expect(shape(source,'page-2-footer').y).toBeCloseTo(expandedY(1072),3);
  });
  it('keeps a one-row table compact with all notes directly below the table and no overlapping shapes',async()=>{
   const input=document('institution_schedule','기관 | 학생 지원 | 교사 추천\n울산 과학 | ~11/11 | ~11/13');
   const result=await buildNotionCanvaPptx(input,[],{previewPage:1}),source=slide(result.bytes),grid=shape(source,'schedule-grid'),row=shape(source,'schedule-cell-1-0-background'),footer=shape(source,'page-2-footer');
-  expect(grid).toMatchObject({y:450,h:194});expect(row.h).toBe(143);
-  expect(footer.y).toBe(grid.y+grid.h+8);expect(footer.y+footer.h).toBeLessThanOrEqual(1143);
+  expect(grid.y).toBeCloseTo(expandedY(450),3);expect(grid.h).toBeCloseTo(194*1222/936,3);expect(row.h).toBeCloseTo(143*1222/936,3);
+  expect(footer.y).toBeCloseTo(grid.y+grid.h+8*1222/936,3);expect(footer.y+footer.h).toBeLessThanOrEqual(1286);
   for(let col=0;col<3;col++){const cell=shape(source,`schedule-cell-1-${col}-text`);expect(cell.y+cell.h).toBeLessThan(footer.y);}
   for(const value of ['울산과학','~11/11','~11/13','시간미기재는확인필요','현재학년과내년도과정구분','2026.11.10확인·학생지원기준'])expect(plain(source)).toContain(value);
   expect(result.previewSvg).toContain('schedule-cell-1-0-text');

@@ -64,7 +64,7 @@ describe('current Notion card table',()=>{
   const f=setup(),before=await f.client.fetchNotionDocument(id(1));f.rows[1].properties['확인메모']=text('기존 검토 기록\n도식: 접수 단계');
   const after=await f.client.fetchNotionDocument(id(1));expect(after.pages[1].infographic).toBe('application_steps');expect(after.pages[1].body).toBe(before.pages[1].body);expect(after.sourceHash).not.toBe(before.sourceHash);
  });
- it.each([['모집 달력','admissions_calendar'],['기관별 일정표','institution_schedule'],['로고 모집 달력','admissions_logo_calendar'],['모집 안내','admissions_guide']])('preserves the %s layout intent through the source snapshot',async(label,kind)=>{
+ it.each([['모집 달력','admissions_calendar'],['기관별 일정표','institution_schedule'],['로고 모집 달력','admissions_logo_calendar'],['모집 안내','admissions_guide'],['모집 기간표','admissions_timeline']])('preserves the %s layout intent through the source snapshot',async(label,kind)=>{
   const f=setup(),before=await f.client.fetchNotionDocument(id(1));f.rows[1].properties['확인메모']=text(`원문 대조\n도식: ${label}`);
   const after=await f.client.fetchNotionDocument(id(1));expect(after.pages[1].infographic).toBe(kind);expect(after.pages[1].body).toBe(before.pages[1].body);expect(after.sourceHash).not.toBe(before.sourceHash);
  });

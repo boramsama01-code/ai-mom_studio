@@ -210,7 +210,7 @@ function parseTableDocument(page: Obj, rows: Obj[]): Snapshot {
     const cardFields={subtitle:propertyText(row,'소제목'),body:propertyText(row,'본문'),footnote:propertyText(row,'각주'),sourceLabel:propertyText(row,'출처표시')};
     const emphasis=propertyText(row,'강조문구');
     const notes=propertyText(row,'확인메모');
-    const infographic=/^도식:\s*로고 모집 달력\s*$/m.test(notes)?'admissions_logo_calendar' as const:/^도식:\s*모집 안내\s*$/m.test(notes)?'admissions_guide' as const:/^도식:\s*모집 달력\s*$/m.test(notes)?'admissions_calendar' as const:/^도식:\s*기관별 일정표\s*$/m.test(notes)?'institution_schedule' as const:/^도식:\s*접수 단계\s*$/m.test(notes)?'application_steps' as const:undefined;
+    const infographic=/^도식:\s*모집 기간표\s*$/m.test(notes)?'admissions_timeline' as const:/^도식:\s*로고 모집 달력\s*$/m.test(notes)?'admissions_logo_calendar' as const:/^도식:\s*모집 안내\s*$/m.test(notes)?'admissions_guide' as const:/^도식:\s*모집 달력\s*$/m.test(notes)?'admissions_calendar' as const:/^도식:\s*기관별 일정표\s*$/m.test(notes)?'institution_schedule' as const:/^도식:\s*접수 단계\s*$/m.test(notes)?'application_steps' as const:undefined;
     return {index:i+1,title:propertyText(row,'제목'),body:[cardFields.subtitle,cardFields.body].filter(x=>x.trim()).join('\n\n'),headingBlockId:row.id,bodyBlockIds:[],cardRowId:row.id,cardFields,...(emphasis?{emphasis}:{}),...(infographic?{infographic}:{})};
   });
   if(pages.some(p=>!p.title.trim()))throw new NotionSyncError('카드 원고 표의 제목을 채워 주세요.',422,'NOTION_TABLE_STRUCTURE');

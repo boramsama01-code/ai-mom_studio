@@ -34,7 +34,7 @@ export function admissionsGuideElements(model:AdmissionsGuide,accent:string):Adm
  const widths=model.courseMode==='institutions'?[260,270,358]:[230,190,468],top=448,header=38,rowHeight=Math.min(86,256/model.courses.length);
  rect('guide-courses-grid',x,top,w,header+model.courses.length*rowHeight,'#DADADA');
  const row=(cells:string[],index:number,y:number,height:number,isHeader=false)=>{
-  let left=x;cells.forEach((cell,col)=>{rect(`guide-course-${index}-${col}-background`,left+.5,y+.5,widths[col]-1,height-1,isHeader?'#F0EEEA':index%2?'#FFFFFF':'#FAF9F7');text(`guide-course-${index}-${col}`,cell,left+10,y+4,widths[col]-20,height-8,isHeader?22:26,isHeader?22:model.courseMode==='institutions'?22:24,isHeader||col===0);left+=widths[col];});
+  let left=x;cells.forEach((cell,col)=>{rect(`guide-course-${index}-${col}-background`,left+.5,y+.5,widths[col]-1,height-1,isHeader?'#F0EEEA':index%2?'#FFFFFF':'#FAF9F7');out.push({kind:'text',name:`guide-course-${index}-${col}`,content:cell,x:left+10,y:y+4,width:widths[col]-20,height:height-8,max:isHeader?22:26,min:isHeader?22:model.courseMode==='institutions'?22:24,bold:isHeader||col===0,ink:'#171717',align:'ctr',verticalAlign:'middle',leading:1.15});left+=widths[col];});
  };
  row(model.courseMode==='institutions'?['기관·과정','분야 · 현재 학년','제출 단계별 기한']:['분야','현재 학년','대상 기관·과정'],0,top,header,true);
  model.courses.forEach((cells,i)=>row(cells,i+1,top+header+i*rowHeight,rowHeight));
