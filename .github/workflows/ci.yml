@@ -115,6 +115,9 @@ jobs:
       - name: Verify page-specific interior templates without AI calls
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node --import tsx scripts/notion-interior-template-regression.mjs
+      - name: Verify Canva auto-save status, continued editing and latest-version saves
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        run: node --import tsx scripts/notion-canva-autosave-regression.mjs
       - name: Verify guarded channel switching and new channel creation
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/channel-navigation-regression.mjs
@@ -172,4 +175,5 @@ jobs:
             test-results/studio-automatic-browser
             test-results/asset-library-browser
             test-results/notion-interior-templates
+            test-results/notion-canva-autosave
           if-no-files-found: ignore

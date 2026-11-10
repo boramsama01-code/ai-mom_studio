@@ -16,6 +16,7 @@ import { processStudioJob } from "./studio";
 import { withGenerationContext } from "../services/generationContext";
 import { autoCollectEnabled } from "../services/autoCollection";
 import { syncNotionOnce } from './notion';
+import { saveNotionCanvaOnce } from './notionCanva';
 
 export { autoCollectEnabled } from "../services/autoCollection";
 
@@ -109,6 +110,8 @@ export async function jobsOnce(opts: { maxMs?: number; types?: string[] } = {}) 
   const deadline = Date.now() + (opts.maxMs ?? 8 * 60_000);
   let processed = 0, failed = 0;
   const notes: string[] = recovered ? [`lease 만료 복구 ${recovered}건`] : [];
+  const canva = await saveNotionCanvaOnce(db,{maxMs:Math.min(120_000,Math.max(0,deadline-Date.now()))});
+  if(canva.checked||canva.failed||canva.blocked)notes.push(`Canva 저장: ${JSON.stringify(canva)}`);
   const notion = await syncNotionOnce(db,{maxMs:Math.min(120_000,Math.max(0,deadline-Date.now()))});
   if(notion.checked||notion.failed)notes.push(`Notion: ${JSON.stringify(notion)}`);
   while (Date.now() < deadline) {

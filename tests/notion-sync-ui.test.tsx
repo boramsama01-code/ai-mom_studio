@@ -83,7 +83,7 @@ beforeEach(() => {
       detail={...detail,copy:structuredClone(options.body.copy),designEdits:structuredClone(options.body.designEdits),itemVersion:detail.itemVersion+1,link:{...detail.link,status:'studio_changed'}};return structuredClone(detail);
     }
     if (path === "/notion/links/18" && options.method === "PATCH") {
-      detail = { ...detail, link: { ...detail.link, ...options.body, version: detail.link.version + 1 } };
+      detail = { ...detail, link: { ...detail.link, ...options.body, ...('canvaAutoSave' in options.body?{canvaAutoSave:{enabled:options.body.canvaAutoSave,phase:options.body.canvaAutoSave?'queued' as const:'idle' as const}}:{}), version: detail.link.version + 1 } };
       return structuredClone(detail);
     }
     if (path === "/notion/import" && options.method === "POST") return structuredClone(detail);
@@ -108,6 +108,35 @@ async function renderLinked() { links = [detail.link]; window.history.replaceSta
 const detailReads = () => mocks.api.mock.calls.filter(([path]) => path === "/notion/links/18?refresh=1");
 
 describe("Notion manuscript and Canva workspace", () => {
+  it('hides automatic Canva saving for an unsupported channel and preserves the manual creation control',async()=>{
+    detail.link.channelId=5;detail.link.canvaAutoSaveSupported=false;detail.link.canvaAutoSave={enabled:false,phase:'idle'};await renderLinked();
+    expect(host.querySelector('[aria-label="캔바 자동 저장"]')).toBeNull();expect(host.querySelector('.notion-canva-autosave')).toBeNull();expect(button('캔바로 제작').disabled).toBe(false);expect(writes()).toHaveLength(0);
+  });
+  it('keeps queued automatic Canva saving editable, polls without new source reads, and labels the previous design',async()=>{
+    vi.useFakeTimers();detail.link.canvaAutoSave={enabled:true,phase:'queued'};detail.link.canva={phase:'ready',designId:'Dprevious',editUrl:'https://www.canva.com/design/Dprevious/edit',currentSource:false};
+    await renderLinked();expect(host.textContent).toContain('캔바 자동 저장 대기 중');expect(host.textContent).toContain('이전 캔바 디자인 열기 ↗');expect(host.textContent).not.toContain('최신 저장본이 캔바에 저장됐습니다.');
+    expect((field('카드 제목') as HTMLTextAreaElement).disabled).toBe(false);await fill('카드 제목','대기 중에도 고친 제목');expect(button('스튜디오에 저장').disabled).toBe(false);
+    const reads=detailReads().length;await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});await settle();expect(detailReads()).toHaveLength(reads);expect(mocks.api.mock.calls.some(([path])=>path==='/notion/links/18')).toBe(true);expect(field('카드 제목').value).toBe('대기 중에도 고친 제목');expect(host.textContent).not.toContain('다른 곳에서 새 버전을 저장했습니다.');expect(writes()).toHaveLength(0);
+    expect(button('현재 원고를 캔바에 저장').disabled).toBe(true);expect(button('완성본 가져오기').disabled).toBe(true);
+  });
+  it('queues automatic Canva saving through the existing settings PATCH and never creates a design from the client',async()=>{
+    detail.link.canvaAutoSave={enabled:false,phase:'idle'};await renderLinked();const checkbox=field('캔바 자동 저장') as HTMLInputElement;expect(checkbox.checked).toBe(false);
+    await act(async()=>checkbox.click());await settle();expect(writes()).toEqual([['/notion/links/18',expect.objectContaining({method:'PATCH',body:{version:4,canvaAutoSave:true}})]]);expect(host.textContent).toContain('캔바 자동 저장 대기 중');expect((field('카드 제목') as HTMLTextAreaElement).disabled).toBe(false);
+    await act(async()=>(field('캔바 자동 저장') as HTMLInputElement).click());await settle();expect(writes()[1][1].body).toEqual({version:5,canvaAutoSave:false});expect(host.textContent).toContain('캔바 자동 저장이 꺼져 있습니다.');expect(writes().some(([path])=>String(path).endsWith('/canva'))).toBe(false);
+  });
+  it('retries a failed automatic save with a settings PATCH while preserving the saved Studio manuscript',async()=>{
+    detail.link.canvaAutoSave={enabled:true,phase:'failed',error:'캔바 연결을 확인해 주세요.'};await renderLinked();expect(host.textContent).toContain('스튜디오에는 저장됐지만 캔바 자동 저장을 완료하지 못했습니다.');expect(field('카드 제목').value).toBe(sourcePages[0].title);
+    await click('캔바 자동 저장 다시 시도');expect(writes()).toEqual([['/notion/links/18',expect.objectContaining({method:'PATCH',body:{version:4,canvaAutoSave:true}})]]);expect(host.textContent).toContain('캔바 자동 저장 대기 중');expect(field('카드 제목').value).toBe(sourcePages[0].title);
+  });
+  it('blocks automatic resubmission for an unknown accepted Canva result and permits a read-only status check',async()=>{
+    detail.link.canvaAutoSave={enabled:true,phase:'blocked',error:'이전 요청 결과를 확인해 주세요.'};detail.link.canva={phase:'result_unknown',jobId:'known-unknown-job'};await renderLinked();expect(button('캔바 자동 저장 다시 시도').disabled).toBe(true);expect(host.textContent).toContain('새 디자인을 중복 생성하지 않습니다.');
+    await click('처리 상태 다시 확인');expect(writes()).toHaveLength(0);expect(detailReads().length).toBeGreaterThan(1);expect((field('카드 제목') as HTMLTextAreaElement).disabled).toBe(false);
+  });
+  it('promotes the latest editable Canva link after queued work settles without an automatic export',async()=>{
+    vi.useFakeTimers();detail.link.canvaAutoSave={enabled:true,phase:'queued'};detail.link.canva={phase:'ready',designId:'Dprevious',editUrl:'https://www.canva.com/design/Dprevious/edit',currentSource:false};await renderLinked();
+    detail={...detail,link:{...detail.link,version:6,canvaAutoSave:{enabled:true,phase:'idle'},canva:{phase:'ready',designId:'Dlatest',editUrl:'https://www.canva.com/design/Dlatest/edit',currentSource:true}}};await act(async()=>{await vi.advanceTimersByTimeAsync(2500);});await settle();
+    expect(host.textContent).toContain('최신 저장본이 캔바에 저장됐습니다.');const link=[...host.querySelectorAll('a')].find(node=>node.textContent==='캔바에서 이어서 편집 ↗');expect(link?.getAttribute('href')).toBe('https://www.canva.com/design/Dlatest/edit');expect(host.textContent).not.toContain('이전 캔바 디자인 열기 ↗');expect(writes()).toHaveLength(0);expect(button('완성본 가져오기').disabled).toBe(true);
+  });
   it('opens the same A/photo/fade editor directly in the linked main Studio workspace without the generic renderer',async()=>{
     const card={...studioContentSchema.parse({title:'원문 연결 카드',channel:'highscoop',format:'카드뉴스'}),id:39,version:1,sourceItemId:28,sourceReference:{channelId:3,itemId:28},notionLinkId:18,createdAt:'2026-11-09',updatedAt:'2026-11-09'};
     await act(async()=>root.render(<QueryClientProvider client={client}><SourceStudioCard card={card}/></QueryClientProvider>));await settle();

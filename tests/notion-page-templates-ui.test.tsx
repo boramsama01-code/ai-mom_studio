@@ -46,6 +46,36 @@ async function preview(){await act(async()=>{await vi.advanceTimersByTimeAsync(5
 const writes=()=>mocks.api.mock.calls;
 
 describe('page-level interior template authoring',()=>{
+ it('preserves dirty template input through Canva job version updates and saves against the latest request version',async()=>{
+  detail.link.canvaAutoSave={enabled:true,phase:'queued'};await render();await page(1);await fill('내지 템플릿','text');await fill('카드 본문','작성 중인 내지 원고');await preview();
+  const previews=mocks.blob.mock.calls.length;
+  for(const [version,phase] of [[5,'queued'],[6,'processing'],[7,'idle']] as const){
+   detail={...detail,link:{...detail.link,version,canvaAutoSave:{enabled:true,phase},canva:{phase:phase==='idle'?'ready':'importing',designId:'Dlatest',editUrl:'https://www.canva.com/design/Dlatest/edit',currentSource:phase==='idle'}}};await render();
+   expect(field('카드 본문').value).toBe('작성 중인 내지 원고');expect(field('내지 템플릿').value).toBe('text');expect(host.textContent).not.toContain('다른 곳에서 새 버전을 저장했습니다.');expect(button('스튜디오에 저장').disabled).toBe(false);
+  }
+  await preview();expect(mocks.blob.mock.calls).toHaveLength(previews);
+  await click('스튜디오에 저장');expect(writes()).toHaveLength(1);expect(writes()[0][1].body).toMatchObject({version:7,itemVersion:7,designEdits:{templateByPage:{'row-one':'text'}}});expect(writes()[0][1].body.copy.pages[0].body).toBe('기준 안내\n\n작성 중인 내지 원고');expect(writes()[0][1].body.copy.pages).toHaveLength(2);
+  expect(host.textContent).toContain('잠시 뒤 캔바에 편집 가능한 디자인으로 자동 저장됩니다.');
+ });
+ it('still protects dirty text when the cover or protected source changes without an item revision',async()=>{
+  detail.link.canvaAutoSave={enabled:true,phase:'queued'};await render();await page(1);await fill('카드 본문','아직 저장하지 않은 원고');
+  detail={...detail,link:{...detail.link,version:5,coverStyle:'B'}};await render();
+  expect(field('카드 본문').value).toBe('아직 저장하지 않은 원고');expect(host.textContent).toContain('다른 곳에서 새 버전을 저장했습니다.');expect(button('스튜디오에 저장').disabled).toBe(true);expect(writes()).toHaveLength(0);
+ });
+ it('ignores an older job poll that arrives after a newer manuscript save',async()=>{
+  detail.link.canvaAutoSave={enabled:true,phase:'queued'};const stale=structuredClone(detail);await render();await fill('카드 제목','새로 저장한 원고');await click('스튜디오에 저장');
+  detail=stale;await render();expect(field('카드 제목').value).toBe('새로 저장한 원고');expect(host.textContent).not.toContain('다른 곳에서 새 버전을 저장했습니다.');expect(button('스튜디오에 저장').disabled).toBe(true);expect(writes()).toHaveLength(1);
+ });
+ it('reports a saved manuscript separately from a failed automatic Canva save',async()=>{
+  detail.link.canvaAutoSave={enabled:true,phase:'failed',error:'캔바 연결을 확인해 주세요.'};await render();await fill('카드 제목','스튜디오에 남는 제목');await click('스튜디오에 저장');
+  expect(host.textContent).toContain('스튜디오에 저장했습니다. 캔바 자동 저장은 아래 상태를 확인해 주세요.');expect(button('스튜디오에 저장').disabled).toBe(true);expect(writes()).toHaveLength(1);expect(detail.copy.cover.title).toBe('스튜디오에 남는 제목');
+ });
+ it('shows the editable continuation link only after the latest saved deck is ready',async()=>{
+  detail.link.canvaAutoSave={enabled:true,phase:'queued'};detail.link.canva={phase:'ready',designId:'Dprevious',editUrl:'https://www.canva.com/design/Dprevious/edit',currentSource:false};await render();
+  expect([...host.querySelectorAll('a')].some(node=>node.textContent==='캔바에서 이어서 편집 ↗')).toBe(false);
+  detail={...detail,link:{...detail.link,version:5,canvaAutoSave:{enabled:true,phase:'idle'},canva:{phase:'ready',designId:'Dlatest',editUrl:'https://www.canva.com/design/Dlatest/edit',currentSource:true}}};await render();
+  const link=[...host.querySelectorAll('a')].find(node=>node.textContent==='캔바에서 이어서 편집 ↗');expect(link?.getAttribute('href')).toBe('https://www.canva.com/design/Dlatest/edit');expect(writes()).toHaveLength(0);
+ });
  it('keeps incompatible source copy until an explicitly entered table is applied, then saves the protected subtitle and source notes',async()=>{
   await render();expect(host.querySelector('[aria-label="내지 템플릿"]')).toBeNull();await page(1);
   await fill('내지 템플릿','table');expect(field('카드 본문').value).toBe(original);expect(writes()).toHaveLength(0);

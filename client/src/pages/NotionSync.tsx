@@ -9,6 +9,7 @@ import { useChannel } from "../state";
 import { ErrorBox, GuardedLink, Loading } from "../ui";
 import {NotionCardEditor} from '../NotionCardEditor';
 import {studioKey} from '@shared/channelKeys';
+import {canvaAutoSaveMessage,canvaAutoSavePending,canvaJobPending,latestCanvaReady} from '../notionCanvaAutoSave';
 import "../notionSync.css";
 
 type CoverStyle = "A" | "B" | "C";
@@ -124,7 +125,7 @@ export function NotionSyncPage() {
   </div>;
 }
 
-type LinkAction = { kind: "pull" | "push" | "style" | "autoSync" | "canva" | "export"; resolveConflict?: boolean; coverStyle?: CoverStyle; autoSync?: boolean };
+type LinkAction = { kind: "pull" | "push" | "style" | "autoSync" | "canvaAutoSave" | "canva" | "export"; resolveConflict?: boolean; coverStyle?: CoverStyle; autoSync?: boolean; canvaAutoSave?:boolean };
 function conflictDetail(error: ApiError): NotionStudioDetail | undefined {
   const candidate = error.body.detail ?? error.body.current;
   return candidate && typeof candidate === "object" && "link" in candidate && "copy" in candidate ? candidate as NotionStudioDetail : undefined;
@@ -140,21 +141,21 @@ export function NotionLinkedDocument({ id }: { id: number }) {
   const [editorDirty,setEditorDirty]=useState(false);
   const detail = useQuery({
     queryKey: ["notion-link", id], queryFn: ({ signal }) => {
-      const phase=qc.getQueryData<NotionStudioDetail>(["notion-link",id])?.link.canva.phase;
-      return api<NotionStudioDetail>(`/notion/links/${id}${phase&&["importing","exporting"].includes(phase)?'':'?refresh=1'}`, { signal });
+      const cached=qc.getQueryData<NotionStudioDetail>(["notion-link",id]);
+      return api<NotionStudioDetail>(`/notion/links/${id}${cached&&canvaJobPending(cached.link)?'':'?refresh=1'}`, { signal });
     },
-    refetchInterval: query => ["importing", "exporting"].includes(query.state.data?.link.canva.phase || "") ? 2500 : query.state.data?.link.autoSync ? 60_000 : false,
+    refetchInterval: query => query.state.data&&canvaJobPending(query.state.data.link) ? 2500 : query.state.data?.link.autoSync ? 60_000 : false,
   });
   const data = detail.data;
   const previousPhase=useRef<string|undefined>(undefined);
-  useEffect(()=>{const previous=previousPhase.current,current=data?.link.canva.phase;previousPhase.current=current;if(previous&&["importing","exporting"].includes(previous)&&current&&!["importing","exporting"].includes(current))void detail.refetch();},[data?.link.canva.phase]);
+  useEffect(()=>{const previous=previousPhase.current,current=data?String(canvaJobPending(data.link)):undefined;previousPhase.current=current;if(previous==='true'&&current==='false')void detail.refetch();},[data?.link.canva.phase,data?.link.canvaAutoSave?.phase,data?.link.canvaAutoSave?.enabled]);
   const signature = data ? `${data.link.version}:${data.itemVersion}:${data.notion?.sourceHash ?? data.link.sourceHash}:${data.link.canva.designId ?? ""}` : "";
   useEffect(() => { setExportConfirmed(false); setConflict(current => current ? { ...current, choice: null } : null); }, [signature]);
   const update = useMutation({
     mutationFn: (action: LinkAction) => {
       if (!data) throw new Error("연결된 원고를 먼저 확인해 주세요.");
       const body = { version: data.link.version, itemVersion: data.itemVersion, expectedSourceHash: data.notion?.sourceHash ?? data.link.sourceHash, resolveConflict: action.resolveConflict === true };
-      if (action.kind === "style" || action.kind === "autoSync") return api<NotionStudioDetail>(`/notion/links/${id}`, { method: "PATCH", body: { version: data.link.version, ...(action.kind === "style" ? { coverStyle: action.coverStyle } : { autoSync: action.autoSync }) } });
+      if (action.kind === "style" || action.kind === "autoSync" || action.kind === "canvaAutoSave") return api<NotionStudioDetail>(`/notion/links/${id}`, { method: "PATCH", body: { version: data.link.version, ...(action.kind === "style" ? { coverStyle: action.coverStyle } : action.kind==='autoSync'?{ autoSync: action.autoSync }:{canvaAutoSave:action.canvaAutoSave}) } });
       if (action.kind === "export") {
         if (!exportConfirmed) throw new Error("현재 원고와 캔바 문구를 대조한 뒤 확인해 주세요.");
         return api<NotionStudioDetail>(`/notion/links/${id}/canva/export`, { method: "POST", body: { version: data.link.version, itemVersion: data.itemVersion, confirmed: true } });
@@ -182,6 +183,7 @@ export function NotionLinkedDocument({ id }: { id: number }) {
   const working = update.isPending || ["importing", "exporting"].includes(data.link.canva.phase);
   const busy = working || editorDirty;
   const canvaUrl = externalUrl(data.link.canva.editUrl) ?? externalUrl(data.link.canva.viewUrl);
+  const autoCanva=data.link.canvaAutoSaveSupported===false?undefined:data.link.canvaAutoSave,autoPending=canvaAutoSavePending(data.link),latestReady=latestCanvaReady(data),canvaUnknown=data.link.canva.phase==='result_unknown';
   const studioPages = [{ index: 1, title: data.copy.cover.title, body: data.copy.cover.subtitle }, ...data.copy.pages.map((page, index) => ({ index: index + 2, title: page.title, body: [page.subtitle, page.body, ...(page.columns?.map(column => `${column.title}\n${column.body}`) ?? [])].filter(Boolean).join("\n\n") }))];
   const notionPages = data.notion?.pages ?? data.source.pages;
   const notionCoverTitle = data.notion ? data.notion.coverTitle || notionPages.find(page => page.index === 1)?.title : data.source.coverTitle;
@@ -190,7 +192,7 @@ export function NotionLinkedDocument({ id }: { id: number }) {
     <header className="row between"><div><span className="studio-eyebrow">연결된 원고</span><h2>{data.link.title}</h2><p className="small muted">마지막 동기화 {dateLabel(data.link.lastSyncedAt)}</p></div><span className="badge">{data.link.status === "studio_changed" ? "스튜디오 원고 변경됨" : data.notion?.changed ? "노션 원고 변경됨" : "동기화됨"}</span></header>
     <div className="row notion-actions"><a className="btn" href={externalUrl(data.link.notionUrl)} target="_blank" rel="noreferrer">노션 원고 열기 ↗</a>{data.link.studioCardId && <GuardedLink className="btn" href={`/studio/${data.link.studioCardId}`}>스튜디오 원고 편집</GuardedLink>}<button className="btn" disabled={busy || detail.isFetching} onClick={() => void refresh()}>{detail.isFetching ? "변경 확인 중…" : "노션 변경 확인"}</button></div>
     {allChannels.some(channel=>channel.id===data.link.channelId&&studioKey(channel.slug)==='highscoop')&&<NotionCardEditor data={data} disabled={working||!!conflict} onDirtyChange={setEditorDirty}/>}
-    <div className="notice notion-auto-sync"><label className="notion-toggle"><input type="checkbox" checked={data.link.autoSync} disabled={busy} onChange={event => update.mutate({ kind: "autoSync", autoSync: event.target.checked })} /><strong>자동 동기화</strong></label><p className="small muted">노션의 사진 변경도 함께 가져옵니다. 원고 한쪽만 바뀌면 반대쪽에 반영하고, 양쪽이 바뀌면 비교를 기다립니다. 사진을 바꾼 뒤 캔바 디자인은 아래 ‘현재 원고로 새 디자인 만들기’로 갱신하세요.</p>{data.link.lastCheckedAt && <p className="small muted">마지막 변경 확인 {dateLabel(data.link.lastCheckedAt)}</p>}</div>
+    <div className="notice notion-auto-sync"><label className="notion-toggle"><input type="checkbox" checked={data.link.autoSync} disabled={busy} onChange={event => update.mutate({ kind: "autoSync", autoSync: event.target.checked })} /><strong>자동 동기화</strong></label><p className="small muted">노션의 사진 변경도 함께 가져옵니다. 원고 한쪽만 바뀌면 반대쪽에 반영하고, 양쪽이 바뀌면 비교를 기다립니다. {autoCanva?.enabled?'캔바 자동 저장이 켜져 있으면 반영된 원고·사진으로 캔바 작업본도 만듭니다.':'사진을 바꾼 뒤 캔바 디자인은 아래 ‘현재 원고로 새 디자인 만들기’로 갱신하세요.'}</p>{data.link.lastCheckedAt && <p className="small muted">마지막 변경 확인 {dateLabel(data.link.lastCheckedAt)}</p>}</div>
     {detail.error && <ErrorBox error={detail.error} retry={() => void detail.refetch()} />}
     <div className="notion-comparison"><section><h3>노션 원고</h3><Manuscript label="현재 노션 원고" pages={notionPages} coverTitle={notionCoverTitle} /></section><section><h3>스튜디오 원고</h3><Manuscript label="현재 스튜디오 원고" pages={studioPages} coverTitle={data.copy.cover.title} /></section></div>
     <Photos photos={data.photos} />
@@ -198,11 +200,12 @@ export function NotionLinkedDocument({ id }: { id: number }) {
     {conflict ? <section className="notice warn notion-conflict" aria-label="원고 충돌 해결"><h3>양쪽 원고가 달라졌습니다</h3><p>위의 노션 원고와 스튜디오 원고를 비교한 뒤, 유지할 쪽을 직접 선택해 주세요.</p><fieldset><legend>어느 쪽 원고를 유지할까요?</legend><label><input type="radio" name={`conflict-${id}`} checked={conflict.choice === "pull"} onChange={() => setConflict({ detail: comparing, choice: "pull" })} />노션 원고를 유지하고 스튜디오에 적용</label><label><input type="radio" name={`conflict-${id}`} checked={conflict.choice === "push"} onChange={() => setConflict({ detail: comparing, choice: "push" })} />스튜디오 원고를 유지하고 노션에 반영</label></fieldset><button className="btn" disabled={!conflict.choice || busy} onClick={() => conflict.choice && update.mutate({ kind: conflict.choice, resolveConflict: true })}>선택한 원고로 동기화</button></section> : <div className="row notion-actions"><button className="btn" disabled={busy || detail.isFetching} onClick={() => update.mutate({ kind: "pull" })}>노션 → 스튜디오 적용</button><button className="btn" disabled={busy || detail.isFetching} onClick={() => update.mutate({ kind: "push" })}>스튜디오 → 노션 반영</button></div>}
     {update.error && <ErrorBox error={update.error} retry={() => void refresh()} />}
     <section className="notion-canva stack"><div><h3>캔바 디자인</h3><p className="small muted">원고와 사진으로 디자인을 만들고, 캔바에서 편집한 완성본을 가져옵니다.</p>{(data.source.sourceReferences?.length||data.source.teaser)&&<p className="small muted">본문 다음에 {data.source.sourceReferences?.length?`원문 확인 QR(${data.source.sourceReferences.length}개 · ${notionSourceReferencePageCount(data.source.sourceReferences)}장) · `:''}{data.source.teaser?'다음 편 예고 · ':''}하이스쿱 소개가 들어갑니다.</p>}</div>
+      {autoCanva&&<div className="notice notion-canva-autosave stack"><label className="notion-toggle"><input type="checkbox" aria-label="캔바 자동 저장" checked={autoCanva.enabled} disabled={busy||!!conflict} onChange={event=>update.mutate({kind:'canvaAutoSave',canvaAutoSave:event.target.checked})}/><strong>캔바 자동 저장</strong></label><p className="small muted">저장한 원고와 페이지별 템플릿을 모아 전체 페이지를 하나의 편집 가능한 캔바 작업본으로 저장합니다. 연속된 저장은 모아서 처리하며, 새로 반영할 내용이 있을 때 새 작업본을 만듭니다. 캔바에서 직접 수정한 기존 디자인은 그대로 보존합니다.</p><p className={['failed','blocked'].includes(autoCanva.phase)?'notice warn':'small muted'} role="status">{canvaAutoSaveMessage(data)}{autoCanva.error&&` · ${autoCanva.error}`}</p>{autoCanva.enabled&&['failed','blocked'].includes(autoCanva.phase)&&<p className="small muted">{canvaUnknown?'이전 요청 결과가 확인될 때까지 새 디자인을 중복 생성하지 않습니다. ‘처리 상태 다시 확인’을 눌러 주세요.':'스튜디오 원고는 보존됐습니다. 연결 상태를 확인하고 다시 시도해 주세요.'}</p>}{autoCanva.enabled&&['failed','blocked'].includes(autoCanva.phase)&&<GuardedLink className="btn sm" href="/connections?service=canva">캔바 연결 설정</GuardedLink>}</div>}
       <CoverStyles value={data.link.coverStyle} disabled={busy || !!conflict} onChange={coverStyle => update.mutate({ kind: "style", coverStyle })} name={`linked-cover-style-${id}`} />
-      <div className="row notion-actions"><button className="btn primary" disabled={busy || !!conflict || detail.isFetching} onClick={() => update.mutate({ kind: "canva" })}>{data.link.canva.designId ? "현재 원고로 새 디자인 만들기" : "캔바로 제작"}</button>{canvaUrl && <a className="btn" href={canvaUrl} target="_blank" rel="noreferrer">캔바 열기 ↗</a>}</div>
-      <p className={data.link.canva.phase === "failed" || data.link.canva.phase === "result_unknown" ? "notice warn" : "small muted"} role="status">{phaseLabel[data.link.canva.phase]}{data.link.canva.error && ` · ${data.link.canva.error}`}</p>
-      {["importing", "exporting", "result_unknown", "failed"].includes(data.link.canva.phase) && <button className="btn" disabled={detail.isFetching || update.isPending} onClick={() => void refresh()}>처리 상태 다시 확인</button>}
-      {data.link.canva.designId && <div className="notion-canva-output stack"><label className="notion-export-confirm"><input type="checkbox" checked={exportConfirmed} disabled={busy || !!conflict} onChange={event => setExportConfirmed(event.target.checked)} /><span>현재 스튜디오 원고와 캔바의 모든 문구를 대조했습니다.</span></label><button className="btn" disabled={!exportConfirmed || busy || !!conflict || detail.isFetching} onClick={() => update.mutate({ kind: "export" })}>완성본 가져오기</button></div>}
+      <div className="row notion-actions">{autoCanva?.enabled?<button className="btn primary" disabled={busy||!!conflict||detail.isFetching||autoPending||canvaUnknown} onClick={()=>update.mutate({kind:'canvaAutoSave',canvaAutoSave:true})}>{['failed','blocked'].includes(autoCanva.phase)?'캔바 자동 저장 다시 시도':'현재 원고를 캔바에 저장'}</button>:<button className="btn primary" disabled={busy || !!conflict || detail.isFetching||canvaUnknown} onClick={() => update.mutate({ kind: "canva" })}>{data.link.canva.designId ? "현재 원고로 새 디자인 만들기" : "캔바로 제작"}</button>}{canvaUrl && <a className="btn" href={canvaUrl} target="_blank" rel="noreferrer">{autoCanva&&!latestReady?'이전 캔바 디자인 열기 ↗':'캔바 열기 ↗'}</a>}</div>
+      <p className={data.link.canva.phase === "failed" || data.link.canva.phase === "result_unknown" ? "notice warn" : "small muted"} role="status">{data.link.canva.currentSource===false&&['ready','complete'].includes(data.link.canva.phase)?'이전 캔바 디자인 · 최신 저장본 미반영':phaseLabel[data.link.canva.phase]}{data.link.canva.error && ` · ${data.link.canva.error}`}</p>
+      {(["importing", "exporting", "result_unknown", "failed"].includes(data.link.canva.phase)||autoCanva?.enabled&&['queued','processing','failed','blocked'].includes(autoCanva.phase)) && <button className="btn" disabled={detail.isFetching || update.isPending} onClick={() => void refresh()}>처리 상태 다시 확인</button>}
+      {data.link.canva.designId && <div className="notion-canva-output stack"><label className="notion-export-confirm"><input type="checkbox" checked={exportConfirmed} disabled={busy || !!conflict||autoPending||data.link.canva.currentSource===false} onChange={event => setExportConfirmed(event.target.checked)} /><span>현재 스튜디오 원고와 캔바의 모든 문구를 대조했습니다.</span></label><button className="btn" disabled={!exportConfirmed || busy || !!conflict || detail.isFetching||autoPending||data.link.canva.currentSource===false} onClick={() => update.mutate({ kind: "export" })}>완성본 가져오기</button></div>}
       {data.link.canva.outputAssetId && <button className="btn" disabled={downloading} onClick={() => void download()}>{downloading ? "파일 준비 중…" : "완성본 ZIP 내려받기"}</button>}
       {!!downloadError && <ErrorBox error={downloadError} retry={() => void download()} />}
     </section>

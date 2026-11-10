@@ -29,7 +29,7 @@ const handle=(fn:(req:Request,res:Response)=>Promise<unknown>)=>(req:Request,res
 const version=z.number().int().positive();
 const canvaRequest=z.object({version,itemVersion:version}).strict();
 const exportRequest=canvaRequest.extend({confirmed:z.literal(true)}).strict();
-const settings=z.object({version,coverStyle:z.enum(notionCoverStyles).optional(),autoSync:z.boolean().optional()}).strict().refine(v=>v.coverStyle!==undefined||v.autoSync!==undefined,'변경할 설정을 선택하세요.');
+const settings=z.object({version,coverStyle:z.enum(notionCoverStyles).optional(),autoSync:z.boolean().optional(),canvaAutoSave:z.boolean().optional()}).strict().refine(v=>v.coverStyle!==undefined||v.autoSync!==undefined||v.canvaAutoSave!==undefined,'변경할 설정을 선택하세요.');
 notionRoutes.get('/notion/status',handle(async(_req,res)=>res.json(getNotionConnectionStatus())));
 notionRoutes.get('/notion/documents',handle(async(req,res)=>res.json(await queryNotionDocuments(parse(notionDocumentQuerySchema,req.query)))));
 notionRoutes.get('/notion/documents/:pageId',handle(async(req,res)=>res.json(await fetchNotionDocument(String(req.params.pageId)))));
