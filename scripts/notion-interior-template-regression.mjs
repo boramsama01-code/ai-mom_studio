@@ -102,6 +102,10 @@ try{
    const picker=page.getByLabel('내지 템플릿',{exact:true});await picker.waitFor();
    assert.deepEqual(await picker.locator('option').evaluateAll(options=>options.map(o=>o.value)),['auto','text','two_columns','image_text','table','process','timeline','bar_chart']);
    await picker.selectOption('table');assert.equal(await page.getByLabel('카드 본문',{exact:true}).inputValue(),original);assert.equal(writes.length,0);
+   const beforeInputPreviews=previews.length;
+   await page.waitForTimeout(700); // Deliberately cross the450ms debounce: incompatible copy must never POST.
+   await page.getByText('구성 내용을 입력하고 ‘내용 적용’을 눌러 미리보기를 확인하세요.',{exact:true}).waitFor();
+   assert.equal(previews.length,beforeInputPreviews,'Selecting a structured layout must wait for compatible content');assert.equal(invalidPreviews.length,0);assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),true);
    await page.getByLabel('1열 머리글',{exact:true}).fill('지역');await page.getByLabel('2열 머리글',{exact:true}).fill('마감일');await page.getByLabel('1행 1열',{exact:true}).fill('서울');await page.getByLabel('1행 2열',{exact:true}).fill('11/11');await page.getByRole('button',{name:'행 추가',exact:true}).click();await page.getByLabel('2행 1열',{exact:true}).fill('서울');await page.getByLabel('2행 2열',{exact:true}).fill('11/12');
    assert.equal(await page.getByLabel('카드 본문',{exact:true}).inputValue(),original,'Structured input must preserve source until Apply');
    assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),true);
@@ -112,7 +116,10 @@ try{
    assert.equal(writes.length,1);assert.equal(detail.copy.pages[0].body,'기준 안내\n\n지역 | 마감일\n서울 | 11/11\n서울 | 11/12');assert.deepEqual(detail.source,sourceBefore);
    await page.reload();await page.locator('.notion-card-editor').waitFor();await page.locator('.notion-card-strip button').nth(1).click();
    assert.equal(await page.getByLabel('내지 템플릿',{exact:true}).inputValue(),'table');assert.equal(await page.getByLabel('2행 2열',{exact:true}).inputValue(),'11/12');await waitPreview(page,1);
-   await page.locator('.notion-card-strip button').nth(2).click();await page.getByLabel('내지 템플릿',{exact:true}).selectOption('image_text');await page.getByLabel('페이지 사진',{exact:true}).selectOption('102');await page.getByLabel('강조문구',{exact:true}).fill('두 번째');await waitPreview(page,2);
+   await page.locator('.notion-card-strip button').nth(2).click();await page.getByLabel('내지 템플릿',{exact:true}).selectOption('image_text');
+   const beforePhotoPreviews=previews.length;await page.waitForTimeout(700);
+   await page.getByText('페이지 사진을 선택해 주세요.',{exact:true}).waitFor();assert.equal(previews.length,beforePhotoPreviews,'A photo template must wait for an owned photo choice');assert.equal(invalidPreviews.length,0);assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),true);
+   await page.getByLabel('페이지 사진',{exact:true}).selectOption('102');await page.getByLabel('강조문구',{exact:true}).fill('두 번째');await waitPreview(page,2);
    await noOverflow(page,'photo-'+width);await screenshot(page,`photo-${width}.png`);
    await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).click();await page.getByText('스튜디오에 저장했습니다. 캔바에는 아래 새 디자인 만들기로 적용하세요.',{exact:true}).waitFor();
    assert.equal(writes.length,2);assert.deepEqual(detail.designEdits,{emphasisByPage:{'row-two':'두 번째'},templateByPage:{'row-one':'table','row-two':'image_text'},photoByPage:{'row-two':102}});assert.deepEqual(detail.source,sourceBefore);

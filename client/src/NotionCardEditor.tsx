@@ -5,7 +5,7 @@ import {notionCardCopySchema} from '@shared/notionStudioCopy';
 import {notionDesignEditsSchema,type NotionDesignEdits,type NotionStudioDetail} from '@shared/notionStudio';
 import {NOTION_MANUSCRIPT_MAX_PAGES,notionSourceReferencePageCount} from '@shared/notionSync';
 import {type NotionInteriorTemplate} from '@shared/notionPageTemplates';
-import {NotionInteriorEditor,NotionInteriorTemplatePicker,isStructuredInterior,interiorInputsSchema,type InteriorInputs} from './NotionInteriorEditor';
+import {NotionInteriorEditor,NotionInteriorTemplatePicker,isStructuredInterior,isInteriorTemplateCompatible,interiorInputsSchema,type InteriorInputs} from './NotionInteriorEditor';
 import {api,apiBlob,ApiError} from './api';
 import {useDirtyGuard} from './state';
 import {useDraftRecovery} from './useDraftRecovery';
@@ -17,6 +17,23 @@ type Draft={copy:CardCopy;designEdits:NotionDesignEdits;interiorInputs?:Interior
 const initial=(data:NotionStudioDetail):Draft=>({copy:structuredClone(data.copy),designEdits:structuredClone(data.designEdits??{emphasisByPage:{}})});
 const stable=(value:unknown):string=>JSON.stringify(value,(_key,entry)=>entry&&typeof entry==='object'&&!Array.isArray(entry)?Object.fromEntries(Object.entries(entry).sort(([a],[b])=>a.localeCompare(b))):entry);
 const same=(a:unknown,b:unknown)=>stable(a)===stable(b);
+function incompatibleInteriorPages(data:NotionStudioDetail,draft:Draft):number[]{
+  return draft.copy.pages.flatMap((page,index)=>{
+    const source=data.source.pages[index+1],key=source?.key??`page:${index+2}`,template=draft.designEdits.templateByPage?.[key];
+    if(!template||!isStructuredInterior(template))return [];
+    const combined=[page.subtitle,page.body].filter(Boolean).join('\n\n'),subtitle=source?.cardFields?.subtitle??'',prefix=subtitle.trim()?`${subtitle}\n\n`:'';
+    const body=prefix&&combined.startsWith(prefix)?combined.slice(prefix.length):combined;
+    return isInteriorTemplateCompatible(template,body)?[]:[index+2];
+  });
+}
+function missingInteriorPhotos(data:NotionStudioDetail,draft:Draft):number[]{
+  return draft.copy.pages.flatMap((_page,index)=>{
+    const key=data.source.pages[index+1]?.key??`page:${index+2}`;
+    if(draft.designEdits.templateByPage?.[key]!=='image_text')return [];
+    const selected=draft.designEdits.photoByPage?.[key],photo=selected===undefined?data.photos[index+1]:data.photos.find(photo=>photo.id===selected);
+    return photo?[]:[index+2];
+  });
+}
 // Checkpoint incomplete edits too; nonempty/length validation belongs to saving.
 const recoveryCopySchema=z.object({version:z.literal(1),templateKey:z.string(),cover:z.object({title:z.string(),subtitle:z.string()}),pages:z.array(z.object({id:z.string(),title:z.string(),subtitle:z.string(),body:z.string()})).min(1).max(NOTION_MANUSCRIPT_MAX_PAGES-1)});
 const recoveryDraft=(value:unknown):Draft|null=>{
@@ -37,6 +54,8 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
   const [previewBusy,setPreviewBusy]=useState(false),[previewError,setPreviewError]=useState<unknown>(null),[retry,setRetry]=useState(0),[safeArea,setSafeArea]=useState(false);
   const dirty=!same(draft,initial(base)),valid=notionCardCopySchema.safeParse(draft.copy).success;
   const pendingInputs=Object.keys(draft.interiorInputs??{}).length>0;
+  const incompatiblePages=incompatibleInteriorPages(base,draft),waitingForInterior=incompatiblePages.length>0;
+  const missingPhotos=missingInteriorPhotos(base,draft),waitingForPhoto=missingPhotos.length>0;
   const put=(next:Draft)=>{draftRef.current=next;setDraft(next);setSavedMessage('');};
   const adopt=(next:NotionStudioDetail)=>{baseRef.current=next;setBase(next);put(initial(next));setRemote(null);setSaveError(null);};
   const recovery=useDraftRecovery<Draft>({recoveryKey:`notion:${data.link.id}:visual-copy`,label:'카드 편집',version:base.itemVersion,value:draft,serverValue:initial(base),dirty,ready:true,parse:recoveryDraft,onRestore:put});
@@ -85,6 +104,8 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
     const current=baseRef.current,snapshot=draftRef.current;
     if(recoveryRef.current.pending)throw new Error('기기 복구본을 먼저 확인해 주세요.');
     if(Object.keys(snapshot.interiorInputs??{}).length)throw new Error('입력 중인 내지 구성을 먼저 적용하거나 취소해 주세요.');
+    if(incompatibleInteriorPages(current,snapshot).length)throw new Error('선택한 내지 템플릿의 구성 내용을 먼저 적용해 주세요.');
+    if(missingInteriorPhotos(current,snapshot).length)throw new Error('사진 + 글 페이지에 사용할 사진을 먼저 선택해 주세요.');
     if(same(snapshot,initial(current)))return true;
     if(!notionCardCopySchema.safeParse(snapshot.copy).success)throw new Error('제목·본문의 입력 길이를 확인해 주세요.');
     setSaving(true);setSaveError(null);
@@ -101,13 +122,13 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
   useEffect(()=>()=>onDirtyChange(false),[onDirtyChange]);
   const signature=stable({copy:draft.copy,designEdits:draft.designEdits,page:pageIndex,version:base.link.version,itemVersion:base.itemVersion});
   useEffect(()=>{
-    if(!valid||!protectedValid||remote){setPreviewBusy(false);return;}
+    if(!valid||!protectedValid||remote||waitingForInterior||waitingForPhoto){setPreviewBusy(false);if(waitingForInterior||waitingForPhoto)setPreviewError(null);return;}
     const controller=new AbortController();let live=true;setPreviewBusy(true);setPreviewError(null);
     const timer=window.setTimeout(async()=>{
       try{const blob=await apiBlob(`/notion/links/${base.link.id}/preview`,'image/jpeg',{method:'POST',body:{version:base.link.version,itemVersion:base.itemVersion,copy:draft.copy,designEdits:draft.designEdits,page:pageIndex},signal:controller.signal,parseErrorJson:true});if(!live)return;const url=URL.createObjectURL(blob);if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);previewUrl.current=url;setPreview({url,signature});}
       catch(error){if(live&&!controller.signal.aborted)setPreviewError(error instanceof ApiError&&error.message.startsWith('파일 요청 실패')?new Error(`카드 미리보기 응답을 받지 못했습니다 (HTTP ${error.status}). 원고는 유지했습니다. 잠시 후 다시 시도해 주세요.`):error);}finally{if(live)setPreviewBusy(false);}
     },450);return()=>{live=false;window.clearTimeout(timer);controller.abort();};
-  },[signature,valid,protectedValid,remote,retry]);
+  },[signature,valid,protectedValid,remote,retry,waitingForInterior,waitingForPhoto]);
   useEffect(()=>()=>{if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);},[]);
   const sourceStart=coreCount,sourceGroup=pageIndex-sourceStart;
   const visibleReferences=sourceGroup>=0&&sourceGroup<sourceCount?base.source.sourceReferences?.slice(sourceGroup*4,sourceGroup*4+4):undefined;
@@ -122,7 +143,7 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
       <div className="notion-card-visual"><div className="row between"><button className="btn sm" disabled={pageIndex===0} onClick={()=>setSelected(pageIndex-1)}>이전 카드</button><span>{pageIndex+1} / {pageTitles.length}</span><button className="btn sm" disabled={pageIndex===pageTitles.length-1} onClick={()=>setSelected(pageIndex+1)}>다음 카드</button></div>
         <div className="notion-card-image" aria-busy={previewBusy}>{preview&&<img src={preview.url} alt={`${pageIndex+1}장 디자인 미리보기`} className={preview.signature===signature?'':'is-stale'}/>} {!preview&&<p className="muted">{previewBusy?'카드 미리보기 만드는 중…':'미리보기를 확인해 주세요.'}</p>}{pageIndex===0&&safeArea&&<span className="notion-card-safe-area" aria-hidden="true"/>}</div>
         {pageIndex===0&&<label className="notion-toggle small"><input type="checkbox" checked={safeArea} onChange={event=>setSafeArea(event.target.checked)}/>안전영역 표시</label>}
-        <p className="small muted" role="status">{previewBusy?'수정한 문구로 미리보기 갱신 중…':preview?.signature===signature?'현재 입력을 반영한 미리보기':'미리보기에 아직 반영되지 않은 변경이 있습니다.'}</p>
+        <p className="small muted" role="status">{missingPhotos.includes(pageIndex+1)?'페이지 사진을 선택해 주세요.':incompatiblePages.includes(pageIndex+1)?'구성 내용을 입력하고 ‘내용 적용’을 눌러 미리보기를 확인하세요.':waitingForInterior?`${incompatiblePages.join('·')}장의 구성 내용을 먼저 적용한 뒤 미리보기를 확인하세요.`:waitingForPhoto?`${missingPhotos.join('·')}장의 페이지 사진을 먼저 선택한 뒤 미리보기를 확인하세요.`:previewBusy?'수정한 문구로 미리보기 갱신 중…':preview?.signature===signature?'현재 입력을 반영한 미리보기':'미리보기에 아직 반영되지 않은 변경이 있습니다.'}</p>
         {!!previewError&&<ErrorBox error={previewError} retry={()=>setRetry(value=>value+1)}/>}<p className="small muted">캔바 전송과 같은 배치·글자 크기·QR을 사용합니다. 캔바에서 편집한 결과와 줄바꿈은 다를 수 있어요.</p>
       </div>
       <div className="notion-card-fields stack">{editable&&page?<>
@@ -136,7 +157,7 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
       </>:<div className="stack"><h4>{pageTitles[pageIndex]}</h4><p className="small muted">이 페이지는 원문·예고·채널 정보로 자동 배치됩니다. 문구와 주소는 노션에서 수정한 뒤 가져오세요.</p>{visibleReferences&&<ul className="notion-source-links">{visibleReferences.map(reference=><li key={reference.url}><a href={reference.url} target="_blank" rel="noreferrer">{reference.title} ↗</a></li>)}</ul>}{pageIndex===coreCount+sourceCount&&base.source.teaser&&<p className="notion-readonly-copy">{base.source.teaser.body}</p>}<a href={base.link.notionUrl} target="_blank" rel="noreferrer">노션 원고 열기 ↗</a></div>}
       {!valid&&<p className="notice warn" role="alert">제목·본문을 채우고 입력 길이를 확인해 주세요. 문구는 자르지 않았습니다.</p>}
       {pendingInputs&&<div className="notice stack" role="status"><p>아직 적용하지 않은 구성 입력이 있어요. 해당 템플릿에서 ‘내용 적용’을 누른 뒤 저장해 주세요.</p><button type="button" className="btn sm" disabled={locked} onClick={()=>{const next={...draftRef.current};delete next.interiorInputs;put(next);}}>미적용 구성 입력 취소</button></div>}
-      <div className="row"><button className="btn primary" disabled={!dirty||locked||!valid||!protectedValid||pendingInputs} onClick={()=>void save().catch(()=>undefined)}>{saving?'저장 중…':'스튜디오에 저장'}</button><button className="btn" disabled={!dirty||saving} onClick={()=>guard.confirmLeave(()=>{recovery.clear();put(initial(baseRef.current));setSaveError(null);})}>수정 취소</button></div>
+      <div className="row"><button className="btn primary" disabled={!dirty||locked||!valid||!protectedValid||pendingInputs||waitingForInterior||waitingForPhoto} onClick={()=>void save().catch(()=>undefined)}>{saving?'저장 중…':'스튜디오에 저장'}</button><button className="btn" disabled={!dirty||saving} onClick={()=>guard.confirmLeave(()=>{recovery.clear();put(initial(baseRef.current));setSaveError(null);})}>수정 취소</button></div>
       {savedMessage&&<p className="notice" role="status">{savedMessage}</p>}{!!saveError&&<ErrorBox error={saveError}/>}<p className="small muted">{base.link.autoSync?'저장한 원고는 켜져 있는 자동 동기화에 따라 노션에도 반영됩니다.':'노션에는 ‘스튜디오 → 노션 반영’으로 적용합니다.'} 내지 템플릿·사진·강조문구는 스튜디오에 저장합니다. 캔바 완성본은 아래 새 디자인 만들기로 적용합니다.</p>
       </div>
     </div>

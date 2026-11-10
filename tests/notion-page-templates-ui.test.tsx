@@ -65,9 +65,16 @@ describe('page-level interior template authoring',()=>{
  });
  it('preserves an un-applied two-column draft across page navigation and only replaces the body on apply',async()=>{
   await render();await page(1);await fill('내지 템플릿','two_columns');await fill('왼쪽 본문','왼쪽 비교 내용');await fill('오른쪽 본문','오른쪽 비교 내용');expect(field('카드 본문').value).toBe(original);expect(button('스튜디오에 저장').disabled).toBe(true);
-  const pendingPreview=await preview();expect(pendingPreview).not.toHaveProperty('interiorInputs');expect(pendingPreview.copy.pages[0].body).toBe('기준 안내\n\n'+original);expect(writes()).toHaveLength(0);
+  expect(await preview()).toBeUndefined();expect(mocks.blob).not.toHaveBeenCalled();expect(host.textContent).toContain('구성 내용을 입력하고 ‘내용 적용’을 눌러 미리보기를 확인하세요.');expect(writes()).toHaveLength(0);
   await page(2);await page(1);expect(field('왼쪽 본문').value).toBe('왼쪽 비교 내용');expect(field('오른쪽 본문').value).toBe('오른쪽 비교 내용');await click('2단 내용 적용');
-  expect(field('카드 본문').value).toBe('왼쪽 비교 내용\n---\n오른쪽 비교 내용');await click('스튜디오에 저장');expect(detail.copy.pages[0].body).toBe('기준 안내\n\n왼쪽 비교 내용\n---\n오른쪽 비교 내용');
+  expect(field('카드 본문').value).toBe('왼쪽 비교 내용\n---\n오른쪽 비교 내용');const appliedPreview=await preview();expect(appliedPreview).not.toHaveProperty('interiorInputs');expect(appliedPreview.copy.pages[0].body).toBe('기준 안내\n\n왼쪽 비교 내용\n---\n오른쪽 비교 내용');await click('스튜디오에 저장');expect(detail.copy.pages[0].body).toBe('기준 안내\n\n왼쪽 비교 내용\n---\n오른쪽 비교 내용');
+ });
+ it.each(['table','process','timeline','two_columns','bar_chart'] as const)('waits for compatible %s content instead of previewing or saving the old prose in the new template',async template=>{
+  await render();await page(1);await fill('내지 템플릿',template);expect(field('카드 본문').value).toBe(original);await preview();expect(mocks.blob).not.toHaveBeenCalled();expect(writes()).toHaveLength(0);expect(button('스튜디오에 저장').disabled).toBe(true);expect(host.textContent).toContain('구성 내용을 입력하고 ‘내용 적용’을 눌러 미리보기를 확인하세요.');
+ });
+ it('waits for an actual page photo before previewing or saving a photo-and-text template',async()=>{
+  detail.photos=detail.photos.slice(0,1);detail.link.photoCount=1;await render();await page(1);await fill('내지 템플릿','image_text');await preview();expect(mocks.blob).not.toHaveBeenCalled();expect(button('스튜디오에 저장').disabled).toBe(true);expect(host.textContent).toContain('페이지 사진을 선택해 주세요.');expect(field('카드 본문').value).toBe(original);expect(writes()).toHaveLength(0);
+  await fill('페이지 사진','101');const request=await preview();expect(request.designEdits).toMatchObject({templateByPage:{'row-one':'image_text'},photoByPage:{'row-one':101}});expect(button('스튜디오에 저장').disabled).toBe(false);await click('스튜디오에 저장');expect(writes()).toHaveLength(1);expect(detail.copy.pages[0].body).toBe('기준 안내\n\n'+original);
  });
  it('recovers the selected template and un-applied structured input after closing and reopening the editor',async()=>{
   const scope='notion-page-template-recovery';activateDraftRecoveryScope(scope);client.setQueryDefaults(['me'],{gcTime:Infinity});client.setQueryData(['me'],{user:'fixture',recoveryScope:scope});

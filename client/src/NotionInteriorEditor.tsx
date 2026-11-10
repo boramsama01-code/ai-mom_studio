@@ -29,6 +29,7 @@ function read(template:NotionInteriorTemplate,body:string):{input:InteriorInput;
  }
  return {input:empty(template,body),compatible:false};
 }
+export const isInteriorTemplateCompatible=(template:NotionInteriorTemplate,body:string):boolean=>!isStructuredInterior(template)||read(template,body).compatible;
 function serialize(input:InteriorInput):string{
  if(input.template==='two_columns')return input.left+'\n---\n'+input.right;
  const rows=input.rows.map(row=>input.template==='timeline'?[...(input.regional?[row[0]]:[]),row[1],dateTime(row[2],row[3]),dateTime(row[4],row[5]),row[6]]:row);
