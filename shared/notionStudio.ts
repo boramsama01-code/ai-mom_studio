@@ -2,12 +2,19 @@ import { z } from 'zod';
 import { type CardCopy } from './cardCopy';
 import { NOTION_MANUSCRIPT_MAX_PAGES, type NotionDocumentPage } from './notionSync';
 import { notionCardCopySchema } from './notionStudioCopy';
+import { notionInteriorTemplates } from './notionPageTemplates';
 
 export const notionCoverStyles = ['A','B','C'] as const;
 export const notionImportRequestSchema=z.object({pageId:z.string().min(1).max(200),channelId:z.number().int().positive(),expectedSourceHash:z.string().min(1).max(128),coverStyle:z.enum(notionCoverStyles).default('A')}).strict();
 export const notionPullRequestSchema=z.object({version:z.number().int().positive(),itemVersion:z.number().int().positive(),expectedSourceHash:z.string().min(1).max(128),resolveConflict:z.boolean().default(false)}).strict();
 export const notionPushRequestSchema=z.object({version:z.number().int().positive(),itemVersion:z.number().int().positive(),expectedSourceHash:z.string().min(1).max(128),resolveConflict:z.boolean().default(false)}).strict();
-export const notionDesignEditsSchema=z.object({emphasisByPage:z.record(z.string().min(1).max(200),z.string().max(100)).refine(values=>Object.keys(values).length<=NOTION_MANUSCRIPT_MAX_PAGES)}).strict();
+const pageKey=z.string().min(1).max(200);
+const pageMap=<T extends z.ZodType>(value:T)=>z.record(pageKey,value).refine(values=>Object.keys(values).length<=NOTION_MANUSCRIPT_MAX_PAGES);
+export const notionDesignEditsSchema=z.object({
+  emphasisByPage:pageMap(z.string().max(100)),
+  templateByPage:pageMap(z.enum(notionInteriorTemplates)).optional(),
+  photoByPage:pageMap(z.number().int().positive()).optional(),
+}).strict();
 export type NotionDesignEdits=z.infer<typeof notionDesignEditsSchema>;
 export const notionEditorRequestSchema=z.object({version:z.number().int().positive(),itemVersion:z.number().int().positive(),copy:notionCardCopySchema,designEdits:notionDesignEditsSchema}).strict();
 export type NotionStudioPhoto={id:number;name:string;mimeType:string;width:number;height:number;url:string};

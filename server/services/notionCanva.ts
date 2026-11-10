@@ -24,6 +24,8 @@ import { admissionsGuideElements, parseAdmissionsGuide } from './notionAdmission
 import { logoCalendarElements, parseLogoCalendar } from './notionLogoCalendar';
 import { admissionsTimelineElements, parseAdmissionsTimeline } from './notionAdmissionsTimeline';
 import { loadEducationOfficeLogos, type EducationOfficeLogo } from './educationOfficeLogos';
+import {notionInteriorTemplates} from '../../shared/notionPageTemplates';
+import {interiorTemplateElements} from './notionInteriorTemplates';
 
 export const NOTION_CANVA_GEOMETRY = { width: 1080, height: 1350, safe: { x: 96, y: 207, width: 888, height: 936 } } as const;
 /** Covers retain the original safe area; every interior uses this larger frame. */
@@ -52,7 +54,7 @@ const EMU = 9525;
 const RED = '#FF493B', INK = '#171717';
 const idSchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9_-]+$/);
 const copy = z.string().refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value));
-const pageSchema = z.object({ title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional(), footnote: copy.max(1000).optional(), sourceLabel: copy.max(300).optional(), infographic: z.enum(['application_steps','admissions_calendar','institution_schedule','admissions_logo_calendar','admissions_guide','admissions_timeline']).optional() }).strict();
+const pageSchema = z.object({ interiorTemplate:z.enum(notionInteriorTemplates).optional(),interiorSubtitle:copy.max(500).optional(),title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional(), footnote: copy.max(1000).optional(), sourceLabel: copy.max(300).optional(), infographic: z.enum(['application_steps','admissions_calendar','institution_schedule','admissions_logo_calendar','admissions_guide','admissions_timeline']).optional() }).strict();
 const sourceUrl = z.string().trim().min(1).max(2048).refine(value=>{
   try{
     const url=new URL(value),host=url.hostname.toLowerCase();
@@ -343,7 +345,14 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     media.set(photo.id,item);if(item.normalized)warnings.push(`${index+1}번 사진의 형식·방향을 PPTX 호환 PNG로 정리했습니다. Studio 원본은 보존됩니다.`);
   }
   for(const page of document.pages)if(page.imageId&&!media.has(page.imageId))invalid('원고에서 지정한 사진을 찾을 수 없습니다. 사진을 다시 연결해 주세요.');
-  for(const [index,page]of document.pages.entries())if(page.infographic){
+  for(const [index,page]of document.pages.entries()){
+    if(page.interiorTemplate){
+      if(index===0)invalid('내지 템플릿은 표지 다음 페이지에서 선택해 주세요.');
+      if(page.interiorTemplate==='image_text'&&!page.imageId)invalid(`${index+1}장 사진 + 글에 사용할 사진을 선택해 주세요.`);
+      if(page.interiorTemplate!=='image_text'&&page.imageId)invalid(`${index+1}장 선택한 내지에는 사진을 함께 넣을 수 없습니다. 사진 + 글을 선택해 주세요.`);
+    }
+  }
+  for(const [index,page]of document.pages.entries())if(page.infographic&&!page.interiorTemplate){
     const label=page.infographic==='application_steps'?'접수 단계 도식':page.infographic==='admissions_calendar'||page.infographic==='admissions_logo_calendar'?'모집 달력':page.infographic==='admissions_timeline'?'모집 기간표':page.infographic==='admissions_guide'?'모집 안내':'기관별 일정표';
     if(index===0)invalid(`${label}은 표지가 아닌 내지에만 사용할 수 있습니다.`);
     if(page.imageId)invalid(`${label}과 사진을 같은 장에 함께 배치할 수 없습니다. 사진을 보존하려면 별도 장으로 나눠 주세요.`);
@@ -355,7 +364,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   const logo=await readMedia(await fs.readFile(path.resolve(process.cwd(),'assets/branding/highscoop-magazine-color.png')),'logo-color');
   const darkLogo=await readMedia(await fs.readFile(path.resolve(process.cwd(),'assets/branding/highscoop-magazine-dark.png')),'logo-dark');
   let educationLogos:EducationOfficeLogo[]=[];const educationMedia=new Map<string,Media>();
-  const logoPages=document.pages.filter((page,index)=>page.infographic==='admissions_logo_calendar'&&(!options.previewOnly||options.previewPage===index));
+  const logoPages=document.pages.filter((page,index)=>!page.interiorTemplate&&page.infographic==='admissions_logo_calendar'&&(!options.previewOnly||options.previewPage===index));
   if(logoPages.length){
     educationLogos=await loadEducationOfficeLogos();
     const keys=new Set<string>();
@@ -385,7 +394,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     await yieldToEventLoop();
     // Legacy layouts share one coordinate expansion; timeline artwork is already
     // authored directly in the full interior frame. Cover coordinates never move.
-    const expand=index>0&&page.infographic!=='admissions_timeline';
+    const expand=index>0&&!page.interiorTemplate&&page.infographic!=='admissions_timeline';
     const coordinates=(x:number,y:number,w:number,h:number)=>expand?{
       x:64+(x-96)*952/888,y:64+(y-207)*1222/936,w:w*952/888,h:h*1222/936,
     }:{x,y,w,h};
@@ -543,6 +552,23 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         text('cover-caption',body,96,1046-extra,888,36+extra-(footer?80:0),26,24,INK);image(logo,96,1091,150,50,'contain');
         text('cover-footer',footer,96,1014,888,64,20,16,'#555555');
       }
+    } else if(page.interiorTemplate){
+      let model:ReturnType<typeof interiorTemplateElements>;
+      try{model=interiorTemplateElements(page.interiorTemplate,body,accent,(value,size,bold)=>loadReadingFont('Noto Sans KR',bold?700:400).measure(value,size));}
+      catch(error){if(error instanceof NotionAdmissionsLayoutError)invalid(`${index+1}장 ${error.message}`);throw error;}
+      const subtitle=[page.interiorSubtitle,model.intro].filter(Boolean).join(' · ');
+      if(document.category)text('page-category',document.category,64,64,470,32,22,20,INK,true);
+      text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,660,64,150,32,20,20,'#555555');
+      image(logo,826,64,190,40,'contain');rect('section-accent',64,104,64,5,accent);
+      text(`page-${index+1}-title`,page.title,64,122,952,112,46,40,INK,true,page.emphasis,'l',1.2);
+      text('interior-subtitle',subtitle,64,244,952,page.interiorTemplate==='timeline'?36:64,26,20,INK,false,page.emphasis,'l',1.2);
+      if(page.interiorTemplate==='image_text')image(media.get(page.imageId!)!,64,336,440,860,'contain');
+      for(const [elementIndex,element]of model.elements.entries()){
+        if(elementIndex>0&&elementIndex%16===0)await yieldToEventLoop();
+        if(element.kind==='rect')rect(element.name,element.x,element.y,element.width,element.height,element.fill,false,element.pill);
+        else if(element.kind==='text')text(element.name,element.content,element.x,element.y,element.width,element.height,element.max,element.min,element.ink,element.bold,page.emphasis,element.align,element.leading,element.verticalAlign);
+      }
+      text(`page-${index+1}-footer`,footer,64,1216,952,70,20,16,'#555555');
     } else {
      if(page.infographic==='admissions_calendar'||page.infographic==='institution_schedule'||page.infographic==='admissions_logo_calendar'||page.infographic==='admissions_guide'||page.infographic==='admissions_timeline'){
       const calendar=page.infographic==='admissions_calendar'||page.infographic==='admissions_logo_calendar',guide=page.infographic==='admissions_guide',timeline=page.infographic==='admissions_timeline';

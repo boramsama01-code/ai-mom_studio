@@ -155,6 +155,9 @@ jobs:
       - name: Verify automatic images, manual fallback and final page previews
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node scripts/studio-automatic-regression.mjs
+      - name: Verify page-specific interior templates without AI calls
+        if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
+        run: node --import tsx scripts/notion-interior-template-regression.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -168,4 +171,5 @@ jobs:
             test-results/channel-navigation
             test-results/studio-automatic-browser
             test-results/asset-library-browser
+            test-results/notion-interior-templates
           if-no-files-found: ignore

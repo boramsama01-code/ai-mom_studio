@@ -90,3 +90,11 @@ The optional **지역** column merges adjacent matching region cells vertically 
 ```
 
 The four kinds are **학생 접수**, **추가 모집**, **사전 제출**, and **연계 접수**. Dates must be actual `YYYY-MM-DD` values, with `HH:mm` only when the source states a time; `24:00` is permitted only as an explicit end time. The axis and bars show calendar-date positions, and each row prints its exact supplied date/time labels. A missing time stays missing. Each input row remains a separate bar: do not merge disjoint periods merely because their region is the same. Unknown start dates belong in a separate institution table; this parser rejects missing endpoints instead of inferring them. Split more than ten periods into additional pages. Every bar, label and date tick remains editable, and overflow fails without truncating the source copy.
+
+## Choose an interior on each page
+
+In **카드 보며 수정**, select a body page and choose **내지 템플릿**: text, two columns, photo with text, table, process, timeline, or bar chart. Keeping **기존 원고 형식 유지** preserves the source layout. Covers, source QR cards and the channel Follow page keep their dedicated layouts. Selection, manual input, native preview and editable Canva import do not call an AI model.
+
+Structured forms edit rows, columns, stages, dates and numbers directly. Choosing a template never replaces original copy with a sample. **내용 적용** explicitly serializes the completed form into the manuscript; pending forms are recoverable on the device and must be applied or discarded before saving. Overflow and invalid values are rejected without trimming the source text. Source subtitles, citations and footnotes stay protected.
+
+`notionDesignEdits.templateByPage` and `photoByPage` store choices against stable Notion row/heading keys, independent of page position. Pulling Notion changes preserves surviving page choices and removes orphaned keys. Photo choices must belong to the current link; a removed selected image requires reselection. Template-only changes invalidate earlier Canva exports. These design settings stay in Studio revisions; the existing manuscript sync continues to write text to Notion.

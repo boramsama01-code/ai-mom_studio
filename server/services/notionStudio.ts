@@ -14,6 +14,7 @@ import {HttpError} from '../routes/util';
 import {audit} from '../audit';
 import {createRevision} from '../content';
 import {fetchNotionDocument,downloadNotionPhoto,updateNotionDocument,patchNotionDocumentProperties,withNotionWriteLease} from './notionClient';
+import {validateInteriorTemplateBody} from './notionInteriorTemplates';
 
 type Link=typeof notionSyncLinks.$inferSelect;
 type PreparedPhoto={sourceKey:string;name:string;mimeType:string;bytes:Buffer;sha256:string;width:number;height:number};
@@ -122,8 +123,12 @@ export async function pullNotionStudio(db:DB,id:number,input:SyncRequest,actor:s
  await db.transaction(async raw=>{const tx=raw as unknown as DB;await tx.select().from(contentItems).where(eq(contentItems.id,initial.item.id)).for('update');await tx.select().from(notionSyncLinks).where(eq(notionSyncLinks.id,id)).for('update');const current=await state(tx,id);assertVersion(current,input,initial.revision.id);
   if(current.link.operationToken&&current.link.operationUntil&&current.link.operationUntil>new Date())throw new HttpError(409,'이 원고의 동기화 작업이 진행 중입니다. 잠시 후 다시 확인하세요.');
   const photoOrder=await storePhotos(tx,id,prepared);
-  const pageKeys=new Set(fresh.pages.map(notionDesignPageKey)),designEdits=notionDesignEdits(current.revision.payload);
-  const survivingEdits={emphasisByPage:Object.fromEntries(Object.entries(designEdits.emphasisByPage).filter(([key])=>pageKeys.has(key)))};
+  const pageKeys=new Set(fresh.pages.map(notionDesignPageKey)),interiorKeys=new Set(fresh.pages.slice(1).map((page,i)=>notionDesignPageKey(page,i+1))),designEdits=notionDesignEdits(current.revision.payload);
+  const survivingEdits:NotionDesignEdits={
+   emphasisByPage:Object.fromEntries(Object.entries(designEdits.emphasisByPage).filter(([key])=>pageKeys.has(key))),
+   ...(designEdits.templateByPage?{templateByPage:Object.fromEntries(Object.entries(designEdits.templateByPage).filter(([key])=>interiorKeys.has(key)))}:{}),
+   ...(designEdits.photoByPage?{photoByPage:Object.fromEntries(Object.entries(designEdits.photoByPage).filter(([key])=>interiorKeys.has(key)))}:{}),
+  };
   await createRevision(tx,{contentItemId:current.item.id,author:'operator',payload:{...current.revision.payload,cardCopy:copy,...(current.revision.payload.notionDesignEdits?{notionDesignEdits:survivingEdits}:{}),notion:{pageId:fresh.pageId,sourceHash:fresh.sourceHash,url:fresh.url}},note:'노션 변경 적용 · 이전 원고는 기록에 보존'});
   await tx.update(contentItems).set({title:fresh.title||copy.cover.title,version:current.item.version+1,updatedAt:new Date()}).where(eq(contentItems.id,current.item.id));
   await tx.update(notionSyncLinks).set({sourceHash:fresh.sourceHash,baseCopyHash:notionCopyHash(copy),sourceEditedAt:fresh.lastEditedAt,sourceSnapshot:snapshot(fresh),photoOrder,lastSyncedAt:new Date(),updatedAt:new Date(),version:current.link.version+1,lastError:null}).where(eq(notionSyncLinks.id,id));
@@ -178,6 +183,15 @@ export function validateNotionStudioDraft(s:Awaited<ReturnType<typeof state>>,co
  try{notionCopyToPages(parsed,{baseline:document,current:document});}catch(error){throw new HttpError(422,(error as Error).message,{code:'notion_copy_limits'});}
  const keys=new Set(document.pages.map(notionDesignPageKey));
  if(Object.keys(designEdits.emphasisByPage).some(key=>!keys.has(key)))throw new HttpError(422,'강조문구가 현재 원고의 카드와 맞지 않습니다. 최신 저장본을 확인해 주세요.');
+ const interiorKeys=new Set(document.pages.slice(1).map((page,i)=>notionDesignPageKey(page,i+1)));
+ if([...Object.keys(designEdits.templateByPage??{}),...Object.keys(designEdits.photoByPage??{})].some(key=>!interiorKeys.has(key)))throw new HttpError(422,'내지 템플릿과 사진은 현재 원고의 본문 카드에서 선택해 주세요.');
+ if(Object.values(designEdits.photoByPage??{}).some(id=>!s.link.photoOrder.includes(id)))throw new HttpError(422,'선택한 사진이 현재 원고에 없습니다. 페이지의 사진을 다시 선택해 주세요.');
+ for(const [index,page]of document.pages.entries()){
+  const key=notionDesignPageKey(page,index),template=designEdits.templateByPage?.[key];if(!template)continue;
+  if(template==='image_text'&&!(designEdits.photoByPage?.[key]??s.link.photoOrder[index]))throw new HttpError(422,`${index+1}장: 사진 + 글 템플릿에 사용할 사진을 선택해 주세요.`);
+  const draft=parsed.pages[index-1],combined=[draft.subtitle,draft.body].filter(Boolean).join('\n\n'),subtitle=page.cardFields?.subtitle??'',prefix=subtitle.trim()?`${subtitle}\n\n`:'';
+  try{validateInteriorTemplateBody(template,prefix&&combined.startsWith(prefix)?combined.slice(prefix.length):combined);}catch(error){throw new HttpError(422,`${index+1}장: ${(error as Error).message}`,{code:'notion_template_format'});}
+ }
  return parsed;
 }
 /** Save only reviewed card copy and Studio design choices. Source notes/extras remain untouched. */
