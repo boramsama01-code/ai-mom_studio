@@ -39,7 +39,7 @@ export function parseAdmissionsTimeline(body:string):AdmissionsTimeline{
  return {intro,rows,firstDay,lastDay};
 }
 /** Full-page interior coordinates. Bars show date positions; clock labels stay explicit. */
-export function admissionsTimelineElements(model:AdmissionsTimeline):AdmissionsElement[]{
+export function admissionsTimelineElements(model:AdmissionsTimeline,measure:(text:string,size:number,bold:boolean)=>number=(value,size)=>value.length*size*.65):AdmissionsElement[]{
  const out:AdmissionsElement[]=[],{x,y,width,bottom}=ADMISSIONS_TIMELINE_BOUNDS,labelWidth=260,header=64,rowHeight=Math.min(128,(bottom-y-header)/model.rows.length);
  const axisLeft=x+labelWidth+32,axisRight=x+width-42,span=Math.max(DAY,model.lastDay-model.firstDay),at=(day:number)=>axisLeft+(day-model.firstDay)/span*(axisRight-axisLeft);
  const rect=(name:string,left:number,top:number,w:number,h:number,fill:string,pill=false)=>out.push({kind:'rect',name,x:left,y:top,width:w,height:h,fill,pill});
@@ -49,7 +49,7 @@ export function admissionsTimelineElements(model:AdmissionsTimeline):AdmissionsE
  rect('timeline-grid',x,y,width,header+rowHeight*model.rows.length,'#DADADA');
  rect('timeline-header-label-background',x+.5,y+.5,labelWidth-1,header-1,'#F0EEEA');
  rect('timeline-header-dates-background',x+labelWidth+.5,y+.5,width-labelWidth-1,header-1,'#F0EEEA');
- text('timeline-header-label','기관·과정',x+8,y+8,labelWidth-16,header-16,26,24,'#171717',true);
+ text('timeline-header-label','지역·기관',x+8,y+8,labelWidth-16,header-16,26,24,'#171717',true);
  const days=Math.round((model.lastDay-model.firstDay)/DAY),tickCount=Math.min(6,days+1);
  const ticks=Array.from({length:tickCount},(_,i)=>model.firstDay+Math.round(i*days/Math.max(1,tickCount-1))*DAY);
  ticks.forEach((day,i)=>{const date=new Date(day),left=at(day);text(`timeline-tick-${i}`,`${date.getUTCMonth()+1}/${date.getUTCDate()}`,left-40,y+12,80,40,21,19,'#555555',true);});
@@ -61,7 +61,9 @@ export function admissionsTimelineElements(model:AdmissionsTimeline):AdmissionsE
   text(`timeline-row-${index}-label`,row.label,x+10,top+8,labelWidth-20,rowHeight-16,28,22,'#171717',true);
   const left=at(row.start.day),right=at(row.end.day),barWidth=Math.max(6,right-left),barY=top+rowHeight*.28;
   rect(`timeline-row-${index}-bar`,left-(right===left?3:0),barY,barWidth,18,ink,true);
-  text(`timeline-row-${index}-dates`,`${row.start.label} → ${row.end.label}`,x+labelWidth+14,top+rowHeight*.54,width-labelWidth-28,rowHeight*.38,24,20,ink,true);
+  const dates=`${row.start.label} → ${row.end.label}`,dateWidth=Math.min(width-labelWidth-16,Math.max(140,Math.ceil(measure(dates,24,true)+16)));
+  const dateLeft=Math.max(x+labelWidth+8,Math.min(x+width-8-dateWidth,left+barWidth/2-dateWidth/2));
+  text(`timeline-row-${index}-dates`,dates,dateLeft,top+rowHeight*.54,dateWidth,rowHeight*.38,24,20,ink,true);
  });
  return out;
 }

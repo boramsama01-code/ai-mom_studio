@@ -548,7 +548,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       const calendar=page.infographic==='admissions_calendar'||page.infographic==='admissions_logo_calendar',guide=page.infographic==='admissions_guide',timeline=page.infographic==='admissions_timeline';
       let elements:ReturnType<typeof admissionsCalendarElements>,intro:string,footerY=1072;
       try{
-       if(timeline){const model=parseAdmissionsTimeline(body);intro=model.intro;elements=admissionsTimelineElements(model);footerY=1216;}
+       if(timeline){const model=parseAdmissionsTimeline(body);intro=model.intro;elements=admissionsTimelineElements(model,(value,size,bold)=>loadReadingFont('Noto Sans KR',bold?700:400).measure(value,size));footerY=1216;}
        else if(page.infographic==='admissions_logo_calendar'){const model=parseLogoCalendar(body,page.title,educationLogos);intro=model.intro;elements=logoCalendarElements(model);}
        else if(page.infographic==='admissions_calendar'){const model=parseAdmissionsCalendar(body,page.title);intro=model.intro;elements=admissionsCalendarElements(model,wrap);}
        else if(guide){const model=parseAdmissionsGuide(body);intro=model.intro;elements=admissionsGuideElements(model,accent);}

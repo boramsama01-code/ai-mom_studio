@@ -19,6 +19,9 @@ describe('actual admissions periods',()=>{
   const e=admissionsTimelineElements(m),bars=e.filter(e=>e.kind==='rect'&&e.name.endsWith('-bar')&&e.name.startsWith('timeline-row'));
   expect(bars).toHaveLength(3);expect(bars[0].x+bars[0].width).toBeLessThan(bars[1].x);expect(bars[1].x+bars[1].width).toBeLessThan(bars[2].x);
   const ratio=(m.rows[0].end.day-m.rows[0].start.day)/(m.lastDay-m.firstDay);expect(bars[0].width).toBeCloseTo((974-356)*ratio,6);
+  const dates=e.filter(e=>e.kind==='text'&&/^timeline-row-\d+-dates$/.test(e.name));
+  for(const [i,date]of dates.entries()){expect(date.y).toBeGreaterThan(bars[i].y+bars[i].height);expect(date.x).toBeGreaterThanOrEqual(332);expect(date.x+date.width).toBeLessThanOrEqual(1008);}
+  expect(dates[1].x+dates[1].width/2).toBeCloseTo(bars[1].x+bars[1].width/2,6);
   expect(parseAdmissionsTimeline('기관·과정 | 시작일 | 마감일 | 구분\n기관 | 2026-11-03 | 2026-11-12 24:00 | 학생 접수').rows[0].end.label).toBe('11/12 24:00');
  });
  it.each([
