@@ -10,6 +10,8 @@ vi.mock("../server/worker/collect", () => ({ runCollect: mocks.collect }));
 vi.mock("../server/worker/publish", () => ({ publishDue: vi.fn() }));
 vi.mock("../server/worker/studio", () => ({ processStudioJob: vi.fn() }));
 vi.mock("../server/worker/discovery", () => ({ channelDiscovery: vi.fn() }));
+// This fixture tests collection retries, not the independently covered Canva queue.
+vi.mock("../server/worker/notionCanva", () => ({ saveNotionCanvaOnce: async () => ({ checked: 0, submitted: 0, polled: 0, failed: 0, blocked: 0 }) }));
 vi.mock("../server/worker/queue", async original => ({ ...await original<object>(), claimJob: mocks.claim, recoverExpired: async () => 0, newWorkerId: () => "test-owner" }));
 const { processCollectJob, jobsOnce, collectOnce } = await import("../server/worker/run");
 const { currentGenerationSignal } = await import("../server/services/generationContext");
