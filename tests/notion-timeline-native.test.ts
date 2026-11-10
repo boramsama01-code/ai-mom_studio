@@ -70,10 +70,10 @@ describe('actual admissions periods',()=>{
   }
   expect(plain(xml)).toContain('긴기관명을확인해보세요그리고한줄더읽어요');
  });
- it('keeps existing A/B/C cover XML byte-identical while enlarging interiors',async()=>{
-  // Hashes captured independently from origin/main 4a9feba before the geometry change.
-  const hashes={A:'e0d2086b30b9272c903b41bbf81d7b865754357bcd9c7b493a12df01c8d3db49',B:'c30c03c7f317dfdc775e3a62ee0c07ba1d7ebc443fc6e430ed5d2482fc327852',C:'01f5166ec9293403127cfd911c5191bcf148d52136859c812e0a4bee000eaf12'};
+ it('keeps the approved A/B/C covers stable while enlarging interiors',async()=>{
+  // A/C include the restored badge; all covers use Canva's verified Korean font alias.
+  const hashes={A:'135fae66d50858b00ec816b653e32066ea4ceb7b24930c3cbe89b63fff01f180',B:'323ace28fe60fd8fa4e9ec8d2393f05799e476d05bad1265717aed16198da3f0',C:'282971ee26ba9148a53bd5f08d8a2d93a3f8cab23d2e82d2a7a7dd537243cad7'};
   const photos=[{id:'original',bytes:await sharp({create:{width:24,height:36,channels:3,background:'#88aacc'}}).png().toBuffer(),mimeType:'image/png'}];
-  for(const coverStyle of ['A','B','C'] as const){const d:NotionCanvaDocument={title:'표지 불변 검증',coverStyle,category:'영재교육',pages:[{title:'표지 좌표는 그대로',body:'원본 표지 문구',imageId:'original',footnote:'표지 각주',sourceLabel:'공식 원문',emphasis:'그대로'},{title:'내지 변경',body:'표지만 기존 형식을 유지합니다.'}]};const xml=source((await buildNotionCanvaPptx(d,photos)).bytes,1);expect(createHash('sha256').update(xml).digest('hex')).toBe(hashes[coverStyle]);}
+  for(const coverStyle of ['A','B','C'] as const){const d:NotionCanvaDocument={title:'표지 불변 검증',coverStyle,category:'영재교육',pages:[{title:'표지 좌표는 그대로',body:'원본 표지 문구',imageId:'original',footnote:'표지 각주',sourceLabel:'공식 원문',emphasis:'그대로'},{title:'내지 변경',body:'표지만 기존 형식을 유지합니다.'}]};const xml=source((await buildNotionCanvaPptx(d,photos)).bytes,1);expect(createHash('sha256').update(xml).digest('hex')).toBe(hashes[coverStyle]);if(coverStyle==='B')expect(createHash('sha256').update(xml.replaceAll('Noto Sans Kr','Noto Sans KR')).digest('hex')).toBe('c30c03c7f317dfdc775e3a62ee0c07ba1d7ebc443fc6e430ed5d2482fc327852');}
  });
 });

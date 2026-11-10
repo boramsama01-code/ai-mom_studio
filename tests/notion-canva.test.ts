@@ -5,6 +5,7 @@ import { strFromU8, unzipSync, zipSync } from 'fflate';
 import sharp from 'sharp';
 import jsQR from 'jsqr';
 import type { DB } from '../server/db';
+import { loadReadingFont } from '../server/services/readingCardFonts';
 import { buildNotionCanvaPptx, decodeNotionCanvaPngExport, downloadNotionCanvaExport, getNotionCanvaExportJob, getNotionCanvaImportJob, getNotionCanvaPages, NOTION_CANVA_OUTRO, NOTION_CANVA_SOURCE_TITLE, NOTION_CANVA_TEASER_COMMENT, NOTION_CANVA_TEXT_SYNC, submitNotionCanvaExport, submitNotionCanvaImport, type NotionCanvaDocument } from '../server/services/notionCanva';
 
 const db={} as DB;
@@ -66,6 +67,50 @@ describe('native editable Notion manuscript PPTX',()=>{
     const {data,info}=await sharp(Buffer.from(result.previewSvg!)).removeAlpha().raw().toBuffer({resolveWithObject:true});expect(info).toMatchObject({width:1080,height:1350});
     const pixel=(x:number,y:number)=>[...data.subarray((y*info.width+x)*info.channels,(y*info.width+x)*info.channels+3)];expect(pixel(50,100)).toEqual([114,167,255]);expect(pixel(50,1200)).toEqual([0,0,0]);
   });
+  it('keeps the approved filled cover badges readable, editable and inside the cover frame in native and preview output',async()=>{
+    smallPhoto??=await sharp({create:{width:600,height:400,channels:3,background:'#72A7FF'}}).png().toBuffer();
+    const photo={id:'cover-photo',bytes:smallPhoto,mimeType:'image/png'};
+    const cases=[
+      {style:'A' as const,label:'영재원',fill:'#FF493B',footer:false},
+      {style:'A' as const,label:'영재교육',fill:'#FF493B',footer:true},
+      {style:'A' as const,label:'가'.repeat(24),fill:'#72A7FF',footer:false},
+      {style:'C' as const,label:'체험',fill:'#5ED7B5',footer:false},
+    ];
+    for(const value of cases){
+      const input=document(2,value.style);input.category=value.label;input.categoryColor=value.fill;input.pages[0].imageId=photo.id;
+      if(value.footer)input.pages[0].footnote='검증 기준을 보존합니다.';
+      const built=await buildNotionCanvaPptx(input,[photo],{previewPage:0}),fast=await buildNotionCanvaPptx(input,[photo],{previewPage:0,previewOnly:true});
+      expect(fast.previewSvg).toBe(built.previewSvg);
+      const files=unzipSync(built.bytes),cover=strFromU8(files['ppt/slides/slide1.xml']);
+      const badge=nativeShape(cover,'cover-category-badge'),label=nativeShape(cover,'cover-category'),title=nativeShape(cover,'cover-title');
+      expect(nativePlain(label.xml)).toBe(value.label);expect(label.xml.match(/<a:p>/g)).toHaveLength(1);
+      expect(badge.xml).toContain('prst="roundRect"');expect(badge.xml).toContain(`fmla="val ${value.style==='A'?16667:16000}"`);
+      expect(badge.xml).toContain(`val="${value.fill.slice(1)}"`);expect(label.xml).toContain('val="181818"');expect(label.xml).toContain('algn="ctr"');expect(label.xml).toContain('b="1"');
+      const fontSize=Number(label.xml.match(/<a:rPr[^>]*sz="(\d+)"/)![1])/75;expect(fontSize).toBeGreaterThanOrEqual(24);expect(fontSize).toBeLessThanOrEqual(value.style==='A'?36:30);if(value.label.length<=4)expect(fontSize).toBe(value.style==='A'?36:30);
+      expect(badge.x).toBe(96);expect(badge.y).toBe(value.style==='A'?(value.footer?560:640):775);expect(badge.h).toBe(value.style==='A'?60:50);
+      expect(badge.w).toBeGreaterThanOrEqual(value.style==='A'?160:130);expect(badge.x+badge.w).toBeLessThanOrEqual(984);
+      expect(badge.y).toBeGreaterThanOrEqual(207);expect(title.y-(badge.y+badge.h)).toBe(value.style==='A'?30:20);
+      expect(label.x+label.w/2).toBeCloseTo(badge.x+badge.w/2,3);expect(label.y+label.h/2).toBeCloseTo(badge.y+badge.h/2,3);
+      const svgBadge=built.previewSvg!.match(/data-name="cover-category-badge"><rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="([\d.]+)" fill="(#[0-9A-F]+)"/)!;
+      expect(svgBadge).toBeTruthy();expect(svgBadge.slice(1,5).map(Number)).toEqual([badge.x,badge.y,badge.w,badge.h]);expect(Number(svgBadge[5])).toBe(value.style==='A'?10:8);expect(svgBadge[6]).toBe(value.fill);
+      if(value.label==='영재교육'){
+        // Canva's exact import alias must not change canonical Korean measurements or preview outlines.
+        for(const part of [cover,strFromU8(files['ppt/theme/theme1.xml'])]){
+          const faces=[...part.matchAll(/<a:(?:latin|ea|cs) typeface="([^"]+)"\/>/g)].map(match=>match[1]);
+          expect(faces.length).toBeGreaterThan(0);expect(new Set(faces)).toEqual(new Set(['Noto Sans Kr']));
+        }
+        const canonical=loadReadingFont('Noto Sans KR',700),width=canonical.measure(value.label,fontSize);
+        expect(badge.w).toBe(Math.ceil(width)+52);
+        const outline=canonical.path(value.label,label.x+(label.w-width)/2,label.y+canonical.baseline(fontSize,label.h),fontSize);
+        expect(built.previewSvg).toContain(`<path d="${outline}" fill="#181818"/>`);
+      }
+      expect(cover).not.toContain('name="category-color"');
+      const follow=strFromU8(files['ppt/slides/slide3.xml']);expect(nativeShape(follow,'outro-red-pill').xml).toContain('fmla="val 50000"');
+      if(value.style==='A'){expect(cover).toContain('name="bottom-black-fade"');expect(cover).toContain('<a:gradFill');expect(title.xml).toContain('val="FFFFFF"');}
+    }
+    const untagged=document(2,'A');delete untagged.category;untagged.pages[0].imageId=photo.id;
+    expect(strFromU8(unzipSync((await buildNotionCanvaPptx(untagged,[photo])).bytes)['ppt/slides/slide1.xml'])).not.toContain('cover-category');
+  });
   it('renders the last grouped source QR as a scannable local preview with its real label and URL',async()=>{
     const input=document(2);input.sourceReferences=Array.from({length:9},(_,i)=>({title:`기관 ${i+1}`,url:`https://ged.kedi.re.kr/notice/${i+1}`}));
     const result=await buildNotionCanvaPptx(input,[],{previewPage:4});expect(result.previewSvg).toContain('source-qr-9-background');expect(result.previewSvg).not.toContain('source-qr-1-background');expect(result.previewSvg).toContain('aria-label="기관 9"');
@@ -94,7 +139,7 @@ describe('native editable Notion manuscript PPTX',()=>{
     const interior=strFromU8(archive['ppt/slides/slide2.xml']);
     expect(cover).toContain('<a:t xml:space="preserve">영재</a:t>');
     expect(cover).toContain('srgbClr val="FF493B"');
-    expect(cover).toContain('typeface="Noto Sans KR"');
+    expect(cover).toContain('typeface="Noto Sans Kr"');
     expect(cover).toContain('<p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"');
     expect(cover).not.toContain('cover-category');
     expect(interior).toContain('첫 문장 &amp; &lt;중요&gt;');expect(interior).toContain('둘째 문장');expect(interior).toContain('• 확인할 내용');
@@ -200,7 +245,7 @@ describe('native editable Notion manuscript PPTX',()=>{
       const cover=strFromU8(files['ppt/slides/slide1.xml']),title=nativeShape(cover,style==='B'?'cover-question':'cover-title'),sub=nativeShape(cover,'cover-caption'),note=nativeShape(cover,'cover-footer');
       expect(nativePlain(sub.xml)).toBe(caption.replaceAll(/\s/g,''));expect(nativePlain(note.xml)).toBe((footnote+sourceLabel).replaceAll(/\s/g,''));
       expect(title.y+title.h).toBeLessThanOrEqual(sub.y-6);expect(sub.y+sub.h).toBeLessThan(note.y);
-      expect(note.y+note.h).toBeLessThanOrEqual(style==='B'?1143:1078);expect(note.xml).toContain('typeface="Noto Sans KR"');
+      expect(note.y+note.h).toBeLessThanOrEqual(style==='B'?1143:1078);expect(note.xml).toContain('typeface="Noto Sans Kr"');
       for(const i of [2,3]){
         const source=strFromU8(files[`ppt/slides/slide${i}.xml`]),body=nativeShape(source,`page-${i}-body`),footer=nativeShape(source,`page-${i}-footer`);
         expect(nativePlain(footer.xml)).toBe((footnote+sourceLabel).replaceAll(/\s/g,''));expect(body.y+body.h).toBeLessThan(footer.y);expect(footer.y+footer.h).toBeLessThan(1202);
