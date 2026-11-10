@@ -78,12 +78,15 @@ Cover A/B/C keeps its original geometry and safe area (x96–984, y207–1143). 
 
 **도식: 모집 기간표** opts a card into `admissions_timeline`. Its optional first line is a subtitle. Then enter this exact header and 1–10 real periods:
 
+The optional **지역** column merges adjacent matching region cells vertically while keeping each institution and period on its own row. An empty institution cell is allowed with a region and spans the left label columns. The original four-column header without **지역** remains supported. Each date label sits beneath its own bar, centred on that period and constrained inside the date columns.
+
 ```text
 2027학년도 모집 · 실제 접수일은 2026년
-기관·과정 | 시작일 | 마감일 | 구분
-서울 신규 | 2026-11-04 | 2026-11-11 18:00 | 학생 접수
-같은 지역의 다른 과정 | 2026-11-20 | 2026-11-23 | 연계 접수
-의정부 | 2026-11-30 | 2026-12-04 | 학생 접수
+지역 | 기관·과정 | 시작일 | 마감일 | 구분
+서울 | | 2026-11-04 | 2026-11-11 18:00 | 학생 접수
+대전 | 동·서부 글로벌 | 2026-11-02 | 2026-11-13 | 학생 접수
+대전 | 창의융합 | 2026-11-04 | 2026-11-16 | 학생 접수
+의정부 | | 2026-11-30 | 2026-12-04 | 학생 접수
 ```
 
 The four kinds are **학생 접수**, **추가 모집**, **사전 제출**, and **연계 접수**. Dates must be actual `YYYY-MM-DD` values, with `HH:mm` only when the source states a time; `24:00` is permitted only as an explicit end time. The axis and bars show calendar-date positions, and each row prints its exact supplied date/time labels. A missing time stays missing. Each input row remains a separate bar: do not merge disjoint periods merely because their region is the same. Unknown start dates belong in a separate institution table; this parser rejects missing endpoints instead of inferring them. Split more than ten periods into additional pages. Every bar, label and date tick remains editable, and overflow fails without truncating the source copy.

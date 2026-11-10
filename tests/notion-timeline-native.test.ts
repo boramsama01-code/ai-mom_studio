@@ -40,6 +40,18 @@ describe('actual admissions periods',()=>{
   expect(parseAdmissionsTimeline(header+Array.from({length:10},(_,i)=>row.replace('기관',`기관${i}`)).join('\n')).rows).toHaveLength(10);
   expect(()=>parseAdmissionsTimeline(header+Array.from({length:11},(_,i)=>row.replace('기관',`기관${i}`)).join('\n'))).toThrow('1~10행');
  });
+ it('merges adjacent region cells without merging the underlying institution periods',async()=>{
+  const content='지역 | 기관·과정 | 시작일 | 마감일 | 구분\n서울 | | 2026-11-04 | 2026-11-11 | 학생 접수\n대전 | 동·서부 글로벌 | 2026-11-02 | 2026-11-13 | 학생 접수\n대전 | 창의융합 | 2026-11-04 | 2026-11-16 | 학생 접수\n충남 | | 2026-11-03 | 2026-11-12 | 학생 접수\n대전 | 예술고 | 2026-11-09 | 2026-11-16 | 학생 접수';
+  const model=parseAdmissionsTimeline(content);expect(model.rows[0]).toMatchObject({region:'서울',label:''});expect(model.rows).toHaveLength(5);
+  const full=await buildNotionCanvaPptx(input(content),[],{previewPage:1}),xml=source(full.bytes);
+  expect(xml.match(/name="timeline-row-\d+-bar"/g)).toHaveLength(5);
+  const merged=shape(xml,'timeline-row-1-region-background'),region=shape(xml,'timeline-row-1-region');
+  expect(merged.h).toBe(255);expect(region.y+region.h/2).toBeCloseTo(merged.y+merged.h/2,3);expect(xml).not.toContain('name="timeline-row-2-region"');
+  expect(xml).toContain('name="timeline-row-4-region"');
+  for(const label of ['동·서부 글로벌','창의융합','예술고'])expect(plain(xml)).toContain(label.replace(/\s/g,''));
+  for(const [i,row]of model.rows.entries())expect(plain(shape(xml,`timeline-row-${i}-dates`).xml)).toContain(`${row.start.label}→${row.end.label}`);
+  expect(()=>parseAdmissionsTimeline('지역 | 기관·과정 | 시작일 | 마감일 | 구분\n | 기관 | 2026-11-01 | 2026-11-02 | 학생 접수')).toThrow('지역 열');
+ });
  it('renders all periods as editable shapes with exact full/selected SVG parity and the full interior bounds',async()=>{
   const full=await buildNotionCanvaPptx(input(),[],{previewPage:1}),fast=await buildNotionCanvaPptx(input(),[],{previewPage:1,previewOnly:true}),xml=source(full.bytes);
   expect(fast.previewSvg).toBe(full.previewSvg);expect(fast.bytes.length).toBe(0);expect(full.pageCount).toBe(3);
