@@ -27,6 +27,23 @@ afterAll(async()=>{await (await import('../server/db')).closeDb();});
 async function imported(){return (await import('../server/services/notionStudio')).importNotionStudio(db,{pageId,channelId:ch,expectedSourceHash:doc.sourceHash,coverStyle:'A'},'test');}
 async function edit(itemId:number,text:string){const [item]=await db.select().from(schemas.contentItems).where(eq(schemas.contentItems.id,itemId));const [rev]=await db.select().from(schemas.contentRevisions).where(eq(schemas.contentRevisions.id,item.currentRevisionId!));const payload=structuredClone(rev.payload) as any;payload.cardCopy.pages[0].body=text;await (await import('../server/content')).createRevision(db,{contentItemId:itemId,author:'operator',payload});await db.update(schemas.contentItems).set({version:item.version+1}).where(eq(schemas.contentItems.id,itemId));}
 describe('Notion ↔ Studio durable integration',()=>{
+ it('saves stable per-page template and photo choices, preserves them on reorder, and rejects cover or foreign-photo choices',async()=>{
+  const a=await imported(),service=await import('../server/services/notionStudio'),photoId=a.photos[0].id;
+  const edits={emphasisByPage:{h2:'본문'},templateByPage:{h2:'text' as const},photoByPage:{h2:photoId}};
+  const saved=await service.saveNotionStudioDraft(db,a.link.id,{version:a.link.version,itemVersion:a.itemVersion,copy:a.copy,designEdits:edits},'test');
+  expect(saved.designEdits).toEqual(edits);
+  const baseline=()=>({version:saved.link.version,itemVersion:saved.itemVersion,copy:saved.copy});
+  await expect(service.saveNotionStudioDraft(db,a.link.id,{...baseline(),designEdits:{...edits,templateByPage:{h1:'text'}}},'test')).rejects.toMatchObject({status:422});
+  await expect(service.saveNotionStudioDraft(db,a.link.id,{...baseline(),designEdits:{...edits,photoByPage:{h2:photoId+1000000}}},'test')).rejects.toMatchObject({status:422});
+  await expect(service.saveNotionStudioDraft(db,a.link.id,{...baseline(),designEdits:{...edits,templateByPage:{h2:'table'}}},'test')).rejects.toMatchObject({status:422,extra:{code:'notion_template_format'}});
+  await expect(service.saveNotionStudioDraft(db,a.link.id,{...baseline(),designEdits:{emphasisByPage:{},templateByPage:{h2:'image_text'}}},'test')).rejects.toMatchObject({status:422});
+  const old=doc.pages[1];doc.pages=[doc.pages[0],{...old,index:2,headingBlockId:'new-interior',title:'새 페이지'}, {...old,index:3}];doc.sourceHash='b'.repeat(64);
+  const pulled=await service.pullNotionStudio(db,a.link.id,{version:saved.link.version,itemVersion:saved.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:false},'test');
+  expect(pulled.designEdits).toEqual(edits);expect(pulled.source.pages[2].key).toBe('h2');
+  doc.pages=doc.pages.filter(page=>page.headingBlockId!=='h2');doc.sourceHash='c'.repeat(64);
+  const removed=await service.pullNotionStudio(db,a.link.id,{version:pulled.link.version,itemVersion:pulled.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:false},'test');
+  expect(removed.designEdits).toEqual({emphasisByPage:{},templateByPage:{},photoByPage:{}});
+ });
  it('saves every page of a long Notion deck and previews its final core and Follow cards',async()=>{
   const template=doc.pages[1];doc.pages=[doc.pages[0],...Array.from({length:19},(_,i)=>({...template,index:i+2,title:`교육청 ${i+2}`,body:`기관별 학생 마감 ${i+2}`,headingBlockId:`h${i+2}`}))];
   const a=await imported(),{agent,csrf}=await login(app);expect(a.copy.pages).toHaveLength(19);

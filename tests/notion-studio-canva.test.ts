@@ -63,6 +63,24 @@ async function completed(f:Fixture,images=pngs.slice(0,3),jobId='export_1'){
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 
 describe('Notion -> Canva coordination on isolated PostgreSQL',()=>{
+ it('uses explicit interior templates and any owned selected photo in Canva while preserving protected text and source layouts',async()=>{
+  const f=await fixture();f.doc.pages[1].infographic='application_steps';f.doc.pages[1].cardFields={subtitle:'원문 소제목',body:'원문 본문 그대로',footnote:'원문 각주',sourceLabel:'공식 원문'};
+  f.doc.pages[1].body='원문 소제목\n\n원문 본문 그대로';
+  const photos=[];for(let i=0;i<3;i++)photos.push((await f.db.insert(notionSyncPhotos).values({linkId:f.link.id,sourceKey:`photo-${i}`,name:`사진${i}.png`,mimeType:'image/png',bytes:pngs[i],sha256:createHash('sha256').update(pngs[i]).digest('hex'),width:1080,height:1350}).returning())[0]);
+  await f.db.update(notionSyncLinks).set({sourceSnapshot:f.doc as unknown as Record<string,unknown>,photoOrder:photos.map(p=>p.id)}).where(eq(notionSyncLinks.id,f.link.id));
+  const copy=notionDocumentToCopy(f.doc),designEdits={emphasisByPage:{h2:'본문'},templateByPage:{h2:'image_text' as const},photoByPage:{h2:photos[2].id}};
+  await saveNotionStudioDraft(f.db,f.link.id,{...await request(f),copy,designEdits},'test');
+  await createNotionStudioCanva(f.db,f.link.id,await request(f),'test');
+  const [input,media]=provider.build.mock.calls[0];
+  expect(input.pages[1]).toMatchObject({interiorTemplate:'image_text',interiorSubtitle:'원문 소제목',body:'원문 본문 그대로',imageId:String(photos[2].id),footnote:'원문 각주',sourceLabel:'공식 원문',emphasis:'본문'});
+  expect(input.pages[1].infographic).toBeUndefined();expect(media.map((p:{id:string})=>p.id)).toEqual([String(photos[0].id),String(photos[2].id)]);
+  expect(((await saved(f)).sourceSnapshot as unknown as NotionDocument).pages[1].infographic).toBe('application_steps');
+ });
+ it('invalidates an exported design when only an interior template choice changes',async()=>{
+  const f=await fixture();await ready(f);const [revision]=await f.db.select().from(contentRevisions).where(eq(contentRevisions.id,f.revision.id));
+  await f.db.update(contentRevisions).set({payload:{...revision.payload,notionDesignEdits:{emphasisByPage:{},templateByPage:{h2:'text'}}}}).where(eq(contentRevisions.id,revision.id));
+  await expect(exportNotionStudioCanva(f.db,f.link.id,await request(f),'test')).rejects.toMatchObject({status:409,extra:{code:'canva_source_changed'}});expect(provider.submitExport).not.toHaveBeenCalled();
+ });
  it('returns the current link version after a slow Notion refresh so an explicit export can use it',async()=>{
   const f=await fixture();await ready(f);const original=await saved(f);
   provider.notionFetch.mockImplementation(async()=>structuredClone(f.doc));
