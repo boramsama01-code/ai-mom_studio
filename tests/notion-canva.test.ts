@@ -5,6 +5,7 @@ import { strFromU8, unzipSync, zipSync } from 'fflate';
 import sharp from 'sharp';
 import jsQR from 'jsqr';
 import type { DB } from '../server/db';
+import { loadReadingFont } from '../server/services/readingCardFonts';
 import { buildNotionCanvaPptx, decodeNotionCanvaPngExport, downloadNotionCanvaExport, getNotionCanvaExportJob, getNotionCanvaImportJob, getNotionCanvaPages, NOTION_CANVA_OUTRO, NOTION_CANVA_SOURCE_TITLE, NOTION_CANVA_TEASER_COMMENT, NOTION_CANVA_TEXT_SYNC, submitNotionCanvaExport, submitNotionCanvaImport, type NotionCanvaDocument } from '../server/services/notionCanva';
 
 const db={} as DB;
@@ -92,6 +93,17 @@ describe('native editable Notion manuscript PPTX',()=>{
       expect(label.x+label.w/2).toBeCloseTo(badge.x+badge.w/2,3);expect(label.y+label.h/2).toBeCloseTo(badge.y+badge.h/2,3);
       const svgBadge=built.previewSvg!.match(/data-name="cover-category-badge"><rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" rx="([\d.]+)" fill="(#[0-9A-F]+)"/)!;
       expect(svgBadge).toBeTruthy();expect(svgBadge.slice(1,5).map(Number)).toEqual([badge.x,badge.y,badge.w,badge.h]);expect(Number(svgBadge[5])).toBe(value.style==='A'?10:8);expect(svgBadge[6]).toBe(value.fill);
+      if(value.label==='영재교육'){
+        // Canva's exact import alias must not change canonical Korean measurements or preview outlines.
+        for(const part of [cover,strFromU8(files['ppt/theme/theme1.xml'])]){
+          const faces=[...part.matchAll(/<a:(?:latin|ea|cs) typeface="([^"]+)"\/>/g)].map(match=>match[1]);
+          expect(faces.length).toBeGreaterThan(0);expect(new Set(faces)).toEqual(new Set(['Noto Sans Kr']));
+        }
+        const canonical=loadReadingFont('Noto Sans KR',700),width=canonical.measure(value.label,fontSize);
+        expect(badge.w).toBe(Math.ceil(width)+52);
+        const outline=canonical.path(value.label,label.x+(label.w-width)/2,label.y+canonical.baseline(fontSize,label.h),fontSize);
+        expect(built.previewSvg).toContain(`<path d="${outline}" fill="#181818"/>`);
+      }
       expect(cover).not.toContain('name="category-color"');
       const follow=strFromU8(files['ppt/slides/slide3.xml']);expect(nativeShape(follow,'outro-red-pill').xml).toContain('fmla="val 50000"');
       if(value.style==='A'){expect(cover).toContain('name="bottom-black-fade"');expect(cover).toContain('<a:gradFill');expect(title.xml).toContain('val="FFFFFF"');}
@@ -127,7 +139,7 @@ describe('native editable Notion manuscript PPTX',()=>{
     const interior=strFromU8(archive['ppt/slides/slide2.xml']);
     expect(cover).toContain('<a:t xml:space="preserve">영재</a:t>');
     expect(cover).toContain('srgbClr val="FF493B"');
-    expect(cover).toContain('typeface="Noto Sans KR"');
+    expect(cover).toContain('typeface="Noto Sans Kr"');
     expect(cover).toContain('<p:bgPr><a:solidFill><a:srgbClr val="FFFFFF"');
     expect(cover).not.toContain('cover-category');
     expect(interior).toContain('첫 문장 &amp; &lt;중요&gt;');expect(interior).toContain('둘째 문장');expect(interior).toContain('• 확인할 내용');
@@ -233,7 +245,7 @@ describe('native editable Notion manuscript PPTX',()=>{
       const cover=strFromU8(files['ppt/slides/slide1.xml']),title=nativeShape(cover,style==='B'?'cover-question':'cover-title'),sub=nativeShape(cover,'cover-caption'),note=nativeShape(cover,'cover-footer');
       expect(nativePlain(sub.xml)).toBe(caption.replaceAll(/\s/g,''));expect(nativePlain(note.xml)).toBe((footnote+sourceLabel).replaceAll(/\s/g,''));
       expect(title.y+title.h).toBeLessThanOrEqual(sub.y-6);expect(sub.y+sub.h).toBeLessThan(note.y);
-      expect(note.y+note.h).toBeLessThanOrEqual(style==='B'?1143:1078);expect(note.xml).toContain('typeface="Noto Sans KR"');
+      expect(note.y+note.h).toBeLessThanOrEqual(style==='B'?1143:1078);expect(note.xml).toContain('typeface="Noto Sans Kr"');
       for(const i of [2,3]){
         const source=strFromU8(files[`ppt/slides/slide${i}.xml`]),body=nativeShape(source,`page-${i}-body`),footer=nativeShape(source,`page-${i}-footer`);
         expect(nativePlain(footer.xml)).toBe((footnote+sourceLabel).replaceAll(/\s/g,''));expect(body.y+body.h).toBeLessThan(footer.y);expect(footer.y+footer.h).toBeLessThan(1202);
