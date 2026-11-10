@@ -557,18 +557,24 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       try{model=interiorTemplateElements(page.interiorTemplate,body,accent,(value,size,bold)=>loadReadingFont('Noto Sans KR',bold?700:400).measure(value,size));}
       catch(error){if(error instanceof NotionAdmissionsLayoutError)invalid(`${index+1}장 ${error.message}`);throw error;}
       const subtitle=[page.interiorSubtitle,model.intro].filter(Boolean).join(' · ');
+      // Reserve the fitted notes before placing artwork. A multi-line source
+      // footer must not be squeezed into the one-line template's fixed space.
+      const footerFit=footer?fit(footer,952,200,20,16,false,`page-${index+1}-footer`):undefined;
+      const footerHeight=Math.max(70,Math.ceil(footerFit?footerFit.lines.length*footerFit.lineHeight:0));
+      const footerY=1286-footerHeight,contentBottom=Math.min(1196,footerY-20),contentHeight=contentBottom-336,contentScale=contentHeight/860;
       if(document.category)text('page-category',document.category,64,64,470,32,22,20,INK,true);
       text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,660,64,150,32,20,20,'#555555');
       image(logo,826,64,190,40,'contain');rect('section-accent',64,104,64,5,accent);
       text(`page-${index+1}-title`,page.title,64,122,952,112,46,40,INK,true,page.emphasis,'l',1.2);
       text('interior-subtitle',subtitle,64,244,952,page.interiorTemplate==='timeline'?36:64,26,20,INK,false,page.emphasis,'l',1.2);
-      if(page.interiorTemplate==='image_text')image(media.get(page.imageId!)!,64,336,440,860,'contain');
-      for(const [elementIndex,element]of model.elements.entries()){
+      if(page.interiorTemplate==='image_text')image(media.get(page.imageId!)!,64,336,440,contentHeight,'contain');
+      for(const [elementIndex,original]of model.elements.entries()){
         if(elementIndex>0&&elementIndex%16===0)await yieldToEventLoop();
+        const element=contentScale<1&&original.y>=336?{...original,y:336+(original.y-336)*contentScale,height:original.height*contentScale}:original;
         if(element.kind==='rect')rect(element.name,element.x,element.y,element.width,element.height,element.fill,false,element.pill);
         else if(element.kind==='text')text(element.name,element.content,element.x,element.y,element.width,element.height,element.max,element.min,element.ink,element.bold,page.emphasis,element.align,element.leading,element.verticalAlign);
       }
-      text(`page-${index+1}-footer`,footer,64,1216,952,70,20,16,'#555555');
+      text(`page-${index+1}-footer`,footer,64,footerY,952,footerHeight,20,16,'#555555');
     } else {
      if(page.infographic==='admissions_calendar'||page.infographic==='institution_schedule'||page.infographic==='admissions_logo_calendar'||page.infographic==='admissions_guide'||page.infographic==='admissions_timeline'){
       const calendar=page.infographic==='admissions_calendar'||page.infographic==='admissions_logo_calendar',guide=page.infographic==='admissions_guide',timeline=page.infographic==='admissions_timeline';
