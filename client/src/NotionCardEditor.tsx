@@ -95,8 +95,8 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
     <nav className="notion-card-strip" aria-label="카드 선택">{pageTitles.map((title,i)=><button type="button" key={i} aria-pressed={pageIndex===i} onClick={()=>setSelected(i)}><span>{String(i+1).padStart(2,'0')} · {i===0?'표지':i<coreCount?'본문':i<coreCount+sourceCount?'원문':i===pageTitles.length-1?'소개':'예고'}</span><strong>{title||'제목 입력'}</strong></button>)}</nav>
     <div className="notion-card-workbench">
       <div className="notion-card-visual"><div className="row between"><button className="btn sm" disabled={pageIndex===0} onClick={()=>setSelected(pageIndex-1)}>이전 카드</button><span>{pageIndex+1} / {pageTitles.length}</span><button className="btn sm" disabled={pageIndex===pageTitles.length-1} onClick={()=>setSelected(pageIndex+1)}>다음 카드</button></div>
-        <div className="notion-card-image" aria-busy={previewBusy}>{preview&&<img src={preview.url} alt={`${pageIndex+1}장 디자인 미리보기`} className={preview.signature===signature?'':'is-stale'}/>} {!preview&&<p className="muted">{previewBusy?'카드 미리보기 만드는 중…':'미리보기를 확인해 주세요.'}</p>}{safeArea&&<span className="notion-card-safe-area" aria-hidden="true"/>}</div>
-        <label className="notion-toggle small"><input type="checkbox" checked={safeArea} onChange={event=>setSafeArea(event.target.checked)}/>안전영역 표시</label>
+        <div className="notion-card-image" aria-busy={previewBusy}>{preview&&<img src={preview.url} alt={`${pageIndex+1}장 디자인 미리보기`} className={preview.signature===signature?'':'is-stale'}/>} {!preview&&<p className="muted">{previewBusy?'카드 미리보기 만드는 중…':'미리보기를 확인해 주세요.'}</p>}{pageIndex===0&&safeArea&&<span className="notion-card-safe-area" aria-hidden="true"/>}</div>
+        {pageIndex===0&&<label className="notion-toggle small"><input type="checkbox" checked={safeArea} onChange={event=>setSafeArea(event.target.checked)}/>안전영역 표시</label>}
         <p className="small muted" role="status">{previewBusy?'수정한 문구로 미리보기 갱신 중…':preview?.signature===signature?'현재 입력을 반영한 미리보기':'미리보기에 아직 반영되지 않은 변경이 있습니다.'}</p>
         {!!previewError&&<ErrorBox error={previewError} retry={()=>setRetry(value=>value+1)}/>}<p className="small muted">캔바 전송과 같은 배치·글자 크기·QR을 사용합니다. 캔바에서 편집한 결과와 줄바꿈은 다를 수 있어요.</p>
       </div>
@@ -115,3 +115,4 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
     </div>
   </section>;
 }
+
