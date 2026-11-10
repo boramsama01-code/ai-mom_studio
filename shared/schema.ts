@@ -610,6 +610,7 @@ export const notionSyncLinks = pgTable('notion_sync_links', {
   coverStyle: text('cover_style').notNull().default('A'),
   autoSync: boolean('auto_sync').notNull().default(true), lastCheckedAt:ts('last_checked_at'),
   canva: jsonb('canva').$type<import('./notionStudio').NotionCanvaState>().notNull().default({phase:'idle'}),
+  canvaAutoSave: jsonb('canva_auto_save').$type<import('./notionStudio').NotionCanvaAutoSaveStored>().notNull().default({enabled:true,phase:'idle'}),
   operationToken: text('operation_token'), operationUntil: ts('operation_until'),
   lastError: text('last_error'), version: integer('version').notNull().default(1),
   lastSyncedAt: ts('last_synced_at').notNull().defaultNow(), createdAt:createdAt(),updatedAt:updatedAt(),

@@ -11,12 +11,16 @@ import {useDirtyGuard} from './state';
 import {useDraftRecovery} from './useDraftRecovery';
 import {RecoveryNotice} from './RecoveryNotice';
 import {ErrorBox} from './ui';
+import {canvaEditUrl,latestCanvaReady} from './notionCanvaAutoSave';
 import {z} from 'zod';
 
 type Draft={copy:CardCopy;designEdits:NotionDesignEdits;interiorInputs?:InteriorInputs};
 const initial=(data:NotionStudioDetail):Draft=>({copy:structuredClone(data.copy),designEdits:structuredClone(data.designEdits??{emphasisByPage:{}})});
 const stable=(value:unknown):string=>JSON.stringify(value,(_key,entry)=>entry&&typeof entry==='object'&&!Array.isArray(entry)?Object.fromEntries(Object.entries(entry).sort(([a],[b])=>a.localeCompare(b))):entry);
 const same=(a:unknown,b:unknown)=>stable(a)===stable(b);
+// Canva queue/job receipts advance the link version without changing artwork.
+// Refresh request versions while keeping the operator's draft in that case.
+const editableBaseline=(data:NotionStudioDetail)=>({itemVersion:data.itemVersion,copy:data.copy,designEdits:data.designEdits??{emphasisByPage:{}},source:data.source,photos:data.photos,coverStyle:data.link.coverStyle,sourceHash:data.link.sourceHash});
 function incompatibleInteriorPages(data:NotionStudioDetail,draft:Draft):number[]{
   return draft.copy.pages.flatMap((page,index)=>{
     const source=data.source.pages[index+1],key=source?.key??`page:${index+2}`,template=draft.designEdits.templateByPage?.[key];
@@ -61,7 +65,8 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
   const recovery=useDraftRecovery<Draft>({recoveryKey:`notion:${data.link.id}:visual-copy`,label:'카드 편집',version:base.itemVersion,value:draft,serverValue:initial(base),dirty,ready:true,parse:recoveryDraft,onRestore:put});
   const recoveryRef=useRef(recovery);recoveryRef.current=recovery;
   useEffect(()=>{
-    if(data.itemVersion===baseRef.current.itemVersion&&data.link.version===baseRef.current.link.version)return;
+    if(data.itemVersion<baseRef.current.itemVersion||(data.itemVersion===baseRef.current.itemVersion&&data.link.version<baseRef.current.link.version))return;
+    if(same(editableBaseline(data),editableBaseline(baseRef.current))){baseRef.current=data;setBase(data);setRemote(null);return;}
     if(!same(draftRef.current,initial(baseRef.current))||recoveryRef.current.pending)setRemote(data);else adopt(data);
   },[data]);
   const sourcePages=base.source.pages,coreCount=draft.copy.pages.length+1,sourceCount=notionSourceReferencePageCount(base.source.sourceReferences);
@@ -111,7 +116,7 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
     setSaving(true);setSaveError(null);
     try{
       const result=await api<NotionStudioDetail>(`/notion/links/${current.link.id}/copy`,{method:'PATCH',body:{version:current.link.version,itemVersion:current.itemVersion,copy:snapshot.copy,designEdits:snapshot.designEdits}});
-      baseRef.current=result;setBase(result);if(same(draftRef.current,snapshot)){recoveryRef.current.clear();put(initial(result));}setRemote(null);setSavedMessage('스튜디오에 저장했습니다. 캔바에는 아래 새 디자인 만들기로 적용하세요.');
+      baseRef.current=result;setBase(result);if(same(draftRef.current,snapshot)){recoveryRef.current.clear();put(initial(result));}setRemote(null);setSavedMessage(result.link.canvaAutoSave?.enabled?['failed','blocked'].includes(result.link.canvaAutoSave.phase)?'스튜디오에 저장했습니다. 캔바 자동 저장은 아래 상태를 확인해 주세요.':'스튜디오에 저장했습니다. 잠시 뒤 캔바에 편집 가능한 디자인으로 자동 저장됩니다.':'스튜디오에 저장했습니다. 캔바에는 아래 새 디자인 만들기로 적용하세요.');
       qc.setQueryData(['notion-link',result.link.id],result);void qc.invalidateQueries({queryKey:['notion-links']});void qc.invalidateQueries({queryKey:['studio']});void qc.invalidateQueries({queryKey:['card-copy',result.link.channelId,result.link.itemId]});return true;
     }catch(error){setSaveError(error);if(error instanceof ApiError&&error.status===409){const detail=error.body.detail;if(detail&&typeof detail==='object'&&'link' in detail)setRemote(detail as NotionStudioDetail);}throw error;}
     finally{setSaving(false);}
@@ -120,12 +125,12 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
   useEffect(()=>{const key=`notion-visual-${data.link.id}`;guard.setDirty(key,dirty||saving||!!recovery.pending,async()=>{if(disabled||remote)return false;try{return await saveRef.current();}catch{return false;}},()=>{recoveryRef.current.clear();put(initial(baseRef.current));});return()=>guard.setDirty(key,false);},[data.link.id,dirty,saving,recovery.pending,disabled,remote,guard]);
   useEffect(()=>{onDirtyChange(dirty||saving||!!recovery.pending||!!remote);},[dirty,saving,recovery.pending,remote,onDirtyChange]);
   useEffect(()=>()=>onDirtyChange(false),[onDirtyChange]);
-  const signature=stable({copy:draft.copy,designEdits:draft.designEdits,page:pageIndex,version:base.link.version,itemVersion:base.itemVersion});
+  const signature=stable({copy:draft.copy,designEdits:draft.designEdits,page:pageIndex,baseline:editableBaseline(base)});
   useEffect(()=>{
     if(!valid||!protectedValid||remote||waitingForInterior||waitingForPhoto){setPreviewBusy(false);if(waitingForInterior||waitingForPhoto)setPreviewError(null);return;}
     const controller=new AbortController();let live=true;setPreviewBusy(true);setPreviewError(null);
     const timer=window.setTimeout(async()=>{
-      try{const blob=await apiBlob(`/notion/links/${base.link.id}/preview`,'image/jpeg',{method:'POST',body:{version:base.link.version,itemVersion:base.itemVersion,copy:draft.copy,designEdits:draft.designEdits,page:pageIndex},signal:controller.signal,parseErrorJson:true});if(!live)return;const url=URL.createObjectURL(blob);if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);previewUrl.current=url;setPreview({url,signature});}
+      try{const current=baseRef.current;const blob=await apiBlob(`/notion/links/${current.link.id}/preview`,'image/jpeg',{method:'POST',body:{version:current.link.version,itemVersion:current.itemVersion,copy:draft.copy,designEdits:draft.designEdits,page:pageIndex},signal:controller.signal,parseErrorJson:true});if(!live)return;const url=URL.createObjectURL(blob);if(previewUrl.current)URL.revokeObjectURL(previewUrl.current);previewUrl.current=url;setPreview({url,signature});}
       catch(error){if(live&&!controller.signal.aborted)setPreviewError(error instanceof ApiError&&error.message.startsWith('파일 요청 실패')?new Error(`카드 미리보기 응답을 받지 못했습니다 (HTTP ${error.status}). 원고는 유지했습니다. 잠시 후 다시 시도해 주세요.`):error);}finally{if(live)setPreviewBusy(false);}
     },450);return()=>{live=false;window.clearTimeout(timer);controller.abort();};
   },[signature,valid,protectedValid,remote,retry,waitingForInterior,waitingForPhoto]);
@@ -134,7 +139,7 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
   const visibleReferences=sourceGroup>=0&&sourceGroup<sourceCount?base.source.sourceReferences?.slice(sourceGroup*4,sourceGroup*4+4):undefined;
   const bodyEditor=<label className="field">{pageIndex===0?'표지 설명':'카드 본문'}<textarea aria-label={pageIndex===0?'표지 설명':'카드 본문'} rows={pageIndex===0?5:10} value={body} disabled={locked||!protectedValid} onChange={event=>change('body',event.target.value)}/><span className="small muted">{[...combined].length} / {pageIndex===0?120:1000}자 · 노션 소제목 포함</span></label>;
   return <section className="notion-card-editor stack" aria-label="카드 보며 수정">
-    <header className="row between"><div><h3>카드 보며 수정</h3><p className="small muted">문구를 바꾸면 미리보기에 반영됩니다. 저장 후 캔바 디자인을 새로 만들 수 있어요.</p></div><span className="badge">{dirty?'저장하지 않은 변경':`저장본 · ${pageTitles.length}장`}</span></header>
+    <header className="row between"><div><h3>카드 보며 수정</h3><p className="small muted">{base.link.canvaAutoSave?.enabled?'문구를 바꾸면 미리보기에 반영됩니다. 저장한 원고와 페이지별 템플릿은 캔바에 자동 저장됩니다.':'문구를 바꾸면 미리보기에 반영됩니다. 저장 후 캔바 디자인을 새로 만들 수 있어요.'}</p></div><span className="badge">{dirty?'저장하지 않은 변경':`저장본 · ${pageTitles.length}장`}</span></header>
     {base.link.coverStyle==='A'&&!base.photos.length&&<p className="notice warn" role="alert">A형 표지에 사용할 사진이 없습니다. 현재는 검정 배경으로 표시됩니다. 노션의 ‘사진 원본’에 사진을 올린 뒤 ‘노션 → 스튜디오 적용’으로 가져오세요.</p>}
     <RecoveryNotice recovery={recovery}/>
     {remote&&<div className="notice warn stack" role="alert"><strong>다른 곳에서 새 버전을 저장했습니다. 입력한 문구는 그대로 유지했습니다.</strong><p>최신 저장본을 불러오기 전에 필요한 문구를 복사해 두세요.</p><button className="btn" onClick={()=>guard.confirmLeave(()=>{recovery.clear();adopt(remote);})}>최신 저장본 불러오기</button></div>}
@@ -158,7 +163,8 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
       {!valid&&<p className="notice warn" role="alert">제목·본문을 채우고 입력 길이를 확인해 주세요. 문구는 자르지 않았습니다.</p>}
       {pendingInputs&&<div className="notice stack" role="status"><p>아직 적용하지 않은 구성 입력이 있어요. 해당 템플릿에서 ‘내용 적용’을 누른 뒤 저장해 주세요.</p><button type="button" className="btn sm" disabled={locked} onClick={()=>{const next={...draftRef.current};delete next.interiorInputs;put(next);}}>미적용 구성 입력 취소</button></div>}
       <div className="row"><button className="btn primary" disabled={!dirty||locked||!valid||!protectedValid||pendingInputs||waitingForInterior||waitingForPhoto} onClick={()=>void save().catch(()=>undefined)}>{saving?'저장 중…':'스튜디오에 저장'}</button><button className="btn" disabled={!dirty||saving} onClick={()=>guard.confirmLeave(()=>{recovery.clear();put(initial(baseRef.current));setSaveError(null);})}>수정 취소</button></div>
-      {savedMessage&&<p className="notice" role="status">{savedMessage}</p>}{!!saveError&&<ErrorBox error={saveError}/>}<p className="small muted">{base.link.autoSync?'저장한 원고는 켜져 있는 자동 동기화에 따라 노션에도 반영됩니다.':'노션에는 ‘스튜디오 → 노션 반영’으로 적용합니다.'} 내지 템플릿·사진·강조문구는 스튜디오에 저장합니다. 캔바 완성본은 아래 새 디자인 만들기로 적용합니다.</p>
+      {savedMessage&&<p className="notice" role="status">{savedMessage}</p>}{!!saveError&&<ErrorBox error={saveError}/>}<p className="small muted">{base.link.autoSync?'저장한 원고는 켜져 있는 자동 동기화에 따라 노션에도 반영됩니다.':'노션에는 ‘스튜디오 → 노션 반영’으로 적용합니다.'} {base.link.canvaAutoSave?.enabled?'저장한 원고·내지 설정으로 표지와 모든 페이지를 하나의 편집 가능한 캔바 작업본으로 만듭니다.':'내지 템플릿·사진·강조문구는 스튜디오에 저장합니다. 캔바 완성본은 아래 새 디자인 만들기로 적용합니다.'}</p>
+      {base.link.canvaAutoSave?.enabled&&latestCanvaReady(base)&&<a className="btn" href={canvaEditUrl(base.link)} target="_blank" rel="noreferrer">캔바에서 이어서 편집 ↗</a>}
       </div>
     </div>
   </section>;

@@ -1,3 +1,4 @@
+import { startNotionCanvaSave, stopNotionCanvaSave } from './worker/notionCanva';
 import { startCanvaJobs, stopCanvaJobs } from "./worker/canva";
 import { startNotionSync, stopNotionSync } from "./worker/notion";
 import { startCanvaLibrary, stopCanvaLibrary } from "./worker/canvaLibrary";
@@ -39,6 +40,7 @@ async function main() {
       startCanvaJobs(getDb());
       startCanvaLibrary(getDb());
       startNotionSync(getDb());
+      startNotionCanvaSave(getDb());
     } catch (e) {
       console.error("DB 준비 실패:", describeDbError(e));
       if (env.isProduction) process.exit(1);
@@ -65,7 +67,7 @@ async function main() {
     try {
       const connectionsClosed = new Promise<void>(resolve => server.close(() => resolve()));
       server.closeIdleConnections();
-      await Promise.allSettled([stopInlinePublish(), stopInlineStudio(), stopInlineCollect(), stopCanvaJobs(), stopCanvaLibrary(), stopNotionSync()]);
+      await Promise.allSettled([stopInlinePublish(), stopInlineStudio(), stopInlineCollect(), stopCanvaJobs(), stopCanvaLibrary(), stopNotionSync(), stopNotionCanvaSave()]);
       await connectionsClosed;
       await closeDb();
       clearTimeout(deadline);

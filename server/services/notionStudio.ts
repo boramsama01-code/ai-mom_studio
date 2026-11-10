@@ -5,6 +5,7 @@ import {and,desc,eq,inArray,sql} from 'drizzle-orm';
 import type {DB} from '../db';
 import {channels,contentItems,contentRevisions,notionSyncLinks,notionSyncPhotos,studioCards} from '../../shared/schema';
 import {type CardCopy} from '../../shared/cardCopy';
+import {studioKey} from '../../shared/channelKeys';
 import type {NotionDocument} from '../../shared/notionSync';
 import {notionDesignEditsSchema,type NotionDesignEdits,type NotionStudioDetail,type NotionStudioLink} from '../../shared/notionStudio';
 import {notionDocumentToCopy,notionCopyText,notionCopyToPages,notionSyncChange,notionPlainCardCopy} from '../../shared/notionStudioCopy';
@@ -15,6 +16,7 @@ import {audit} from '../audit';
 import {createRevision} from '../content';
 import {fetchNotionDocument,downloadNotionPhoto,updateNotionDocument,patchNotionDocumentProperties,withNotionWriteLease} from './notionClient';
 import {validateInteriorTemplateBody} from './notionInteriorTemplates';
+import {publicNotionCanvaAutoSave,queuedNotionCanvaAutoSave} from './notionCanvaAutoSave';
 
 type Link=typeof notionSyncLinks.$inferSelect;
 type PreparedPhoto={sourceKey:string;name:string;mimeType:string;bytes:Buffer;sha256:string;width:number;height:number};
@@ -22,6 +24,7 @@ const hash=(v:unknown)=>crypto.createHash('sha256').update(JSON.stringify(v)).di
 export const notionCopyHash=(copy:CardCopy)=>hash(notionCopyText(copy));
 function snapshot(doc:NotionDocument){return {...doc,photos:doc.photos.map(({key,name})=>({key,name}))} as unknown as Record<string,unknown>;}
 function sourceSnapshot(link:Link){return link.sourceSnapshot as unknown as NotionDocument;}
+function renderedSource(document:NotionDocument){return {category:document.category,sourceCard:document.sourceCard,sourceReferences:document.sourceReferences,teaser:document.teaser,pages:document.pages.map(page=>({infographic:page.infographic,emphasis:page.emphasis,subtitle:page.cardFields?.subtitle,footnote:page.cardFields?.footnote,sourceLabel:page.cardFields?.sourceLabel}))};}
 export function notionDesignEdits(payload:Record<string,unknown>):NotionDesignEdits{return notionDesignEditsSchema.parse(payload.notionDesignEdits??{emphasisByPage:{}});}
 export function notionDesignPageKey(page:Pick<NotionDocument['pages'][number],'cardRowId'|'headingBlockId'>,index:number){return page.cardRowId||page.headingBlockId||`page:${index+1}`;}
 function readCopy(value:unknown){try{return notionPlainCardCopy(value);}catch{throw new HttpError(409,'이 연결은 일반 카드뉴스 원고용입니다. 원고 형식을 바꾼 경우 새 연결로 가져와 주세요.',{code:'notion_copy_format_changed'});}}
@@ -32,11 +35,12 @@ async function state(db:DB,id:number){
  const [card]=await db.select({id:studioCards.id,trashedAt:studioCards.trashedAt}).from(studioCards).where(eq(studioCards.sourceItemId,link.contentItemId));
  if(!item||!revision)throw new HttpError(409,'연결된 스튜디오 원고를 찾을 수 없습니다.');
  if(card?.trashedAt)throw new HttpError(409,'휴지통의 콘텐츠입니다. 스튜디오에서 복원한 뒤 동기화하세요.');
- return {link,item,revision,card,copy:readCopy(revision.payload.cardCopy)};
+ const [channel]=await db.select({slug:channels.slug}).from(channels).where(eq(channels.id,link.channelId));
+ return {link,item,revision,card,copy:readCopy(revision.payload.cardCopy),canvaAutoSaveSupported:!!channel&&studioKey(channel.slug)==='highscoop'};
 }
 function linkDto(s:Awaited<ReturnType<typeof state>>):NotionStudioLink{
  const {link,item,copy,card}=s;
- return {id:link.id,version:link.version,pageId:link.notionPageId,notionUrl:link.notionUrl,channelId:link.channelId,itemId:item.id,studioCardId:card?.id??null,title:item.title,sourceHash:link.sourceHash,lastEditedAt:link.sourceEditedAt,lastSyncedAt:link.lastSyncedAt.toISOString(),autoSync:link.autoSync,lastCheckedAt:link.lastCheckedAt?.toISOString()??null,coverStyle:link.coverStyle as 'A'|'B'|'C',status:notionCopyHash(copy)===link.baseCopyHash?'synced':'studio_changed',studioUrl:`${env.baseUrl}/notion?link=${link.id}`,canva:link.canva,photoCount:link.photoOrder.length};
+ return {id:link.id,version:link.version,pageId:link.notionPageId,notionUrl:link.notionUrl,channelId:link.channelId,itemId:item.id,studioCardId:card?.id??null,title:item.title,sourceHash:link.sourceHash,lastEditedAt:link.sourceEditedAt,lastSyncedAt:link.lastSyncedAt.toISOString(),autoSync:link.autoSync,lastCheckedAt:link.lastCheckedAt?.toISOString()??null,coverStyle:link.coverStyle as 'A'|'B'|'C',status:notionCopyHash(copy)===link.baseCopyHash?'synced':'studio_changed',studioUrl:`${env.baseUrl}/notion?link=${link.id}`,canva:{...link.canva,currentSource:['ready','complete'].includes(link.canva.phase)&&link.canva.currentSource!==false&&link.canva.sourceRevisionId===s.revision.id&&link.canva.sourceVersion===item.version},canvaAutoSave:publicNotionCanvaAutoSave(s.canvaAutoSaveSupported?link.canvaAutoSave:{enabled:false,phase:'idle'}),canvaAutoSaveSupported:s.canvaAutoSaveSupported,photoCount:link.photoOrder.length};
 }
 export async function notionStudioDetail(db:DB,id:number,refresh=false):Promise<NotionStudioDetail>{
  let s=await state(db,id);
@@ -103,7 +107,8 @@ export async function importNotionStudio(db:DB,input:{pageId:string;channelId:nu
   const [item]=await tx.insert(contentItems).values({channelId:ch.id,kind:ch.contentType,origin:'manual',title:doc.title||copy.cover.title,topicKey:`notion:${doc.pageId}`,relevance:'relevant',evidenceStatus:'needs_review',scheduleStatus:'not_applicable'}).returning();
   const [link]=await tx.insert(notionSyncLinks).values({notionPageId:doc.pageId,notionUrl:doc.url,channelId:ch.id,contentItemId:item.id,sourceHash:doc.sourceHash,baseCopyHash:notionCopyHash(copy),sourceEditedAt:doc.lastEditedAt,sourceSnapshot:snapshot(doc),coverStyle:input.coverStyle}).returning();
   const photoOrder=await storePhotos(tx,link.id,prepared);await tx.update(notionSyncLinks).set({photoOrder}).where(eq(notionSyncLinks.id,link.id));
-  await createRevision(tx,{contentItemId:item.id,author:'operator',payload:{...emptyPayload(ch.contentType,item.title),cardCopy:copy,notion:{pageId:doc.pageId,sourceHash:doc.sourceHash,url:doc.url}},note:'노션 원고 직접 가져오기 · 원문과 사진 보존'});
+  const revision=await createRevision(tx,{contentItemId:item.id,author:'operator',payload:{...emptyPayload(ch.contentType,item.title),cardCopy:copy,notion:{pageId:doc.pageId,sourceHash:doc.sourceHash,url:doc.url}},note:'노션 원고 직접 가져오기 · 원문과 사진 보존'});
+  await tx.update(notionSyncLinks).set({canvaAutoSave:studioKey(ch.slug)==='highscoop'?queuedNotionCanvaAutoSave(link.canvaAutoSave,revision.id,item.version):{enabled:false,phase:'idle'}}).where(eq(notionSyncLinks.id,link.id));
   await audit(tx,{actor,action:'notion_import',entity:'content_item',entityId:item.id,channelId:ch.id,detail:{pageId:doc.pageId,photos:photoOrder.length}});return link.id;
  });
  // Link writeback is secondary: a missing Notion write capability must never create a second Studio draft on retry.
@@ -129,9 +134,9 @@ export async function pullNotionStudio(db:DB,id:number,input:SyncRequest,actor:s
    ...(designEdits.templateByPage?{templateByPage:Object.fromEntries(Object.entries(designEdits.templateByPage).filter(([key])=>interiorKeys.has(key)))}:{}),
    ...(designEdits.photoByPage?{photoByPage:Object.fromEntries(Object.entries(designEdits.photoByPage).filter(([key])=>interiorKeys.has(key)))}:{}),
   };
-  await createRevision(tx,{contentItemId:current.item.id,author:'operator',payload:{...current.revision.payload,cardCopy:copy,...(current.revision.payload.notionDesignEdits?{notionDesignEdits:survivingEdits}:{}),notion:{pageId:fresh.pageId,sourceHash:fresh.sourceHash,url:fresh.url}},note:'노션 변경 적용 · 이전 원고는 기록에 보존'});
+  const revision=await createRevision(tx,{contentItemId:current.item.id,author:'operator',payload:{...current.revision.payload,cardCopy:copy,...(current.revision.payload.notionDesignEdits?{notionDesignEdits:survivingEdits}:{}),notion:{pageId:fresh.pageId,sourceHash:fresh.sourceHash,url:fresh.url}},note:'노션 변경 적용 · 이전 원고는 기록에 보존'});
   await tx.update(contentItems).set({title:fresh.title||copy.cover.title,version:current.item.version+1,updatedAt:new Date()}).where(eq(contentItems.id,current.item.id));
-  await tx.update(notionSyncLinks).set({sourceHash:fresh.sourceHash,baseCopyHash:notionCopyHash(copy),sourceEditedAt:fresh.lastEditedAt,sourceSnapshot:snapshot(fresh),photoOrder,lastSyncedAt:new Date(),updatedAt:new Date(),version:current.link.version+1,lastError:null}).where(eq(notionSyncLinks.id,id));
+  await tx.update(notionSyncLinks).set({sourceHash:fresh.sourceHash,baseCopyHash:notionCopyHash(copy),sourceEditedAt:fresh.lastEditedAt,sourceSnapshot:snapshot(fresh),photoOrder,lastSyncedAt:new Date(),updatedAt:new Date(),version:current.link.version+1,lastError:null,canva:{...current.link.canva,currentSource:false},canvaAutoSave:current.canvaAutoSaveSupported?queuedNotionCanvaAutoSave(current.link.canvaAutoSave,revision.id,current.item.version+1):{enabled:false,phase:'idle'}}).where(eq(notionSyncLinks.id,id));
   await audit(tx,{actor,action:'notion_pull',entity:'content_item',entityId:current.item.id,channelId:current.link.channelId});
  });return notionStudioDetail(db,id);
 }
@@ -168,14 +173,31 @@ export async function pushNotionStudio(db:DB,id:number,input:SyncRequest,actor:s
   if(!isDeepStrictEqual(freshFiles,photoFiles(updated)))throw new HttpError(409,'노션에 원고는 반영됐지만 사진이 바뀌었습니다. 최신 노션 사진을 다시 확인해 동기화해 주세요.',{code:'notion_source_changed'});
   await db.transaction(async raw=>{const tx=raw as unknown as DB;const [current]=await tx.select().from(notionSyncLinks).where(eq(notionSyncLinks.id,id)).for('update');if(current.operationToken!==token)throw new HttpError(409,'노션에는 반영됐지만 연결 상태가 바뀌었습니다. 양쪽 원고를 다시 확인하세요.');
    const photoOrder=prepared===undefined?current.photoOrder:await storePhotos(tx,id,prepared);
-   await tx.update(notionSyncLinks).set({sourceHash:updated.sourceHash,baseCopyHash:notionCopyHash(initial.copy),sourceEditedAt:updated.lastEditedAt,sourceSnapshot:snapshot(updated),photoOrder,lastSyncedAt:new Date(),updatedAt:new Date(),version:current.version+1,operationToken:null,operationUntil:null,lastError:null}).where(eq(notionSyncLinks.id,id));
+   const visualChanged=!isDeepStrictEqual(photoOrder,current.photoOrder)||!isDeepStrictEqual(renderedSource(updated),renderedSource(sourceSnapshot(current)));
+   await tx.update(notionSyncLinks).set({sourceHash:updated.sourceHash,baseCopyHash:notionCopyHash(initial.copy),sourceEditedAt:updated.lastEditedAt,sourceSnapshot:snapshot(updated),photoOrder,lastSyncedAt:new Date(),updatedAt:new Date(),version:current.version+1,operationToken:null,operationUntil:null,lastError:null,...(visualChanged?{canva:{...current.canva,currentSource:false},canvaAutoSave:initial.canvaAutoSaveSupported?queuedNotionCanvaAutoSave(current.canvaAutoSave,initial.revision.id,initial.item.version):{enabled:false,phase:'idle'}}:{})}).where(eq(notionSyncLinks.id,id));
    await audit(tx,{actor,action:'notion_push',entity:'content_item',entityId:initial.item.id,channelId:initial.link.channelId});
   });
  }catch(e){await db.update(notionSyncLinks).set({operationToken:null,operationUntil:null,lastError:(e as Error).message.slice(0,500)}).where(and(eq(notionSyncLinks.id,id),eq(notionSyncLinks.operationToken,token)));throw e;}
  return notionStudioDetail(db,id);
 }
-export async function setNotionStudioStyle(db:DB,id:number,input:{version:number;coverStyle?:'A'|'B'|'C';autoSync?:boolean}){
- const updated=await db.update(notionSyncLinks).set({...(input.coverStyle?{coverStyle:input.coverStyle}:{}),...(input.autoSync!==undefined?{autoSync:input.autoSync}:{}),version:input.version+1,updatedAt:new Date()}).where(and(eq(notionSyncLinks.id,id),eq(notionSyncLinks.version,input.version))).returning({id:notionSyncLinks.id});if(!updated.length)throw new HttpError(409,'연결 설정이 바뀌었습니다. 새로고침해 주세요.');return notionStudioDetail(db,id);
+export async function setNotionStudioStyle(db:DB,id:number,input:{version:number;coverStyle?:'A'|'B'|'C';autoSync?:boolean;canvaAutoSave?:boolean}){
+ await db.transaction(async raw=>{const tx=raw as unknown as DB,initial=await state(tx,id);
+  await tx.select({id:contentItems.id}).from(contentItems).where(eq(contentItems.id,initial.item.id)).for('update');
+  await tx.select({id:notionSyncLinks.id}).from(notionSyncLinks).where(eq(notionSyncLinks.id,id)).for('update');
+  const current=await state(tx,id);if(current.link.version!==input.version)throw new HttpError(409,'연결 설정이 바뀌었습니다. 새로고침해 주세요.');
+  const coverChanged=input.coverStyle!==undefined&&input.coverStyle!==current.link.coverStyle;
+  if(input.canvaAutoSave===true&&!current.canvaAutoSaveSupported)throw new HttpError(422,'Canva 자동 저장은 하이스쿱에 연결한 원고에서 사용할 수 있습니다.');
+  let automatic=current.canvaAutoSaveSupported?current.link.canvaAutoSave:{enabled:false,phase:'idle' as const};
+  if(input.canvaAutoSave===false){
+   const accepted=['importing','exporting'].includes(current.link.canva.phase);
+   automatic={...automatic,enabled:false,phase:accepted?'processing':'idle',error:null,leaseToken:undefined,leaseUntil:undefined};
+  }else if(input.canvaAutoSave===true||coverChanged){
+   automatic=queuedNotionCanvaAutoSave(automatic,current.revision.id,current.item.version,{...(input.canvaAutoSave===true?{enable:true}:{})});
+   if(['importing','exporting'].includes(current.link.canva.phase)&&current.link.canvaAutoSave.principal)automatic={...automatic,principal:current.link.canvaAutoSave.principal};
+   if(current.link.canva.phase==='result_unknown'&&automatic.enabled)automatic={...automatic,phase:'blocked',error:'이미 접수한 Canva 작업의 결과가 미확정입니다. 기존 작업 결과를 먼저 확인해 주세요.'};
+  }
+  await tx.update(notionSyncLinks).set({...(input.coverStyle?{coverStyle:input.coverStyle}:{}),...(input.autoSync!==undefined?{autoSync:input.autoSync}:{}),canvaAutoSave:automatic,...(coverChanged?{canva:{...current.link.canva,currentSource:false}}:{}),version:current.link.version+1,updatedAt:new Date()}).where(eq(notionSyncLinks.id,id));
+ });return notionStudioDetail(db,id);
 }
 export function validateNotionStudioDraft(s:Awaited<ReturnType<typeof state>>,copy:CardCopy,designEdits:NotionDesignEdits){
  const document=sourceSnapshot(s.link),parsed=notionPlainCardCopy(copy);
@@ -206,6 +228,7 @@ export async function saveNotionStudioDraft(db:DB,id:number,input:{version:numbe
   const payload={...current.revision.payload,cardCopy:copy,notionDesignEdits:input.designEdits};
   const revision=await createRevision(tx,{contentItemId:current.item.id,author:'operator',payload,note:'노션 연결 카드 미리보기 편집 · 원문·각주·QR·예고 보존'});
   await tx.update(contentItems).set({edited:payload,version:current.item.version+1,reviewStatus:current.item.reviewStatus==='reviewed'?'pending':current.item.reviewStatus,updatedAt:new Date()}).where(eq(contentItems.id,current.item.id));
+  await tx.update(notionSyncLinks).set({canva:{...current.link.canva,currentSource:false},canvaAutoSave:queuedNotionCanvaAutoSave(current.link.canvaAutoSave,revision.id,current.item.version+1)}).where(eq(notionSyncLinks.id,id));
   await audit(tx,{actor,action:'notion_edit_card_copy',entity:'content_item',entityId:current.item.id,channelId:current.item.channelId,detail:{revisionId:revision.id,pages:copy.pages.length+1}});
  });return notionStudioDetail(db,id);
 }

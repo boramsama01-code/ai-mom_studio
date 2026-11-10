@@ -190,6 +190,13 @@
       "when": 1794182400000,
       "tag": "0026_notion_sync",
       "breakpoints": true
+    },
+    {
+      "breakpoints": true,
+      "version": "7",
+      "tag": "0027_notion_canva_autosave",
+      "idx": 27,
+      "when": 1794268800000
     }
   ]
 }
