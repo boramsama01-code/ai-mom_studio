@@ -108,8 +108,15 @@ export function institutionScheduleElements(model:InstitutionSchedule):Admission
  const addRow=(values:string[],rowIndex:number,top:number,height:number,header=false)=>{
   let left=x;
   values.forEach((content,col)=>{
-   out.push({kind:'rect',name:`schedule-cell-${rowIndex}-${col}-background`,x:left+.5,y:top+.5,width:widths[col]-1,height:height-1,fill:header?'#F0EEEA':rowIndex%2?'#FFFFFF':'#FAF9F7'});
-   out.push({kind:'text',name:`schedule-cell-${rowIndex}-${col}-text`,content,x:left+12,y:top+8,width:widths[col]-24,height:height-16,max:header?26:28,min:26,ink:INK,bold:header||col===0,align:'ctr',verticalAlign:'middle',leading:1.2});
+   let cellHeight=height;
+   if(!header&&col===0&&model.headers[0]==='지역'&&content){
+    if(rowIndex>1&&model.rows[rowIndex-2][0]===content){left+=widths[col];return;}
+    let end=rowIndex;
+    while(end<model.rows.length&&model.rows[end][0]===content)end++;
+    cellHeight=height*(end-rowIndex+1);
+   }
+   out.push({kind:'rect',name:`schedule-cell-${rowIndex}-${col}-background`,x:left+.5,y:top+.5,width:widths[col]-1,height:cellHeight-1,fill:header?'#F0EEEA':rowIndex%2?'#FFFFFF':'#FAF9F7'});
+   out.push({kind:'text',name:`schedule-cell-${rowIndex}-${col}-text`,content,x:left+12,y:top+8,width:widths[col]-24,height:cellHeight-16,max:header?26:28,min:26,ink:INK,bold:header||col===0,align:'ctr',verticalAlign:'middle',leading:1.2});
    left+=widths[col];
   });
  };
