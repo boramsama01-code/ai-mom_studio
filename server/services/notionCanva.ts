@@ -297,9 +297,11 @@ function box(id:number,name:string,text:string,x:number,y:number,w:number,h:numb
   }).join('');
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${xml(name)}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"><a:noAutofit/></a:bodyPr><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`;
 }
-function rectangle(id:number,name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000) {
+function cornerRadius(w:number,h:number,pill:boolean,radius?:number){return Math.min(Math.min(w,h)/2,Math.max(0,radius??(pill?Math.min(w,h)/2:0)));}
+function rectangle(id:number,name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000,radius?:number) {
   const paint=gradient?'<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="000000"><a:alpha val="0"/></a:srgbClr></a:gs><a:gs pos="50000"><a:srgbClr val="000000"><a:alpha val="74000"/></a:srgbClr></a:gs><a:gs pos="100000"><a:srgbClr val="000000"><a:alpha val="100000"/></a:srgbClr></a:gs></a:gsLst><a:lin ang="5400000" scaled="1"/></a:gradFill>':`<a:solidFill><a:srgbClr val="${color(fill)}"><a:alpha val="${alpha}"/></a:srgbClr></a:solidFill>`;
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="${pill?'roundRect':'rect'}"><a:avLst>${pill?'<a:gd name="adj" fmla="val 50000"/>':''}</a:avLst></a:prstGeom>${paint}<a:ln><a:noFill/></a:ln></p:spPr></p:sp>`;
+  const rounded=cornerRadius(w,h,pill,radius),adjustment=Math.round(rounded/Math.min(w,h)*100000);
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="${rounded?'roundRect':'rect'}"><a:avLst>${rounded?`<a:gd name="adj" fmla="val ${adjustment}"/>`:''}</a:avLst></a:prstGeom>${paint}<a:ln><a:noFill/></a:ln></p:spPr></p:sp>`;
 }
 function outlinedRectangle(id:number,name:string,x:number,y:number,w:number,h:number,fill:string,stroke:string) {
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val 12000"/></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val="${color(fill)}"/></a:solidFill><a:ln w="${emu(1.5)}"><a:solidFill><a:srgbClr val="${color(stroke)}"/></a:solidFill></a:ln></p:spPr></p:sp>`;
@@ -402,11 +404,11 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     const previewShapes:string[]=[],previewing=options.previewPage===index;
     const visual=(name:string,markup:string)=>{if(previewing)previewShapes.push(`<g data-name="${xml(name)}">${markup}</g>`);};
     const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover',altText?:string)=>{({x,y,w,h}=coordinates(x,y,w,h));if(!options.previewOnly){const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,altText??item.file,rid,item,x,y,w,h,mode));}if(previewing)visual(item.file,`<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden"${altText?` aria-label="${xml(altText)}"`:''}><image width="${w}" height="${h}" preserveAspectRatio="xMidYMid ${mode==='contain'?'meet':'slice'}" href="data:image/${item.extension};base64,${item.bytes.toString('base64')}"/></svg>`);};
-    const rawRect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000)=>{
-      if(!options.previewOnly)shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill,alpha));
-      visual(name,`${gradient?'<defs><linearGradient id="bottom-fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset=".5" stop-color="#000000" stop-opacity=".74"/><stop offset="1" stop-color="#000000"/></linearGradient></defs>':''}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${pill?Math.min(w,h)/2:0}" fill="${gradient?'url(#bottom-fade)':fill}" fill-opacity="${alpha/100000}"/>`);
+    const rawRect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000,radius?:number)=>{
+      if(!options.previewOnly)shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill,alpha,radius));
+      visual(name,`${gradient?'<defs><linearGradient id="bottom-fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset=".5" stop-color="#000000" stop-opacity=".74"/><stop offset="1" stop-color="#000000"/></linearGradient></defs>':''}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${cornerRadius(w,h,pill,radius)}" fill="${gradient?'url(#bottom-fade)':fill}" fill-opacity="${alpha/100000}"/>`);
     };
-    const rect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000)=>{const b=coordinates(x,y,w,h);rawRect(name,b.x,b.y,b.w,b.h,fill,gradient,pill,alpha);};
+    const rect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000,radius?:number)=>{const b=coordinates(x,y,w,h);rawRect(name,b.x,b.y,b.w,b.h,fill,gradient,pill,alpha,radius);};
     const text=(name:string,content:string,x:number,y:number,w:number,h:number,max:number,min:number,ink=INK,bold=false,emphasis?:string,align:'l'|'ctr'='l',leading=1.3,verticalAlign:'top'|'middle'='top')=>{
       if(!content)return;
       ({x,y,w,h}=coordinates(x,y,w,h));
@@ -460,6 +462,15 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       }
     };
     const body=[page.body,...(page.bullets??[]).map(b=>`• ${b}`)].filter(Boolean).join('\n\n');
+    // Approved cover labels are filled rounded badges above the headline,
+    // with separate native text so they remain editable after Canva import.
+    const categoryBadge=(y:number,style:'A'|'C')=>{
+      if(!document.category)return;
+      const height=style==='A'?60:50,fontSize=style==='A'?36:30,radius=style==='A'?10:8;
+      const width=Math.min(888,Math.max(style==='A'?160:130,Math.ceil(loadReadingFont('Noto Sans KR',700).measure(document.category,fontSize))+52));
+      rect('cover-category-badge',96,y,width,height,accent,false,false,100000,radius);
+      text('cover-category',document.category,122,y,width-52,height,fontSize,24,'#181818',true,undefined,'ctr',1.2,'middle');
+    };
     // Metadata stays distinct from editorial copy. Every supplied note/source is
     // visible native text; an overfull footer fails instead of being discarded.
     const footer=[page.footnote,page.sourceLabel].filter(value=>value?.trim()).join('\n');
@@ -531,7 +542,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         const titleY=footer?650:730;
         const titleHeight=footer||captionHeight>55?Math.min(268,captionY-14-titleY):268;
         background='#000000';if(coverPhoto)image(coverPhoto,0,0,1080,1350);rect('bottom-black-fade',0,300,1080,778,'#000000',true);rect('bottom-black-base',0,1078,1080,272,'#000000');
-        if(document.category){rect('category-color',96,footer?560:640,64,6,accent);text('cover-category',document.category,96,footer?582:662,888,48,28,24,accent,true);}
+        categoryBadge(footer?560:640,'A');
         text('cover-title',page.title,96,titleY,888,titleHeight,72,48,'#FFFFFF',true,page.emphasis);
         text('cover-caption',body,96,captionY,888,captionHeight,28,24,'#FFFFFF');image(darkLogo,96,1078,190,64,'contain');
         text('cover-footer',footer,96,996,888,76,20,16,'#E5E5E5');
@@ -547,7 +558,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         const captionFit=body?fit(body,888,footer?200:128,26,24,false,'cover-caption'):undefined;
         const extra=Math.max(0,Math.ceil(captionFit?captionFit.lines.length*captionFit.lineHeight:0)-36)+(footer?80:0);
         image(coverPhoto!,0,0,1080,740-extra);rect('caption-background',0,740-extra,1080,610+extra,'#FFFFFF');
-        if(document.category)text('cover-category',document.category,96,775-extra,888,48,28,24,accent,true);
+        categoryBadge(775-extra,'C');
         text('cover-title',page.title,96,845-extra,888,195,68,46,INK,true,page.emphasis);
         text('cover-caption',body,96,1046-extra,888,36+extra-(footer?80:0),26,24,INK);image(logo,96,1091,150,50,'contain');
         text('cover-footer',footer,96,1014,888,64,20,16,'#555555');
