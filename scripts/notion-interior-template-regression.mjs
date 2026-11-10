@@ -67,7 +67,7 @@ try{
  for(const width of widths){
   const context=await browser.newContext({viewport:{width,height:1000},locale:'ko-KR',timezoneId:'Asia/Seoul',serviceWorkers:'block'});
   await context.addInitScript(()=>localStorage.setItem('spacepenguin.channel','3'));
-  const page=await context.newPage(),errors=[],blocked=[],writes=[],previews=[],invalidPreviews=[];let detail=fixture();
+  const page=await context.newPage(),errors=[],blocked=[],writes=[],previewRequests=[],previews=[],invalidPreviews=[];let detail=fixture();
   const sourceBefore=clone(detail.source);
   page.on('pageerror',error=>errors.push(error.message));
   await context.route('**/*',async route=>{
@@ -85,6 +85,9 @@ try{
    else if(p==='/api/notion/links/18'&&method==='GET')json=detail;
    else if(/^\/api\/notion\/links\/18\/photos\/(101|102)$/.test(p))return route.fulfill({contentType:'image/png',body:photoBytes.get(Number(p.split('/').at(-1)))});
    else if(p==='/api/notion/links/18/preview'&&method==='POST'){
+    // Track submission before rendering. An earlier, valid preview can finish
+    // after a template switch; its completion is not a new invalid POST.
+    previewRequests.push({page:body.page,templates:clone(body.designEdits.templateByPage??{}),photoByPage:clone(body.designEdits.photoByPage??{}),body:clone(body.copy)});
     assert(!('interiorInputs' in body),'Client-only structured buffers must never enter preview requests');
     try{const rendered=await realPreview(detail,body);previews.push({page:body.page,templates:clone(body.designEdits.templateByPage??{}),photoByPage:clone(body.designEdits.photoByPage??{}),body:clone(body.copy)});const template=body.designEdits.templateByPage?.[detail.source.pages[body.page]?.key];if(template==='table'||template==='image_text'){await writeFile(path.join(output,`real-${template}-${width}.jpg`),rendered.bytes);await writeFile(path.join(output,`real-${template}-${width}.svg`),rendered.svg);}return route.fulfill({contentType:'image/jpeg',body:rendered.bytes});}
     catch(error){invalidPreviews.push({page:body.page,error:error.message});return route.fulfill({status:422,json:{error:error.message}});}
@@ -102,10 +105,9 @@ try{
    const picker=page.getByLabel('내지 템플릿',{exact:true});await picker.waitFor();
    assert.deepEqual(await picker.locator('option').evaluateAll(options=>options.map(o=>o.value)),['auto','text','two_columns','image_text','table','process','timeline','bar_chart']);
    await picker.selectOption('table');assert.equal(await page.getByLabel('카드 본문',{exact:true}).inputValue(),original);assert.equal(writes.length,0);
-   const beforeInputPreviews=previews.length;
    await page.waitForTimeout(700); // Deliberately cross the450ms debounce: incompatible copy must never POST.
    await page.getByText('구성 내용을 입력하고 ‘내용 적용’을 눌러 미리보기를 확인하세요.',{exact:true}).waitFor();
-   assert.equal(previews.length,beforeInputPreviews,'Selecting a structured layout must wait for compatible content');assert.equal(invalidPreviews.length,0);assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),true);
+   assert.equal(previewRequests.filter(request=>request.templates['row-one']==='table').length,0,'An incompatible table must never be submitted before Apply');assert.equal(invalidPreviews.length,0);assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),true);
    await page.getByLabel('1열 머리글',{exact:true}).fill('지역');await page.getByLabel('2열 머리글',{exact:true}).fill('마감일');await page.getByLabel('1행 1열',{exact:true}).fill('서울');await page.getByLabel('1행 2열',{exact:true}).fill('11/11');await page.getByRole('button',{name:'행 추가',exact:true}).click();await page.getByLabel('2행 1열',{exact:true}).fill('서울');await page.getByLabel('2행 2열',{exact:true}).fill('11/12');
    assert.equal(await page.getByLabel('카드 본문',{exact:true}).inputValue(),original,'Structured input must preserve source until Apply');
    assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),true);
@@ -117,8 +119,8 @@ try{
    await page.reload();await page.locator('.notion-card-editor').waitFor();await page.locator('.notion-card-strip button').nth(1).click();
    assert.equal(await page.getByLabel('내지 템플릿',{exact:true}).inputValue(),'table');assert.equal(await page.getByLabel('2행 2열',{exact:true}).inputValue(),'11/12');await waitPreview(page,1);
    await page.locator('.notion-card-strip button').nth(2).click();await page.getByLabel('내지 템플릿',{exact:true}).selectOption('image_text');
-   const beforePhotoPreviews=previews.length;await page.waitForTimeout(700);
-   await page.getByText('페이지 사진을 선택해 주세요.',{exact:true}).waitFor();assert.equal(previews.length,beforePhotoPreviews,'A photo template must wait for an owned photo choice');assert.equal(invalidPreviews.length,0);assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),true);
+   await page.waitForTimeout(700);
+   await page.getByText('페이지 사진을 선택해 주세요.',{exact:true}).waitFor();assert.equal(previewRequests.filter(request=>request.templates['row-two']==='image_text').length,0,'A photo template must never be submitted before its owned photo choice');assert.equal(invalidPreviews.length,0);assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),true);
    await page.getByLabel('페이지 사진',{exact:true}).selectOption('102');await page.getByLabel('강조문구',{exact:true}).fill('두 번째');await waitPreview(page,2);
    await noOverflow(page,'photo-'+width);await screenshot(page,`photo-${width}.png`);
    await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).click();await page.getByText('스튜디오에 저장했습니다. 캔바에는 아래 새 디자인 만들기로 적용하세요.',{exact:true}).waitFor();
@@ -127,8 +129,8 @@ try{
    for(const index of [0,3,4]){await page.locator('.notion-card-strip button').nth(index).click();assert.equal(await page.getByLabel('내지 템플릿',{exact:true}).count(),0);}
    assert.equal(blocked.length,0,'No external request is needed');assert.equal(errors.length,0,errors.join('\n'));assert.equal(nodeNetworkAttempts,0,'Renderer must not call providers');
    assert(writes.every(w=>w.path==='/api/notion/links/18/copy'),'Only explicit manuscript saves may mutate fixture state');assert(previews.some(p=>p.templates['row-one']==='table'));assert(previews.some(p=>p.photoByPage['row-two']===102));
-   results.push({width,engine,status:'PASS',savedWrites:writes.length,realPreviewCount:previews.length,externalRequests:blocked.length,aiCalls:0,canvaCalls:0,sourcePreserved:true,saveReopenVerified:true,expectedInvalidPreviews:invalidPreviews});
-  }catch(error){await page.screenshot({path:path.join(output,`failure-${width}.png`),fullPage:true});results.push({width,engine,status:'FAIL',error:error.stack,errors,blocked,writes,invalidPreviews});throw error;}
+   results.push({width,engine,status:'PASS',savedWrites:writes.length,previewRequestCount:previewRequests.length,realPreviewCount:previews.length,externalRequests:blocked.length,aiCalls:0,canvaCalls:0,sourcePreserved:true,saveReopenVerified:true,expectedInvalidPreviews:invalidPreviews});
+  }catch(error){await page.screenshot({path:path.join(output,`failure-${width}.png`),fullPage:true});results.push({width,engine,status:'FAIL',error:error.stack,errors,blocked,writes,previewRequests,invalidPreviews});throw error;}
   finally{await writeFile(path.join(output,'results.json'),JSON.stringify(results,null,2)+'\n');await context.close();}
  }
  console.log(JSON.stringify({status:'PASS',results,output}));
