@@ -6,6 +6,7 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {NotionCardEditor} from '../client/src/NotionCardEditor';
 import {activateDraftRecoveryScope} from '../client/src/draftRecovery';
 import type {NotionStudioDetail} from '../shared/notionStudio';
+import {notionConversationSignature} from '../shared/notionConversation';
 
 const mocks=vi.hoisted(()=>({api:vi.fn(),blob:vi.fn(),guard:{setDirty:vi.fn(),confirmLeave:vi.fn((action:()=>void)=>action())}}));
 vi.mock('../client/src/api',async original=>({...await original<object>(),api:mocks.api,apiBlob:mocks.blob}));
@@ -102,9 +103,26 @@ describe('page-level interior template authoring',()=>{
  it.each(['table','process','timeline','two_columns','bar_chart'] as const)('waits for compatible %s content instead of previewing or saving the old prose in the new template',async template=>{
   await render();await page(1);await fill('내지 템플릿',template);expect(field('카드 본문').value).toBe(original);await preview();expect(mocks.blob).not.toHaveBeenCalled();expect(writes()).toHaveLength(0);expect(button('스튜디오에 저장').disabled).toBe(true);expect(host.textContent).toContain('구성 내용을 입력하고 ‘내용 적용’을 눌러 미리보기를 확인하세요.');
  });
- it('waits for an actual page photo before previewing or saving a photo-and-text template',async()=>{
-  detail.photos=detail.photos.slice(0,1);detail.link.photoCount=1;await render();await page(1);await fill('내지 템플릿','image_text');await preview();expect(mocks.blob).not.toHaveBeenCalled();expect(button('스튜디오에 저장').disabled).toBe(true);expect(host.textContent).toContain('페이지 사진을 선택해 주세요.');expect(field('카드 본문').value).toBe(original);expect(writes()).toHaveLength(0);
-  await fill('페이지 사진','101');const request=await preview();expect(request.designEdits).toMatchObject({templateByPage:{'row-one':'image_text'},photoByPage:{'row-one':101}});expect(button('스튜디오에 저장').disabled).toBe(false);await click('스튜디오에 저장');expect(writes()).toHaveLength(1);expect(detail.copy.pages[0].body).toBe('기준 안내\n\n'+original);
+ it('previews and saves a photo-pending draft, then retains the selected actual photo',async()=>{
+  detail.photos=detail.photos.slice(0,1);detail.link.photoCount=1;await render();await page(1);await fill('내지 템플릿','image_text');await preview();expect(mocks.blob).toHaveBeenCalled();expect(button('스튜디오에 저장').disabled).toBe(false);expect(host.textContent).toContain('사진 추가 대기');expect(field('카드 본문').value).toBe(original);expect(writes()).toHaveLength(0);
+  await click('스튜디오에 저장');expect(writes()).toHaveLength(1);expect(host.textContent).toContain('초안을 스튜디오에 저장했습니다. 사진을 추가하면 캔바 제작을 이어갈 수 있어요.');
+  await fill('페이지 사진','101');const request=await preview();expect(request.designEdits).toMatchObject({templateByPage:{'row-one':'image_text'},photoByPage:{'row-one':101}});expect(button('스튜디오에 저장').disabled).toBe(false);await click('스튜디오에 저장');expect(writes()).toHaveLength(2);expect(detail.copy.pages[0].body).toBe('기준 안내\n\n'+original);
+ });
+ it('continues previewing another card while a structured page is still incomplete',async()=>{
+  await render();await page(1);await fill('내지 템플릿','table');await preview();expect(mocks.blob).not.toHaveBeenCalled();
+  await page(2);const request=await preview();expect(request.page).toBe(2);expect(request.copy.pages[1].body).toBe('두 번째 원고입니다.');expect(button('스튜디오에 저장').disabled).toBe(true);
+ });
+ it('applies and undoes a conversation proposal only in the selected card without saving or changing protected source',async()=>{
+  const sourceBefore=structuredClone(detail.source),copyBefore=structuredClone(detail.copy);
+  mocks.api.mockImplementation(async(path:string,options:{body?:any}={})=>{
+   expect(path).toBe('/notion/links/18/conversation');const input=options.body;
+   return {page:input.page,sourceSignature:notionConversationSignature(input.copy,input.designEdits,input.page),patch:{title:'조금 편하게 부탁했어요',body:'양식은 제가 챙겼고, 부탁은 아이가 직접 했어요ㅎㅎ.',emphasis:'아이가 직접'},summary:'경험담처럼 편하게 다듬었어요.'};
+  });
+  await render();await page(1);await fill('카드 수정 요청','조금 더 편안한 말투로');await click('2장 수정 부탁하기');
+  expect(field('카드 본문').value).toBe(original);expect(writes()).toHaveLength(1);expect(detail.copy).toEqual(copyBefore);
+  await click('이 장에 적용');expect(field('카드 제목').value).toBe('조금 편하게 부탁했어요');expect(field('카드 본문').value).toBe('양식은 제가 챙겼고, 부탁은 아이가 직접 했어요ㅎㅎ.');expect(field('강조문구').value).toBe('아이가 직접');
+  const request=await preview();expect(request.copy.pages[0].body).toBe('기준 안내\n\n양식은 제가 챙겼고, 부탁은 아이가 직접 했어요ㅎㅎ.');expect(request.copy.pages[1]).toEqual(copyBefore.pages[1]);expect(request.copy.cover).toEqual(copyBefore.cover);expect(detail.source).toEqual(sourceBefore);expect(writes()).toHaveLength(1);
+  await click('직전 수정 되돌리기');expect(field('카드 본문').value).toBe(original);expect(field('카드 제목').value).toBe('첫 내지');expect(writes()).toHaveLength(1);
  });
  it('recovers the selected template and un-applied structured input after closing and reopening the editor',async()=>{
   const scope='notion-page-template-recovery';activateDraftRecoveryScope(scope);client.setQueryDefaults(['me'],{gcTime:Infinity});client.setQueryData(['me'],{user:'fixture',recoveryScope:scope});

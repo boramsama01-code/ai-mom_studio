@@ -199,7 +199,7 @@ export async function setNotionStudioStyle(db:DB,id:number,input:{version:number
   await tx.update(notionSyncLinks).set({...(input.coverStyle?{coverStyle:input.coverStyle}:{}),...(input.autoSync!==undefined?{autoSync:input.autoSync}:{}),canvaAutoSave:automatic,...(coverChanged?{canva:{...current.link.canva,currentSource:false}}:{}),version:current.link.version+1,updatedAt:new Date()}).where(eq(notionSyncLinks.id,id));
  });return notionStudioDetail(db,id);
 }
-export function validateNotionStudioDraft(s:Awaited<ReturnType<typeof state>>,copy:CardCopy,designEdits:NotionDesignEdits){
+export function validateNotionStudioDraft(s:Awaited<ReturnType<typeof state>>,copy:CardCopy,designEdits:NotionDesignEdits,options:{templatePage?:number;allowMissingPhotos?:boolean}={}){
  const document=sourceSnapshot(s.link),parsed=notionPlainCardCopy(copy);
  if(parsed.templateKey!==s.copy.templateKey||parsed.pages.length!==s.copy.pages.length||parsed.pages.some((page,i)=>page.id!==s.copy.pages[i].id))throw new HttpError(422,'연결된 카드의 장 수·순서·템플릿은 유지해 주세요.',{code:'notion_structure_conflict'});
  try{notionCopyToPages(parsed,{baseline:document,current:document});}catch(error){throw new HttpError(422,(error as Error).message,{code:'notion_copy_limits'});}
@@ -210,7 +210,11 @@ export function validateNotionStudioDraft(s:Awaited<ReturnType<typeof state>>,co
  if(Object.values(designEdits.photoByPage??{}).some(id=>!s.link.photoOrder.includes(id)))throw new HttpError(422,'선택한 사진이 현재 원고에 없습니다. 페이지의 사진을 다시 선택해 주세요.');
  for(const [index,page]of document.pages.entries()){
   const key=notionDesignPageKey(page,index),template=designEdits.templateByPage?.[key];if(!template)continue;
-  if(template==='image_text'&&!(designEdits.photoByPage?.[key]??s.link.photoOrder[index]))throw new HttpError(422,`${index+1}장: 사진 + 글 템플릿에 사용할 사진을 선택해 주세요.`);
+  // A single-page preview or AI draft can continue while another card is
+  // still being arranged. Structure, protected source text and photo ownership
+  // above always remain checked for the whole manuscript.
+  if(options.templatePage!==undefined&&index!==options.templatePage)continue;
+  if(!options.allowMissingPhotos&&template==='image_text'&&!(designEdits.photoByPage?.[key]??s.link.photoOrder[index]))throw new HttpError(422,`${index+1}장: 사진 + 글 템플릿에 사용할 사진을 선택해 주세요.`);
   const draft=parsed.pages[index-1],combined=[draft.subtitle,draft.body].filter(Boolean).join('\n\n'),subtitle=page.cardFields?.subtitle??'',prefix=subtitle.trim()?`${subtitle}\n\n`:'';
   try{validateInteriorTemplateBody(template,prefix&&combined.startsWith(prefix)?combined.slice(prefix.length):combined);}catch(error){throw new HttpError(422,`${index+1}장: ${(error as Error).message}`,{code:'notion_template_format'});}
  }
@@ -223,12 +227,21 @@ export async function saveNotionStudioDraft(db:DB,id:number,input:{version:numbe
   await tx.select({id:notionSyncLinks.id}).from(notionSyncLinks).where(eq(notionSyncLinks.id,id)).for('update');
   const current=await state(tx,id);assertVersion(current,{...input,expectedSourceHash:current.link.sourceHash,resolveConflict:false});
   if(current.link.operationToken&&current.link.operationUntil&&current.link.operationUntil>new Date()||['importing','exporting','result_unknown'].includes(current.link.canva.phase))throw new HttpError(409,'진행 중인 동기화·캔바 작업을 확인한 뒤 저장해 주세요. 입력한 문구는 유지했습니다.');
-  const copy=validateNotionStudioDraft(current,input.copy,input.designEdits);
+  const copy=validateNotionStudioDraft(current,input.copy,input.designEdits,{allowMissingPhotos:true});
   if(isDeepStrictEqual(copy,current.copy)&&isDeepStrictEqual(input.designEdits,notionDesignEdits(current.revision.payload)))return;
   const payload={...current.revision.payload,cardCopy:copy,notionDesignEdits:input.designEdits};
   const revision=await createRevision(tx,{contentItemId:current.item.id,author:'operator',payload,note:'노션 연결 카드 미리보기 편집 · 원문·각주·QR·예고 보존'});
   await tx.update(contentItems).set({edited:payload,version:current.item.version+1,reviewStatus:current.item.reviewStatus==='reviewed'?'pending':current.item.reviewStatus,updatedAt:new Date()}).where(eq(contentItems.id,current.item.id));
-  await tx.update(notionSyncLinks).set({canva:{...current.link.canva,currentSource:false},canvaAutoSave:queuedNotionCanvaAutoSave(current.link.canvaAutoSave,revision.id,current.item.version+1)}).where(eq(notionSyncLinks.id,id));
+  const missingPhotos=sourceSnapshot(current.link).pages.flatMap((page,index)=>{
+   const key=notionDesignPageKey(page,index);
+   return input.designEdits.templateByPage?.[key]==='image_text'&&!(input.designEdits.photoByPage?.[key]??current.link.photoOrder[index])?[index+1]:[];
+  });
+  let automatic=queuedNotionCanvaAutoSave(current.link.canvaAutoSave,revision.id,current.item.version+1);
+  // A photo-less draft is useful Studio work, not a failed external import.
+  // Keep automatic saving enabled and let the next valid photo choice or
+  // source pull queue the newest revision normally.
+  if(automatic.enabled&&missingPhotos.length)automatic={...automatic,phase:'blocked',notBefore:undefined,leaseToken:undefined,leaseUntil:undefined,error:`${missingPhotos.join('·')}장 사진 추가 대기: 초안은 스튜디오에 저장했습니다. 실제 사진을 선택하고 저장하면 Canva 자동 저장이 이어집니다.`};
+  await tx.update(notionSyncLinks).set({canva:{...current.link.canva,currentSource:false},canvaAutoSave:automatic}).where(eq(notionSyncLinks.id,id));
   await audit(tx,{actor,action:'notion_edit_card_copy',entity:'content_item',entityId:current.item.id,channelId:current.item.channelId,detail:{revisionId:revision.id,pages:copy.pages.length+1}});
  });return notionStudioDetail(db,id);
 }

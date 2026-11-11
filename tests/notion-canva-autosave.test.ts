@@ -1,8 +1,9 @@
 /** Isolated PostgreSQL: durable automatic editable Canva handoff, no live providers. */
 import {createHash,randomUUID} from 'node:crypto';
+import sharp from 'sharp';
 import {and,eq} from 'drizzle-orm';
 import {afterAll,afterEach,beforeAll,beforeEach,describe,expect,it,vi} from 'vitest';
-import {appSettings,channels,contentItems,contentRevisions,notionSyncLinks,studioCards} from '../shared/schema';
+import {appSettings,channels,contentItems,contentRevisions,notionSyncLinks,notionSyncPhotos,studioCards} from '../shared/schema';
 import type {NotionDocument} from '../shared/notionSync';
 import {notionDocumentToCopy} from '../shared/notionStudioCopy';
 import {studioKey} from '../shared/channelKeys';
@@ -56,6 +57,17 @@ async function finish(f:Fixture,id='new_design'){
 }
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 describe('durable Canva automatic saves',()=>{
+ it('keeps missing-photo drafts without queueing Canva and resumes after selecting an actual owned photo',async()=>{
+  const f=await fixture(),before=await detail(f),designEdits={emphasisByPage:{},templateByPage:{h2:'image_text' as const}},copy=structuredClone(before.copy);copy.pages[0].body='실물 사진을 기다리는 동안 완성한 원고';
+  const draft=await saveNotionStudioDraft(f.db,f.link.id,{version:before.link.version,itemVersion:before.itemVersion,copy,designEdits},'test');
+  expect(draft.copy.pages[0].body).toBe(copy.pages[0].body);expect(draft.link.canvaAutoSave).toMatchObject({enabled:true,phase:'blocked',sourceVersion:draft.itemVersion});expect(draft.link.canvaAutoSave?.error).toContain('사진 추가 대기');
+  expect((await saveNotionCanvaOnce(f.db)).checked).toBe(0);expect(provider.build).not.toHaveBeenCalled();expect(provider.submit).not.toHaveBeenCalled();
+  const bytes=await sharp({create:{width:30,height:40,channels:3,background:'#72A7FF'}}).png().toBuffer();
+  const [photo]=await f.db.insert(notionSyncPhotos).values({linkId:f.link.id,sourceKey:'actual-memo',name:'실제 메모.png',mimeType:'image/png',bytes,sha256:createHash('sha256').update(bytes).digest('hex'),width:30,height:40}).returning();
+  await f.db.update(notionSyncLinks).set({photoOrder:[photo.id]}).where(eq(notionSyncLinks.id,f.link.id));
+  const refreshed=await detail(f),resumed=await saveNotionStudioDraft(f.db,f.link.id,{version:refreshed.link.version,itemVersion:refreshed.itemVersion,copy:refreshed.copy,designEdits:{...designEdits,photoByPage:{h2:photo.id}}},'test');
+  expect(resumed.link.canvaAutoSave).toMatchObject({enabled:true,phase:'queued',error:null});await due(f);await saveNotionCanvaOnce(f.db);expect(provider.submit).toHaveBeenCalledTimes(1);expect(provider.build.mock.calls[0][0].pages[1]).toMatchObject({body:copy.pages[0].body,imageId:String(photo.id)});
+ });
  it('does not backfill unchanged existing links',async()=>{const f=await fixture();expect((await saveNotionCanvaOnce(f.db)).checked).toBe(0);expect(provider.submit).not.toHaveBeenCalled();expect((await detail(f)).link.canvaAutoSave).toEqual({enabled:true,phase:'idle'});});
  it('queues changed saves atomically, coalesces the latest revision, and skips no-op saves',async()=>{
   const f=await fixture(),first=await edit(f),a=(await stored(f)).canvaAutoSave;

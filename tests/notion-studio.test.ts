@@ -36,7 +36,7 @@ describe('Notion ↔ Studio durable integration',()=>{
   await expect(service.saveNotionStudioDraft(db,a.link.id,{...baseline(),designEdits:{...edits,templateByPage:{h1:'text'}}},'test')).rejects.toMatchObject({status:422});
   await expect(service.saveNotionStudioDraft(db,a.link.id,{...baseline(),designEdits:{...edits,photoByPage:{h2:photoId+1000000}}},'test')).rejects.toMatchObject({status:422});
   await expect(service.saveNotionStudioDraft(db,a.link.id,{...baseline(),designEdits:{...edits,templateByPage:{h2:'table'}}},'test')).rejects.toMatchObject({status:422,extra:{code:'notion_template_format'}});
-  await expect(service.saveNotionStudioDraft(db,a.link.id,{...baseline(),designEdits:{emphasisByPage:{},templateByPage:{h2:'image_text'}}},'test')).rejects.toMatchObject({status:422});
+  // Photo-pending draft saves are covered separately; owned-photo and final-export guards remain strict.
   const old=doc.pages[1];doc.pages=[doc.pages[0],{...old,index:2,headingBlockId:'new-interior',title:'새 페이지'}, {...old,index:3}];doc.sourceHash='b'.repeat(64);
   const pulled=await service.pullNotionStudio(db,a.link.id,{version:saved.link.version,itemVersion:saved.itemVersion,expectedSourceHash:doc.sourceHash,resolveConflict:false},'test');
   expect(pulled.designEdits).toEqual(edits);expect(pulled.source.pages[2].key).toBe('h2');

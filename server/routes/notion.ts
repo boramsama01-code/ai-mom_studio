@@ -9,10 +9,12 @@ import {actorOf} from '../auth';
 import {HttpError,intParam,parse} from './util';
 import {getNotionConnectionStatus,queryNotionDocuments,fetchNotionDocument,NotionSyncError} from '../services/notionClient';
 import {CanvaRestError} from '../services/canvaRest';
+import {notionConversationRoutes} from './notionConversation';
 import {importNotionStudio,listNotionStudioLinks,notionStudioDetail,notionStudioLinkForItem,pullNotionStudio,pushNotionStudio,setNotionStudioStyle,saveNotionStudioDraft} from '../services/notionStudio';
 import {createNotionStudioCanva,exportNotionStudioCanva,pollNotionStudioCanva,downloadNotionStudioOutput,previewNotionStudioCard} from '../services/notionStudioCanva';
 
 export const notionRoutes=Router();
+notionRoutes.use(notionConversationRoutes);
 // This router is installed after operator authentication and the existing CSRF guard.
 const handle=(fn:(req:Request,res:Response)=>Promise<unknown>)=>(req:Request,res:Response,next:NextFunction)=>{
  res.set('Cache-Control','private, no-store');
