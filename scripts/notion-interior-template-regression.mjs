@@ -43,7 +43,7 @@ async function realPreview(detail,input){
   return {...page,body:prefix&&page.body.startsWith(prefix)?page.body.slice(prefix.length):page.body,...(template?{interiorTemplate:template,...(subtitle?{interiorSubtitle:subtitle}:{})}:{}),...(photo?{imageId:String(photo.id)}:{}),...(source.cardFields?{footnote:source.cardFields.footnote,sourceLabel:source.cardFields.sourceLabel}:{}),...(edits.emphasisByPage[key]!==undefined?{emphasis:edits.emphasisByPage[key]}:source.emphasis?{emphasis:source.emphasis}:{})};
  });
  const used=new Set(pages.flatMap(p=>p.imageId?[p.imageId]:[])),photos=ordered.filter(p=>used.has(String(p.id))).map(p=>({id:String(p.id),bytes:photoBytes.get(p.id),mimeType:'image/png'}));
- const deck=await buildNotionCanvaPptx({title:detail.link.title,coverStyle:'A',category:'영재교육',pages,sourceReferences:detail.source.sourceReferences},photos,{previewPage:input.page,previewOnly:true});
+ const deck=await buildNotionCanvaPptx({title:detail.link.title,coverStyle:'A',category:'영재교육',pages,sourceReferences:detail.source.sourceReferences},photos,{previewPage:input.page,previewOnly:true,allowMissingPhotos:true});
  assert(deck.previewSvg,'Real renderer must return SVG');
  return {svg:deck.previewSvg,bytes:await sharp(Buffer.from(deck.previewSvg)).resize(540,675).jpeg({quality:90}).toBuffer()};
 }
@@ -120,7 +120,7 @@ try{
    assert.equal(await page.getByLabel('내지 템플릿',{exact:true}).inputValue(),'table');assert.equal(await page.getByLabel('2행 2열',{exact:true}).inputValue(),'11/12');await waitPreview(page,1);
    await page.locator('.notion-card-strip button').nth(2).click();await page.getByLabel('내지 템플릿',{exact:true}).selectOption('image_text');
    await page.waitForTimeout(700);
-   await page.getByText('페이지 사진을 선택해 주세요.',{exact:true}).waitFor();assert.equal(previewRequests.filter(request=>request.templates['row-two']==='image_text').length,0,'A photo template must never be submitted before its owned photo choice');assert.equal(invalidPreviews.length,0);assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),true);
+   await page.getByText('사진 추가 대기 · 원고와 배치는 계속 수정하고 저장할 수 있어요.',{exact:true}).waitFor();assert(previewRequests.some(request=>request.templates['row-two']==='image_text'),'A pending photo template must remain previewable');assert.equal(invalidPreviews.length,0);assert.equal(await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).isDisabled(),false);
    await page.getByLabel('페이지 사진',{exact:true}).selectOption('102');await page.getByLabel('강조문구',{exact:true}).fill('두 번째');await waitPreview(page,2);
    await noOverflow(page,'photo-'+width);await screenshot(page,`photo-${width}.png`);
    await page.getByRole('button',{name:'스튜디오에 저장',exact:true}).click();await page.getByText('스튜디오에 저장했습니다. 캔바에는 아래 새 디자인 만들기로 적용하세요.',{exact:true}).waitFor();

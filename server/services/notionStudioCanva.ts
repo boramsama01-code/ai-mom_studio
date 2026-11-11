@@ -85,7 +85,7 @@ async function prepareNotionStudioDeck(db:DB,before:State,copy:CardCopy=before.c
  const id=before.link.id;
  const [channel]=await db.select().from(channels).where(eq(channels.id,before.link.channelId));
  if(!channel||studioKey(channel.slug)!=='highscoop')throw new HttpError(422,'이번 A·B·C 표지는 하이스쿱용입니다. 하이스쿱 채널의 원고를 선택해 주세요.');
- const all=before.link.photoOrder.length?await db.select().from(notionSyncPhotos).where(and(eq(notionSyncPhotos.linkId,id),inArray(notionSyncPhotos.id,before.link.photoOrder))):[];
+ const all=before.link.photoOrder.length?await db.select({id:notionSyncPhotos.id,name:notionSyncPhotos.name}).from(notionSyncPhotos).where(and(eq(notionSyncPhotos.linkId,id),inArray(notionSyncPhotos.id,before.link.photoOrder))):[];
  const ordered=before.link.photoOrder.map(pid=>all.find(p=>p.id===pid)).filter((p):p is NonNullable<typeof p>=>!!p);
  const source=before.link.sourceSnapshot as {category?:string};
  const sourcePages=(before.link.sourceSnapshot as unknown as {pages?:NotionDocumentPage[]} ).pages??[];
@@ -93,15 +93,19 @@ async function prepareNotionStudioDeck(db:DB,before:State,copy:CardCopy=before.c
   const sourcePage=sourcePages[i],key=sourcePage?notionDesignPageKey(sourcePage,i):`page:${i+1}`,emphasis=designEdits.emphasisByPage[key]??sourcePage?.emphasis;
   const interiorTemplate=i>0?designEdits.templateByPage?.[key]:undefined,photoId=designEdits.photoByPage?.[key];
   const selectedPhoto=interiorTemplate==='image_text'?(photoId!==undefined?ordered.find(p=>p.id===photoId):ordered[i]):!interiorTemplate?ordered[i]:undefined;
-  if(interiorTemplate==='image_text'&&!selectedPhoto)throw new HttpError(422,'사진 + 글 템플릿에 사용할 사진을 이 페이지에서 선택해 주세요.');
+  if(previewPage===undefined&&interiorTemplate==='image_text'&&!selectedPhoto)throw new HttpError(422,'사진 + 글 템플릿에 사용할 사진을 이 페이지에서 선택해 주세요.');
   const subtitle=interiorTemplate?sourcePage?.cardFields?.subtitle??'':'',prefix=subtitle.trim()?`${subtitle}\n\n`:'';
   const body=interiorTemplate&&prefix&&page.body.startsWith(prefix)?page.body.slice(prefix.length):page.body;
   return {...page,body,...(interiorTemplate?{interiorTemplate,...(subtitle?{interiorSubtitle:subtitle}:{})}:{}),...(selectedPhoto?{imageId:String(selectedPhoto.id)}:{}),...(sourcePage?.cardFields?{footnote:sourcePage.cardFields.footnote,sourceLabel:sourcePage.cardFields.sourceLabel}:{}),...(!interiorTemplate&&sourcePage?.infographic?{infographic:sourcePage.infographic}:{}),...(emphasis!==undefined?{emphasis}:{})};
  });
- const usedPhotos=new Set(pages.flatMap(page=>'imageId' in page?[page.imageId]:[])),photos=[];
- for(const p of ordered.filter(p=>usedPhotos.has(String(p.id)))){const bytes=await sharp(p.bytes,{limitInputPixels:50_000_000}).rotate().resize({width:2000,height:2000,fit:'inside',withoutEnlargement:true}).png().toBuffer();photos.push({id:String(p.id),name:p.name,bytes,mimeType:'image/png'});}
+ // Decode only the media used by the requested page. A large or not-yet-linked
+ // photograph elsewhere must not delay a text card's interactive preview.
+ const usedPhotos=new Set(pages.flatMap((page,index)=>(previewPage===undefined||previewPage===index)&&'imageId' in page?[page.imageId]:[])),photos=[];
+ const usedIds=ordered.filter(p=>usedPhotos.has(String(p.id))).map(p=>p.id);
+ const usedRows=usedIds.length?await db.select({id:notionSyncPhotos.id,name:notionSyncPhotos.name,bytes:notionSyncPhotos.bytes}).from(notionSyncPhotos).where(and(eq(notionSyncPhotos.linkId,id),inArray(notionSyncPhotos.id,usedIds))):[];
+ for(const pid of usedIds){const p=usedRows.find(photo=>photo.id===pid);if(!p)throw new HttpError(409,'사진 배치가 바뀌었습니다. 최신 원고의 사진을 다시 확인해 주세요.');const bytes=await sharp(p.bytes,{limitInputPixels:50_000_000}).rotate().resize({width:2000,height:2000,fit:'inside',withoutEnlargement:true}).png().toBuffer();photos.push({id:String(p.id),name:p.name,bytes,mimeType:'image/png'});}
  // The builder validates fit before a durable reservation or external POST is made.
- const deck=await buildNotionCanvaPptx({title:before.item.title,coverStyle:before.link.coverStyle as 'A'|'B'|'C',category:source.category||undefined,pages,...extras(before)},photos,previewPage===undefined?{}:{previewPage,previewOnly:true});
+ const deck=await buildNotionCanvaPptx({title:before.item.title,coverStyle:before.link.coverStyle as 'A'|'B'|'C',category:source.category||undefined,pages,...extras(before)},photos,previewPage===undefined?{}:{previewPage,previewOnly:true,allowMissingPhotos:true});
  const unusedPhotos=before.link.photoOrder.length-usedPhotos.size;
  const warnings=[...deck.warnings,...(unusedPhotos>0?[`사진 ${unusedPhotos}개는 이번 페이지 배치에 사용하지 않았습니다. Studio 원본은 그대로 보존했습니다.`]:[])];
  return {...deck,warnings};
@@ -109,7 +113,7 @@ async function prepareNotionStudioDeck(db:DB,before:State,copy:CardCopy=before.c
 /** The same layout primitives as PPTX, rendered locally without a Canva/AI request. */
 export async function previewNotionStudioCard(db:DB,id:number,input:Request&{copy:CardCopy;designEdits:NotionDesignEdits;page:number},cancelled=()=>false){
  const before=await loadNotionStudioState(db,id);valid(before,input);
- const copy=validateNotionStudioDraft(before,input.copy,input.designEdits);
+ const copy=validateNotionStudioDraft(before,input.copy,input.designEdits,{templatePage:input.page,allowMissingPhotos:true});
  if(input.page<0||input.page>=expectedOutputPages(before))throw new HttpError(422,'미리볼 카드 번호를 확인해 주세요.');
  return rasterizeReadingSvg(async()=>{
   if(cancelled())throw new HttpError(499,'미리보기 요청이 취소되었습니다.');

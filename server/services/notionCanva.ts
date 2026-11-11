@@ -334,13 +334,17 @@ async function readMedia(bytes:Buffer,file:string):Promise<Media> {
  * Keep all validated manuscript pages, optional references and teaser, then the brand CTA.
  * Overflow is a validation error, never truncation or an unreadably small font.
  */
-export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:{previewPage?:number;previewOnly?:boolean}={}):Promise<NotionCanvaPptx> {
+export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:{previewPage?:number;previewOnly?:boolean;allowMissingPhotos?:boolean}={}):Promise<NotionCanvaPptx> {
   const document=parse(documentSchema,value,true);
   if(options.previewOnly&&options.previewPage===undefined)invalid('미리볼 카드 번호를 확인해 주세요.');
   const references=document.sourceReferences??[],referencePageCount=notionSourceReferencePageCount(references);
   if(document.pages.length+referencePageCount+(document.teaser?1:0)+1>NOTION_CANVA_MAX_OUTPUT_PAGES)invalid(`원고·기관별 원문 QR·예고·채널 소개를 합쳐 ${NOTION_CANVA_MAX_OUTPUT_PAGES}장 이내로 나눠 주세요. 원문 주소를 누락하지 않았습니다.`);
   if(!Array.isArray(photos)||photos.length>12||new Set(photos.map(p=>p.id)).size!==photos.length||photos.some(p=>!idSchema.safeParse(p.id).success||!Buffer.isBuffer(p.bytes)||!p.bytes.length||p.bytes.length>MAX_PHOTO_BYTES||!['image/png','image/jpeg','image/webp','image/gif','image/avif','image/heif','image/heic'].includes(p.mimeType))||photos.reduce((n,p)=>n+p.bytes.length,0)>MAX_PHOTO_TOTAL_BYTES)invalid('사진은 서로 다른 ID의 단일 이미지 최대 12개, 개별 20MB·전체 60MB 이하여야 합니다.');
   const warnings:string[]=[];
+  // Missing-photo placeholders belong to an interactive SVG preview only.
+  // A production PPTX import keeps the same strict actual-photo requirement.
+  const allowMissingPhotos=options.previewOnly===true&&options.allowMissingPhotos===true;
+  const inspecting=(index:number)=>!options.previewOnly||options.previewPage===index;
   const media=new Map<string,Media>();
   let embeddedPhotoBytes=0;
   for(const [index,photo] of photos.entries()){
@@ -348,23 +352,24 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     if(embeddedPhotoBytes>MAX_PHOTO_TOTAL_BYTES)invalid('사진의 PPTX 호환본 합계가 60MB를 초과합니다.');
     media.set(photo.id,item);if(item.normalized)warnings.push(`${index+1}번 사진의 형식·방향을 PPTX 호환 PNG로 정리했습니다. Studio 원본은 보존됩니다.`);
   }
-  for(const page of document.pages)if(page.imageId&&!media.has(page.imageId))invalid('원고에서 지정한 사진을 찾을 수 없습니다. 사진을 다시 연결해 주세요.');
+  for(const [index,page]of document.pages.entries())if(inspecting(index)&&page.imageId&&!media.has(page.imageId))invalid('원고에서 지정한 사진을 찾을 수 없습니다. 사진을 다시 연결해 주세요.');
   for(const [index,page]of document.pages.entries()){
+    if(index===0&&page.interiorTemplate)invalid('내지 템플릿은 표지 다음 페이지에서 선택해 주세요.');
+    if(!inspecting(index))continue;
     if(page.interiorTemplate){
-      if(index===0)invalid('내지 템플릿은 표지 다음 페이지에서 선택해 주세요.');
-      if(page.interiorTemplate==='image_text'&&!page.imageId)invalid(`${index+1}장 사진 + 글에 사용할 사진을 선택해 주세요.`);
+      if(!allowMissingPhotos&&page.interiorTemplate==='image_text'&&!page.imageId)invalid(`${index+1}장 사진 + 글에 사용할 사진을 선택해 주세요.`);
       if(page.interiorTemplate!=='image_text'&&page.imageId)invalid(`${index+1}장 선택한 내지에는 사진을 함께 넣을 수 없습니다. 사진 + 글을 선택해 주세요.`);
     }
   }
-  for(const [index,page]of document.pages.entries())if(page.infographic&&!page.interiorTemplate){
+  for(const [index,page]of document.pages.entries())if(inspecting(index)&&page.infographic&&!page.interiorTemplate){
     const label=page.infographic==='application_steps'?'접수 단계 도식':page.infographic==='admissions_calendar'||page.infographic==='admissions_logo_calendar'?'모집 달력':page.infographic==='admissions_timeline'?'모집 기간표':page.infographic==='admissions_guide'?'모집 안내':'기관별 일정표';
     if(index===0)invalid(`${label}은 표지가 아닌 내지에만 사용할 수 있습니다.`);
     if(page.imageId)invalid(`${label}과 사진을 같은 장에 함께 배치할 수 없습니다. 사진을 보존하려면 별도 장으로 나눠 주세요.`);
   }
   const coverPhoto=document.pages[0].imageId?media.get(document.pages[0].imageId):undefined;
-  if(document.coverStyle==='C'&&!coverPhoto)invalid('C 표지에는 실제 사진이 필요합니다. 표지 사진을 선택해 주세요.');
-  if(document.coverStyle==='A'&&!coverPhoto)warnings.push('표지 사진이 없어 A 표지를 검정 정보형으로 만들었습니다.');
-  if(document.coverStyle==='B'&&coverPhoto)warnings.push('B는 질문 타이포 표지이므로 표지 사진은 표시하지 않습니다. 원본 사진은 Studio에 보존됩니다.');
+  if(inspecting(0)&&document.coverStyle==='C'&&!coverPhoto)invalid('C 표지에는 실제 사진이 필요합니다. 표지 사진을 선택해 주세요.');
+  if(inspecting(0)&&document.coverStyle==='A'&&!coverPhoto)warnings.push('표지 사진이 없어 A 표지를 검정 정보형으로 만들었습니다.');
+  if(inspecting(0)&&document.coverStyle==='B'&&coverPhoto)warnings.push('B는 질문 타이포 표지이므로 표지 사진은 표시하지 않습니다. 원본 사진은 Studio에 보존됩니다.');
   const logo=await readMedia(await fs.readFile(path.resolve(process.cwd(),'assets/branding/highscoop-magazine-color.png')),'logo-color');
   const darkLogo=await readMedia(await fs.readFile(path.resolve(process.cwd(),'assets/branding/highscoop-magazine-dark.png')),'logo-dark');
   let educationLogos:EducationOfficeLogo[]=[];const educationMedia=new Map<string,Media>();
@@ -580,7 +585,15 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       image(logo,826,64,190,40,'contain');rect('section-accent',64,104,64,5,accent);
       text(`page-${index+1}-title`,page.title,64,122,952,112,46,40,INK,true,page.emphasis,'l',1.2);
       text('interior-subtitle',subtitle,64,244,952,page.interiorTemplate==='timeline'?36:64,26,20,INK,false,page.emphasis,'l',1.2);
-      if(page.interiorTemplate==='image_text')image(media.get(page.imageId!)!,64,336,440,contentHeight,'contain');
+      if(page.interiorTemplate==='image_text'){
+        const actualPhoto=page.imageId?media.get(page.imageId):undefined;
+        if(actualPhoto)image(actualPhoto,64,336,440,contentHeight,'contain');
+        else if(allowMissingPhotos){
+          rect('interior-photo-pending',64,336,440,contentHeight,'#EEECE7');
+          text('interior-photo-pending-label','사진 추가 대기',88,336+(contentHeight-50)/2,392,50,30,26,'#77736D',false,undefined,'ctr',1.2,'middle');
+          warnings.push(`${index+1}장 사진 추가 대기: 실제 사진을 선택한 뒤 Canva에 저장하세요.`);
+        }
+      }
       for(const [elementIndex,original]of model.elements.entries()){
         if(elementIndex>0&&elementIndex%16===0)await yieldToEventLoop();
         const element=contentScale<1&&original.y>=336?{...original,y:336+(original.y-336)*contentScale,height:original.height*contentScale}:original;
