@@ -1,7 +1,7 @@
 import {useState,type CSSProperties} from 'react';
 import {HIGH_SCOOP_TEMPLATE_KITS,HIGH_SCOOP_TEMPLATE_VERSION,highScoopTemplateForKey,type HighScoopTemplateKit as Kit} from '@shared/highscoopTemplates';
 import type {TemplateOption} from '@shared/templateCatalog';
-import {editorialTemplateForKey,isCurrentEditorialTemplate} from '@shared/editorialTemplates';
+import {editorialTemplateForKey,isCurrentEditorialTemplate,EDITORIAL_TEMPLATE_VERSION} from '@shared/editorialTemplates';
 import './highScoopTemplateKit.css';
 
 type DisplayKit=Pick<Kit,'key'|'category'|'color'|'soft'|'accent'|'thumbnailUrl'|'overviewUrl'|'canvaEditUrl'> & {layoutLabels:readonly string[]};
@@ -16,7 +16,7 @@ export function HighScoopTemplateKit({value,onSelect,disabled=false,compact=fals
  const kits:readonly DisplayKit[]=items?items.filter(item=>isCurrentEditorialTemplate(item.key)).map((item,index)=>{
   const palette=editorialTemplateForKey(item.key),fallback=HIGH_SCOOP_TEMPLATE_KITS[index%HIGH_SCOOP_TEMPLATE_KITS.length];
   return {key:item.key,category:item.category??item.name,color:item.color??palette?.color??fallback.color,soft:item.soft??palette?.soft??fallback.soft,accent:item.accent??palette?.accent??fallback.accent,
-   thumbnailUrl:previewUrlFor?.(item.key)??item.thumbnailUrl??'',overviewUrl:previewUrlFor?'':item.overviewUrl??'',canvaEditUrl:item.canvaEditUrl??null,layoutLabels:item.pageLabels??fallback.layoutLabels};
+   thumbnailUrl:previewUrlFor?`${previewUrlFor(item.key)}&kit=${encodeURIComponent(EDITORIAL_TEMPLATE_VERSION)}`:item.thumbnailUrl??'',overviewUrl:previewUrlFor?'':item.overviewUrl??'',canvaEditUrl:item.canvaEditUrl??null,layoutLabels:item.pageLabels??fallback.layoutLabels};
  }):HIGH_SCOOP_TEMPLATE_KITS;
  const resolve=(key:string|undefined|null)=>kits.find(kit=>kit.key===key)||(key? kits.find(kit=>editorialTemplateForKey(kit.key)?.colorId===editorialTemplateForKey(key)?.colorId):undefined)||(kits.length===1&&isCurrentEditorialTemplate(key)?kits[0]:undefined);
  const current=resolve(value),[previewKey,setPreviewKey]=useState<string|null>(null);
