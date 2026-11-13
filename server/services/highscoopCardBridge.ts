@@ -1,6 +1,6 @@
 /** The generic card editor and Notion share the current page geometry for every brand. */
 import sharp from "sharp";
-import {editorialTemplateForKey,editorialTemplateOptions,editorialBrandForChannel,type EditorialChannel,type EditorialBrand} from '../../shared/editorialTemplates';
+import {editorialTemplateForKey,editorialTemplateForChannel,editorialBrandForChannel,type EditorialChannel,type EditorialBrand} from '../../shared/editorialTemplates';
 import type {CardCopy} from '../../shared/cardCopy';
 import type {CardCopyV2,PageDesign,PageDesigns} from '../../shared/familyDialogue';
 import {familyPageTitle} from './familyDialogueCard';
@@ -35,7 +35,7 @@ function validateTextLengths(document: NotionCanvaDocument) {
 /** Keep every original page and block. The editor's last page is never replaced by a CTA. */
 export function highScoopCardDocument(templateKey: string, cover: CardModel, pages: CardModel[],channel?:EditorialChannel,copy?:CardCopy): HighScoopCardBridge {
   const current=editorialTemplateForKey(templateKey);
-  const kit=channel&&current?editorialTemplateOptions(channel).find(kit=>kit.colorId===current.colorId):current;
+  const kit=channel&&current?editorialTemplateForChannel(channel,templateKey):current;
   if (!kit) throw new HttpError(422, "현재 공통 템플릿을 다시 선택해 주세요.");
   const document: NotionCanvaDocument = {
     title: cover.title,
@@ -62,7 +62,7 @@ export function highScoopCardDocument(templateKey: string, cover: CardModel, pag
 
 /** Render every semantic field of an eight-slot manuscript without changing its stored schema. */
 export function editorialFamilyCardDocument(templateKey:string,copy:CardCopyV2,designs:PageDesigns,channel:EditorialChannel,context:FamilyDisplayContext={}):HighScoopCardBridge{
- const current=editorialTemplateForKey(templateKey),kit=current&&editorialTemplateOptions(channel).find(kit=>kit.colorId===current.colorId);
+ const kit=editorialTemplateForChannel(channel,templateKey);
  if(!kit)throw new HttpError(422,'현재 공통 템플릿을 다시 선택해 주세요.');
  const assets=copy.pages.map(page=>{const bg=designs[page.id].background;return bg.assetId??(bg.inheritCover?designs.cover.background.assetId:undefined);});
  const pages:NotionCanvaDocument['pages']=copy.pages.map((page,index)=>{

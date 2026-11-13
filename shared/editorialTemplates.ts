@@ -21,13 +21,25 @@ export function editorialTemplateForKey(key:string|undefined|null):EditorialTemp
  return {...kit,key:key!.startsWith('highscoop:')?kit.key:`editorial:${EDITORIAL_COLOR_IDS[index]}`,colorId:EDITORIAL_COLOR_IDS[index]};
 }
 export function isCurrentEditorialTemplate(key:string|undefined|null):boolean{return !!editorialTemplateForKey(key);}
+/** Public news posts use one shared tag/color; source topic metadata stays separate. */
+export function isEditorialNewsChannel(channel:EditorialChannel):boolean{return studioKey(channel.slug??'')==='news';}
 export function editorialTemplateOptions(channel:EditorialChannel):EditorialTemplate[]{
+ if(isEditorialNewsChannel(channel)){
+  const kit=HIGH_SCOOP_TEMPLATE_KITS[5];
+  return [{...kit,key:'editorial:cyan',colorId:'cyan',category:'뉴스',label:'뉴스',canvaEditUrl:null,canvaDesignId:null}];
+ }
  const high=isHighScoopChannel(channel),categories=channelCategories(channel.slug??'',channel.categories);
  return EDITORIAL_COLOR_IDS.map((id,index)=>{
   const kit=HIGH_SCOOP_TEMPLATE_KITS[index],category=high?kit.category:categories[index]??COLOR_LABELS[index];
   return {...kit,key:high?kit.key:`editorial:${id}`,colorId:id,category,label:category,
    canvaEditUrl:high?kit.canvaEditUrl:null,canvaDesignId:high?kit.canvaDesignId:null};
  });
+}
+/** Saved color keys remain readable while News now presents the cyan master. */
+export function editorialTemplateForChannel(channel:EditorialChannel,key:string|undefined|null):EditorialTemplate|undefined{
+ const current=editorialTemplateForKey(key);if(!current)return;
+ const options=editorialTemplateOptions(channel);
+ return options.find(kit=>kit.colorId===current.colorId)??(isEditorialNewsChannel(channel)?options[0]:undefined);
 }
 /** Paths are consumed only by trusted server rendering, never accepted from request bodies. */
 export function editorialBrandForChannel(channel:EditorialChannel):EditorialBrand{

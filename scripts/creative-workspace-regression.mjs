@@ -229,6 +229,10 @@ async function run(root,label,port){
    assert.equal(await page.locator(".highscoop-kit-card").count(),6,"only the six current channel masters are selectable without Canva OAuth");
    assert.equal(await page.locator(".registered-design-card").count(),0,"legacy template gallery is hidden from current selection");
    await noOverflow(page,"template gallery "+width);await shot(page,"after-templates-"+width);
+   await selectChannel(page,3);await page.getByRole('button',{name:'뉴스 마스터 선택',exact:true}).waitFor();
+   assert.equal(await page.locator('.highscoop-kit-card').count(),1,'Alligodang uses the single cyan News master');
+   assert.equal(await page.getByRole('group',{name:'ALLligodang 마스터 1종',exact:true}).count(),1);
+   await noOverflow(page,'single news master '+width);
    await selectChannel(page,'all');
    await page.getByRole("button",{name:"브랜드 가이드",exact:true}).click();await page.locator(".asset-brand").first().waitFor();
    await noOverflow(page,"assets "+width);await shot(page,"after-assets-"+width);

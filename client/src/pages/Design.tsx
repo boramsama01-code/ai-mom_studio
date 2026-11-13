@@ -22,10 +22,11 @@ export function useTemplates(cid: number | "all") {
 /** The same current catalogue is used from channel settings, Inbox and Studio. */
 export function TemplatePicker({ cid, value, onChange, items, version, studioChannel, brandName="현재 채널", disabled = false }: { cid: number | "studio"; value: string; onChange: (k: string, item?: TemplateCatalogItem) => void; items: Tpl[]; version?: string; studioChannel?: string; brandName?:string; disabled?: boolean }) {
   const current = items.filter(item => isCurrentEditorialTemplate(item.key));
+  const selectedValue=current.length===1&&isCurrentEditorialTemplate(value)?current[0].key:value;
   const previewUrlFor = (key: string) => `${cid === "studio" ? "/api/studio/design-preview" : `/api/channels/${cid}/templates/preview`}?size=sm&key=${encodeURIComponent(key)}&page=0&v=${encodeURIComponent(version ?? "current")}${studioChannel ? `&channel=${encodeURIComponent(studioChannel)}` : ""}`;
   return <div className="collection-picker" data-testid="current-template-picker">
-    {!current.some(item => item.key === value) && <p className="small muted collection-legacy">현재 작업에는 이전 디자인이 적용되어 있습니다. 원고와 이미지는 유지하며 아래 최신 마스터를 적용할 수 있습니다.</p>}
-    {current.length ? <HighScoopTemplateKit items={current} value={value} disabled={disabled} brandName={brandName} previewUrlFor={previewUrlFor} onSelect={key => {
+    {!current.some(item => item.key === selectedValue) && <p className="small muted collection-legacy">현재 작업에는 이전 디자인이 적용되어 있습니다. 원고와 이미지는 유지하며 아래 최신 마스터를 적용할 수 있습니다.</p>}
+    {current.length ? <HighScoopTemplateKit items={current} value={selectedValue} disabled={disabled} brandName={brandName} previewUrlFor={previewUrlFor} onSelect={key => {
       const item = current.find(option => option.key === key);
       if (item) onChange(key, templateSelection(item, key));
     }} selectionHint="선택은 현재 원고에만 반영됩니다. 문구·디자인 저장으로 확정하세요. 페이지별 내지는 편집기에서 고릅니다."/> : <Empty>현재 마스터를 불러오지 못했습니다. 화면을 새로고침해 주세요.</Empty>}
@@ -36,7 +37,7 @@ export function DesignPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { current, selected } = useChannel();
   if (selected === "all" || !current) return <>
     {!embedded && <h1>디자인 템플릿</h1>}
-    <Empty>보기 채널을 고르면 현재 사용하는 컬러 마스터 6종을 확인할 수 있습니다.</Empty>
+    <Empty>보기 채널을 고르면 현재 사용하는 마스터를 확인할 수 있습니다.</Empty>
   </>;
   return <>
     {!embedded && <div className="page-head"><div><h1>{current.name} 디자인 템플릿</h1><p className="small muted">컬러 마스터 하나를 고르고, 콘텐츠 편집기에서 페이지별 내지를 선택하세요.</p></div></div>}
@@ -46,7 +47,8 @@ export function DesignPage({ embedded = false }: { embedded?: boolean } = {}) {
 
 function CurrentDefaultTemplate({cid,brandName}:{cid:number;brandName:string}){
  const qc=useQueryClient(),toast=useToast(),q=useTemplates(cid),[selection,setSelection]=useState('');
- const chosen=selection||q.data?.current,current=editorialTemplateForKey(q.data?.current);
+ const previous=selection||q.data?.current,items=q.data?.items??[];
+ const chosen=items.length===1&&isCurrentEditorialTemplate(previous)?items[0].key:previous,current=editorialTemplateForKey(q.data?.current);
  const save=useMutation({
   mutationFn:(key:string)=>api(`/channels/${cid}/design`,{method:'PUT',body:{cardTemplate:key}}),
   onSuccess:(_result,key)=>{

@@ -18,14 +18,14 @@ export function HighScoopTemplateKit({value,onSelect,disabled=false,compact=fals
   return {key:item.key,category:item.category??item.name,color:item.color??palette?.color??fallback.color,soft:item.soft??palette?.soft??fallback.soft,accent:item.accent??palette?.accent??fallback.accent,
    thumbnailUrl:previewUrlFor?.(item.key)??item.thumbnailUrl??'',overviewUrl:previewUrlFor?'':item.overviewUrl??'',canvaEditUrl:item.canvaEditUrl??null,layoutLabels:item.pageLabels??fallback.layoutLabels};
  }):HIGH_SCOOP_TEMPLATE_KITS;
- const resolve=(key:string|undefined|null)=>kits.find(kit=>kit.key===key)||(key? kits.find(kit=>editorialTemplateForKey(kit.key)?.colorId===editorialTemplateForKey(key)?.colorId):undefined);
+ const resolve=(key:string|undefined|null)=>kits.find(kit=>kit.key===key)||(key? kits.find(kit=>editorialTemplateForKey(kit.key)?.colorId===editorialTemplateForKey(key)?.colorId):undefined)||(kits.length===1&&isCurrentEditorialTemplate(key)?kits[0]:undefined);
  const current=resolve(value),[previewKey,setPreviewKey]=useState<string|null>(null);
  const shown=(!onSelect?resolve(previewKey):undefined)??current;
  const active=onSelect?current:shown;
  const isHighScoop=brandName==='HighScoop';
  return <section className={`highscoop-template-kit stack${compact?' is-compact':''}`} aria-label={isHighScoop?'하이스쿱 카테고리 마스터':`${brandName} 카테고리 마스터`} data-testid="current-template-kit">
-  <div><h3>카테고리별 마스터</h3><p className="small muted">카테고리마다 하나씩, 같은 내지 종류를 각 포인트 컬러로 사용합니다.</p></div>
-  <div className="highscoop-kit-grid" role="group" aria-label={isHighScoop?'하이스쿱 마스터 6종':`${brandName} 마스터 6종`}>
+  <div><h3>{kits.length===1?'뉴스 마스터':'카테고리별 마스터'}</h3><p className="small muted">{kits.length===1?'뉴스 태그와 시안 컬러로 통일하고, 콘텐츠에 맞춰 내지를 고릅니다.':'카테고리마다 하나씩, 같은 내지 종류를 각 포인트 컬러로 사용합니다.'}</p></div>
+  <div className={`highscoop-kit-grid${kits.length===1?' is-single':''}`} role="group" aria-label={`${isHighScoop?'하이스쿱':brandName} 마스터 ${kits.length}종`}>
    {kits.map(kit=><article className={`highscoop-kit-card${active?.key===kit.key?' is-selected':''}`} key={kit.key} style={{'--kit-color':kit.color,'--kit-soft':kit.soft,'--kit-accent':kit.accent} as CSSProperties}>
     <button type="button" aria-label={`${kit.category} 마스터 ${onSelect?'선택':'미리보기'}`} aria-pressed={active?.key===kit.key} disabled={disabled} onClick={()=>{setPreviewKey(kit.key);onSelect?.(kit.key);}}>
      <MasterPreview kit={kit} brandName={brandName}/><span className="highscoop-kit-category"><i aria-hidden="true"/>{kit.category}</span>{onSelect&&current?.key===kit.key&&<small>선택됨</small>}

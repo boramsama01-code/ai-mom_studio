@@ -9,7 +9,7 @@ const content = () => studioContentSchema.parse({title:'보이저가 보내온 �
 
 describe('common kit in the four-panel workspace',()=>{
  it('shares current defaults without invalidating saved legacy designs',()=>{
-  expect(creativeProfileFor({slug:'current-dialogue'}).defaultTemplate).toBe('editorial:red');
+  expect(creativeProfileFor({slug:'current-dialogue'}).defaultTemplate).toBe('editorial:cyan');
   expect(creativeProfileFor({slug:'opportunities'}).defaultTemplate).toBe('highscoop:gifted');
   expect(studioContentSchema.parse({...content(),exportDesign:'set:n03'}).exportDesign).toBe('set:n03');
  });
@@ -22,7 +22,8 @@ describe('common kit in the four-panel workspace',()=>{
   expect(out.brand.logoPath).toContain('allligodang');
   expect(out.brand.handle).not.toContain('highscoop');
   expect(JSON.stringify(source)).toBe(before);
-  expect(studioCurrentDocument({...source,exportDesign:'editorial:red'},'Alligodang',['우주','기후']).document.category).toBe('우주');
+  expect(studioCurrentDocument({...source,exportDesign:'editorial:red',subcategory:'과학'},'Alligodang',['우주','기후']).document.category).toBe('뉴스');
+  expect(studioCurrentDocument({...source,channel:'custom-channel',exportDesign:'editorial:red'},'내 채널',['우주','기후']).document.category).toBe('우주');
  });
  it('renders current cover, body and channel-native closing card',async()=>{
   const source=content(),output=createStudioRenderer(source,2,'Alligodang','#285FAD');

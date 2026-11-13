@@ -3,7 +3,7 @@ import { currentTemplateDefault } from '../shared/currentTemplateDefaults';
 
 describe('new-work current template defaults', () => {
   it('uses current common colors for Alligodang and user-created channels', () => {
-    expect(currentTemplateDefault({slug:'current-dialogue',accentColor:'#285FAD'})).toBe('editorial:red');
+    expect(currentTemplateDefault({slug:'current-dialogue',accentColor:'#285FAD'})).toBe('editorial:cyan');
     expect(currentTemplateDefault({slug:'my-new-channel',accentColor:'#72a7ff'})).toBe('editorial:blue');
     expect(currentTemplateDefault({slug:'fryday',accentColor:'#FFD166'})).toBe('editorial:yellow');
   });

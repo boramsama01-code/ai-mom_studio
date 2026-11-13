@@ -19,17 +19,17 @@ const model=(cardCopy:unknown,pageDesigns?:unknown)=>({kind:'current_dialogue',c
 const photo=()=>sharp({create:{width:120,height:160,channels:3,background:'#5AC0C8'}}).jpeg().toBuffer();
 
 describe('current shared editorial templates',()=>{
- it('offers exactly six current choices for every brand with channel categories and readable historical aliases',()=>{
-  expect(editorialTemplateOptions(channel).map(item=>item.category)).toEqual(['과학','사회','정치','예술','여행','최신이슈']);
+ it('offers a single News choice and preserves other brand categories and historical aliases',()=>{
+  expect(editorialTemplateOptions(channel).map(item=>item.category)).toEqual(['뉴스']);
   for(const slug of ['opportunities','current-dialogue','science-dialogue','penguin','fryday','my-custom-brand']){
    const choices=editorialTemplateCatalogOptions({slug,name:slug});
-   expect(choices).toHaveLength(6);expect(choices.every(item=>item.pageCount===11&&!!editorialTemplateForKey(item.key))).toBe(true);
+   expect(choices).toHaveLength(['current-dialogue','science-dialogue'].includes(slug)?1:6);expect(choices.every(item=>item.pageCount===11&&!!editorialTemplateForKey(item.key))).toBe(true);
    expect(choices.some(item=>item.key.startsWith('set:')||item.key.startsWith('cardnews14-'))).toBe(false);
   }
   expect(editorialTemplateForKey('highscoop:conversation')?.colorId).toBe('yellow');
   expect(editorialTemplateOptions({slug:'my-custom-brand',name:'내 채널',categories:['새 소식']})[0].category).toBe('새 소식');
   const manual={version:1,templateKey:'editorial:red',cover:{title:'제목',subtitle:''},pages:[{id:'body-1',title:'본문',subtitle:'',body:'원고'}]};
-  expect(planCarousel({...model(manual),channelCategories:['사용자가 정한 분류']},{layout:'magazine'}).highscoop?.document.category).toBe('사용자가 정한 분류');
+  expect(planCarousel({...model(manual),channelName:'내 채널',channelSlug:'custom-channel',channelCategories:['사용자가 정한 분류']},{layout:'magazine'}).highscoop?.document.category).toBe('사용자가 정한 분류');
  });
  it('uses the approved Alligodang logo and account in native slides, without any HighScoop identity',async()=>{
   const document=editorialSampleDocument(channel,'editorial:cyan');

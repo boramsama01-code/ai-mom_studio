@@ -7,6 +7,8 @@ import {DesignPage} from '../client/src/pages/Design';
 import {HighScoopTemplateKit} from '../client/src/HighScoopTemplateKit';
 import {HIGH_SCOOP_TEMPLATE_KITS} from '../shared/highscoopTemplates';
 import {editorialTemplateCatalogOptions} from '../shared/templateCatalog';
+import {CreativeProfileFields} from '../client/src/CreativeProfileFields';
+import {creativeProfileFor} from '../shared/creativeProfile';
 
 const mocks=vi.hoisted(()=>({api:vi.fn(),toast:vi.fn(),selected:3 as number|'all'}));
 const channels=[
@@ -56,13 +58,31 @@ describe('HighScoop current category masters',()=>{
   expect(mocks.toast).toHaveBeenCalledWith('ok',expect.stringContaining('기본 마스터를 저장'));
  });
 
- it('uses the same current six masters for Alligodang without old galleries or upload choices',async()=>{
+ it('uses the same single current news master for Alligodang without old galleries or upload choices',async()=>{
   mocks.selected=5;await render();
-  expect(host.querySelectorAll('[aria-label="알리고당 마스터 6종"] button')).toHaveLength(6);
+  expect(host.querySelectorAll('[aria-label="알리고당 마스터 1종"] button')).toHaveLength(1);
   expect(host.textContent).not.toContain('기존 등록 디자인 목록');expect(host.textContent).not.toContain('기존 8장 Canva 라이브러리');
   expect(host.textContent).not.toContain('내 배경 템플릿');expect(host.querySelector('input[type="file"]')).toBeNull();
-  expect([...host.querySelectorAll('.highscoop-kit-category')].map(node=>node.textContent)).toEqual(['과학','사회','정치','예술','여행','최신이슈']);
+  expect([...host.querySelectorAll('.highscoop-kit-category')].map(node=>node.textContent)).toEqual(['뉴스']);
   expect(host.querySelector('img')?.getAttribute('src')).toContain('/api/channels/5/templates/preview?');expect(writes()).toHaveLength(0);
+ });
+
+ it('shows the cyan News choice for an old current Alligodang color without writing',async()=>{
+  await render(<HighScoopTemplateKit brandName="알리고당" items={editorialTemplateCatalogOptions({slug:'news'})} value="editorial:red" onSelect={mocks.toast}/>);
+  const button=host.querySelector<HTMLButtonElement>('[aria-label="뉴스 마스터 선택"]')!;
+  expect(button.getAttribute('aria-pressed')).toBe('true');
+  expect(button.closest('article')?.style.getPropertyValue('--kit-color')).toBe('#57C7E3');
+  expect(host.querySelector('[aria-label="알리고당 마스터 1종"]')).not.toBeNull();
+  expect(mocks.toast).not.toHaveBeenCalled();expect(writes()).toHaveLength(0);
+ });
+
+ it('offers only News in Alligodang creative defaults while retaining six HighScoop categories',async()=>{
+  const changed=vi.fn(),profile={...creativeProfileFor({slug:'news'}),defaultTemplate:'editorial:red' as const};
+  await render(<CreativeProfileFields channel={{slug:'news'}} value={profile} onChange={changed}/>);
+  const select=()=>[...host.querySelectorAll<HTMLSelectElement>('select')].find(node=>node.closest('label')?.textContent?.startsWith('기본 디자인'))!;
+  expect([...select().options].map(option=>option.value)).toEqual(['editorial:cyan']);expect(select().value).toBe('editorial:cyan');expect(changed).not.toHaveBeenCalled();
+  await render(<CreativeProfileFields channel={{slug:'highscoop'}} value={creativeProfileFor({slug:'highscoop'})} onChange={changed}/>);
+  expect(select().options).toHaveLength(6);
  });
 
  it('keeps read-only master previews selected and links directly to available Canva originals',async()=>{

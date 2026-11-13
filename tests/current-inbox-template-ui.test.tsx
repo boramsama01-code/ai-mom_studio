@@ -27,7 +27,7 @@ beforeEach(()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());client.clear();host.remove();});
 describe('Alligodang Inbox content template selection',()=>{
- it('opens the real Inbox editor picker with six latest masters and keeps the saved draft untouched',async()=>{
+ it('opens the real Inbox editor picker with one news master and keeps the saved draft untouched',async()=>{
   const onChange=vi.fn(),payload=emptyPayload('science_dialogue','저장된 기사 원고');
   const detail:any={item:{id:21527,channelId:2,title:'수집한 기사',kind:'science_dialogue',version:3,edited:payload},current:{id:30,revisionNo:3,payload},primary:null,linked:[],imageAiAvailable:true};
   const original=structuredClone(detail);
@@ -36,11 +36,11 @@ describe('Alligodang Inbox content template selection',()=>{
   const toggle=[...host.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.startsWith('문구를 작성할 템플릿:'))!;
   await act(async()=>toggle.click());
   const picker=host.querySelector('[data-testid="current-template-picker"]')!;
-  expect(picker.querySelectorAll('.highscoop-kit-card')).toHaveLength(6);
-  expect([...picker.querySelectorAll('.highscoop-kit-category')].map(node=>node.textContent)).toEqual(['과학','사회','정치','예술','여행','최신이슈']);
+  expect(picker.querySelectorAll('.highscoop-kit-card')).toHaveLength(1);
+  expect([...picker.querySelectorAll('.highscoop-kit-category')].map(node=>node.textContent)).toEqual(['뉴스']);
   for(const old of ['포토 디스패치','캠퍼스 에디토리얼','BANG BANG','기존 버전'])expect(picker.textContent).not.toContain(old);
-  await act(async()=>picker.querySelector<HTMLButtonElement>('[aria-label="예술 마스터 선택"]')!.click());
-  expect(onChange).toHaveBeenCalledExactlyOnceWith('editorial:blue');
+  await act(async()=>picker.querySelector<HTMLButtonElement>('[aria-label="뉴스 마스터 선택"]')!.click());
+  expect(onChange).toHaveBeenCalledExactlyOnceWith('editorial:cyan');
   expect(detail).toEqual(original);
   expect(mocks.api.mock.calls.some(([,options])=>options?.method&&options.method!=='GET')).toBe(false);
  });

@@ -36,7 +36,7 @@ function ChannelFamilyDesignPicker(props:FamilyDesignPickerProps & {channelId:nu
 }
 function CurrentFamilyDesignPicker({templateKey,disabled,onChange,channelId,items}:FamilyDesignPickerProps & {items:TemplateListReply['items']}) {
   const current=items.filter(item=>isCurrentEditorialTemplate(item.key));
-  const selected=current.find(item=>item.key===templateKey)||current.find(item=>editorialTemplateForKey(item.key)?.colorId===editorialTemplateForKey(templateKey)?.colorId);
+  const selected=current.find(item=>item.key===templateKey)||current.find(item=>editorialTemplateForKey(item.key)?.colorId===editorialTemplateForKey(templateKey)?.colorId)||(current.length===1&&isCurrentEditorialTemplate(templateKey)?current[0]:undefined);
   return <details className="family-whole-design">
     <summary><strong>전체 카드 디자인</strong><span>현재 · {selected?.name??'이전 디자인 · 원고 보관 중'}</span></summary>
     <div className="family-design-content stack">
