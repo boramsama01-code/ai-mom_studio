@@ -22,6 +22,7 @@ describe('common kit in the four-panel workspace',()=>{
   expect(out.brand.logoPath).toContain('allligodang');
   expect(out.brand.handle).not.toContain('highscoop');
   expect(JSON.stringify(source)).toBe(before);
+  expect(studioCurrentDocument({...source,exportDesign:'editorial:red'},'Alligodang',['우주','기후']).document.category).toBe('우주');
  });
  it('renders current cover, body and channel-native closing card',async()=>{
   const source=content(),output=createStudioRenderer(source,2,'Alligodang','#285FAD');

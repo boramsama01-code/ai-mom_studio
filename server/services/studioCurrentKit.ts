@@ -6,10 +6,10 @@ import { CanvaRestError } from './canvaRest';
 import { HttpError } from '../routes/util';
 
 /** The four-panel workspace uses the same current cover, interiors and closing card. */
-export function studioCurrentDocument(content: StudioContent, brandName: string) {
+export function studioCurrentDocument(content: StudioContent, brandName: string, categories?: readonly string[] | null) {
   const current = editorialTemplateForKey(content.exportDesign);
   if (!current) throw new HttpError(400, '현재 공통 템플릿을 선택해 주세요.');
-  const channel = {slug: content.channel, name: brandName};
+  const channel = {slug: content.channel, name: brandName, categories};
   const kit = editorialTemplateOptions(channel).find(kit => kit.colorId === current.colorId)!;
   const document: NotionCanvaDocument = {
     title: content.title, coverStyle: 'A', category: content.subcategory || kit.category, categoryColor: kit.color,
@@ -25,8 +25,8 @@ export function studioCurrentDocument(content: StudioContent, brandName: string)
   return {document, brand: editorialBrandForChannel(channel), soft: kit.soft};
 }
 
-export function createStudioCurrentRenderer(content: StudioContent, version: number, brandName: string, images: ReadonlyMap<number, Buffer>) {
-  const {document, brand, soft} = studioCurrentDocument(content, brandName);
+export function createStudioCurrentRenderer(content: StudioContent, version: number, brandName: string, images: ReadonlyMap<number, Buffer>, categories?: readonly string[] | null) {
+  const {document, brand, soft} = studioCurrentDocument(content, brandName, categories);
   const pageCount = document.pages.length + 1;
   const page = async (index: number) => {
     if (!Number.isInteger(index) || index < 0 || index >= pageCount) throw new HttpError(400, '내보낼 페이지를 확인하세요.');

@@ -117,15 +117,15 @@ export async function renderStudioOutput(db: DB, cardId: number, requestedVersio
     if (!image) throw new HttpError(400, "이 콘텐츠의 그림을 찾을 수 없습니다. 그림을 다시 확인해 주세요.");
     images.set(panel.imageId, image.bytes);
   }
-  return createStudioRenderer(content, row.version, brand, accent, images);
+  return createStudioRenderer(content, row.version, brand, accent, images, channel?.categories);
 }
 
 /** Pure renderer shared by the API and visual checks; performs no network or AI calls. */
-export function createStudioRenderer(content: StudioContent, version: number, brand: string, accent: string, images = new Map<number, Buffer>()) {
+export function createStudioRenderer(content: StudioContent, version: number, brand: string, accent: string, images = new Map<number, Buffer>(), categories?: readonly string[] | null) {
   if(content.experience)return createExperienceRenderer(content,version,brand,accent,images);
   const check = checkStudioExport(content);
   if (check.errors.length) throw new HttpError(400, check.errors[0].message, { errors: check.errors });
-  if (content.format === '카드뉴스' && isCurrentEditorialTemplate(content.exportDesign)) return createStudioCurrentRenderer(content, version, brand, images);
+  if (content.format === '카드뉴스' && isCurrentEditorialTemplate(content.exportDesign)) return createStudioCurrentRenderer(content, version, brand, images, categories);
   const fonts = loadFonts();
   const layout = contentLayout(content);
   const page = async (index: number): Promise<Buffer> => {

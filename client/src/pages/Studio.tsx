@@ -538,7 +538,7 @@ function StudioEditor({ data, refresh }: { data: Detail; refresh: () => unknown 
         <div className="row"><button className="btn" onClick={copyCaption} disabled={!form.caption.trim()}>캡션 복사</button></div>
         <div className="row"><button className="btn" disabled={!canWrite || (!form.caption.trim() && !studioCaptionDraft(form) && !form.memo.trim())} onClick={() => run({ kind: "text", textTarget: "caption" })}>캡션만 자동 작성·수정</button></div><details className="studio-more"><summary>수동 캡션 작성 도움 · API 한도·연결 문제일 때</summary><div className="stack"><StudioPromptCopy prompt={studioChatGptCaptionPrompt(form, channelName(form.channel))} label="ChatGPT 캡션 프롬프트 복사" /><p className="small muted">받은 답변을 위 캡션 칸에 붙여넣으세요.</p><AiUsageGuide provider={provider} /><button className="btn" disabled={!canWrite || (!form.caption.trim() && !studioCaptionDraft(form) && !form.memo.trim())} onClick={() => run({ kind: "text", textTarget: "caption" })}>{aiProviderLabels[provider]}로 캡션 작성</button></div></details>
       </section>
-      <StudioExport form={form} base={base} dirty={dirty} busy={ownBusy} active={editorStep === "finish"} change={change} save={saveCurrent} onPublicationBusyChange={setPublicationBusy} onFieldFocus={field => {
+      <StudioExport form={form} base={base} dirty={dirty} busy={ownBusy} active={editorStep === "finish"} channelCategories={channelAi?.categories} brandName={channelName(form.channel)} change={change} save={saveCurrent} onPublicationBusyChange={setPublicationBusy} onFieldFocus={field => {
         const panel = /^panels\.(\d+)\./.exec(field);
         if (panel) { setEditorStep("images"); setSelectedPanel(Number(panel[1])); }
         else if (field === "title" || field === "format") setEditorStep("story");

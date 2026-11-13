@@ -44,13 +44,14 @@ const designs = [
   { id: "minimal", name: "미니멀", detail: "여백과 본문 중심" },
 ] as const;
 
-export function StudioExport({ form, base, dirty, busy: parentBusy, change, save, onFieldFocus, onPublicationBusyChange, active = true }: {
+export function StudioExport({ form, base, dirty, busy: parentBusy, change, save, onFieldFocus, onPublicationBusyChange, active = true, channelCategories, brandName }: {
   form: StudioContent; base: StudioCard; dirty: boolean; busy: boolean;
   change: <K extends keyof StudioContent>(key: K, value: StudioContent[K]) => void;
   save: () => Promise<StudioCard>;
   onFieldFocus?: (field: string) => void;
   onPublicationBusyChange?: (busy: boolean) => void;
   active?: boolean;
+  channelCategories?: readonly string[] | null; brandName?: string;
 }) {
   const [publicationBusy, setPublicationBusy] = useState(false);
   const reportPublicationBusy = useCallback((value: boolean) => { setPublicationBusy(value); onPublicationBusyChange?.(value); }, [onPublicationBusyChange]);
@@ -96,7 +97,7 @@ export function StudioExport({ form, base, dirty, busy: parentBusy, change, save
     </div>}
     {!form.experience && form.format === "카드뉴스" && <div className="stack">
       <button type="button" className="btn" aria-expanded={showCollection} onClick={() => setShowCollection(v => !v)}>{showCollection ? "디자인 컬렉션 접기" : "카드 디자인·컬러 둘러보기"}</button>
-      {showCollection && <TemplatePicker cid="studio" studioChannel={form.channel} value={form.exportDesign} disabled={busy || prepare.isPending} onChange={key => change("exportDesign", key as StudioContent["exportDesign"])} items={editorialTemplateCatalogOptions({slug:form.channel})} />}
+      {showCollection && <TemplatePicker cid="studio" studioChannel={form.channel} brandName={brandName} value={form.exportDesign} disabled={busy || prepare.isPending} onChange={key => change("exportDesign", key as StudioContent["exportDesign"])} items={editorialTemplateCatalogOptions({slug:form.channel,categories:channelCategories})} />}
       {form.exportDesign.startsWith("set:") && <p className="small muted">사진형 표지는 첫 번째 본문의 이미지를 함께 사용합니다. 각 본문에 넣은 그림도 유지됩니다.</p>}
     </div>}
     <label className="field">출처 표기<input id="studio-sourceLabel" disabled={busy || prepare.isPending} maxLength={180} value={form.sourceLabel} onChange={event => change("sourceLabel", event.target.value)} placeholder="예: ○○대학교 입학처 · 2026.10.23 확인" /><span className="hint">이미지 하단에 표시됩니다.</span></label>
