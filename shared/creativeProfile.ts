@@ -32,11 +32,11 @@ export function creativeProfileFor(channel: { slug: string; creativeProfile?: Cr
   const key = studioKey(channel.slug);
   const legacy: Record<string, { format: StudioFormat; template: CreativeProfile["defaultTemplate"]; characters: CreativeProfile["characters"]; logoAssetId?: RegisteredProfileAssetId }> = {
     penguin: { format: "웹툰", template: "editorial", characters: ["pengki"], logoAssetId: "brand:space-penguin-company:20261101" },
-    highscoop: { format: "카드뉴스", template: "set:r01", characters: ["pempem"], logoAssetId: "brand:highscoop:original:20261101" },
-    news: { format: "카드뉴스", template: "set:n03", characters: ["pengpeng"], logoAssetId: "brand:allligodang:bw:20261104" },
-    fryday: { format: "카드뉴스", template: "set:f01", characters: ["penguin"] },
+    highscoop: { format: "카드뉴스", template: "highscoop:gifted", characters: ["pempem"], logoAssetId: "brand:highscoop:original:20261101" },
+    news: { format: "카드뉴스", template: "editorial:red", characters: ["pengpeng"], logoAssetId: "brand:allligodang:bw:20261104" },
+    fryday: { format: "카드뉴스", template: "editorial:red", characters: ["penguin"] },
   };
-  const defaults = legacy[key] ?? { format: "카드뉴스" as const, template: "editorial" as const, characters: [], logoAssetId: undefined };
+  const defaults = legacy[key] ?? { format: "카드뉴스" as const, template: "editorial:red" as const, characters: [], logoAssetId: undefined };
   return creativeProfileSchema.parse({
     formats: [...studioFormats], defaultFormat: defaults.format,
     defaultRoute: "writing", defaultTemplate: defaults.template, characters: defaults.characters, logoAssetId: defaults.logoAssetId,

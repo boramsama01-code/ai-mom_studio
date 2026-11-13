@@ -1,6 +1,11 @@
 import type { FamilyPageId } from "@shared/familyDialogue";
 import { familyCollectionDesign } from "@shared/familyCollectionDesigns";
-import { READING_CARD_PROFILES, readingProfileForTemplateKey } from "@shared/readingCardProfiles";
+import { useQuery } from "@tanstack/react-query";
+import { editorialTemplateCatalogOptions, type TemplateListReply } from "@shared/templateCatalog";
+import { editorialTemplateForKey, isCurrentEditorialTemplate } from "@shared/editorialTemplates";
+import { api } from "./api";
+import { HighScoopTemplateKit } from "./HighScoopTemplateKit";
+import { ErrorBox, Loading } from "./ui";
 
 /** A role diagram only: it never contains manuscript text or rendered artwork. */
 export function FamilyPageLayout({ pageId }: { pageId: FamilyPageId }) {
@@ -19,29 +24,29 @@ export function FamilyPageLayout({ pageId }: { pageId: FamilyPageId }) {
   </svg>;
 }
 
-export function FamilyDesignPicker({ templateKey, disabled, onChange }: { templateKey: string; disabled: boolean; onChange: (key: string) => void }) {
-  const profile = readingProfileForTemplateKey(templateKey), collection = familyCollectionDesign(templateKey);
-  const collectionName = collection && `${collection.name}${collection.colorName ? ` · ${collection.colorName}` : ""}`;
-  const currentName = profile?.label ?? collectionName ?? "기존 8장 디자인";
+type FamilyDesignPickerProps={templateKey:string;disabled:boolean;onChange:(key:string)=>void;channelId?:number};
+export function FamilyDesignPicker(props:FamilyDesignPickerProps) {
+  return props.channelId ? <ChannelFamilyDesignPicker {...props} channelId={props.channelId}/> : <CurrentFamilyDesignPicker {...props} items={editorialTemplateCatalogOptions({slug:'news'})}/>;
+}
+function ChannelFamilyDesignPicker(props:FamilyDesignPickerProps & {channelId:number}) {
+  const query=useQuery({queryKey:['ch',props.channelId,'templates'],queryFn:()=>api<TemplateListReply>(`/channels/${props.channelId}/templates`)});
+  if(query.isPending)return <Loading label="현재 디자인 불러오는 중"/>;
+  if(query.error)return <ErrorBox error={query.error} retry={()=>void query.refetch()}/>;
+  return <CurrentFamilyDesignPicker {...props} items={query.data.items}/>;
+}
+function CurrentFamilyDesignPicker({templateKey,disabled,onChange,channelId,items}:FamilyDesignPickerProps & {items:TemplateListReply['items']}) {
+  const current=items.filter(item=>isCurrentEditorialTemplate(item.key));
+  const selected=current.find(item=>item.key===templateKey)||current.find(item=>editorialTemplateForKey(item.key)?.colorId===editorialTemplateForKey(templateKey)?.colorId);
   return <details className="family-whole-design">
-    <summary><strong>전체 8장 디자인</strong><span>현재 · {currentName}</span></summary>
+    <summary><strong>전체 카드 디자인</strong><span>현재 · {selected?.name??'이전 디자인 · 원고 보관 중'}</span></summary>
     <div className="family-design-content stack">
-      <p className="hint">8장 전체에 사용할 배치와 색을 선택하세요. 실제 문구와 이미지 배치는 선택한 페이지의 미리보기에서 확인합니다.</p>
-      <label className="field">전체 목록에서 선택
-        <select aria-label="전체 목록에서 선택" value={profile?.templateKey ?? (collection ? templateKey : "legacy")} disabled={disabled} onChange={event => onChange(event.target.value === "legacy" ? "builtin:classic" : event.target.value)}>
-          <option value="legacy">기존 8장 디자인</option>
-          {collection && <option value={templateKey}>{collectionName} · 8장 컬러 적용</option>}
-          {READING_CARD_PROFILES.map(value => <option key={value.id} value={value.templateKey}>{value.label}{value.sourceStyleId ? "" : " · 기존"} · 사진 {value.images.length - 1}장</option>)}
+      <label className="field">컬러·카테고리 선택
+        <select aria-label="전체 목록에서 선택" value={selected?.key??''} disabled={disabled} onChange={event=>{if(isCurrentEditorialTemplate(event.target.value))onChange(event.target.value);}}>
+          {!selected&&<option value="" disabled>최신 마스터를 선택하세요</option>}
+          {current.map(item=><option key={item.key} value={item.key}>{item.name}</option>)}
         </select>
-        <span className="hint">{collection ? "기본 세트에서 선택한 컬러를 8장 전용 배치에 적용합니다. 현재 원고의 8장 구성과 직접 지정한 배경색은 유지합니다." : "1080×1350 · 8장. 디자인을 바꿔도 입력한 문구와 이전 이미지 기록은 유지합니다. Canva 자동 제작은 해당 마스터 검증·등록이 완료된 뒤 가능합니다."}</span>
       </label>
-      <div className="family-design-example-heading"><strong>디자인 예시</strong><span className="hint">현재 원고가 아닙니다. 예시 속 문구와 사진은 가져오지 않습니다.</span></div>
-      <div className="family-design-examples" role="group" aria-label="전체 8장 디자인 예시">
-        {READING_CARD_PROFILES.filter(value => value.sourceStyleId).map(value => <button key={value.id} className="family-design-example" type="button" aria-label={`디자인 선택 · ${value.label}`} aria-pressed={templateKey === value.templateKey} disabled={disabled} onClick={() => onChange(value.templateKey)}>
-          <img src={`/cardnews14/${value.sourceStyleId}-cover.webp`} alt="" loading="lazy" decoding="async" width="270" height="337" />
-          <strong>{value.label}</strong><span>{templateKey === value.templateKey ? "선택됨" : "8장에 적용"}</span>
-        </button>)}
-      </div>
+      <HighScoopTemplateKit value={selected?.key} items={current} brandName="현재 채널" disabled={disabled} onSelect={onChange} previewUrlFor={channelId?key=>`/api/channels/${channelId}/templates/preview?size=sm&key=${encodeURIComponent(key)}&page=0`:undefined} selectionHint="컬러를 바꿔도 현재 원고의 장수·문구·근거 자료·사진은 유지합니다. 문구·디자인 저장으로 확정하세요."/>
     </div>
   </details>;
 }

@@ -21,6 +21,8 @@ import { STUDIO_IMAGE_MAX_BYTES, STUDIO_IMAGE_TYPES } from "../../shared/studioI
 import sharp from "sharp";
 import { cardDesign } from "../../shared/cardDesigns";
 import { renderCollectionPreview } from "../services/cardDesignSamples";
+import { editorialTemplateForKey, EDITORIAL_TEMPLATE_VERSION } from "../../shared/editorialTemplates";
+import { renderEditorialTemplateSample } from "../services/editorialTemplateSamples";
 import { zipImportRoutes } from "./zipImport";
 import { studioFamilyReference, studioPoseReference } from "../services/studioCharacters";
 import { STUDIO_CHARACTERS } from "../../shared/studioCharacters";
@@ -115,16 +117,17 @@ for(const preview of [false,true]) studioRoutes.get(`/studio/media/:id${preview?
 const designPreviewCache = new Map<string, Buffer>();
 studioRoutes.get("/studio/design-preview", ah(async (req, res) => {
   const key = String(req.query.key ?? "");
-  if (!key.startsWith("set:") || !cardDesign(key.slice(4))) throw new HttpError(404, "디자인을 찾을 수 없습니다.");
-  const page = parse(z.coerce.number().int().min(0).max(4).default(0), req.query.page);
+  const current = editorialTemplateForKey(key);
+  if (!current && (!key.startsWith("set:") || !cardDesign(key.slice(4)))) throw new HttpError(404, "디자인을 찾을 수 없습니다.");
+  const page = parse(z.coerce.number().int().min(0).max(current ? 10 : 4).default(0), req.query.page);
   const small = req.query.size === "sm";
   const channel = req.query.channel === undefined ? undefined : parse(z.string().min(1).max(100), req.query.channel);
   const [selected] = channel ? await getDb().select().from(channels).where(eq(channels.slug, channelSlug(channel))) : [];
   if (channel && !selected) throw new HttpError(404, "채널을 찾을 수 없습니다.");
-  const cacheKey = `${key}|${page}|${small}|${selected?.slug ?? ""}|${selected?.name ?? ""}`;
+  const cacheKey = `${EDITORIAL_TEMPLATE_VERSION}|${key}|${page}|${small}|${selected?.slug ?? ""}|${selected?.name ?? ""}|${JSON.stringify(selected?.categories)}`;
   let bytes = designPreviewCache.get(cacheKey);
   if (!bytes) {
-    const image = await renderCollectionPreview(key.slice(4), page, selected?.name, selected?.slug);
+    const image = current ? await renderEditorialTemplateSample(selected ?? {slug:'studio',name:'Studio'},key,page) : await renderCollectionPreview(key.slice(4), page, selected?.name, selected?.slug);
     bytes = small ? await sharp(image).resize(360, 450).jpeg({ quality: 85 }).toBuffer() : image;
     if (designPreviewCache.size >= 120) designPreviewCache.clear();
     designPreviewCache.set(cacheKey, bytes);

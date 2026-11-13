@@ -71,7 +71,7 @@ describe("current HighScoop kits in the generic card editor", () => {
     expect(plan.highscoopOutro).toBeUndefined();
   });
 
-  it("leaves legacy brand rendering intact and rejects rich manuscript conversion instead of discarding its structure", () => {
+  it("leaves legacy brand rendering intact and rejects malformed rich manuscripts without discarding their structure", () => {
     const legacy = planCarousel({ ...input(copy("legacy:classic")), channelName: "Fryday", channelSlug: "science" }, { layout: "classic" });
     expect(legacy.highscoop).toBeUndefined();
     expect(legacy.copy).toEqual(copy("legacy:classic"));

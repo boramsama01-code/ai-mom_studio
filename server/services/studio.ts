@@ -1,4 +1,5 @@
 import { creativeProfileFor } from "../../shared/creativeProfile";
+import { currentTemplateDefault } from "../../shared/currentTemplateDefaults";
 import { validSubcategory } from "../../shared/channelCategories";
 import { lockStudioPublication, invalidateStudioPublication } from "./studioPublicationState";
 import { validateExperienceMedia } from "./experienceMedia";
@@ -163,7 +164,7 @@ export async function createStudioCard(db: DB, content: StudioContent, actor: st
       if (!content.subcategory && validSubcategory(content.channel, source.subcategory, ch.categories)) content = { ...content, subcategory: source.subcategory ?? "" };
       const idea = readIdea(source.edited);
       if (idea && source.origin === "idea") {
-        content = { ...content, format: idea.format, exportDesign: idea.format === "카드뉴스" ? "set:f01" : content.exportDesign,
+        content = { ...content, format: idea.format, exportDesign: idea.format === "카드뉴스" ? currentTemplateDefault(ch) as StudioContent['exportDesign'] : content.exportDesign,
           memo: [idea.angle, ...idea.beats, idea.verification, ...idea.references.map(r=>`${r.label}: ${r.url}`)].join("\n\n"),
           script: `${idea.title}\n\n${idea.angle}\n\n${idea.beats.join("\n\n")}`,
           panels: idea.beats.map(scene=>({scene,dialogue:"",imageId:null})) };

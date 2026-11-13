@@ -20,6 +20,9 @@ import { familyDialogueMetadataSchema, type FamilyDialogueMetadata } from "@shar
 import { FamilyDialogueEditor, familyCopyText, type FamilyDialogueResponse, type FamilyProposal } from "./FamilyDialogueEditor";
 import { readingProfileForTemplateKey } from "@shared/readingCardProfiles";
 import { collectionUsesArt } from "@shared/cardDesigns";
+import { isCurrentEditorialTemplate } from "@shared/editorialTemplates";
+import { editorialInteriorFields } from "@shared/editorialPageDesign";
+import { CardInteriorEditor, useCardInteriorDrafts } from "./CardInteriorEditor";
 
 export type CardCopyResponse = { version: number; revisionId: number; copy: CardCopy; hasSavedCopy: boolean; recoveryNotice?: string; recommendedStoryFormat?: "discussion8" | "family_dialogue_8" | null; ai?: Record<"summary" | "copy" | "image", AiSelection> };
 export type StoredCardCopyResponse = Omit<CardCopyResponse, "copy"> & { copy: StoredCardCopy } & Partial<FamilyDialogueMetadata>;
@@ -50,13 +53,13 @@ const chars = (text: string) => [...text].length;
 const copyText = (copy: CardCopy) => [
   `템플릿: ${cardCopyLimits(copy.templateKey, copy.storyFormat).templateName} (${copy.templateKey})`,
   `표지\n${copy.cover.title}\n${copy.cover.subtitle}`,
-  ...copy.pages.map((page, i) => `${page.role ? `${i + 2}페이지 · ${NEWS_EDITORIAL_LABELS[page.role]}` : `${i + 1}번째 본문`}\n${page.title}\n${page.subtitle}\n${page.body}${page.columns ? `\n${page.columns.map(col => `${col.title}\n${col.body}`).join("\n\n")}` : ""}${page.resource ? `\n함께 볼 자료: ${page.resource.title}\n${page.resource.url}` : ""}${page.background ? `\n배경 이미지 #${page.background.assetId}` : ""}`),
+  ...copy.pages.map((page, i) => `${page.role ? `${i + 2}페이지 · ${NEWS_EDITORIAL_LABELS[page.role]}` : `${i + 1}번째 본문`}\n${page.title}\n${page.subtitle}\n${page.body}${page.columns ? `\n${page.columns.map(col => `${col.title}\n${col.body}`).join("\n\n")}` : ""}${page.resource ? `\n함께 볼 자료: ${page.resource.title}\n${page.resource.url}` : ""}${page.footnote ? `\n각주: ${page.footnote}` : ""}${page.background ? `\n배경 이미지 #${page.background.assetId}` : ""}`),
 ].join("\n\n");
 // Checkpoint incomplete edits too. Save-time nonempty/length checks remain in cardCopySchema.
 const recoveryCopySchema = z.object({
   version: z.literal(1), templateKey: z.string(), storyFormat: z.literal("discussion8").optional(),
   cover: z.object({ title: z.string(), subtitle: z.string(), background: cardPageBackgroundSchema.optional() }),
-  pages: z.array(z.object({ id: z.string(), title: z.string(), subtitle: z.string(), body: z.string(), role: z.enum(NEWS_EDITORIAL_ROLES).optional(), columns: z.array(z.object({ title: z.string(), body: z.string() })).length(2).optional(), sourceIds: z.array(z.number().int().positive()).max(12).optional(), resource: newsEditorialResourceSchema.optional(), background: cardPageBackgroundSchema.optional() })).min(1).max(9),
+  pages: z.array(z.object({ ...editorialInteriorFields, id: z.string(), title: z.string(), subtitle: z.string(), body: z.string(), role: z.enum(NEWS_EDITORIAL_ROLES).optional(), columns: z.array(z.object({ title: z.string(), body: z.string() })).length(2).optional(), sourceIds: z.array(z.number().int().positive()).max(12).optional(), resource: newsEditorialResourceSchema.optional(), background: cardPageBackgroundSchema.optional() })).min(1).max(9),
 });
 const parseRecoveryCopy = (value: unknown): CardCopy | null => { const parsed = recoveryCopySchema.safeParse(value); return parsed.success ? parsed.data : null; };
 
@@ -112,6 +115,7 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   const serial = useRef<Promise<CardCopyResponse> | null>(null);
   const action = useRef<"generate" | "render" | null>(null);
   const generation = useGenerationRequest(channelId, itemId, "card-copy");
+  const interiors = useCardInteriorDrafts(channelId, itemId, base?.version ?? 0, !!base);
   const generationSource = useRef<string | null>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null), subtitleRef = useRef<HTMLTextAreaElement>(null), bodyRef = useRef<HTMLTextAreaElement>(null);
   const dirty = !!copy && !!base && !same(copy, base.copy);
@@ -165,6 +169,7 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
     finally { setConflictLoading(false); }
   }
   async function saveNow(): Promise<CardCopyResponse> {
+    if (interiors.pending) throw new Error("내지 구성 입력을 적용하거나 취소한 뒤 저장해 주세요. 기존 원고는 유지했습니다.");
     if (formatConflict) throw new Error("다른 형식으로 저장된 원고를 먼저 확인해 주세요. 현재 입력은 유지했습니다.");
     if (recovery.pending) throw new Error("기기 복구본을 먼저 불러오거나 버려 주세요.");
     if (serial.current) { await serial.current; return saveNow(); }
@@ -205,7 +210,7 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
     });
     return () => guard.setDirty(key, false);
   }, [channelId, itemId, dirty, recovery.pending, saving, rendering, backgroundBusy, generating, generation.cancelled, conflicting, guard]);
-  useEffect(() => { onDirtyChange?.(dirty || locked || !base || invalid || !!conflicting); }, [dirty, locked, base, invalid, conflicting, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(dirty || interiors.pending || locked || !base || invalid || !!conflicting); }, [dirty, interiors.pending, locked, base, invalid, conflicting, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   useEffect(() => {
@@ -297,10 +302,12 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   }
   function applyBackground(result: PageArtworkResult, priorAssetId: number | null) {
     const current = copyRef.current, baseline = baseRef.current;
-    if (!current || (current.storyFormat !== "discussion8" && result.pageId !== "cover") || baseline?.version !== result.version) return false;
-    const index = result.pageId === "cover" ? 0 : current.pages.findIndex(p => p.id === result.pageId) + 1;
+    if (!current || (current.storyFormat !== "discussion8" && !isCurrentEditorialTemplate(current.templateKey) && result.pageId !== "cover") || baseline?.version !== result.version) return false;
+    const position = /^body-([1-9])$/.exec(result.pageId);
+    const index = result.pageId === "cover" ? 0 : position ? Number(position[1]) : current.pages.findIndex(p => p.id === result.pageId) + 1;
     if (result.pageId !== "cover" && index === 0) return false;
     const target = index === 0 ? current.cover : current.pages[index - 1];
+    if (!target) return false;
     if ((target.background?.assetId ?? null) !== priorAssetId) return false;
     setBackground(index, { assetId: result.assetId, opacity: target.background?.opacity ?? 100 });
     return true;
@@ -319,12 +326,15 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
   const limits = cardCopyLimits(copy.templateKey, copy.storyFormat);
   const bodyText = pageIndex > 0 ? copy.pages[pageIndex - 1].body : null;
   const editorialPage = pageIndex > 0 ? copy.pages[pageIndex - 1] : null;
+  const currentKit = isCurrentEditorialTemplate(copy.templateKey);
+  const bodyEditor = bodyText !== null && <label className="field" htmlFor={`${uid}-body`}><span className="row between"><strong>카드 본문</strong><span className="hint">{chars(bodyText)}자 · {limits.recommended.body}자 권장</span></span><textarea ref={bodyRef} id={`${uid}-body`} aria-label="카드 본문" rows={6} value={bodyText} disabled={busy} aria-invalid={!!issue("body")} aria-describedby={`${uid}-body-help`} onChange={event => update("body", event.target.value)} /><span id={`${uid}-body-help`} className={issue("body") ? "card-copy-error" : "hint"}>{issue("body") ?? (chars(bodyText) > limits.recommended.body ? `${limits.recommended.body}자를 넘었습니다. 글자가 잘리지 않도록 미리보기와 저장 안내를 확인해 주세요. 입력한 내용은 자동으로 자르지 않습니다.` : "이미지 안에 들어가는 본문입니다. 캡션·대체텍스트와 별도로 저장합니다.")}</span></label>;
   const pageLabel = pageIndex === 0 ? "표지" : editorialPage?.role ? `${pageIndex + 1}페이지 · ${NEWS_EDITORIAL_LABELS[editorialPage.role]}` : `${pageIndex}번째 본문`;
   const canApplyProposal = !!proposal && proposal.version === base.version && proposal.source === JSON.stringify(copy);
   const canApplyFamilyProposal = !!familyProposal?.copy && !familyProposal.lateResult && familyProposal.version === base.version && familyProposal.source === JSON.stringify(copy) && familyProposal.copy.templateKey === (templateKey ?? copy.templateKey);
   return <section className="card-copy-editor stack" aria-labelledby={`${uid}-heading`}>
     <div className="card-copy-heading"><div><h3 id={`${uid}-heading`}>문구·미리보기</h3><p className="small muted">카드를 선택해서 글을 고치세요. 게시물 캡션과 별도로 저장합니다.</p></div><span className={`badge ${dirty ? "warn" : "ok"}`} role="status">{saving ? "문구 저장 중…" : dirty ? "저장하지 않은 수정" : base.hasSavedCopy ? "문구 저장됨" : "원고에서 가져온 문구"}</span></div>
     <RecoveryNotice recovery={recovery} formatValue={value => value ? copyText(value) : ""} />
+    <RecoveryNotice recovery={interiors.recovery} />
     {(base.recommendedStoryFormat === "family_dialogue_8" || pendingFamilyTemplate || copy.storyFormat === "discussion8") && <details className="content-options" open={manualConversion}>
       <summary>AI 없이 8장 원고 직접 작성·전환</summary>
       {manualConversion ? <ManualFamilyInitializer channelId={channelId} channelName={qc.getQueryData<Array<{id:number;name:string}>>(["channels"])?.find(value => value.id === channelId)?.name ?? "채널 이름"} initialTitle={copy.cover.title} templateKey={templateKey ?? copy.templateKey} existing={{itemId,version:base.version}} onBack={() => setManualConversion(false)} onSaved={() => { setManualConversion(false); void loaded.refetch(); }} /> : <div className="stack"><p className="small">제공 자료와 8장 문구를 직접 대조해 새 버전으로 전환합니다. 현재 원고와 이전 버전은 보존하며 AI는 호출하지 않습니다.</p><button type="button" className="btn" disabled={locked || dirty || !!conflicting} onClick={() => setManualConversion(true)}>제공 자료로 8장 직접 작성 시작</button>{dirty&&<p className="hint">지금 입력한 문구를 먼저 저장한 뒤 새 구성을 작성해 주세요.</p>}</div>}
@@ -357,14 +367,17 @@ function LegacyCardCopyEditor({ loaded, channelId, itemId, itemVersion, template
       <div className="card-copy-fields">
         <label className="field" htmlFor={`${uid}-title`}><span className="row between"><strong>{pageIndex === 0 ? "표지 제목" : "본문 제목"}</strong><span className="hint">{chars(page.title)}자 · {pageIndex === 0 ? limits.recommended.coverTitle : limits.recommended.title}자 권장</span></span><textarea ref={titleRef} id={`${uid}-title`} rows={2} value={page.title} disabled={busy} aria-invalid={!!issue("title")} aria-describedby={`${uid}-title-help`} onChange={event => update("title", event.target.value)} /><span id={`${uid}-title-help`} className={issue("title") ? "card-copy-error" : "hint"}>{issue("title") ?? `카드에서 가장 크게 보이는 제목입니다. 최대 ${pageIndex === 0 ? limits.max.coverTitle : limits.max.title}자까지 입력할 수 있어요.`}</span></label>
         <label className="field" htmlFor={`${uid}-subtitle`}><span className="row between"><strong>{pageIndex === 0 ? "표지 부제" : "본문 부제"} <span className="muted small">선택</span></strong><span className="hint">{chars(page.subtitle)}자 · {limits.recommended.subtitle}자 권장</span></span><textarea ref={subtitleRef} id={`${uid}-subtitle`} rows={2} value={page.subtitle} disabled={busy} aria-invalid={!!issue("subtitle")} aria-describedby={`${uid}-subtitle-help`} onChange={event => update("subtitle", event.target.value)} /><span id={`${uid}-subtitle-help`} className={issue("subtitle") ? "card-copy-error" : "hint"}>{issue("subtitle") ?? "제목을 보충하는 짧은 문장입니다. 비워 두면 표시하지 않습니다."}</span></label>
-        {bodyText !== null && <label className="field" htmlFor={`${uid}-body`}><span className="row between"><strong>카드 본문</strong><span className="hint">{chars(bodyText)}자 · {limits.recommended.body}자 권장</span></span><textarea ref={bodyRef} id={`${uid}-body`} rows={6} value={bodyText} disabled={busy} aria-invalid={!!issue("body")} aria-describedby={`${uid}-body-help`} onChange={event => update("body", event.target.value)} /><span id={`${uid}-body-help`} className={issue("body") ? "card-copy-error" : "hint"}>{issue("body") ?? (chars(bodyText) > limits.recommended.body ? `${limits.recommended.body}자를 넘었습니다. 글자가 잘리지 않도록 미리보기와 저장 안내를 확인해 주세요. 입력한 내용은 자동으로 자르지 않습니다.` : "이미지 안에 들어가는 본문입니다. 캡션·대체텍스트와 별도로 저장합니다.")}</span></label>}
+        {currentKit && editorialPage ? <CardInteriorEditor value={editorialPage.interiorTemplate} body={editorialPage.body} emphasis={editorialPage.emphasis} footnote={editorialPage.footnote} limit={limits.max.body} disabled={busy || !!interiors.recovery.pending}
+          draft={interiors.drafts[editorialPage.id]} onDraft={value => interiors.set(editorialPage.id, value)} rawEditor={bodyEditor}
+          onChange={patch => { const current = copyRef.current; if (current) put({ ...current, pages: current.pages.map(value => value.id === editorialPage.id ? { ...value, ...patch } : value) }); }} /> : bodyEditor}
         {editorialPage?.columns && <fieldset className="card-copy-columns"><legend>{editorialPage.role === "concept" ? "서로 다른 정의의 예시" : "두 가지 시선"}</legend>{editorialPage.columns.map((column, index) => <div className="stack" key={index}><label className="field">{index + 1}번 칸 제목<input id={`${uid}-column-${index}-title`} value={column.title} disabled={busy} onChange={event => updateColumn(index, "title", event.target.value)} /></label><label className="field">{index + 1}번 칸 설명<textarea id={`${uid}-column-${index}-body`} rows={4} value={column.body} disabled={busy} onChange={event => updateColumn(index, "body", event.target.value)} /><span className="hint">{chars(column.body)}자 · 100자 권장</span></label></div>)}</fieldset>}
-        {(copy.storyFormat === "discussion8" || pageIndex === 0 && (!copy.templateKey.startsWith("set:") || collectionUsesArt(copy.templateKey.slice(4)) || !!page.background)) && <PageBackgroundEditor key={`${channelId}:${itemId}`} channelId={channelId} itemId={itemId} pageIndex={pageIndex} background={page.background} disabled={busy || saving || conflictLoading || !!conflicting || invalid} showAi={showAi && (copy.storyFormat === "discussion8" || !copy.templateKey.startsWith("set:") || collectionUsesArt(copy.templateKey.slice(4)))} imageReady={!!status.data?.image} imageModel={base.ai?.image.model} save={saveNow} onApply={applyBackground} onChange={next => setBackground(pageIndex, next)} onBusyChange={setBackgroundBusy} />}
+        {(currentKit || copy.storyFormat === "discussion8" || pageIndex === 0 && (!copy.templateKey.startsWith("set:") || collectionUsesArt(copy.templateKey.slice(4)) || !!page.background)) && <PageBackgroundEditor key={`${channelId}:${itemId}`} channelId={channelId} itemId={itemId} pageIndex={pageIndex} background={page.background} disabled={busy || saving || interiors.pending || conflictLoading || !!conflicting || invalid} showAi={showAi && (copy.storyFormat === "discussion8" || !copy.templateKey.startsWith("set:") || collectionUsesArt(copy.templateKey.slice(4)))} imageReady={!!status.data?.image} imageModel={base.ai?.image.model} save={saveNow} onApply={applyBackground} onChange={next => setBackground(pageIndex, next)} onBusyChange={setBackgroundBusy} />}
         {editorialPage?.resource && <div className="notice small stack"><strong>함께 볼 자료 · 확보한 원문</strong><a href={editorialPage.resource.url} target="_blank" rel="noreferrer">{editorialPage.resource.title}</a><p className="hint">이 콘텐츠에 연결된 자료의 실제 제목과 주소입니다. 방문 일정·이용 조건은 원문에서 확인하세요.</p><button className="btn ghost sm" disabled={busy} onClick={() => put({ ...copy, pages: copy.pages.map((p, i) => i === pageIndex - 1 ? { ...p, resource: undefined } : p) })}>이 참고자료 빼기</button></div>}
       </div>
     </div>
     {invalid && <p className="notice warn small" role="alert">제목과 본문은 비울 수 없습니다. 제목·부제·본문의 글자 수 안내를 확인한 뒤 저장해 주세요. 입력한 내용은 그대로 유지됩니다.</p>}
     {saveError && <ErrorBox error={saveError} />}
-    <div className="card-copy-savebar"><p className="small muted">{dirty ? "수정 내용을 저장하고 이미지에 반영하세요." : "작성한 글은 이 카드에만 반영돼요."}</p><div className="row"><button className="btn" disabled={locked || invalid || !!conflicting || (!dirty && base.hasSavedCopy)} onClick={() => void saveNow().catch(() => {})}>{saving ? "저장 중…" : "문구 저장"}</button>{onSaveAndRender && <button className="btn primary" disabled={generating || renderDisabled || !!pendingFamilyTemplate || locked || invalid || !!conflicting} onClick={() => void saveAndRender()}>{rendering ? "카드뉴스 만드는 중…" : `${dirty || !base.hasSavedCopy ? "저장하고 " : ""}${renderLabel}`}</button>}</div></div>
+    {interiors.pending && <p className="notice small" role="status">적용하지 않은 내지 구성 입력이 있습니다. 해당 페이지에서 적용하거나 취소하면 저장할 수 있어요.</p>}
+    <div className="card-copy-savebar"><p className="small muted">{dirty ? "수정 내용을 저장하고 이미지에 반영하세요." : "작성한 글은 이 카드에만 반영돼요."}</p><div className="row"><button className="btn" disabled={locked || interiors.pending || invalid || !!conflicting || (!dirty && base.hasSavedCopy)} onClick={() => void saveNow().catch(() => {})}>{saving ? "저장 중…" : "문구 저장"}</button>{onSaveAndRender && <button className="btn primary" disabled={generating || renderDisabled || !!pendingFamilyTemplate || locked || interiors.pending || invalid || !!conflicting} onClick={() => void saveAndRender()}>{rendering ? "카드뉴스 만드는 중…" : `${dirty || !base.hasSavedCopy ? "저장하고 " : ""}${renderLabel}`}</button>}</div></div>
   </section>;
 }

@@ -12,6 +12,8 @@ import { familyEvidenceView } from '../server/services/familyEvidence.ts';
 import { planCarousel, renderCarouselPage } from '../server/services/cardCarousel.ts';
 import { canvaLibraryStateFixture } from '../tests/fixtures/canvaTemplateLibrary.ts';
 import { assertStudioStartLayout } from './studio-start-layout.mjs';
+import { editorialTemplateCatalogOptions } from '../shared/templateCatalog.ts';
+import { familyDisplayDescriptors } from '../shared/familyDisplay.ts';
 
 const require = createRequire(import.meta.url); let playwright;
 try { playwright = require('playwright'); } catch { playwright = require(require.resolve('playwright', { paths: [process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES ?? '/nonexistent'] })); }
@@ -31,7 +33,7 @@ async function render(copy, page, pageDesigns) {
   }
   return imageCache.get(key);
 }
-function fixture() {
+function fixture(expectedTemplate=example.copy.templateKey) {
   const state = { body: null, writes: [], saved: null, payload: null, evidence: null, pendingPreviews: 0 };
   const card = () => ({ id: 88, version: 1, title: state.body.title, channel: 'news', format: '카드뉴스', stage: 'writing', sourceItemId: 39, sourceReference: { channelId: 3, itemId: 39 }, panels: Array.from({ length: 4 }, () => ({ scene: '', dialogue: '', imageId: null })), script: '', caption: '', memo: '', imagePath: '', createdAt: stamp, updatedAt: stamp });
   const current = () => ({ id: state.saved.revisionId, revisionNo: state.saved.version - 1, author: 'operator', payload: state.payload, createdAt: stamp, note: '제공 문서·직접 작성한 8장 원고 저장 · AI 호출 없음' });
@@ -47,7 +49,7 @@ function fixture() {
     else if (pathname === '/api/studio/cards' && method === 'GET') data = { cards: state.body ? [card()] : [], ai, notes: '', notesVersion: 1 };
     else if (pathname === '/api/channels/3/items/manual-family' && method === 'POST') {
       assert.equal(state.body, null, 'one explicit creation only'); const saved = familyManualCreateSchema.parse(body);
-      assert.equal(saved.title, example.title); assert.deepEqual(saved.copy.pages.map(page => page.fields), example.copy.pages.map(page => page.fields)); assert.equal(saved.copy.templateKey, example.copy.templateKey); assert.deepEqual(saved.source, example.source); assert.deepEqual(saved.factBindings, example.factBindings);
+      assert.equal(saved.title, example.title); assert.deepEqual(saved.copy.pages.map(page => page.fields), example.copy.pages.map(page => page.fields)); assert.equal(saved.copy.templateKey, expectedTemplate); assert.deepEqual(saved.source, example.source); assert.deepEqual(saved.factBindings, example.factBindings);
       for (const [index, page] of saved.copy.pages.entries()) {
         const actual = resolveFamilyDisplay(page), expected = resolveFamilyDisplay(example.copy.pages[index]);
         for (const key of Object.keys(example.copy.pages[index].displayOverrides ?? {})) assert.equal(actual[key], expected[key], `exact displayed ${index + 1} / ${key} must survive ordinary form input`);
@@ -81,7 +83,8 @@ function fixture() {
       try { return await route.fulfill({ contentType: 'image/jpeg', body: await render(body.copy, body.page, body.pageDesigns) }); }
       finally { state.pendingPreviews--; }
     }
-    else if (pathname === '/api/channels/3/templates') data = { current: 'set:n03', items: [{ key: 'set:n03', name: '뉴스 대화', description: '', kind: 'builtin', family: 'news', pageCount: 5 }] };
+    else if (pathname === '/api/channels/3/templates') data = { current: 'editorial:blue', items: editorialTemplateCatalogOptions(channels[0]) };
+    else if (pathname === '/api/channels/3/templates/preview') return route.fulfill({contentType:'image/jpeg',body:await render({...example.copy,templateKey:url.searchParams.get('key')??'editorial:blue'},0,defaultPageDesigns())});
     else if (pathname === '/api/canva/status') data = { connected: true };
     else if (pathname === '/api/canva/editorial/status') data = { configured: true, connected: true, autofill: false, capabilities: [], capabilityStatus: 'unavailable', reason: 'capability_missing' };
     else if (pathname === '/api/canva/template-library') data = canvaLibraryStateFixture({ autofill: false });
@@ -228,7 +231,7 @@ try {
   for (const width of widths) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 768, hasTouch: width < 768, locale: 'ko-KR', timezoneId: 'Asia/Seoul', serviceWorkers: 'block', reducedMotion: 'reduce' });
     await context.addInitScript(() => localStorage.setItem('spacepenguin.channel', '3')); context.setDefaultTimeout(20_000);
-    const page = await context.newPage(), { state, route } = fixture(), errors = [], external = [], diagnostics = [], requestFailures = [];
+    const page = await context.newPage(), { state, route } = fixture(width===1280?example.copy.templateKey:'editorial:blue'), errors = [], external = [], diagnostics = [], requestFailures = [];
     let stage = 'manual authoring', contextClosed = false, scenarioError = null;
     const lifecycle = { api: createApiLifecycle(diagnostics, () => stage), boundaries: [], get stage() { return stage; }, mark(value) { stage = value; diagnostics.push({ kind: 'stage', stage, at: Date.now() }); } };
     await page.exposeBinding('__manualEditorReadinessChanged', () => lifecycle.api.domChanged());
@@ -266,7 +269,10 @@ try {
         await page.waitForFunction(title => document.querySelector('[aria-label="8장 작업 제목"]')?.value === title, example.title);
       } else {
         await form.getByLabel('8장 작업 제목', { exact: true }).fill(example.title); await form.getByLabel('제공 자료 제목', { exact: true }).fill(example.source.title); await form.getByLabel('제공 자료 주소', { exact: true }).fill(example.source.url); await form.getByLabel('제공 자료 본문', { exact: true }).fill(example.source.text);
-        await form.getByLabel('직접 작성 8장 디자인', { exact: true }).selectOption(example.copy.templateKey);
+        const choices=form.getByLabel('직접 작성 8장 디자인', { exact: true });
+        assert.equal(await choices.locator('option[value^="editorial:"]').count(),6);
+        assert.equal(await choices.locator('option[value^="cardnews14-"]').count(),0);
+        await choices.selectOption('editorial:blue');
         for (const [index, sourcePage] of example.copy.pages.entries()) {
           await form.getByRole('button', { name: `${index + 1} ${FAMILY_PAGE_LABELS[sourcePage.id]}`, exact: true }).click();
           for (const field of familyFieldDescriptors(sourcePage)) {
@@ -278,8 +284,7 @@ try {
           const display = form.getByText('이 장의 표시 문구 · 선택', { exact: true });
           if (!await display.evaluate(node => node.parentElement.open)) await display.click();
           for (const [key, value] of Object.entries(sourcePage.displayOverrides ?? {})) {
-            const { readingDisplayDescriptors, readingProfileForTemplateKey } = await import('../shared/readingCardProfiles.ts');
-            const descriptor = readingDisplayDescriptors(readingProfileForTemplateKey(example.copy.templateKey), sourcePage).find(field => field.key === key);
+            const descriptor = familyDisplayDescriptors(sourcePage).find(field => field.key === key);
             if (descriptor) await form.getByLabel(`직접 작성 ${descriptor.label}`, { exact: true }).fill(value);
           }
         }

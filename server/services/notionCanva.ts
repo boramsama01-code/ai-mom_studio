@@ -27,6 +27,7 @@ import { loadEducationOfficeLogos, type EducationOfficeLogo } from './educationO
 import {notionInteriorTemplates} from '../../shared/notionPageTemplates';
 import {interiorTemplateElements} from './notionInteriorTemplates';
 import {HIGH_SCOOP_TEMPLATE_KITS,highScoopTemplateForCategory} from '../../shared/highscoopTemplates';
+import type {EditorialBrand} from '../../shared/editorialTemplates';
 
 export const NOTION_CANVA_GEOMETRY = { width: 1080, height: 1350, safe: { x: 96, y: 207, width: 888, height: 936 } } as const;
 /** Covers retain the original safe area; every interior uses this larger frame. */
@@ -340,7 +341,8 @@ async function readMedia(bytes:Buffer,file:string):Promise<Media> {
  * Keep all validated manuscript pages, optional references and teaser, then the brand CTA.
  * Overflow is a validation error, never truncation or an unreadably small font.
  */
-export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:{previewPage?:number;previewOnly?:boolean;allowMissingPhotos?:boolean;includeOutro?:boolean}={}):Promise<NotionCanvaPptx> {
+export type NativeEditorialOptions={previewPage?:number;previewOnly?:boolean;allowMissingPhotos?:boolean;includeOutro?:boolean;brand?:EditorialBrand;soft?:string;pageAlignments?:Array<'left'|'center'>};
+export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:NativeEditorialOptions={}):Promise<NotionCanvaPptx> {
   const document=parse(documentSchema,value,true);
   const includeOutro=options.includeOutro!==false;
   if(options.previewOnly&&options.previewPage===undefined)invalid('미리볼 카드 번호를 확인해 주세요.');
@@ -387,8 +389,15 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   if(inspecting(0)&&document.coverStyle==='C'&&!coverPhoto)invalid('C 표지에는 실제 사진이 필요합니다. 표지 사진을 선택해 주세요.');
   if(inspecting(0)&&document.coverStyle==='A'&&!coverPhoto)warnings.push('표지 사진이 없어 A 표지를 검정 정보형으로 만들었습니다.');
   if(inspecting(0)&&document.coverStyle==='B'&&coverPhoto)warnings.push('B는 질문 타이포 표지이므로 표지 사진은 표시하지 않습니다. 원본 사진은 Studio에 보존됩니다.');
-  const logo=await readMedia(await fs.readFile(path.resolve(process.cwd(),'assets/branding/highscoop-magazine-color.png')),'logo-color');
-  const darkLogo=await readMedia(await fs.readFile(path.resolve(process.cwd(),'assets/branding/highscoop-magazine-dark.png')),'logo-dark');
+  const brand=options.brand;
+  const outro=brand?{title:`${brand.name} 채널 소개`,follow:brand.follow,handle:brand.handle??brand.name,introduction:brand.introduction,action:brand.action}:NOTION_CANVA_OUTRO;
+  const readBrand=async(file:string|undefined,id:string)=>{
+    if(!file)return undefined;
+    try{return await readMedia(await fs.readFile(path.resolve(process.cwd(),file)),id);}
+    catch(error){if(!brand||brand.id==='highscoop')throw error;return undefined;}
+  };
+  const logo=await readBrand(brand?brand.logoPath:'assets/branding/highscoop-magazine-color.png','logo-color');
+  const darkLogo=brand&&!brand.darkLogoPath?logo?await readMedia(await sharp(logo.bytes).negate({alpha:false}).png().toBuffer(),'logo-dark'):undefined:await readBrand(brand?brand.darkLogoPath:'assets/branding/highscoop-magazine-dark.png','logo-dark');
   let educationLogos:EducationOfficeLogo[]=[];const educationMedia=new Map<string,Media>();
   const logoPages=document.pages.filter((page,index)=>!page.interiorTemplate&&page.infographic==='admissions_logo_calendar'&&(!options.previewOnly||options.previewPage===index));
   if(logoPages.length){
@@ -400,7 +409,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     }
     for(const key of keys){const asset=educationLogos.find(item=>item.key===key)!;educationMedia.set(key,await readMedia(asset.bytes,`education-${key}`));}
   }
-  const allMedia=[logo,darkLogo,...media.values(),...educationMedia.values()];
+  const allMedia=[logo,darkLogo,...media.values(),...educationMedia.values()].filter((item):item is Media=>!!item);
   const fileFor=(item:Media)=>`${item.file}.${item.extension}`;
   const files:Record<string,Uint8Array>={};
   const put=(name:string,contents:string)=>{if(!options.previewOnly)files[name]=strToU8(contents);};
@@ -409,7 +418,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   if(document.sourceCard&&!references.length)invalid('원문 확인 문구를 보존하려면 최소 한 개의 공식 원문 주소가 필요합니다.');
   const referencesIndex=references.length?document.pages.length:-1;
   const teaserIndex=document.teaser?document.pages.length+referencePageCount:-1;
-  const renderedPages:NotionCanvaDocument['pages']=[...document.pages,...Array.from({length:referencePageCount},()=>({title:NOTION_CANVA_SOURCE_TITLE})),...(document.teaser?[{title:document.teaser.title,body:document.teaser.body}]:[]),...(includeOutro?[{title:NOTION_CANVA_OUTRO.title}]:[])];
+  const renderedPages:NotionCanvaDocument['pages']=[...document.pages,...Array.from({length:referencePageCount},()=>({title:NOTION_CANVA_SOURCE_TITLE})),...(document.teaser?[{title:document.teaser.title,body:document.teaser.body}]:[]),...(includeOutro?[{title:outro.title}]:[])];
   const followIndex=includeOutro?renderedPages.length-1:-1;
   if(options.previewPage!==undefined&&(!Number.isInteger(options.previewPage)||options.previewPage<0||options.previewPage>=renderedPages.length))invalid('미리볼 카드 번호를 확인해 주세요.');
   let previewSvg:string|undefined;
@@ -427,7 +436,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     let nextId=2;const shapes:string[]=[];let relationships=rel('rIdLayout','slideLayout','../slideLayouts/slideLayout1.xml');let imageIndex=0;
     const previewShapes:string[]=[],previewing=options.previewPage===index;
     const visual=(name:string,markup:string)=>{if(previewing)previewShapes.push(`<g data-name="${xml(name)}">${markup}</g>`);};
-    const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover',altText?:string)=>{({x,y,w,h}=coordinates(x,y,w,h));if(!options.previewOnly){const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,altText??item.file,rid,item,x,y,w,h,mode));}if(previewing)visual(item.file,`<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden"${altText?` aria-label="${xml(altText)}"`:''}><image width="${w}" height="${h}" preserveAspectRatio="xMidYMid ${mode==='contain'?'meet':'slice'}" href="data:image/${item.extension};base64,${item.bytes.toString('base64')}"/></svg>`);};
+    const image=(item:Media|undefined,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover',altText?:string)=>{if(!item){if(brand)text('brand-name',brand.name,x,y,w,h,Math.min(48,h*.72),14,index===0&&document.coverStyle==='A'?'#FFFFFF':INK,true);return;}({x,y,w,h}=coordinates(x,y,w,h));if(!options.previewOnly){const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,altText??item.file,rid,item,x,y,w,h,mode));}if(previewing)visual(item.file,`<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden"${altText?` aria-label="${xml(altText)}"`:''}><image width="${w}" height="${h}" preserveAspectRatio="xMidYMid ${mode==='contain'?'meet':'slice'}" href="data:image/${item.extension};base64,${item.bytes.toString('base64')}"/></svg>`);};
     const rawRect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000,radius?:number)=>{
       if(!options.previewOnly)shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill,alpha,radius));
       visual(name,`${gradient?`<defs><linearGradient id="bottom-fade" x1="0" y1="0" x2="0" y2="1">${COVER_FADE_STOPS.map(stop=>`<stop offset="${stop.position/100000}" stop-color="#000000" stop-opacity="${stop.alpha/100000}"/>`).join('')}</linearGradient></defs>`:''}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${cornerRadius(w,h,pill,radius)}" fill="${gradient?'url(#bottom-fade)':fill}" fill-opacity="${alpha/100000}"/>`);
@@ -502,13 +511,13 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     if(index===followIndex){
       background='#FFF9F2';
       image(logo,110,112,860,290,'contain');
-      text('outro-follow',NOTION_CANVA_OUTRO.follow,80,474,920,116,44,40,INK,true,undefined,'ctr');
-      text('outro-introduction',NOTION_CANVA_OUTRO.introduction,80,669,920,140,32,28,INK,false,undefined,'ctr');
+      text('outro-follow',outro.follow,80,474,920,116,44,40,INK,true,undefined,'ctr');
+      text('outro-introduction',outro.introduction,80,669,920,140,32,28,INK,false,undefined,'ctr');
       if(!options.previewOnly)shapes.push(outlinedRectangle(nextId++,'outro-search',200,1084,680,76,'#FFFFFF',INK,38));
       visual('outro-search','<rect x="200" y="1084" width="680" height="76" rx="38" fill="#FFFFFF" stroke="#181818" stroke-width="2"/>');
-      text('outro-handle',NOTION_CANVA_OUTRO.handle,226,1094,628,54,34,30,INK,true,undefined,'ctr',1.2,'middle');
+      text('outro-handle',outro.handle,226,1094,628,54,34,30,INK,true,undefined,'ctr',1.2,'middle');
       rect('outro-red-pill',64,1209,952,65,accent,false,true);
-      text('outro-action',NOTION_CANVA_OUTRO.action,88,1219,904,45,28,24,INK,true,undefined,'ctr',1.2,'middle');
+      text('outro-action',outro.action,88,1219,904,45,28,24,INK,true,undefined,'ctr',1.2,'middle');
     }else if(referencesIndex>=0&&index>=referencesIndex&&index<referencesIndex+referencePageCount){
       const referenceOffset=(index-referencesIndex)*NOTION_SOURCE_REFERENCES_PER_PAGE;
       const pageReferences=references.slice(referenceOffset,referenceOffset+NOTION_SOURCE_REFERENCES_PER_PAGE);
@@ -591,7 +600,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       }
     } else if(page.interiorTemplate){
       let model:ReturnType<typeof interiorTemplateElements>;
-      try{model=interiorTemplateElements(page.interiorTemplate,body,accent,(value,size,bold)=>loadReadingFont('Noto Sans KR',bold?700:400).measure(value,size),{hasImage:!!page.imageId,soft:highScoopTemplateForCategory(document.category)?.soft});}
+      try{model=interiorTemplateElements(page.interiorTemplate,body,accent,(value,size,bold)=>loadReadingFont('Noto Sans KR',bold?700:400).measure(value,size),{hasImage:!!page.imageId,soft:options.soft??highScoopTemplateForCategory(document.category)?.soft});}
       catch(error){if(error instanceof NotionAdmissionsLayoutError)invalid(`${index+1}장 ${error.message}`);throw error;}
       const subtitle=[page.interiorSubtitle,model.intro].filter(Boolean).join(' · ');
       // Reserve the fitted notes before placing artwork. A multi-line source
@@ -622,7 +631,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         if(elementIndex>0&&elementIndex%16===0)await yieldToEventLoop();
         const element=original.y>=336?{...original,y:contentStart+(original.y-336)*contentScale,height:original.height*contentScale}:original;
         if(element.kind==='rect')rect(element.name,element.x,element.y,element.width,element.height,element.fill,false,element.pill,100000,element.name.endsWith('-bubble')?18:undefined);
-        else if(element.kind==='text')text(element.name,element.content,element.x,element.y,element.width,element.height,element.max,element.min,element.ink,element.bold,page.emphasis,element.align,element.leading,element.verticalAlign);
+        else if(element.kind==='text')text(element.name,element.content,element.x,element.y,element.width,element.height,element.max,element.min,element.ink,element.bold,page.emphasis,options.pageAlignments?.[index]==='center'&&/^interior-(?:body|column-)/.test(element.name)?'ctr':element.align,element.leading,element.verticalAlign);
       }
       text(`page-${index+1}-footer`,footer,64,footerY,952,footerHeight,20,16,'#555555');
     } else {

@@ -13,6 +13,8 @@ import { HttpError } from "../routes/util";
 import { CardOverflowError, loadFonts, wrapText, type CardModel } from "./card";
 import { checkCollectionTitle, layoutCollectionBody, renderCollectionBody, renderCollectionCover } from "./cardCollection";
 import { zipFiles } from "./zip";
+import { isCurrentEditorialTemplate } from "../../shared/editorialTemplates";
+import { createStudioCurrentRenderer } from "./studioCurrentKit";
 
 type Fit = { lines: string[]; size: number; lineHeight: number; fits: boolean };
 function fit(font: Font, text: string, width: number, height: number, max: number, min: number): Fit {
@@ -123,6 +125,7 @@ export function createStudioRenderer(content: StudioContent, version: number, br
   if(content.experience)return createExperienceRenderer(content,version,brand,accent,images);
   const check = checkStudioExport(content);
   if (check.errors.length) throw new HttpError(400, check.errors[0].message, { errors: check.errors });
+  if (content.format === '카드뉴스' && isCurrentEditorialTemplate(content.exportDesign)) return createStudioCurrentRenderer(content, version, brand, images);
   const fonts = loadFonts();
   const layout = contentLayout(content);
   const page = async (index: number): Promise<Buffer> => {

@@ -163,7 +163,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   let newCoverArt: { bytes: Buffer; model: string; prompt: string; promptVersion: number } | null = null;
   let cover: CardCarousel["cover"] = { kind: "typography", credit: style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오" };
   try {
-    const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, channelSlug: ch.slug, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
+    const plan = planCarousel({ kind: item.kind, payload, channelName: ch.name, channelSlug: ch.slug, channelCategories: ch.categories, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, payload), checkedDate: kstToday(now) }, style);
     const pageImages = copy || familyCopy ? await loadCardPageArtwork(db, item.id, ch.id, familyCopy ?? copy!, familyMetadata?.pageDesigns) : new Map<number, Buffer>();
     const coverBackgroundId = familyCopy ? familyMetadata?.pageDesigns.cover.background.assetId : copy?.cover.background?.assetId;
     if (coverBackgroundId) {

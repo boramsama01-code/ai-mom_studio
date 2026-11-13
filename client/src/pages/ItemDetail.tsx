@@ -14,6 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useToast } from "../toast";
 import { DiscoveryNote } from "../discovery";
 import { TemplatePicker, useTemplates } from "./Design";
+import { isCurrentEditorialTemplate } from "@shared/editorialTemplates";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { api, ApiError } from "../api";
@@ -498,8 +499,8 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
   const templates = useTemplates(cid);
   const [localTemplate, setLocalTemplate] = useState<string | null>(null);
   const [showTemplates, setShowTemplates] = useState(false);
-  const preferredTemplate = templateKey ?? localTemplate ?? d.current?.payload.cardCopy?.templateKey ?? templates.data?.current ?? "builtin:classic";
-  const draftTemplate = !d.current && workMode === "auto" && !templateKey && !localTemplate && preferredTemplate.startsWith("set:") && !collectionUsesArt(preferredTemplate.slice(4)) ? "set:n03" : preferredTemplate;
+  const preferredTemplate = templateKey ?? localTemplate ?? d.current?.payload.cardCopy?.templateKey ?? templates.data?.current ?? "editorial:red";
+  const draftTemplate = !d.current && !templateKey && !localTemplate && !isCurrentEditorialTemplate(preferredTemplate) ? templates.data?.items.find(item=>isCurrentEditorialTemplate(item.key))?.key??"editorial:red" : preferredTemplate;
   const sourceReady = !d.primary || (d.primary.fetchStatus === "ok" && !!d.primary.fetchedText?.trim());
   const generation = useGenerationRequest(cid, d.item.id, "draft");
   const [generationStep, setGenerationStep] = useState<"draft" | "image" | null>(null);
@@ -561,8 +562,8 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
           {workflow && <p className="small muted">현재 원고를 만든 모델: 요약 {workflow.summary.model}{workflow.copy ? ` · 문구 ${workflow.copy.model}` : ""}</p>}
           <GuardedLink href="/settings">채널별 AI 설정 변경 →</GuardedLink>
         </div></details>
-        <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate || t.colors?.some(color => color.key === draftTemplate))?.name ?? "기본"} ▾</button>
-        {showTemplates && templates.data && <TemplatePicker cid={cid} value={draftTemplate} items={templates.data.items} disabled={gen.isPending} onChange={key => { setLocalTemplate(key); onTemplateChange?.(key); }} />}
+        <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate)?.name ?? "이전 디자인 · 원고 유지"} ▾</button>
+        {showTemplates && templates.data && <TemplatePicker cid={cid} brandName={aiChannel?.name} value={draftTemplate} items={templates.data.items} disabled={gen.isPending} onChange={key => { setLocalTemplate(key); onTemplateChange?.(key); }} />}
         {readingProfileForTemplateKey(draftTemplate) && <p className="notice small">선택한 풀세트는 표지부터 마지막 장까지 8장으로 만듭니다. 기존 카드 원고가 있으면 아래 편집기에서 새 8장 제안을 비교한 뒤 전환하세요. 선택만으로 생성하거나 기존 내용을 덮어쓰지 않습니다.</p>}
         <p className="hint">요약 AI가 원문을 분석하고, 문구 AI가 선택한 디자인에 맞게 카드를 작성합니다. 아래 카드 편집기에서 세부 문구를 고치거나 다시 제안받을 수 있어요.</p>
         <AiUsageGuide provider={provider} />
@@ -771,7 +772,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
   const [confirmed, setConfirmed] = useState(false);
   const tpls = useTemplates(cid);
   const [tpl, setTpl] = useState<string | null>(null);
-  const templateKey = templateChoice ?? tpl ?? d.current?.payload.cardCopy?.templateKey ?? currentCard?.templateKey ?? tpls.data?.current ?? "builtin:classic";
+  const templateKey = templateChoice ?? tpl ?? d.current?.payload.cardCopy?.templateKey ?? currentCard?.templateKey ?? tpls.data?.current ?? "editorial:red";
   const templateKeyRef = useRef(templateKey); templateKeyRef.current = templateKey;
   const chooseTemplate = (key: string) => { setTpl(key); onTemplateChange?.(key); };
   const typographyOnly = templateKey.startsWith("set:") && !collectionUsesArt(templateKey.slice(4));
@@ -887,7 +888,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
         <>
           <div className="content-editor-toolbar"><h2>카드 편집</h2><span className="small muted">문구를 고치고, 디자인을 확인하세요.</span></div>
           {copyIncomplete && <p className="notice warn small" role="status">저장된 기사 요약을 바탕으로 카드 문구를 마무리해 주세요. ‘AI로 문구 다듬기’에서 문구만 다시 제안받거나 직접 수정해 저장하면 이미지 제작과 게시 준비를 이어갈 수 있습니다.</p>}
-          {!familyCopy.success && workMode === "auto" && typographyOnly && <div className="notice small"><span>현재 디자인은 글자 중심입니다. 그림이 필요한 콘텐츠는 일러스트 디자인으로 바꿔 주세요.</span> <button className="btn sm" disabled={render.isPending} onClick={() => { chooseTemplate("builtin:classic"); setCoverChoice("ai"); }}>그림이 있는 디자인 사용</button></div>}
+          {!familyCopy.success && workMode === "auto" && typographyOnly && <div className="notice small"><span>현재 작업은 이전 글자 중심 디자인입니다. 아래 최신 마스터에서 사진 표지와 공통 내지를 사용할 수 있습니다.</span> <button className="btn sm" disabled={render.isPending} onClick={() => setShowTpl(true)}>최신 마스터 선택</button></div>}
           {!familyCopy.success && <details className="content-options" open={coverOptionsOpen || !!coverRecovery.pending} onToggle={event => {
             if (event.target !== event.currentTarget) return;
             if (coverRecovery.pending && !event.currentTarget.open) event.currentTarget.open = true;
@@ -907,7 +908,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
           {!familyCopy.success && !d.imageAiAvailable && !typographyOnly && coverMode === "ai" && <p className="notice warn small">자동 일러스트를 만들려면 <GuardedLink href="/connections?service=openai">이미지 AI 연결</GuardedLink>을 확인해 주세요. 문구 수정과 저장은 계속할 수 있습니다. 연결 문제일 때는 수동 작업이나 표지 설정의 글자 중심 디자인을 이용하세요.</p>}
           <div className="row">
             {!familyCopy.success && <button className="btn" disabled={render.isPending} onClick={() => setShowTpl((v) => !v)} aria-expanded={showTpl}>
-              템플릿: {tpls.data?.items.find((t) => t.key === templateKey || t.colors?.some(color => color.key === templateKey))?.name ?? "기본"} ▾
+              템플릿: {tpls.data?.items.find((t) => t.key === templateKey)?.name ?? "이전 디자인 · 원고 유지"} ▾
             </button>}
             {currentCard && (
               <a className="btn" aria-disabled={copyDirty || altDirty} tabIndex={copyDirty || altDirty ? -1 : undefined} href={copyDirty || altDirty ? undefined : `/api/channels/${cid}/media/${currentCard.id}?download=1`}>
@@ -916,7 +917,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
             )}
           </div>
           {!familyCopy.success && showTpl && tpls.data && (
-            <TemplatePicker cid={cid} value={templateKey} onChange={chooseTemplate} items={tpls.data.items} version={ch?.accentColor} disabled={render.isPending} />
+            <TemplatePicker cid={cid} brandName={ch?.name} value={templateKey} onChange={chooseTemplate} items={tpls.data.items} version={ch?.accentColor} disabled={render.isPending} />
           )}
           {sourceDirty && <p className="notice warn small" role="status">자료·초안에 저장하지 않은 변경이 있습니다. 먼저 저장한 뒤 이미지를 갱신하고 게시 준비를 완료해 주세요.</p>}
           <CardCopyEditor key={`${cid}-${d.item.id}`} channelId={cid} itemId={d.item.id} itemVersion={d.item.version} templateKey={templateKey} onTemplateChange={chooseTemplate} coverMode={coverMode} previewRevision={`${currentCard?.id ?? ""}:${render.data && !olderRender(render.data) ? render.data.id : ""}`} showAi={workMode === "auto"} disabled={render.isPending || altDirty} renderDisabled={sourceDirty || imageGeneration.unresolved || !familyCopy.success && (!!coverRecovery.pending || workMode === "auto" && coverDraft.regenerateCover && (typographyOnly || !d.imageAiAvailable))} onDirtyChange={setCopyDirty} onApplyCaption={text => captionDraft.setCaptions({ ...caps, instagram: text })} onEditCaption={openManualCaption} onSaveAndRender={saved => render.mutateAsync(saved)} renderLabel={workMode === "auto" ? coverDraft.regenerateCover ? "표지 1장 다시 그리기 · 이미지 갱신" : "이미지 생성·갱신" : "카드 이미지 저장"} />

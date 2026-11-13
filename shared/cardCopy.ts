@@ -3,6 +3,8 @@ import { familyCardCopySchema, familyDialogueMetadataSchema } from "./familyDial
 import { cardDesign } from "./cardDesigns";
 import { discussionCardCopyInstruction, NEWS_EDITORIAL_AI_LIMITS, NEWS_EDITORIAL_BODY_LIMITS, NEWS_EDITORIAL_ROLES } from "./newsEditorial";
 import { newsEditorialResourceSchema } from "./newsEditorialResource";
+import { editorialInteriorFields } from "./editorialPageDesign";
+import { isCurrentEditorialTemplate } from "./editorialTemplates";
 export { discussionCardCopyInstruction, NEWS_EDITORIAL_AI_LIMITS, NEWS_EDITORIAL_LABELS, NEWS_EDITORIAL_ROLES } from "./newsEditorial";
 export type { NewsEditorialRole } from "./newsEditorial";
 
@@ -27,6 +29,7 @@ const manualColumnSchema = z.object({ title: copyText(120, true), body: copyText
 export type CardCopyColumn = z.infer<typeof manualColumnSchema>;
 export type CardCopyResource = z.infer<typeof newsEditorialResourceSchema>;
 const editorialPageFields = {
+  ...editorialInteriorFields,
   role: z.enum(NEWS_EDITORIAL_ROLES).optional(),
   columns: z.array(manualColumnSchema).length(2).optional(),
   sourceIds: z.array(z.number().int().positive()).max(12).optional(),
@@ -51,10 +54,10 @@ export const cardCopySchema = z.object(copyShape(CARD_COPY_MANUAL_LIMITS))
   .refine(uniquePages, { message: "카드 ID가 중복되었습니다.", path: ["pages"] })
   .superRefine((copy, ctx) => {
     if (copy.storyFormat !== "discussion8") {
-      if (copy.cover.background) ctx.addIssue({ code: "custom", path: ["cover", "background"], message: "페이지별 배경은 8장 대화형 카드로 전환한 뒤 선택해 주세요." });
+      if (copy.cover.background && !isCurrentEditorialTemplate(copy.templateKey)) ctx.addIssue({ code: "custom", path: ["cover", "background"], message: "페이지별 배경은 8장 대화형 카드로 전환한 뒤 선택해 주세요." });
       copy.pages.forEach((page, index) => {
         if (page.role || page.columns) ctx.addIssue({ code: "custom", path: ["pages", index], message: "역할과 두 칸 구성은 8장 대화형 카드에서 사용하세요." });
-        if (page.background) ctx.addIssue({ code: "custom", path: ["pages", index, "background"], message: "페이지별 배경은 8장 대화형 카드로 전환한 뒤 선택해 주세요." });
+        if (page.background && !isCurrentEditorialTemplate(copy.templateKey)) ctx.addIssue({ code: "custom", path: ["pages", index, "background"], message: "페이지별 배경은 8장 대화형 카드로 전환한 뒤 선택해 주세요." });
         if (page.resource) ctx.addIssue({ code: "custom", path: ["pages", index, "resource"], message: "활동 참고자료는 8장 대화형 카드에서 사용하세요." });
       });
       return;

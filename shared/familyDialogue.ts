@@ -3,6 +3,7 @@ import { aiStageProvenanceSchema } from "./aiProvenance";
 import { FAMILY_PAGE_COLORS } from "./familyDialogueTheme";
 import { familyDisplayOverridesSchema } from "./familyDisplay";
 import { FAMILY_ENDING_ASSET_IDS } from "./characterVariantAssets";
+import { editorialInteriorBody, editorialInteriorFields } from "./editorialPageDesign";
 
 export const FAMILY_FORMAT_ID = "family_dialogue_8" as const;
 export const FAMILY_SCHEMA_VERSION = "family-dialogue-v2.1";
@@ -70,6 +71,9 @@ export const outroPresentationSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("full_image"), assetId: z.enum(FAMILY_ENDING_ASSET_IDS) }).strict(),
 ]);
 export const pageDesignSchema = z.object({
+  ...editorialInteriorFields,
+  // An explicitly applied composition never overwrites page.fields or claimRefs.
+  interiorBody: editorialInteriorBody,
   alignment: z.enum(["center", "left"]),
   background: z.object({ kind: z.enum(["none", "brand", "image"]), assetId: z.number().int().positive().optional(), inheritCover: z.boolean().optional(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(), fit: z.enum(["cover", "contain"]), focalX: percent, focalY: percent, brightness: z.number().min(0).max(200), overlay: percent }).strict().refine(value => value.kind !== "image" || value.assetId !== undefined, "이미지 배경에는 저장된 자산이 필요합니다."),
   previousAssetIds: z.array(z.number().int().positive()).max(20).optional(),
