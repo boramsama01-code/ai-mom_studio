@@ -1,5 +1,6 @@
 // Built application, authenticated metadata fixtures, no provider/AI/publishing calls.
 import assert from 'node:assert/strict';
+import { editorialTemplateCatalogOptions } from '../shared/templateCatalog.ts';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
@@ -91,7 +92,8 @@ function fixture() {
     else if (p === '/api/channels/1/items/9/revisions/3') data = oldSource;
     else if (p === '/api/channels/1/items/9/card-copy' && method === 'GET') data = { version: 4, revisionId: 4, hasSavedCopy: true, copy: currentSource.payload.cardCopy };
     else if (p === '/api/channels/1/items/9/card-copy/preview' && method === 'POST') return route.fulfill({ contentType: 'image/jpeg', body: pictures[1] });
-    else if (p === '/api/channels/1/templates') data = { current: 'set:n03', items: [] };
+    else if (p === '/api/channels/1/templates') data = { current: 'editorial:red', items: editorialTemplateCatalogOptions({slug:'news',name:'알리고당'}) };
+    else if (p === '/api/channels/1/templates/preview') return route.fulfill({contentType:'image/jpeg',body:pictures[1]});
     else return false;
     await route.fulfill({ json: structuredClone(data) }); return true;
   }

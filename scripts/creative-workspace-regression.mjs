@@ -2,12 +2,15 @@
 // No production credentials, external requests, paid generation or SNS writes.
 import assert from "node:assert/strict";
 import { browserLayout } from "./browser-layout.mjs";
+import {selectChannel,closeChannelMenu} from './channel-picker.mjs';
 import { writeWorkspaceReview } from "./creative-workspace-review.mjs";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { preview } from "vite";
 import sharp from "sharp";
+import {editorialTemplateCatalogOptions} from '../shared/templateCatalog.ts';
+import {renderEditorialTemplateSample} from '../server/services/editorialTemplateSamples.ts';
 const require=createRequire(import.meta.url);
 let pw; try{pw=require("playwright");}catch{pw=require(require.resolve("playwright",{paths:[process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES??"/nonexistent"]}));}
 const output="test-results/creative-workspace";await mkdir(output,{recursive:true});
@@ -39,6 +42,7 @@ video.updatedAt="2026-11-05T00:00:00Z";
 initial.push(video);
 const browsers=await pw.webkit.launch();const results=[];
 let mode="normal"; const cards=new Map(initial.map(value=>[value.id,clone(value)]));
+const currentPreviewCache=new Map();
 async function intercept(route,origin,errors,writes){
  const req=route.request(),url=new URL(req.url()),p=url.pathname,method=req.method();
  if(url.origin!==origin)throw new Error("External request blocked: "+url.origin);
@@ -48,6 +52,17 @@ async function intercept(route,origin,errors,writes){
  let data;
  if(p==="/api/auth/me")data={user:"visual-fixture",demo:false,csrf:"fixture",recoveryScope:"creative-ui-fixture",authConfigured:true,demoAllowed:false};
  else if(p==="/api/channels")data=channels;
+ else if(/^\/api\/channels\/\d+\/templates$/.test(p)){
+  const channel=channels.find(channel=>channel.id===Number(p.split('/')[3]));assert(channel,'known template channel');
+  const items=editorialTemplateCatalogOptions(channel);data={current:items[0].key,items};
+ }
+ else if(/^\/api\/channels\/\d+\/templates\/preview$/.test(p)){
+  const channel=channels.find(channel=>channel.id===Number(p.split('/')[3]));assert(channel,'known preview channel');
+  const key=url.searchParams.get('key'),cacheKey=channel.id+'|'+key;
+  let bytes=currentPreviewCache.get(cacheKey);
+  if(!bytes){bytes=await renderEditorialTemplateSample(channel,key,0);currentPreviewCache.set(cacheKey,bytes);}
+  return route.fulfill({contentType:'image/jpeg',body:bytes});
+ }
  else if(p==="/api/status")data={globalStop:false,workerConnected:true,integrations:{flags:{dryRun:true,autoPublish:false}}};
  else if(/\/channels\/\d+\/today$/.test(p))data={counts:{pendingReview:2}};
  else if(p==="/api/studio/cards"){
@@ -210,9 +225,11 @@ async function run(root,label,port){
    await page.locator(".video-history > summary").click();await page.locator(".video-history details > summary").click();await noOverflow(page,"expanded video history "+width);
    const navVisible=await page.locator(".mobile-nav").isVisible();assert.equal(navVisible,false,"editing must have one bottom action region");
    // Leave by full navigation; local recovery remains available on return.
-   await page.goto(origin+"/assets");await page.locator(".registered-design-card").nth(13).waitFor();
-   assert.equal(await page.locator(".registered-design-card").count(),14,"registered template sets remain available without Canva OAuth");
+   await page.goto(origin+"/assets");await selectChannel(page,2);await closeChannelMenu(page);await page.locator("[data-testid='current-template-kit'] .highscoop-kit-card").nth(5).waitFor();
+   assert.equal(await page.locator(".highscoop-kit-card").count(),6,"only the six current channel masters are selectable without Canva OAuth");
+   assert.equal(await page.locator(".registered-design-card").count(),0,"legacy template gallery is hidden from current selection");
    await noOverflow(page,"template gallery "+width);await shot(page,"after-templates-"+width);
+   await selectChannel(page,'all');await closeChannelMenu(page);
    await page.getByRole("button",{name:"브랜드 가이드",exact:true}).click();await page.locator(".asset-brand").first().waitFor();
    await noOverflow(page,"assets "+width);await shot(page,"after-assets-"+width);
    assert.equal(await page.locator(".asset-brand img").count(),3,"existing registered brand originals are displayed");

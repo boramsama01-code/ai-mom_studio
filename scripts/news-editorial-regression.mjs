@@ -756,6 +756,10 @@ try {
       assert.deepEqual(state.saved.copy,beforeStyle,'a design choice remains a draft until explicit save');
       await designArea.locator(':scope > summary').scrollIntoViewIfNeeded();
       await page.screenshot({path:`${outputDir}/whole-deck-design-choice-${width}.png`});
+      // A current color change preserves every page setting. Reusing the cover
+      // is a separate, explicit per-page choice rather than an automatic rewrite.
+      await family.getByRole('button',{name:'3페이지 · 뉴스의 의미',exact:true}).click();
+      await family.getByRole('checkbox',{name:'이 장에서 표지 사진 함께 사용'}).check();
       await family.getByRole('button',{name:'1페이지 · 표지',exact:true}).click();
       await family.locator('textarea[id$="-displayOverrides.kicker"]').fill('');
       await openBackground(page);
@@ -835,7 +839,7 @@ try {
       lifecycle.mark('successful context close'); await settleEditorPreviews(page, lifecycle);
       await context.close();
       assert.deepEqual(errors, []); assert.deepEqual(external, []);
-      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', '14 style identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists', 'Canva folder sync preserves the mounted editor', 'Canva folder inner-page preview and reachable native creation preserve saved copy'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, mockNativeCreates: state.canvaJobs.length, requestFailures, actualPaidCalls: 0, publicationRequests: 0 });
+      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', 'six current color identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists', 'Canva folder sync preserves the mounted editor', 'Canva folder inner-page preview and reachable native creation preserve saved copy'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, mockNativeCreates: state.canvaJobs.length, requestFailures, actualPaidCalls: 0, publicationRequests: 0 });
       Object.assign(results.at(-1), { manualImports, manualImportReview: true, manualConfirmationPaddingHitTests: true });
       Object.assign(results.at(-1), { previewLifecycleSettled: true, diagnostics });
       results.at(-1).checks.push('No-Autofill manual copy safe-ID import, existing review after reload without duplicate POST, 48px review navigation and explicit new-version acceptance');
