@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import type { DB } from "./db";
 import { channels, officialSources, searchRules, appSettings } from "../shared/schema";
 import { seedOfficialCatalog } from "./services/officialCatalog";
+import {isHighScoopChannel} from '../shared/highscoopTemplates';
 import {
   CANDIDATE_RULES,
   CHANNEL_SEEDS,
@@ -28,6 +29,7 @@ export async function seedIfNeeded(db: DB, options: { officialCatalog?: boolean 
           description: c.description,
           contentType: c.contentType,
           accentColor: c.accentColor,
+          ...(isHighScoopChannel(c)?{cardTemplate:'highscoop:gifted'}:{}),
           budget: DEFAULT_BUDGET,
         })
         .onConflictDoNothing({ target: channels.slug })

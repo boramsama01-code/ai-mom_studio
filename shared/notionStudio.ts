@@ -14,6 +14,9 @@ export const notionDesignEditsSchema=z.object({
   emphasisByPage:pageMap(z.string().max(100)),
   templateByPage:pageMap(z.enum(notionInteriorTemplates)).optional(),
   photoByPage:pageMap(z.number().int().positive()).optional(),
+  /** Transparent PNG drawn on the same canvas as the selected original image.
+   * Asset IDs stay link-owned; source image bytes are never painted over. */
+  overlayByPage:pageMap(z.number().int().positive()).optional(),
 }).strict();
 export type NotionDesignEdits=z.infer<typeof notionDesignEditsSchema>;
 export const notionEditorRequestSchema=z.object({version:z.number().int().positive(),itemVersion:z.number().int().positive(),copy:notionCardCopySchema,designEdits:notionDesignEditsSchema}).strict();

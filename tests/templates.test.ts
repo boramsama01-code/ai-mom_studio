@@ -36,16 +36,15 @@ async function makeItem(agent: import("supertest").Agent, H: Record<string, stri
 }
 
 describe("카드 템플릿", () => {
-  it("완성 세트 37종과 기존 컬러 33가지 목록, 새 컬러 생성과 이전 디자인 호환", async () => {
+  it("하이스쿱 컬러 마스터 6종과 이전 디자인의 저장 원고 호환", async () => {
     const { agent, csrf } = await login(app);
     const H = { "x-csrf-token": csrf };
     const list = await agent.get("/api/channels/1/templates");
-    expect(list.body.items).toHaveLength(37);
-    expect(new Set(list.body.items.map((t: { key: string }) => t.key)).size).toBe(37);
-    expect(list.body.items.filter((t: { cardCopyVersion: number }) => t.cardCopyVersion === 2)).toHaveLength(16);
-    expect(list.body.items.filter((t: { key: string }) => t.key.startsWith("set:"))).toHaveLength(21);
-    for (const item of list.body.items.filter((t: { key: string }) => ["set:r01", "set:r05", "set:n01", "set:n03", "set:n04", "set:f01"].includes(t.key))) expect(item.colors).toHaveLength(item.key === "set:f01" ? 3 : 6);
-    expect(list.body.current).toBe("builtin:classic");
+    expect(list.body.items).toHaveLength(6);
+    expect(new Set(list.body.items.map((t: { key: string }) => t.key)).size).toBe(6);
+    expect(list.body.items.map((t:{name:string})=>t.name)).toEqual(['영재원','체험','대회','입시','말풍선','뉴스']);
+    expect(list.body.items.every((t:{pageCount:number;pageCountMode:string})=>t.pageCount===11&&t.pageCountMode==='variable')).toBe(true);
+    expect(list.body.current).toBe("highscoop:gifted");
     const pv = await agent.get("/api/channels/1/templates/preview?key=builtin:header&size=sm");
     expect(pv.status).toBe(200);
     expect((await sharp(pv.body).metadata()).width).toBe(360);
@@ -75,7 +74,7 @@ describe("카드 템플릿", () => {
     expect((await sharp(bodyPreview.body).metadata()).width).toBe(360);
     expect((await agent.get("/api/channels/1/templates/preview?key=set:r03&page=5")).status).toBe(400);
     const eighth = await agent.get("/api/channels/1/templates/preview?key=cardnews14-cinematic-v1&page=7&size=sm");
-    expect(eighth.status).toBe(200);
+    expect(eighth.status,JSON.stringify(eighth.body)).toBe(200);
     expect((await sharp(eighth.body).metadata()).width).toBe(360);
     expect((await agent.get("/api/channels/1/templates/preview?key=cardnews14-cinematic-v1&page=8")).status).toBe(400);
     expect((await agent.put("/api/channels/1/design").set(H).send({ cardTemplate: "set:missing" })).status).toBe(400);

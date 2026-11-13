@@ -103,7 +103,7 @@ try{
    assert.equal(await page.getByLabel('내지 템플릿',{exact:true}).count(),0,'Cover must keep its own settings');
    const cards=page.locator('.notion-card-strip button');await cards.nth(1).click();
    const picker=page.getByLabel('내지 템플릿',{exact:true});await picker.waitFor();
-   assert.deepEqual(await picker.locator('option').evaluateAll(options=>options.map(o=>o.value)),['auto','text','two_columns','image_text','table','process','timeline','bar_chart']);
+   assert.deepEqual(await picker.locator('option').evaluateAll(options=>options.map(o=>o.value)),['auto','text','two_columns','image_text','table','process','timeline','bar_chart','document_excerpt','dialogue']);
    await picker.selectOption('table');assert.equal(await page.getByLabel('카드 본문',{exact:true}).inputValue(),original);assert.equal(writes.length,0);
    await page.waitForTimeout(700); // Deliberately cross the450ms debounce: incompatible copy must never POST.
    await page.getByText('구성 내용을 입력하고 ‘내용 적용’을 눌러 미리보기를 확인하세요.',{exact:true}).waitFor();

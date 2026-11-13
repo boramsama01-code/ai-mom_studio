@@ -63,6 +63,28 @@ async function completed(f:Fixture,images=pngs.slice(0,3),jobId='export_1'){
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 
 describe('Notion -> Canva coordination on isolated PostgreSQL',()=>{
+ it('passes the selected current kit, capture and separate overlay to native export and invalidates changed marks',async()=>{
+  const f=await fixture(),overlay=await sharp({create:{width:1080,height:1350,channels:4,background:{r:255,g:0,b:0,alpha:0}}}).png().toBuffer(),photos=[];
+  for(const [i,bytes]of [pngs[0],pngs[1],overlay].entries())photos.push((await f.db.insert(notionSyncPhotos).values({linkId:f.link.id,sourceKey:`kit-photo-${i}`,name:`자료${i}.png`,mimeType:'image/png',bytes,sha256:createHash('sha256').update(bytes).digest('hex'),width:1080,height:1350}).returning())[0]);
+  await f.db.update(notionSyncLinks).set({photoOrder:photos.map(photo=>photo.id)}).where(eq(notionSyncLinks.id,f.link.id));
+  const copy={...f.copy,templateKey:'highscoop:admissions'},designEdits={emphasisByPage:{},templateByPage:{h2:'document_excerpt' as const},photoByPage:{h2:photos[1].id},overlayByPage:{h2:photos[2].id}};
+  const edited=await saveNotionStudioDraft(f.db,f.link.id,{...await request(f),copy,designEdits},'test');
+  await ready(f);const [input,media]=provider.build.mock.calls[0];
+  expect(input).toMatchObject({coverStyle:'A',category:'입시',categoryColor:'#72A7FF'});expect(input.pages[1]).toMatchObject({interiorTemplate:'document_excerpt',imageId:String(photos[1].id),overlayImageId:String(photos[2].id),body:'원문 본문 그대로'});
+  expect(media.map((photo:{id:string})=>photo.id)).toEqual(photos.map(photo=>String(photo.id)));expect(((await saved(f)).sourceSnapshot as unknown as NotionDocument).category).toBe('영재원');
+  const [item]=await f.db.select().from(contentItems).where(eq(contentItems.id,f.item.id)),[revision]=await f.db.select().from(contentRevisions).where(eq(contentRevisions.id,item.currentRevisionId!));
+  await f.db.update(contentRevisions).set({payload:{...revision.payload,notionDesignEdits:{...edited.designEdits,overlayByPage:{h2:photos[1].id}}}}).where(eq(contentRevisions.id,revision.id));
+  await expect(exportNotionStudioCanva(f.db,f.link.id,await request(f),'test')).rejects.toMatchObject({status:409,extra:{code:'canva_source_changed'}});expect(provider.submitExport).not.toHaveBeenCalled();
+ });
+ it('keeps a dialogue text-only until its photo is explicitly selected',async()=>{
+  const f=await fixture(),photos=[];
+  for(let i=0;i<2;i++)photos.push((await f.db.insert(notionSyncPhotos).values({linkId:f.link.id,sourceKey:`dialogue-${i}`,name:`화면${i}.png`,mimeType:'image/png',bytes:pngs[i],sha256:createHash('sha256').update(pngs[i]).digest('hex'),width:1080,height:1350}).returning())[0]);
+  await f.db.update(notionSyncLinks).set({photoOrder:photos.map(photo=>photo.id)}).where(eq(notionSyncLinks.id,f.link.id));
+  const copy=structuredClone(f.copy);copy.pages[0].body='화자|내용\n엄마|왜 재미있어?\n아이|친구들과 내 세계를 만들 수 있어서요.';
+  await saveNotionStudioDraft(f.db,f.link.id,{...await request(f),copy,designEdits:{emphasisByPage:{},templateByPage:{h2:'dialogue'}}},'test');
+  await createNotionStudioCanva(f.db,f.link.id,await request(f),'test');
+  const [input,media]=provider.build.mock.calls[0];expect(input.pages[1]).toMatchObject({interiorTemplate:'dialogue',body:copy.pages[0].body});expect(input.pages[1].imageId).toBeUndefined();expect(media.map((photo:{id:string})=>photo.id)).toEqual([String(photos[0].id)]);
+ });
  it('uses explicit interior templates and any owned selected photo in Canva while preserving protected text and source layouts',async()=>{
   const f=await fixture();f.doc.pages[1].infographic='application_steps';f.doc.pages[1].cardFields={subtitle:'원문 소제목',body:'원문 본문 그대로',footnote:'원문 각주',sourceLabel:'공식 원문'};
   f.doc.pages[1].body='원문 소제목\n\n원문 본문 그대로';

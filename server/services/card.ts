@@ -136,6 +136,8 @@ function drawBrand(c: Ctx, label: string, y: number, color: string, maxWidth = c
 export type CardLayout = "classic" | "header" | "magazine" | "minimal";
 export type CardStyle = {
   layout: CardLayout;
+  /** Current HighScoop rendering keeps its category master through source-only drafts. */
+  highscoopTemplateKey?: string;
   collection?: string; // paired cover/body system from shared/cardDesigns
   tone?: "dark" | "light"; // 글자색 계열(배경 이미지 템플릿용)
   background?: Buffer | null; // 내 템플릿 배경(이미지)

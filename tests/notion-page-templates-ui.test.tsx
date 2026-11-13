@@ -47,6 +47,38 @@ async function preview(){await act(async()=>{await vi.advanceTimersByTimeAsync(5
 const writes=()=>mocks.api.mock.calls;
 
 describe('page-level interior template authoring',()=>{
+ it('selects one category master in the draft and keeps all manuscript and photo content until save',async()=>{
+  const copyBefore=structuredClone(detail.copy),sourceBefore=structuredClone(detail.source),photosBefore=structuredClone(detail.photos);
+  await render();const kits=host.querySelectorAll('.highscoop-kit-card');expect(kits).toHaveLength(6);
+  const admissions=host.querySelector<HTMLButtonElement>('[aria-label="입시 마스터 선택"]')!;await act(async()=>admissions.click());await settle();
+  expect(admissions.getAttribute('aria-pressed')).toBe('true');expect(writes()).toHaveLength(0);expect(detail.copy).toEqual(copyBefore);
+  const request=await preview();expect(request.copy.templateKey).toBe('highscoop:admissions');expect({...request.copy,templateKey:copyBefore.templateKey}).toEqual(copyBefore);
+  await click('스튜디오에 저장');expect(detail.copy.templateKey).toBe('highscoop:admissions');expect(detail.source).toEqual(sourceBefore);expect(detail.photos).toEqual(photosBefore);expect(writes()).toHaveLength(1);
+ });
+ it('keeps the document original and transparent annotations as separate selections through preview and save',async()=>{
+  detail.photos.push({id:103,name:'색연필 표시.png',mimeType:'image/png',width:1080,height:1350,url:'/api/notion/links/18/photos/103'});
+  const photosBefore=structuredClone(detail.photos);await render();await page(1);await fill('내지 템플릿','document_excerpt');await fill('원본 캡처','102');await fill('별도 표시 레이어','103');
+  expect(host.querySelector('img[alt="선택한 원본 캡처"]')?.getAttribute('src')).toBe('/api/notion/links/18/photos/102');
+  expect(host.querySelector('img[alt="별도 표시 레이어 미리보기"]')?.getAttribute('src')).toBe('/api/notion/links/18/photos/103');
+  expect([...field('별도 표시 레이어').querySelectorAll('option')].some(option=>(option as HTMLOptionElement).value==='101')).toBe(false);
+  await page(2);await fill('내지 템플릿','text');await page(1);expect(field('원본 캡처').value).toBe('102');expect(field('별도 표시 레이어').value).toBe('103');
+  const request=await preview();expect(request.designEdits).toMatchObject({templateByPage:{'row-one':'document_excerpt'},photoByPage:{'row-one':102},overlayByPage:{'row-one':103}});
+  expect(field('카드 본문').value).toBe(original);await click('스튜디오에 저장');expect(detail.photos).toEqual(photosBefore);expect(detail.designEdits).toEqual(request.designEdits);
+ });
+ it('changes from a captioned original to dialogue without silently rewriting the source prose',async()=>{
+  await render();await page(1);await fill('내지 템플릿','dialogue');expect(field('카드 본문').value).toBe(original);expect(button('스튜디오에 저장').disabled).toBe(true);
+  await fill('1행 화자','엄마');await fill('1행 대화 내용','너는 이게 왜 재미있어?');await fill('2행 화자','아이');await fill('2행 대화 내용','내가 만든 세계를 보여줄 수 있잖아요ㅋㅋ');
+  await page(2);await page(1);expect(field('1행 대화 내용').value).toBe('너는 이게 왜 재미있어?');await click('메신저 대화 내용 적용');
+  expect(field('카드 본문').value).toBe('화자 | 내용\n엄마 | 너는 이게 왜 재미있어?\n아이 | 내가 만든 세계를 보여줄 수 있잖아요ㅋㅋ');
+  const request=await preview();expect(request.designEdits.templateByPage).toEqual({'row-one':'dialogue'});expect(request.designEdits.photoByPage).toBeUndefined();
+  expect(host.querySelector('[aria-label="별도 표시 레이어"]')).toBeNull();await click('스튜디오에 저장');expect(detail.source.pages[1].body).toBe('기준 안내\n\n'+original);expect(detail.copy.pages[0].body).toContain('화자 | 내용');
+ });
+ it('retains the original image while removing an inapplicable overlay only from the selected page',async()=>{
+  detail.photos.push({id:103,name:'표시.png',mimeType:'image/png',width:1080,height:1350,url:'/api/notion/links/18/photos/103'});
+  detail.designEdits={emphasisByPage:{},templateByPage:{'row-one':'document_excerpt','row-two':'document_excerpt'},photoByPage:{'row-one':102,'row-two':101},overlayByPage:{'row-one':103,'row-two':103}};
+  await render();await page(1);await fill('내지 템플릿','image_text');expect(field('페이지 사진').value).toBe('102');expect(field('별도 표시 레이어').value).toBe('103');
+  await fill('내지 템플릿','text');const request=await preview();expect(request.designEdits.photoByPage).toEqual({'row-two':101});expect(request.designEdits.overlayByPage).toEqual({'row-two':103});expect(detail.photos).toHaveLength(3);expect(writes()).toHaveLength(0);
+ });
  it('preserves dirty template input through Canva job version updates and saves against the latest request version',async()=>{
   detail.link.canvaAutoSave={enabled:true,phase:'queued'};await render();await page(1);await fill('내지 템플릿','text');await fill('카드 본문','작성 중인 내지 원고');await preview();
   const previews=mocks.blob.mock.calls.length;

@@ -14,7 +14,7 @@ let db:ReturnType<typeof import('../server/db').getDb>,app:ReturnType<typeof imp
 let schemas:typeof import('../shared/schema');
 beforeAll(async()=>{
  // resetDb is destructive. This suite is restricted to the task's loopback test database.
- const u=new URL(process.env.APP_DATABASE_URL!);if(!['127.0.0.1','localhost'].includes(u.hostname)||u.pathname!=='/spacepenguin_test')throw new Error('Isolated loopback test DB required');
+ const u=new URL(process.env.APP_DATABASE_URL!);if(!['127.0.0.1','localhost','::1','[::1]'].includes(u.hostname)||!/^\/spacepenguin(?:_[a-z0-9_]+)?_test$/.test(u.pathname))throw new Error('Isolated loopback spacepenguin *_test DB required');
  db=(await import('../server/db')).getDb();schemas=await import('../shared/schema');
 });
 beforeEach(async()=>{

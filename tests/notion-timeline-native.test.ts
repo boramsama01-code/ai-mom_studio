@@ -71,9 +71,15 @@ describe('actual admissions periods',()=>{
   expect(plain(xml)).toContain('긴기관명을확인해보세요그리고한줄더읽어요');
  });
  it('keeps the approved A/B/C covers stable while enlarging interiors',async()=>{
-  // A/C include the restored badge; all covers use Canva's verified Korean font alias.
-  const hashes={A:'135fae66d50858b00ec816b653e32066ea4ceb7b24930c3cbe89b63fff01f180',B:'323ace28fe60fd8fa4e9ec8d2393f05799e476d05bad1265717aed16198da3f0',C:'282971ee26ba9148a53bd5f08d8a2d93a3f8cab23d2e82d2a7a7dd537243cad7'};
+  // A uses the continuous fade that removes Canva's former 1078px seam.
+  // Its remaining artwork/copy equals the prior approved cover; B/C stay exact.
+  const hashes={A:'df8b0c19df238c7d7c459745f76b6227bb29c1994ec854d0bce8fcbab0016701',B:'323ace28fe60fd8fa4e9ec8d2393f05799e476d05bad1265717aed16198da3f0',C:'282971ee26ba9148a53bd5f08d8a2d93a3f8cab23d2e82d2a7a7dd537243cad7'};
   const photos=[{id:'original',bytes:await sharp({create:{width:24,height:36,channels:3,background:'#88aacc'}}).png().toBuffer(),mimeType:'image/png'}];
-  for(const coverStyle of ['A','B','C'] as const){const d:NotionCanvaDocument={title:'표지 불변 검증',coverStyle,category:'영재교육',pages:[{title:'표지 좌표는 그대로',body:'원본 표지 문구',imageId:'original',footnote:'표지 각주',sourceLabel:'공식 원문',emphasis:'그대로'},{title:'내지 변경',body:'표지만 기존 형식을 유지합니다.'}]};const xml=source((await buildNotionCanvaPptx(d,photos)).bytes,1);expect(createHash('sha256').update(xml).digest('hex')).toBe(hashes[coverStyle]);if(coverStyle==='B')expect(createHash('sha256').update(xml.replaceAll('Noto Sans Kr','Noto Sans KR')).digest('hex')).toBe('c30c03c7f317dfdc775e3a62ee0c07ba1d7ebc443fc6e430ed5d2482fc327852');}
+  for(const coverStyle of ['A','B','C'] as const){const d:NotionCanvaDocument={title:'표지 불변 검증',coverStyle,category:'영재교육',pages:[{title:'표지 좌표는 그대로',body:'원본 표지 문구',imageId:'original',footnote:'표지 각주',sourceLabel:'공식 원문',emphasis:'그대로'},{title:'내지 변경',body:'표지만 기존 형식을 유지합니다.'}]};const xml=source((await buildNotionCanvaPptx(d,photos)).bytes,1);expect(createHash('sha256').update(xml).digest('hex')).toBe(hashes[coverStyle]);if(coverStyle==='B')expect(createHash('sha256').update(xml.replaceAll('Noto Sans Kr','Noto Sans KR')).digest('hex')).toBe('c30c03c7f317dfdc775e3a62ee0c07ba1d7ebc443fc6e430ed5d2482fc327852');if(coverStyle==='A'){
+   // Verified against the pre-change 7f87a34 cover after removing only the
+   // fade/base shapes and normalizing the shifted nonvisual shape IDs.
+   const outsideFade=xml.replace(/<p:sp>[\s\S]*?<\/p:sp>/g,shape=>/name="bottom-black-(?:fade|base)"/.test(shape)?'':shape).replace(/(<p:cNvPr id=")\d+/g,'$1ID');
+   expect(createHash('sha256').update(outsideFade).digest('hex')).toBe('2b8c6d2d24c0feab9780400b4fbbf11ae92b2c9590c49dae54e187d76a7c976e');expect(xml.includes('name="bottom-black-base"')).toBe(false);expect(shape(xml,'bottom-black-fade').y+shape(xml,'bottom-black-fade').h).toBe(1350);
+  }}
  });
 });

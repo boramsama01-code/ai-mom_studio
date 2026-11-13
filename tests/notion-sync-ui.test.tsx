@@ -199,6 +199,16 @@ describe("Notion manuscript and Canva workspace", () => {
     expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith("/notion?link=18");
   });
 
+  it('replaces HighScoop cover variants with six category masters and does not inherit another channel cover style',async()=>{
+    await render();await chooseSource();
+    expect(host.querySelectorAll('[aria-label="하이스쿱 마스터 6종"] .highscoop-kit-card')).toHaveLength(6);
+    expect(host.querySelector('input[name="import-cover-style"]')).toBeNull();
+    await fill('저장할 채널','5');await chooseRadio('input[name="import-cover-style"][value="C"]');
+    await fill('저장할 채널','3');expect(host.querySelector('input[name="import-cover-style"]')).toBeNull();
+    expect(writes()).toHaveLength(0);await click('스튜디오로 가져오기');
+    expect(writes()).toEqual([['/notion/import',expect.objectContaining({body:{pageId,channelId:3,expectedSourceHash:sourceHash,coverStyle:'A'}})]]);
+  });
+
   it("requires an explicit destination when viewing all channels and never imports into an inactive channel", async () => {
     mocks.selected = "all"; await render(); await chooseSource();
     expect(field("저장할 채널").value).toBe(""); expect(button("스튜디오로 가져오기").disabled).toBe(true);
