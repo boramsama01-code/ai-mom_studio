@@ -2,6 +2,12 @@ import sharp from 'sharp';
 import {editorialBrandForChannel,editorialTemplateForKey,editorialTemplateOptions,type EditorialChannel} from '../../shared/editorialTemplates';
 import {buildNotionCanvaPptx,type NotionCanvaDocument,type NotionCanvaPhoto} from './notionCanva';
 import {loadReadingFont} from './readingCardFonts';
+import {HttpError} from '../routes/util';
+
+// Six thumbnails arrive together. Build one at a time so their native image
+// buffers do not accumulate on the 512 MiB service; waiting work holds no SVGs.
+let sampleTail:Promise<void>=Promise.resolve();
+let pendingSamples=0;
 
 let samplePhoto:Promise<Buffer>|undefined;
 function capture(){return samplePhoto??=Promise.resolve().then(async()=>{
@@ -28,9 +34,14 @@ export function editorialSampleDocument(channel:EditorialChannel,key:string):Not
  ]};
 }
 export async function renderEditorialTemplateSample(channel:EditorialChannel,key:string,page:number){
+ if(pendingSamples>=12)throw new HttpError(503,'미리보기를 준비 중입니다. 잠시 후 다시 확인해 주세요.');
+ const previous=sampleTail;let release!:()=>void;sampleTail=new Promise<void>(resolve=>{release=resolve;});pendingSamples++;
+ await previous;
+ try{
  const doc=editorialSampleDocument(channel,key),kit=editorialTemplateForKey(key)!;
  const photos:NotionCanvaPhoto[]=[{id:'sample',bytes:await capture(),mimeType:'image/png'}];
  const rendered=await buildNotionCanvaPptx(doc,photos,{previewPage:page,previewOnly:true,brand:editorialBrandForChannel(channel),soft:kit.soft});
  if(!rendered.previewSvg)throw new Error('미리보기 페이지를 만들 수 없습니다.');
- return sharp(Buffer.from(rendered.previewSvg)).jpeg({quality:88}).toBuffer();
+ return await sharp(Buffer.from(rendered.previewSvg)).jpeg({quality:88}).toBuffer();
+ }finally{pendingSamples--;release();}
 }
