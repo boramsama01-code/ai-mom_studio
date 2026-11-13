@@ -13,6 +13,8 @@ import { useToast } from "../toast";
 import { Badge, Empty, ErrorBox, GuardedLink, Loading } from "../ui";
 import { CARD_FIELD_KEYS } from "@shared/cardFields";
 import { templateIncludesKey, templateSelection, type TemplateCatalogItem, type TemplateListReply, type TemplateOption } from "@shared/templateCatalog";
+import {highScoopTemplateForKey,isHighScoopChannel} from '@shared/highscoopTemplates';
+import {HighScoopTemplateKit} from '../HighScoopTemplateKit';
 import "../templateCatalog.css";
 
 export type Tpl = TemplateOption;
@@ -130,6 +132,10 @@ export function DesignPage({ embedded = false }: { embedded?: boolean } = {}) {
         {embedded ? <p className="small muted">표지와 세트 원본을 비교해 보세요. 수집 자료에 사용할 기본 카드는 ‘보기 채널’을 선택해 설정할 수 있습니다. 작업별 디자인은 콘텐츠 편집기에서 고릅니다.</p> : <Empty>수집함에서 만드는 카드의 디자인입니다. 오른쪽 위 ‘보기 채널’에서 설정할 채널을 선택해 주세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>}
       </>
     );
+  if(isHighScoopChannel(current))return <>
+    {!embedded&&<div className="page-head"><div><h1>하이스쿱 디자인 템플릿</h1><p className="small muted">카테고리별 마스터 하나를 고르고, 콘텐츠 안에서 페이지별 내지를 선택하세요.</p></div></div>}
+    <HighScoopDefaultTemplate key={current.id} cid={current.id}/>
+  </>;
   return (
     <>
       {!embedded && <div className="page-head">
@@ -149,6 +155,27 @@ export function DesignPage({ embedded = false }: { embedded?: boolean } = {}) {
       <BulkSection cid={current.id} kind={current.contentType} />
     </>
   );
+}
+
+function HighScoopDefaultTemplate({cid}:{cid:number}){
+ const qc=useQueryClient(),toast=useToast(),q=useTemplates(cid),[selection,setSelection]=useState('');
+ const chosen=selection||q.data?.current,current=highScoopTemplateForKey(q.data?.current);
+ const save=useMutation({
+  mutationFn:(key:string)=>api(`/channels/${cid}/design`,{method:'PUT',body:{cardTemplate:key}}),
+  onSuccess:(_result,key)=>{
+   qc.setQueryData<TemplateListReply>(['ch',cid,'templates'],old=>old?{...old,current:key}:old);
+   void qc.invalidateQueries({queryKey:['ch',cid,'templates']});void qc.invalidateQueries({queryKey:['channels']});
+   toast('ok','하이스쿱 기본 마스터를 저장했습니다. 새로 만드는 콘텐츠부터 적용됩니다.');
+  },onError:error=>toast('err',(error as Error).message),
+ });
+ return <section className="panel stack" aria-label="하이스쿱 현재 템플릿">
+  {q.isPending?<Loading label="하이스쿱 마스터 불러오는 중"/>:q.error?<ErrorBox error={q.error} retry={()=>void q.refetch()}/>:<>
+   {!current&&<p className="notice small">현재 기본값은 이전 디자인입니다. 아래에서 새 카테고리 마스터를 선택해 주세요.</p>}
+   <HighScoopTemplateKit value={chosen} disabled={save.isPending} onSelect={setSelection} selectionHint="카테고리를 고른 뒤 ‘이 마스터를 기본으로 사용’을 눌러 저장하세요. 콘텐츠 원고에서는 페이지별 내지를 선택할 수 있습니다."/>
+   <div className="row"><button type="button" className="btn primary" disabled={save.isPending||!highScoopTemplateForKey(chosen)||chosen===q.data?.current} onClick={()=>chosen&&save.mutate(chosen)}>{save.isPending?'저장 중…':chosen===q.data?.current?'현재 기본 마스터':'이 마스터를 기본으로 사용'}</button><GuardedLink className="btn" href="/notion">원고에서 페이지별 내지 선택</GuardedLink><GuardedLink className="btn ghost" href="/connections?service=canva">Canva 연결 설정</GuardedLink></div>
+   <p className="small muted">Canva 원본은 각 카드에서 열 수 있습니다. Studio에서 고른 배치와 원고는 Canva 작업본으로 만들고, Canva에서 직접 고친 배치는 해당 디자인에 저장됩니다.</p>
+  </>}
+ </section>;
 }
 
 function DefaultTemplate({ cid, accent }: { cid: number; accent: string }) {

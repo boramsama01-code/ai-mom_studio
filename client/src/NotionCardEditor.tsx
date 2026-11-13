@@ -5,7 +5,8 @@ import {notionCardCopySchema} from '@shared/notionStudioCopy';
 import {notionDesignEditsSchema,type NotionDesignEdits,type NotionStudioDetail} from '@shared/notionStudio';
 import {NOTION_MANUSCRIPT_MAX_PAGES,notionSourceReferencePageCount} from '@shared/notionSync';
 import {type NotionInteriorTemplate} from '@shared/notionPageTemplates';
-import {NotionInteriorEditor,NotionInteriorTemplatePicker,isStructuredInterior,isInteriorTemplateCompatible,interiorInputsSchema,type InteriorInputs} from './NotionInteriorEditor';
+import {NotionInteriorEditor,NotionInteriorTemplatePicker,isStructuredInterior,isPhotoInterior,supportsInteriorPhoto,isInteriorTemplateCompatible,interiorInputsSchema,type InteriorInputs} from './NotionInteriorEditor';
+import {HighScoopTemplateKit} from './HighScoopTemplateKit';
 import {api,apiBlob,ApiError} from './api';
 import {useDirtyGuard} from './state';
 import {useDraftRecovery} from './useDraftRecovery';
@@ -35,7 +36,7 @@ function incompatibleInteriorPages(data:NotionStudioDetail,draft:Draft):number[]
 function missingInteriorPhotos(data:NotionStudioDetail,draft:Draft):number[]{
   return draft.copy.pages.flatMap((_page,index)=>{
     const key=data.source.pages[index+1]?.key??`page:${index+2}`;
-    if(draft.designEdits.templateByPage?.[key]!=='image_text')return [];
+    if(!isPhotoInterior(draft.designEdits.templateByPage?.[key]))return [];
     const selected=draft.designEdits.photoByPage?.[key],photo=selected===undefined?data.photos[index+1]:data.photos.find(photo=>photo.id===selected);
     return photo?[]:[index+2];
   });
@@ -88,13 +89,20 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
     const edits=structuredClone(draftRef.current.designEdits),map={...edits.templateByPage};
     if(template)map[designKey]=template;else delete map[designKey];
     if(Object.keys(map).length)edits.templateByPage=map;else delete edits.templateByPage;
-    if(template!=='image_text'&&edits.photoByPage){const photos={...edits.photoByPage};delete photos[designKey];if(Object.keys(photos).length)edits.photoByPage=photos;else delete edits.photoByPage;}
+    if(!supportsInteriorPhoto(template)&&edits.photoByPage){const photos={...edits.photoByPage};delete photos[designKey];if(Object.keys(photos).length)edits.photoByPage=photos;else delete edits.photoByPage;}
+    if(!isPhotoInterior(template)&&edits.overlayByPage){const overlays={...edits.overlayByPage};delete overlays[designKey];if(Object.keys(overlays).length)edits.overlayByPage=overlays;else delete edits.overlayByPage;}
     put({...draftRef.current,designEdits:edits});setSaveError(null);
   };
   const choosePhoto=(photoId?:number)=>{
     const edits=structuredClone(draftRef.current.designEdits),map={...edits.photoByPage};
     if(photoId!==undefined)map[designKey]=photoId;else delete map[designKey];
     if(Object.keys(map).length)edits.photoByPage=map;else delete edits.photoByPage;
+    put({...draftRef.current,designEdits:edits});setSaveError(null);
+  };
+  const chooseOverlay=(photoId?:number)=>{
+    const edits=structuredClone(draftRef.current.designEdits),map={...edits.overlayByPage};
+    if(photoId!==undefined)map[designKey]=photoId;else delete map[designKey];
+    if(Object.keys(map).length)edits.overlayByPage=map;else delete edits.overlayByPage;
     put({...draftRef.current,designEdits:edits});setSaveError(null);
   };
   const changeInteriorInput=(input:InteriorInputs[string]|null)=>{
@@ -157,6 +165,7 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
     {base.link.coverStyle==='A'&&!base.photos.length&&<p className="notice warn" role="alert">A형 표지에 사용할 사진이 없습니다. 현재는 검정 배경으로 표시됩니다. 노션의 ‘사진 원본’에 사진을 올린 뒤 ‘노션 → 스튜디오 적용’으로 가져오세요.</p>}
     <RecoveryNotice recovery={recovery}/>
     {remote&&<div className="notice warn stack" role="alert"><strong>다른 곳에서 새 버전을 저장했습니다. 입력한 문구는 그대로 유지했습니다.</strong><p>최신 저장본을 불러오기 전에 필요한 문구를 복사해 두세요.</p><button className="btn" onClick={()=>guard.confirmLeave(()=>{recovery.clear();adopt(remote);})}>최신 저장본 불러오기</button></div>}
+    <HighScoopTemplateKit value={draft.copy.templateKey} disabled={locked} compact onSelect={key=>{put({...draftRef.current,copy:{...draftRef.current.copy,templateKey:key}});setSaveError(null);}}/>
     <nav className="notion-card-strip" aria-label="카드 선택">{pageTitles.map((title,i)=><button type="button" key={i} aria-pressed={pageIndex===i} onClick={()=>setSelected(i)}><span>{String(i+1).padStart(2,'0')} · {i===0?'표지':i<coreCount?'본문':i<coreCount+sourceCount?'원문':i===pageTitles.length-1?'소개':'예고'}</span><strong>{title||'제목 입력'}</strong></button>)}</nav>
     <div className="notion-card-workbench">
       <div className="notion-card-visual"><div className="row between"><button className="btn sm" disabled={pageIndex===0} onClick={()=>setSelected(pageIndex-1)}>이전 카드</button><span>{pageIndex+1} / {pageTitles.length}</span><button className="btn sm" disabled={pageIndex===pageTitles.length-1} onClick={()=>setSelected(pageIndex+1)}>다음 카드</button></div>
@@ -169,7 +178,7 @@ export function NotionCardEditor({data,disabled=false,onDirtyChange}:{data:Notio
       <NotionConversation data={base} draft={draft} selectedPage={pageIndex} onApply={applyConversation} onUndo={undoConversation} canUndo={canUndoConversation} disabled={locked||!editable||pendingInputs||!protectedValid}/>
       {editable&&page?<>
         <label className="field">카드 제목<textarea aria-label="카드 제목" rows={3} value={page.title} disabled={locked} onChange={event=>change('title',event.target.value)}/></label>
-        {pageIndex>0&&<NotionInteriorTemplatePicker value={interiorTemplate} onChange={chooseTemplate} disabled={locked} photos={base.photos} photoId={draft.designEdits.photoByPage?.[designKey]} defaultPhoto={base.photos[pageIndex]} onPhotoChange={choosePhoto}/>}
+        {pageIndex>0&&<NotionInteriorTemplatePicker value={interiorTemplate} onChange={chooseTemplate} disabled={locked} photos={base.photos} photoId={draft.designEdits.photoByPage?.[designKey]} defaultPhoto={base.photos[pageIndex]} onPhotoChange={choosePhoto} overlayId={draft.designEdits.overlayByPage?.[designKey]} onOverlayChange={chooseOverlay}/>}
         {sourceSubtitle&&<div className="notion-protected-field"><span className="small muted">노션 소제목</span><p>{sourceSubtitle}</p></div>}
         {pageIndex>0&&isStructuredInterior(interiorTemplate)?<NotionInteriorEditor template={interiorTemplate!} body={body} limit={Math.max(0,1000-[...prefix].length)} disabled={locked||!protectedValid} buffer={draft.interiorInputs?.[inputKey]} onBuffer={changeInteriorInput} onApply={value=>change('body',value)} rawEditor={bodyEditor}/>:bodyEditor}
         {!protectedValid&&<p className="notice warn">노션 소제목과 저장된 본문이 다릅니다. 노션 원고를 비교한 뒤 다시 가져와 주세요.</p>}

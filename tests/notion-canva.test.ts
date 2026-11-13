@@ -162,7 +162,7 @@ describe('native editable Notion manuscript PPTX',()=>{
     const files=unzipSync(full.bytes),lastSource=strFromU8(files['ppt/slides/slide20.xml']),outro=strFromU8(files['ppt/slides/slide21.xml']);
     expect(lastSource).toContain('20장 제목');expect(lastSource).toContain('본문 20.');
     for(const text of [NOTION_CANVA_OUTRO.follow,NOTION_CANVA_OUTRO.handle,...NOTION_CANVA_OUTRO.introduction.split('\n'),NOTION_CANVA_OUTRO.action])expect(outro).toContain(text);
-    expect(outro).toContain('name="outro-red-pill"');expect(outro).toContain('prst="roundRect"');expect(outro).toContain('srgbClr val="FF493B"');
+    expect(outro).toContain('name="outro-red-pill"');expect(outro).toContain('prst="roundRect"');expect(outro).toContain('srgbClr val="5ED7B5"');
     await expect(buildNotionCanvaPptx(document(1))).rejects.toMatchObject({code:'invalid_request'});
     await expect(buildNotionCanvaPptx(document(21))).rejects.toMatchObject({code:'invalid_request'});
     const input=document(2);input.pages[1].body='한글 원고가 너무 길면 문장을 자르지 않습니다. '.repeat(45);

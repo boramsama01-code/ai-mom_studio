@@ -26,20 +26,44 @@ export function parseInteriorBars(body:string):Array<{label:string;source:string
   return {label:cells[0],source:cells[1],value:Number(cells[1])};
  });
 }
+export function parseInteriorDialogue(body:string):Array<{speaker:string;message:string}>{
+ const source=lines(body);
+ if(source.shift()?.split('|').map(value=>value.trim()).join('|')!=='화자|내용')fail('대화의 화자·내용을 입력해 주세요.');
+ if(source.length<2||source.length>6)fail('대화는 실제 발화 2~6개로 나누어 주세요.');
+ return source.map(line=>{
+  const cells=line.split('|').map(value=>value.trim());
+  if(cells.length!==2||cells.some(value=>!value)||[...cells[0]].length>20)fail('각 말풍선의 화자(20자 이내)와 내용을 빈칸 없이 입력해 주세요.');
+  return {speaker:cells[0],message:cells[1]};
+ });
+}
 export function validateInteriorTemplateBody(template:NotionInteriorTemplate,body:string):void{
+ if(template==='document_excerpt')return; // A caption is optional for a faithful document excerpt.
  if(template==='text'||template==='image_text')nonempty(body,'본문을 입력해 주세요.');
  else if(template==='two_columns')parseInteriorColumns(body);
  else if(template==='table')parseInstitutionSchedule(body);
  else if(template==='timeline')parseAdmissionsTimeline(body);
  else if(template==='process')parseInteriorProcess(body);
+ else if(template==='dialogue')parseInteriorDialogue(body);
  else parseInteriorBars(body);
 }
 /** Native, source-driven elements. No model call, inferred value, or copy truncation. */
-export function interiorTemplateElements(template:NotionInteriorTemplate,body:string,accent:string,measure:(text:string,size:number,bold:boolean)=>number):{intro:string;elements:AdmissionsElement[]}{
+export function interiorTemplateElements(template:NotionInteriorTemplate,body:string,accent:string,measure:(text:string,size:number,bold:boolean)=>number,options:{hasImage?:boolean;soft?:string}={}):{intro:string;elements:AdmissionsElement[]}{
  const out:AdmissionsElement[]=[];
  const rect=(name:string,x:number,y:number,width:number,height:number,fill:string,pill=false)=>out.push({kind:'rect',name,x,y,width,height,fill,pill});
  const text=(name:string,content:string,x:number,y:number,width:number,height:number,max=36,min=26,bold=false,align:'l'|'ctr'='l',ink='#171717',middle=false)=>out.push({kind:'text',name,content,x,y,width,height,max,min,bold,align,ink,verticalAlign:middle?'middle':'top',leading:1.25});
- if(template==='text'||template==='image_text'){
+ if(template==='document_excerpt'){
+  if(body.trim())text('interior-document-caption',body,64,1082,952,114,30,24);
+ }else if(template==='dialogue'){
+  const messages=parseInteriorDialogue(body),x=options.hasImage?552:64,width=options.hasImage?464:952;
+  const firstSpeaker=messages[0].speaker,gap=18,rowHeight=(860-gap*(messages.length-1))/messages.length;
+  messages.forEach((message,index)=>{
+   const top=336+index*(rowHeight+gap),right=message.speaker===firstSpeaker;
+   const bubbleWidth=options.hasImage?width-24:Math.min(760,width-48),left=x+(right?width-bubbleWidth:0);
+   text(`interior-dialogue-${index}-speaker`,message.speaker,left,top,bubbleWidth,28,20,18,false,right?'ctr':'l','#64645E');
+   rect(`interior-dialogue-${index}-bubble`,left,top+32,bubbleWidth,rowHeight-32,right?(options.soft??'#FFF0B6'):'#F2F3F1',false);
+   text(`interior-dialogue-${index}-message`,message.message,left+20,top+46,bubbleWidth-40,rowHeight-60,options.hasImage?30:34,24,false,'l','#171717');
+  });
+ }else if(template==='text'||template==='image_text'){
   nonempty(body,'본문을 입력해 주세요.');
   text('interior-body',body,template==='image_text'?552:64,336,template==='image_text'?464:952,860,template==='image_text'?36:40,template==='image_text'?26:28);
  }else if(template==='two_columns'){

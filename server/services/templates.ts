@@ -4,15 +4,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import sharp from 'sharp';
 import { and, eq, isNull, or } from "drizzle-orm";
 import type { DB } from "../db";
-import { cardTemplates, type Channel } from "../../shared/schema";
+import { cardTemplates, channels, type Channel } from "../../shared/schema";
 import { BUILTIN_LAYOUTS, renderCardJpeg, type CardLayout, type CardStyle } from "./card";
 import { buildCardModel } from "./cardModel";
 import { cardDesign } from "../../shared/cardDesigns";
 import { renderCollectionPreview } from "./cardDesignSamples";
 import { readingProfileForTemplateKey, readingProfileDesigns, type ReadingCardProfile } from "../../shared/readingCardProfiles";
-import { templateCatalogOptions, type TemplateCatalogItem } from "../../shared/templateCatalog";
+import { highScoopTemplateCatalogOptions, templateCatalogOptions, type TemplateCatalogItem } from "../../shared/templateCatalog";
+import { highScoopTemplateForKey, isHighScoopChannel } from '../../shared/highscoopTemplates';
 import { defaultPageDesigns } from "../../shared/familyDialogue";
 import cardnews14Layout from "../../shared/cardnews14Layout.json";
 import { layoutReadingProfilePage } from "./readingCard";
@@ -23,6 +25,8 @@ export class TemplateNotFound extends Error {}
 export class TemplatePreviewPageError extends Error {}
 
 export async function resolveStyle(db: DB, key: string, channelId: number): Promise<CardStyle> {
+  const highScoop=highScoopTemplateForKey(key);
+  if(highScoop)return {layout:'magazine',highscoopTemplateKey:highScoop.key};
   // Reading profiles render from their versioned 8-page contract. Their keys
   // are valid for saved V2 copies without pretending to be Canva registrations.
   if (readingProfileForTemplateKey(key)) return { layout: "minimal" };
@@ -49,6 +53,10 @@ export async function resolveStyle(db: DB, key: string, channelId: number): Prom
 }
 
 export async function listTemplates(db: DB, channelId: number): Promise<TemplateCatalogItem[]> {
+  const [channel]=await db.select({slug:channels.slug,name:channels.name}).from(channels).where(eq(channels.id,channelId));
+  // Old keys continue to resolve saved work, while new HighScoop choices use only
+  // the six current category masters. Other brands retain their own catalogue.
+  if(channel&&isHighScoopChannel(channel))return highScoopTemplateCatalogOptions();
   const customs = await db
     .select({ id: cardTemplates.id, name: cardTemplates.name, layout: cardTemplates.layout, textTone: cardTemplates.textTone, overlay: cardTemplates.overlay, channelId: cardTemplates.channelId, createdAt: cardTemplates.createdAt })
     .from(cardTemplates)
@@ -148,6 +156,13 @@ async function renderReadingPreview(profile: ReadingCardProfile, page: number): 
 const cache = new Map<string, Buffer>();
 const pending = new Map<string, Promise<Buffer>>();
 export async function renderPreview(db: DB, key: string, channel: Channel, page = 0): Promise<Buffer> {
+  const kit=highScoopTemplateForKey(key);
+  if(kit){
+    if(!Number.isInteger(page)||page<0||page>=kit.pageCount)throw new TemplatePreviewPageError(`이 템플릿의 미리보기는 ${kit.pageCount}장입니다.`);
+    const slug=kit.key.slice('highscoop:'.length),file=path.resolve(process.cwd(),`client/public/highscoop/current/${slug}-page-${page+1}.webp`);
+    if(!fs.existsSync(file))throw new TemplateNotFound('최신 카테고리 마스터의 미리보기를 준비 중입니다.');
+    return sharp(fs.readFileSync(file)).jpeg({quality:88}).toBuffer();
+  }
   const ck = `${key}|${page}|${channel.id}|${channel.accentColor}|${channel.name}|${channel.contentType}`;
   const hit = cache.get(ck);
   if (hit) return hit;

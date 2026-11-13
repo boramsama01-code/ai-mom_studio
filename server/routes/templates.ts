@@ -59,7 +59,7 @@ templateRoutes.get(
   ah(async (req, res) => {
     const ch = await loadChannel(req.params.cid);
     const key = String(req.query.key ?? "");
-    const page = parse(z.coerce.number().int().min(0).max(7).default(0), req.query.page);
+    const page = parse(z.coerce.number().int().min(0).max(99).default(0), req.query.page);
     try {
       const jpg = await renderPreview(getDb(), key, ch, page);
       const thumb = req.query.size === "sm" ? await sharp(jpg).resize(360, 450).jpeg({ quality: 82 }).toBuffer() : jpg;

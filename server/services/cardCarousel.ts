@@ -23,11 +23,13 @@ import { FAMILY_ENDING_FIXED_TEXT, selectedFamilyEnding } from "../../shared/cha
 import { renderRegisteredFamilyEnding } from "./characterVariantAssets";
 import { HIGHSCOOP_HANDLE, HIGHSCOOP_OUTRO_THEMES, highscoopOutroTheme, isHighscoopChannel, type HighscoopOutroThemeId } from "../../shared/highscoopOutro";
 import { checkHighscoopOutro, renderHighscoopOutro } from "./highscoopOutro";
+import { highScoopTemplateForKey } from "../../shared/highscoopTemplates";
+import { highScoopCardDocument, renderHighScoopCardPage, type HighScoopCardBridge } from "./highscoopCardBridge";
 
 type Block = CardModel["blocks"][number];
 type Section = { title: string; blocks: Block[] };
 export type ModelInput = Parameters<typeof buildCardModel>[0] & { subcategory?: string | null };
-export type CarouselPlan = { base: CardModel; pages: CardModel[]; count: number; copy?: CardCopy; highscoopOutro?: HighscoopOutroThemeId; family?: { copy: CardCopyV2; designs: PageDesigns; context: FamilyCardContext } };
+export type CarouselPlan = { base: CardModel; pages: CardModel[]; count: number; copy?: CardCopy; highscoop?: HighScoopCardBridge; highscoopOutro?: HighscoopOutroThemeId; family?: { copy: CardCopyV2; designs: PageDesigns; context: FamilyCardContext } };
 export type CarouselPageImages = ReadonlyMap<number, Buffer> & { credits?: ReadonlyMap<number, string> };
 const block = (field: string, label: string, text: unknown): Block => ({ field, label, text: Array.isArray(text) ? text.filter(Boolean).join("\n\n") : String(text ?? ""), maxLines: 30 });
 
@@ -56,7 +58,9 @@ export function carouselSections(kind: string, p: Record<string, any>): Section[
 /** Measure real typography. Overflow continues on another page; text is never sliced away. */
 export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan {
   const base = buildCardModel(input);
-  const highscoopOutro = input.kind === "notice" && isHighscoopChannel(input.channelSlug) ? highscoopOutroTheme(input.subcategory, input.payload) : undefined;
+  const kit = highScoopTemplateForKey(style.highscoopTemplateKey ?? input.payload.cardCopy?.templateKey);
+  if (kit && (input.payload.cardCopy?.version === 2 || input.payload.cardCopy?.storyFormat === "discussion8")) throw new HttpError(422, "이 구조의 원고·사진은 기존 전용 템플릿에서 유지해 주세요. 새 하이스쿱 카테고리는 일반 카드 원고 또는 Notion 페이지별 템플릿에서 선택할 수 있습니다.");
+  const highscoopOutro = !kit && input.kind === "notice" && isHighscoopChannel(input.channelSlug) ? highscoopOutroTheme(input.subcategory, input.payload) : undefined;
   if (input.payload.cardCopy?.version === 2) {
     const parsed = familyCardCopySchema.safeParse(input.payload.cardCopy);
     if (!parsed.success) throw new HttpError(422, "8장 원고의 필드와 순서를 확인해 주세요. 기존 문구는 유지했습니다.");
@@ -79,6 +83,7 @@ export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan 
     return { base: models[0], pages: models.slice(1), count: 8, family: { copy, designs, context } };
   }
   const copy = cardCopyFromStored(input.payload);
+  if (kit && input.payload.cardCopy && !copy) throw new HttpError(422, "저장된 카드 원고의 형식과 길이를 확인해 주세요. 기존 원고·사진은 유지했습니다.");
   if (copy) {
     const count = copy.pages.length + 1;
     const cover: CardModel = { ...base, title: copy.cover.title, subtitle: copy.cover.subtitle,
@@ -94,11 +99,12 @@ export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan 
     if (cover.editorial) checkEditorialCard(cover, style);
     const closingTheme = copy.storyFormat ? undefined : highscoopOutro;
     for (const [index, page] of pages.entries()) {
+      if (kit) continue; // The shared native renderer checks the actual selected page geometry.
       if (closingTheme && index === pages.length - 1) checkHighscoopOutro(page, style, closingTheme);
       else if (page.editorial) checkEditorialCard(page, style);
       else if (style.collection) layoutCollectionBody(page, style.collection); else layoutCard(page, style);
     }
-    return { base: cover, pages, count, copy, ...(closingTheme ? { highscoopOutro: closingTheme } : {}) };
+    return { base: cover, pages, count, copy, ...(kit ? { highscoop: highScoopCardDocument(kit.key, cover, pages) } : {}), ...(closingTheme ? { highscoopOutro: closingTheme } : {}) };
   }
   const pages: CardModel[] = [];
   const append = (title: string, blocks: Block[], depth = 0, closing = false) => {
@@ -135,7 +141,7 @@ export function planCarousel(input: ModelInput, style: CardStyle): CarouselPlan 
   const count = pages.length + 1;
   const numberedPages = pages.map((p, i) => ({ ...p, badge: `${String(i + 2).padStart(2, "0")} / ${String(count).padStart(2, "0")}`, footer: base.footer }));
   if (highscoopOutro && numberedPages.length) checkHighscoopOutro(numberedPages.at(-1)!, style, highscoopOutro);
-  return { base, pages: numberedPages, count, ...(highscoopOutro ? { highscoopOutro } : {}) };
+  return { base, pages: numberedPages, count, ...(kit ? { highscoop: highScoopCardDocument(kit.key, base, numberedPages) } : {}), ...(highscoopOutro ? { highscoopOutro } : {}) };
 }
 
 /** Lossless editable seed for old decks. Preserve their actual pagination and every block label. */
@@ -192,6 +198,7 @@ export async function renderCarouselCover(model: CardModel, count: number, art: 
 /** One exact final page, shared by the editor preview, saved deck and publication export. */
 export async function renderCarouselPage(plan: CarouselPlan, pageIndex: number, style: CardStyle, art: Buffer | null, credit: string, pageImages: CarouselPageImages = new Map()): Promise<Buffer> {
   if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= plan.count) throw new HttpError(400, "카드 페이지를 확인해 주세요.");
+  if (plan.highscoop) return renderHighScoopCardPage(plan.highscoop, pageIndex, art ?? style.background ?? null, credit);
   if (plan.family) {
     const { copy, designs, context } = plan.family, page = copy.pages[pageIndex], design = resolvedReadingPageDesigns(copy, designs)[page.id];
     const ending = selectedFamilyEnding(page.id, design);

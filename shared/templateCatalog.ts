@@ -1,5 +1,6 @@
 import { cardDesignOptions } from "./cardDesigns";
 import { READING_CARD_PROFILES } from "./readingCardProfiles";
+import {HIGH_SCOOP_TEMPLATE_KITS,HIGH_SCOOP_TEMPLATE_VERSION} from './highscoopTemplates';
 
 export type TemplateFormat = "standard" | "family_dialogue_8";
 export type TemplateFamily = "recruitment" | "news" | "food";
@@ -35,6 +36,14 @@ export type TemplateCatalogItem = {
 };
 
 export type TemplateListReply = { items: TemplateCatalogItem[]; current: string };
+
+/** Current HighScoop picker has exactly one master per category, never palette duplicates. */
+export function highScoopTemplateCatalogOptions():TemplateCatalogItem[]{
+  return HIGH_SCOOP_TEMPLATE_KITS.map(kit=>({key:kit.key,templateKey:kit.key,name:kit.label,
+    description:'카테고리 컬러 마스터 · 표지부터 문서 캡처·대화·마무리까지',kind:'builtin',family:'recruitment',
+    format:'standard',cardCopyVersion:1,pageCount:kit.pageCount,previewPageCount:kit.pageCount,pageCountMode:'variable',
+    pageLabels:[...kit.layoutLabels],templateVersion:HIGH_SCOOP_TEMPLATE_VERSION,thumbnailUrl:kit.thumbnailUrl,overviewUrl:kit.overviewUrl}));
+}
 
 /** Older callers can still supply the original option shape. New API replies
  * always include the version/format contract above. */
@@ -95,6 +104,6 @@ export function templateSelection(item: TemplateOption, key = item.key): Templat
 }
 
 export function templateCatalogItem(key: string): TemplateCatalogItem | undefined {
-  const item = templateCatalogOptions().find(item => templateIncludesKey(item, key));
+  const item = [...highScoopTemplateCatalogOptions(),...templateCatalogOptions()].find(item => templateIncludesKey(item, key));
   return item ? templateSelection(item, key) : undefined;
 }

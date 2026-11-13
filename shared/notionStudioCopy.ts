@@ -1,10 +1,13 @@
 import { CARD_COPY_MANUAL_LIMITS, cardCopySchema, type CardCopy } from './cardCopy';
 import { NOTION_MANUSCRIPT_MAX_PAGES, type NotionDocument } from './notionSync';
+import {z} from 'zod';
 
 // Linked manuscripts can have more pages than the generic manual/AI editor.
 // Keep its field, unique-ID and story-format validation without relaxing other editors.
 export const notionCardCopySchema = cardCopySchema.safeExtend({
- pages:cardCopySchema.shape.pages.element.array().min(1).max(NOTION_MANUSCRIPT_MAX_PAGES-1),
+ // A full-page source capture can be intentionally captionless. Individual
+ // selected template validation still rejects empty text-only interiors.
+ pages:cardCopySchema.shape.pages.element.safeExtend({body:z.string().refine(value=>[...value].length<=CARD_COPY_MANUAL_LIMITS.body,`${CARD_COPY_MANUAL_LIMITS.body}자 이내로 입력해 주세요.`)}).array().min(1).max(NOTION_MANUSCRIPT_MAX_PAGES-1),
 });
 
 /** Complex editorial fields need their own round-trip format; never silently drop them. */

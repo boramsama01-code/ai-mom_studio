@@ -199,6 +199,7 @@ async function renderCarouselForItem(db: DB, itemId: number, now: Date, template
   } catch (e) {
     if (e instanceof CardOverflowError) return { ok: false as const, code: "overflow", field: e.field, error: `편집 필요: ${e.message}` };
     if (e instanceof CardFontError) return { ok: false as const, code: "font", error: e.message };
+    if (e instanceof HttpError && e.status === 422) return { ok: false as const, code: "invalid_payload", error: e.message };
     return { ok: false as const, code: "render", error: `카드뉴스를 완성하지 못했습니다: ${(e as Error).message}` };
   }
   const [fresh] = await db.select().from(contentItems).where(eq(contentItems.id, item.id)).for("update");

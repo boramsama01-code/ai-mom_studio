@@ -1,0 +1,160 @@
+{
+  "version": "2026-11-13",
+  "kitCount": 6,
+  "categoryMastersOnly": true,
+  "renderer": "buildNotionCanvaPptx",
+  "sourceArtwork": [
+    {
+      "id": "cover",
+      "name": "01-cover-hero.png"
+    },
+    {
+      "id": "document",
+      "name": "02-answer-explanation-base.png"
+    },
+    {
+      "id": "marks",
+      "name": "02-answer-explanation-annotations.png"
+    }
+  ],
+  "records": [
+    {
+      "key": "highscoop:gifted",
+      "category": "영재원",
+      "color": "#FF493B",
+      "pptx": "docs/artifacts/highscoop-current/gifted.pptx",
+      "pageCount": 11,
+      "sourcePageCount": 10,
+      "sha256": "497eb01276e8a0f9a4dd64965af73c3a711c8a90b44b00fe1969ddf19ecd8a41",
+      "previewFiles": [
+        "client/public/highscoop/current/gifted-page-1.webp",
+        "client/public/highscoop/current/gifted-page-2.webp",
+        "client/public/highscoop/current/gifted-page-3.webp",
+        "client/public/highscoop/current/gifted-page-4.webp",
+        "client/public/highscoop/current/gifted-page-5.webp",
+        "client/public/highscoop/current/gifted-page-6.webp",
+        "client/public/highscoop/current/gifted-page-7.webp",
+        "client/public/highscoop/current/gifted-page-8.webp",
+        "client/public/highscoop/current/gifted-page-9.webp",
+        "client/public/highscoop/current/gifted-page-10.webp",
+        "client/public/highscoop/current/gifted-page-11.webp"
+      ],
+      "warnings": []
+    },
+    {
+      "key": "highscoop:experience",
+      "category": "체험",
+      "color": "#5ED7B5",
+      "pptx": "docs/artifacts/highscoop-current/experience.pptx",
+      "pageCount": 11,
+      "sourcePageCount": 10,
+      "sha256": "2897cdd0c1ac697612955b0f8c70f2ce273ec78dbe000800ffa0dbaae06dcccb",
+      "previewFiles": [
+        "client/public/highscoop/current/experience-page-1.webp",
+        "client/public/highscoop/current/experience-page-2.webp",
+        "client/public/highscoop/current/experience-page-3.webp",
+        "client/public/highscoop/current/experience-page-4.webp",
+        "client/public/highscoop/current/experience-page-5.webp",
+        "client/public/highscoop/current/experience-page-6.webp",
+        "client/public/highscoop/current/experience-page-7.webp",
+        "client/public/highscoop/current/experience-page-8.webp",
+        "client/public/highscoop/current/experience-page-9.webp",
+        "client/public/highscoop/current/experience-page-10.webp",
+        "client/public/highscoop/current/experience-page-11.webp"
+      ],
+      "warnings": []
+    },
+    {
+      "key": "highscoop:competition",
+      "category": "대회",
+      "color": "#BAA0FF",
+      "pptx": "docs/artifacts/highscoop-current/competition.pptx",
+      "pageCount": 11,
+      "sourcePageCount": 10,
+      "sha256": "eef0b3780224479728ca814935bab612ec5b435d1180dfee3e5c7f121f5bd704",
+      "previewFiles": [
+        "client/public/highscoop/current/competition-page-1.webp",
+        "client/public/highscoop/current/competition-page-2.webp",
+        "client/public/highscoop/current/competition-page-3.webp",
+        "client/public/highscoop/current/competition-page-4.webp",
+        "client/public/highscoop/current/competition-page-5.webp",
+        "client/public/highscoop/current/competition-page-6.webp",
+        "client/public/highscoop/current/competition-page-7.webp",
+        "client/public/highscoop/current/competition-page-8.webp",
+        "client/public/highscoop/current/competition-page-9.webp",
+        "client/public/highscoop/current/competition-page-10.webp",
+        "client/public/highscoop/current/competition-page-11.webp"
+      ],
+      "warnings": []
+    },
+    {
+      "key": "highscoop:admissions",
+      "category": "입시",
+      "color": "#72A7FF",
+      "pptx": "docs/artifacts/highscoop-current/admissions.pptx",
+      "pageCount": 11,
+      "sourcePageCount": 10,
+      "sha256": "691b51928d9c576594968994afa6188740d34d2ff6d3b534fd2de6826d9c67ec",
+      "previewFiles": [
+        "client/public/highscoop/current/admissions-page-1.webp",
+        "client/public/highscoop/current/admissions-page-2.webp",
+        "client/public/highscoop/current/admissions-page-3.webp",
+        "client/public/highscoop/current/admissions-page-4.webp",
+        "client/public/highscoop/current/admissions-page-5.webp",
+        "client/public/highscoop/current/admissions-page-6.webp",
+        "client/public/highscoop/current/admissions-page-7.webp",
+        "client/public/highscoop/current/admissions-page-8.webp",
+        "client/public/highscoop/current/admissions-page-9.webp",
+        "client/public/highscoop/current/admissions-page-10.webp",
+        "client/public/highscoop/current/admissions-page-11.webp"
+      ],
+      "warnings": []
+    },
+    {
+      "key": "highscoop:conversation",
+      "category": "말풍선",
+      "color": "#FFD166",
+      "pptx": "docs/artifacts/highscoop-current/conversation.pptx",
+      "pageCount": 11,
+      "sourcePageCount": 10,
+      "sha256": "7c0fef97cb137d2347f2bc507a1f1f7c21aefafec581324b8e467be0d9965d99",
+      "previewFiles": [
+        "client/public/highscoop/current/conversation-page-1.webp",
+        "client/public/highscoop/current/conversation-page-2.webp",
+        "client/public/highscoop/current/conversation-page-3.webp",
+        "client/public/highscoop/current/conversation-page-4.webp",
+        "client/public/highscoop/current/conversation-page-5.webp",
+        "client/public/highscoop/current/conversation-page-6.webp",
+        "client/public/highscoop/current/conversation-page-7.webp",
+        "client/public/highscoop/current/conversation-page-8.webp",
+        "client/public/highscoop/current/conversation-page-9.webp",
+        "client/public/highscoop/current/conversation-page-10.webp",
+        "client/public/highscoop/current/conversation-page-11.webp"
+      ],
+      "warnings": []
+    },
+    {
+      "key": "highscoop:news",
+      "category": "뉴스",
+      "color": "#57C7E3",
+      "pptx": "docs/artifacts/highscoop-current/news.pptx",
+      "pageCount": 11,
+      "sourcePageCount": 10,
+      "sha256": "16060917a901cc51ada2055178c8486c9fb3b0b7b57298e634501418e024bcb4",
+      "previewFiles": [
+        "client/public/highscoop/current/news-page-1.webp",
+        "client/public/highscoop/current/news-page-2.webp",
+        "client/public/highscoop/current/news-page-3.webp",
+        "client/public/highscoop/current/news-page-4.webp",
+        "client/public/highscoop/current/news-page-5.webp",
+        "client/public/highscoop/current/news-page-6.webp",
+        "client/public/highscoop/current/news-page-7.webp",
+        "client/public/highscoop/current/news-page-8.webp",
+        "client/public/highscoop/current/news-page-9.webp",
+        "client/public/highscoop/current/news-page-10.webp",
+        "client/public/highscoop/current/news-page-11.webp"
+      ],
+      "warnings": []
+    }
+  ]
+}

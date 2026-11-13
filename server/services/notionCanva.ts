@@ -26,6 +26,7 @@ import { admissionsTimelineElements, parseAdmissionsTimeline } from './notionAdm
 import { loadEducationOfficeLogos, type EducationOfficeLogo } from './educationOfficeLogos';
 import {notionInteriorTemplates} from '../../shared/notionPageTemplates';
 import {interiorTemplateElements} from './notionInteriorTemplates';
+import {HIGH_SCOOP_TEMPLATE_KITS,highScoopTemplateForCategory} from '../../shared/highscoopTemplates';
 
 export const NOTION_CANVA_GEOMETRY = { width: 1080, height: 1350, safe: { x: 96, y: 207, width: 888, height: 936 } } as const;
 /** Covers retain the original safe area; every interior uses this larger frame. */
@@ -39,13 +40,13 @@ export const NOTION_CANVA_TEASER_COMMENT = '궁금한 점은 댓글로 남겨 �
 /** Added after every manuscript page; the source's final page is never replaced. */
 export const NOTION_CANVA_OUTRO = {
   title: 'HighScoop 채널 소개',
-  follow: 'Follow',
+  follow: '아이의 관심에서 다음 도전까지',
   handle: '@highscoop.official',
-  introduction: '영재교육원 10년차 엄마가 떠먹여주는\n영재교육 꿀팁',
-  action: '찾는 수고는 덜고, 알맹이만 떠먹여 드립니다.',
-  altText: 'Follow HighScoop. @highscoop.official. 영재교육원 10년차 엄마가 떠먹여주는 영재교육 꿀팁. 찾는 수고는 덜고, 알맹이만 떠먹여 드립니다.'
+  introduction: '아이의 호기심을 놓치지 않고,\n함께 도전할 기회를 찾아봅니다.',
+  action: '다음 이야기도 궁금하다면, 하이스쿱을 찾아주세요.',
+  altText: 'HighScoop. 아이의 관심에서 다음 도전까지. @highscoop.official 검색창. 아이의 호기심을 놓치지 않고 함께 도전할 기회를 찾아봅니다.'
 } as const;
-export const NOTION_CANVA_CATEGORY_COLORS: Record<string, string> = { 영재원: '#FF493B', 입시: '#72A7FF', 대회: '#BAA0FF', 체험: '#5ED7B5', 꿀팁: '#FFD166' };
+export const NOTION_CANVA_CATEGORY_COLORS: Record<string, string> = Object.fromEntries(HIGH_SCOOP_TEMPLATE_KITS.map(kit=>[kit.category,kit.color]));
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 const MAX_EXPORT_BYTES = 80 * 1024 * 1024;
 const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
@@ -54,7 +55,7 @@ const EMU = 9525;
 const RED = '#FF493B', INK = '#171717';
 const idSchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9_-]+$/);
 const copy = z.string().refine(value => !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value));
-const pageSchema = z.object({ interiorTemplate:z.enum(notionInteriorTemplates).optional(),interiorSubtitle:copy.max(500).optional(),title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional(), footnote: copy.max(1000).optional(), sourceLabel: copy.max(300).optional(), infographic: z.enum(['application_steps','admissions_calendar','institution_schedule','admissions_logo_calendar','admissions_guide','admissions_timeline']).optional() }).strict();
+const pageSchema = z.object({ interiorTemplate:z.enum(notionInteriorTemplates).optional(),interiorSubtitle:copy.max(500).optional(),title: copy.trim().min(1).max(300), body: copy.max(2400).optional(), bullets: z.array(copy.max(500)).max(12).optional(), imageId: z.string().min(1).max(200).optional(), overlayImageId:z.string().min(1).max(200).optional(), emphasis: copy.max(100).optional(), footnote: copy.max(1000).optional(), sourceLabel: copy.max(300).optional(), infographic: z.enum(['application_steps','admissions_calendar','institution_schedule','admissions_logo_calendar','admissions_guide','admissions_timeline']).optional() }).strict();
 const sourceUrl = z.string().trim().min(1).max(2048).refine(value=>{
   try{
     const url=new URL(value),host=url.hostname.toLowerCase();
@@ -300,13 +301,18 @@ function box(id:number,name:string,text:string,x:number,y:number,w:number,h:numb
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${xml(name)}"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"><a:noAutofit/></a:bodyPr><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`;
 }
 function cornerRadius(w:number,h:number,pill:boolean,radius?:number){return Math.min(Math.min(w,h)/2,Math.max(0,radius??(pill?Math.min(w,h)/2:0)));}
+// One full-height fade avoids a visible antialiased join when Canva imports
+// adjacent gradient/solid rectangles. Keep the original y300..1078 curve,
+// then continue with opaque black through the bottom edge of the cover.
+const COVER_FADE_STOPS=[{position:0,alpha:0},{position:37048,alpha:74000},{position:74095,alpha:100000},{position:100000,alpha:100000}] as const;
 function rectangle(id:number,name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000,radius?:number) {
-  const paint=gradient?'<a:gradFill rotWithShape="1"><a:gsLst><a:gs pos="0"><a:srgbClr val="000000"><a:alpha val="0"/></a:srgbClr></a:gs><a:gs pos="50000"><a:srgbClr val="000000"><a:alpha val="74000"/></a:srgbClr></a:gs><a:gs pos="100000"><a:srgbClr val="000000"><a:alpha val="100000"/></a:srgbClr></a:gs></a:gsLst><a:lin ang="5400000" scaled="1"/></a:gradFill>':`<a:solidFill><a:srgbClr val="${color(fill)}"><a:alpha val="${alpha}"/></a:srgbClr></a:solidFill>`;
+  const paint=gradient?`<a:gradFill rotWithShape="1"><a:gsLst>${COVER_FADE_STOPS.map(stop=>`<a:gs pos="${stop.position}"><a:srgbClr val="000000"><a:alpha val="${stop.alpha}"/></a:srgbClr></a:gs>`).join('')}</a:gsLst><a:lin ang="5400000" scaled="1"/></a:gradFill>`:`<a:solidFill><a:srgbClr val="${color(fill)}"><a:alpha val="${alpha}"/></a:srgbClr></a:solidFill>`;
   const rounded=cornerRadius(w,h,pill,radius),adjustment=Math.round(rounded/Math.min(w,h)*100000);
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="${rounded?'roundRect':'rect'}"><a:avLst>${rounded?`<a:gd name="adj" fmla="val ${adjustment}"/>`:''}</a:avLst></a:prstGeom>${paint}<a:ln><a:noFill/></a:ln></p:spPr></p:sp>`;
 }
-function outlinedRectangle(id:number,name:string,x:number,y:number,w:number,h:number,fill:string,stroke:string) {
-  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val 12000"/></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val="${color(fill)}"/></a:solidFill><a:ln w="${emu(1.5)}"><a:solidFill><a:srgbClr val="${color(stroke)}"/></a:solidFill></a:ln></p:spPr></p:sp>`;
+function outlinedRectangle(id:number,name:string,x:number,y:number,w:number,h:number,fill:string,stroke:string,radius=Math.min(w,h)*.12) {
+  const adjustment=Math.round(cornerRadius(w,h,false,radius)/Math.min(w,h)*100000);
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="val ${adjustment}"/></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val="${color(fill)}"/></a:solidFill><a:ln w="${emu(1.5)}"><a:solidFill><a:srgbClr val="${color(stroke)}"/></a:solidFill></a:ln></p:spPr></p:sp>`;
 }
 function stepArrow(id:number,name:string,x:number,y:number,w:number,h:number) {
   return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="${name}"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>${transform(x,y,w,h)}<a:prstGeom prst="chevron"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val="888888"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>`;
@@ -334,11 +340,12 @@ async function readMedia(bytes:Buffer,file:string):Promise<Media> {
  * Keep all validated manuscript pages, optional references and teaser, then the brand CTA.
  * Overflow is a validation error, never truncation or an unreadably small font.
  */
-export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:{previewPage?:number;previewOnly?:boolean;allowMissingPhotos?:boolean}={}):Promise<NotionCanvaPptx> {
+export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:NotionCanvaPhoto[]=[], options:{previewPage?:number;previewOnly?:boolean;allowMissingPhotos?:boolean;includeOutro?:boolean}={}):Promise<NotionCanvaPptx> {
   const document=parse(documentSchema,value,true);
+  const includeOutro=options.includeOutro!==false;
   if(options.previewOnly&&options.previewPage===undefined)invalid('미리볼 카드 번호를 확인해 주세요.');
   const references=document.sourceReferences??[],referencePageCount=notionSourceReferencePageCount(references);
-  if(document.pages.length+referencePageCount+(document.teaser?1:0)+1>NOTION_CANVA_MAX_OUTPUT_PAGES)invalid(`원고·기관별 원문 QR·예고·채널 소개를 합쳐 ${NOTION_CANVA_MAX_OUTPUT_PAGES}장 이내로 나눠 주세요. 원문 주소를 누락하지 않았습니다.`);
+  if(document.pages.length+referencePageCount+(document.teaser?1:0)+(includeOutro?1:0)>NOTION_CANVA_MAX_OUTPUT_PAGES)invalid(`원고·기관별 원문 QR·예고·채널 소개를 합쳐 ${NOTION_CANVA_MAX_OUTPUT_PAGES}장 이내로 나눠 주세요. 원문 주소를 누락하지 않았습니다.`);
   if(!Array.isArray(photos)||photos.length>12||new Set(photos.map(p=>p.id)).size!==photos.length||photos.some(p=>!idSchema.safeParse(p.id).success||!Buffer.isBuffer(p.bytes)||!p.bytes.length||p.bytes.length>MAX_PHOTO_BYTES||!['image/png','image/jpeg','image/webp','image/gif','image/avif','image/heif','image/heic'].includes(p.mimeType))||photos.reduce((n,p)=>n+p.bytes.length,0)>MAX_PHOTO_TOTAL_BYTES)invalid('사진은 서로 다른 ID의 단일 이미지 최대 12개, 개별 20MB·전체 60MB 이하여야 합니다.');
   const warnings:string[]=[];
   // Missing-photo placeholders belong to an interactive SVG preview only.
@@ -352,13 +359,23 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     if(embeddedPhotoBytes>MAX_PHOTO_TOTAL_BYTES)invalid('사진의 PPTX 호환본 합계가 60MB를 초과합니다.');
     media.set(photo.id,item);if(item.normalized)warnings.push(`${index+1}번 사진의 형식·방향을 PPTX 호환 PNG로 정리했습니다. Studio 원본은 보존됩니다.`);
   }
-  for(const [index,page]of document.pages.entries())if(inspecting(index)&&page.imageId&&!media.has(page.imageId))invalid('원고에서 지정한 사진을 찾을 수 없습니다. 사진을 다시 연결해 주세요.');
+  for(const [index,page]of document.pages.entries())if(inspecting(index)){
+    if(page.imageId&&!media.has(page.imageId))invalid('원고에서 지정한 사진을 찾을 수 없습니다. 사진을 다시 연결해 주세요.');
+    if(page.overlayImageId){
+      const overlay=media.get(page.overlayImageId),original=page.imageId?media.get(page.imageId):undefined;
+      if(!overlay||!original)invalid('표시 PNG와 원본 캡처를 이 페이지에서 함께 선택해 주세요.');
+      if(!['image_text','document_excerpt'].includes(page.interiorTemplate??''))invalid('표시 PNG는 사진 + 글 또는 문서 캡처 내지에서 사용해 주세요.');
+      const supplied=photos.find(photo=>photo.id===page.overlayImageId);
+      if(supplied?.mimeType!=='image/png'||(await sharp(supplied.bytes).metadata()).format!=='png'||overlay.extension!=='png'||(await sharp(overlay.bytes).stats()).isOpaque)invalid('표시 레이어는 배경이 투명한 PNG여야 합니다. 원본 이미지는 그대로 보존됩니다.');
+      if(Math.abs((overlay.width/overlay.height)/(original.width/original.height)-1)>.005)invalid('표시 PNG는 원본 캡처와 같은 가로세로 비율로 저장해 주세요.');
+    }
+  }
   for(const [index,page]of document.pages.entries()){
     if(index===0&&page.interiorTemplate)invalid('내지 템플릿은 표지 다음 페이지에서 선택해 주세요.');
     if(!inspecting(index))continue;
     if(page.interiorTemplate){
-      if(!allowMissingPhotos&&page.interiorTemplate==='image_text'&&!page.imageId)invalid(`${index+1}장 사진 + 글에 사용할 사진을 선택해 주세요.`);
-      if(page.interiorTemplate!=='image_text'&&page.imageId)invalid(`${index+1}장 선택한 내지에는 사진을 함께 넣을 수 없습니다. 사진 + 글을 선택해 주세요.`);
+      if(!allowMissingPhotos&&['image_text','document_excerpt'].includes(page.interiorTemplate)&&!page.imageId)invalid(`${index+1}장 ${page.interiorTemplate==='document_excerpt'?'문서 캡처':'사진 + 글'}에 사용할 이미지를 선택해 주세요.`);
+      if(!['image_text','document_excerpt','dialogue'].includes(page.interiorTemplate)&&page.imageId)invalid(`${index+1}장 선택한 내지에는 사진을 함께 넣을 수 없습니다. 사진 + 글·문서 캡처·메신저 대화를 선택해 주세요.`);
     }
   }
   for(const [index,page]of document.pages.entries())if(inspecting(index)&&page.infographic&&!page.interiorTemplate){
@@ -392,8 +409,8 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
   if(document.sourceCard&&!references.length)invalid('원문 확인 문구를 보존하려면 최소 한 개의 공식 원문 주소가 필요합니다.');
   const referencesIndex=references.length?document.pages.length:-1;
   const teaserIndex=document.teaser?document.pages.length+referencePageCount:-1;
-  const renderedPages:NotionCanvaDocument['pages']=[...document.pages,...Array.from({length:referencePageCount},()=>({title:NOTION_CANVA_SOURCE_TITLE})),...(document.teaser?[{title:document.teaser.title,body:document.teaser.body}]:[]),{title:NOTION_CANVA_OUTRO.title}];
-  const followIndex=renderedPages.length-1;
+  const renderedPages:NotionCanvaDocument['pages']=[...document.pages,...Array.from({length:referencePageCount},()=>({title:NOTION_CANVA_SOURCE_TITLE})),...(document.teaser?[{title:document.teaser.title,body:document.teaser.body}]:[]),...(includeOutro?[{title:NOTION_CANVA_OUTRO.title}]:[])];
+  const followIndex=includeOutro?renderedPages.length-1:-1;
   if(options.previewPage!==undefined&&(!Number.isInteger(options.previewPage)||options.previewPage<0||options.previewPage>=renderedPages.length))invalid('미리볼 카드 번호를 확인해 주세요.');
   let previewSvg:string|undefined;
   for(const [index,page] of renderedPages.entries()) {
@@ -403,7 +420,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     await yieldToEventLoop();
     // Legacy layouts share one coordinate expansion; timeline artwork is already
     // authored directly in the full interior frame. Cover coordinates never move.
-    const expand=index>0&&!page.interiorTemplate&&page.infographic!=='admissions_timeline';
+    const expand=index>0&&index!==followIndex&&!page.interiorTemplate&&page.infographic!=='admissions_timeline';
     const coordinates=(x:number,y:number,w:number,h:number)=>expand?{
       x:64+(x-96)*952/888,y:64+(y-207)*1222/936,w:w*952/888,h:h*1222/936,
     }:{x,y,w,h};
@@ -413,7 +430,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     const image=(item:Media,x:number,y:number,w:number,h:number,mode:'cover'|'contain'='cover',altText?:string)=>{({x,y,w,h}=coordinates(x,y,w,h));if(!options.previewOnly){const rid=`rIdImage${++imageIndex}`;relationships+=rel(rid,'image',`../media/${fileFor(item)}`);shapes.push(picture(nextId++,altText??item.file,rid,item,x,y,w,h,mode));}if(previewing)visual(item.file,`<svg x="${x}" y="${y}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="hidden"${altText?` aria-label="${xml(altText)}"`:''}><image width="${w}" height="${h}" preserveAspectRatio="xMidYMid ${mode==='contain'?'meet':'slice'}" href="data:image/${item.extension};base64,${item.bytes.toString('base64')}"/></svg>`);};
     const rawRect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000,radius?:number)=>{
       if(!options.previewOnly)shapes.push(rectangle(nextId++,name,x,y,w,h,fill,gradient,pill,alpha,radius));
-      visual(name,`${gradient?'<defs><linearGradient id="bottom-fade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000000" stop-opacity="0"/><stop offset=".5" stop-color="#000000" stop-opacity=".74"/><stop offset="1" stop-color="#000000"/></linearGradient></defs>':''}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${cornerRadius(w,h,pill,radius)}" fill="${gradient?'url(#bottom-fade)':fill}" fill-opacity="${alpha/100000}"/>`);
+      visual(name,`${gradient?`<defs><linearGradient id="bottom-fade" x1="0" y1="0" x2="0" y2="1">${COVER_FADE_STOPS.map(stop=>`<stop offset="${stop.position/100000}" stop-color="#000000" stop-opacity="${stop.alpha/100000}"/>`).join('')}</linearGradient></defs>`:''}<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${cornerRadius(w,h,pill,radius)}" fill="${gradient?'url(#bottom-fade)':fill}" fill-opacity="${alpha/100000}"/>`);
     };
     const rect=(name:string,x:number,y:number,w:number,h:number,fill:string,gradient=false,pill=false,alpha=100000,radius?:number)=>{const b=coordinates(x,y,w,h);rawRect(name,b.x,b.y,b.w,b.h,fill,gradient,pill,alpha,radius);};
     const text=(name:string,content:string,x:number,y:number,w:number,h:number,max:number,min:number,ink=INK,bold=false,emphasis?:string,align:'l'|'ctr'='l',leading=1.3,verticalAlign:'top'|'middle'='top')=>{
@@ -483,13 +500,15 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
     const footer=[page.footnote,page.sourceLabel].filter(value=>value?.trim()).join('\n');
     let background='#FFFFFF';
     if(index===followIndex){
-      background='#FFF8F0';
-      text('outro-follow',NOTION_CANVA_OUTRO.follow,96,245,888,104,76,64,INK,true,undefined,'ctr');
-      image(logo,108,370,864,292,'contain');
-      text('outro-handle',NOTION_CANVA_OUTRO.handle,96,728,888,68,42,36,INK,true,undefined,'ctr');
-      text('outro-introduction',NOTION_CANVA_OUTRO.introduction,96,818,888,110,36,30,INK,false,undefined,'ctr');
-      rect('outro-red-pill',108,1010,864,78,RED,false,true);
-      text('outro-action',NOTION_CANVA_OUTRO.action,132,1027,816,44,28,24,'#FFFFFF',true,undefined,'ctr');
+      background='#FFF9F2';
+      image(logo,110,112,860,290,'contain');
+      text('outro-follow',NOTION_CANVA_OUTRO.follow,80,474,920,116,44,40,INK,true,undefined,'ctr');
+      text('outro-introduction',NOTION_CANVA_OUTRO.introduction,80,669,920,140,32,28,INK,false,undefined,'ctr');
+      if(!options.previewOnly)shapes.push(outlinedRectangle(nextId++,'outro-search',200,1084,680,76,'#FFFFFF',INK,38));
+      visual('outro-search','<rect x="200" y="1084" width="680" height="76" rx="38" fill="#FFFFFF" stroke="#181818" stroke-width="2"/>');
+      text('outro-handle',NOTION_CANVA_OUTRO.handle,226,1094,628,54,34,30,INK,true,undefined,'ctr',1.2,'middle');
+      rect('outro-red-pill',64,1209,952,65,accent,false,true);
+      text('outro-action',NOTION_CANVA_OUTRO.action,88,1219,904,45,28,24,INK,true,undefined,'ctr',1.2,'middle');
     }else if(referencesIndex>=0&&index>=referencesIndex&&index<referencesIndex+referencePageCount){
       const referenceOffset=(index-referencesIndex)*NOTION_SOURCE_REFERENCES_PER_PAGE;
       const pageReferences=references.slice(referenceOffset,referenceOffset+NOTION_SOURCE_REFERENCES_PER_PAGE);
@@ -548,7 +567,7 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
         const captionY=footer?980-captionHeight:captionHeight>55?1072-captionHeight:1012;
         const titleY=footer?650:730;
         const titleHeight=footer||captionHeight>55?Math.min(268,captionY-14-titleY):268;
-        background='#000000';if(coverPhoto)image(coverPhoto,0,0,1080,1350);rect('bottom-black-fade',0,300,1080,778,'#000000',true);rect('bottom-black-base',0,1078,1080,272,'#000000');
+        background='#000000';if(coverPhoto)image(coverPhoto,0,0,1080,1350);rect('bottom-black-fade',0,300,1080,1050,'#000000',true);
         categoryBadge(footer?560:640,'A');
         text('cover-title',page.title,96,titleY,888,titleHeight,72,48,'#FFFFFF',true,page.emphasis);
         text('cover-caption',body,96,captionY,888,captionHeight,28,24,'#FFFFFF');image(darkLogo,96,1078,190,64,'contain');
@@ -572,32 +591,37 @@ export async function buildNotionCanvaPptx(value:NotionCanvaDocument, photos:Not
       }
     } else if(page.interiorTemplate){
       let model:ReturnType<typeof interiorTemplateElements>;
-      try{model=interiorTemplateElements(page.interiorTemplate,body,accent,(value,size,bold)=>loadReadingFont('Noto Sans KR',bold?700:400).measure(value,size));}
+      try{model=interiorTemplateElements(page.interiorTemplate,body,accent,(value,size,bold)=>loadReadingFont('Noto Sans KR',bold?700:400).measure(value,size),{hasImage:!!page.imageId,soft:highScoopTemplateForCategory(document.category)?.soft});}
       catch(error){if(error instanceof NotionAdmissionsLayoutError)invalid(`${index+1}장 ${error.message}`);throw error;}
       const subtitle=[page.interiorSubtitle,model.intro].filter(Boolean).join(' · ');
       // Reserve the fitted notes before placing artwork. A multi-line source
       // footer must not be squeezed into the one-line template's fixed space.
       const footerFit=footer?fit(footer,952,200,20,16,false,`page-${index+1}-footer`):undefined;
       const footerHeight=Math.max(70,Math.ceil(footerFit?footerFit.lines.length*footerFit.lineHeight:0));
-      const footerY=1286-footerHeight,contentBottom=Math.min(1196,footerY-20),contentHeight=contentBottom-336,contentScale=contentHeight/860;
-      if(document.category)text('page-category',document.category,64,64,470,32,22,20,INK,true);
+      const contentStart=420,footerY=1286-footerHeight,contentBottom=Math.min(1196,footerY-20),contentHeight=contentBottom-contentStart,contentScale=contentHeight/860;
+      image(logo,64,64,214,72,'contain');
+      if(document.category)text('page-category',document.category,64,154,470,32,22,20,INK,true);
       text('page-number',`${String(index+1).padStart(2,'0')} / ${String(renderedPages.length).padStart(2,'0')}`,660,64,150,32,20,20,'#555555');
-      image(logo,826,64,190,40,'contain');rect('section-accent',64,104,64,5,accent);
-      text(`page-${index+1}-title`,page.title,64,122,952,112,46,40,INK,true,page.emphasis,'l',1.2);
-      text('interior-subtitle',subtitle,64,244,952,page.interiorTemplate==='timeline'?36:64,26,20,INK,false,page.emphasis,'l',1.2);
-      if(page.interiorTemplate==='image_text'){
+      rect('section-accent',64,196,64,5,accent);
+      text(`page-${index+1}-title`,page.title,64,220,952,112,46,40,INK,true,page.emphasis,'l',1.2);
+      text('interior-subtitle',subtitle,64,344,952,page.interiorTemplate==='timeline'?36:64,26,20,INK,false,page.emphasis,'l',1.2);
+      if(['image_text','document_excerpt','dialogue'].includes(page.interiorTemplate)){
         const actualPhoto=page.imageId?media.get(page.imageId):undefined;
-        if(actualPhoto)image(actualPhoto,64,336,440,contentHeight,'contain');
-        else if(allowMissingPhotos){
-          rect('interior-photo-pending',64,336,440,contentHeight,'#EEECE7');
-          text('interior-photo-pending-label','사진 추가 대기',88,336+(contentHeight-50)/2,392,50,30,26,'#77736D',false,undefined,'ctr',1.2,'middle');
+        const fullWidth=page.interiorTemplate==='document_excerpt',imageWidth=fullWidth?952:440,imageHeight=fullWidth&&body.trim()?contentHeight-132:contentHeight;
+        if(actualPhoto){
+          image(actualPhoto,64,contentStart,imageWidth,imageHeight,'contain');
+          const overlay=page.overlayImageId?media.get(page.overlayImageId):undefined;
+          if(overlay)image(overlay,64,contentStart,imageWidth,imageHeight,'contain');
+        }else if(allowMissingPhotos&&page.interiorTemplate!=='dialogue'){
+          rect('interior-photo-pending',64,contentStart,imageWidth,imageHeight,'#EEECE7');
+          text('interior-photo-pending-label','사진 추가 대기',88,contentStart+(imageHeight-50)/2,imageWidth-48,50,30,26,'#77736D',false,undefined,'ctr',1.2,'middle');
           warnings.push(`${index+1}장 사진 추가 대기: 실제 사진을 선택한 뒤 Canva에 저장하세요.`);
         }
       }
       for(const [elementIndex,original]of model.elements.entries()){
         if(elementIndex>0&&elementIndex%16===0)await yieldToEventLoop();
-        const element=contentScale<1&&original.y>=336?{...original,y:336+(original.y-336)*contentScale,height:original.height*contentScale}:original;
-        if(element.kind==='rect')rect(element.name,element.x,element.y,element.width,element.height,element.fill,false,element.pill);
+        const element=original.y>=336?{...original,y:contentStart+(original.y-336)*contentScale,height:original.height*contentScale}:original;
+        if(element.kind==='rect')rect(element.name,element.x,element.y,element.width,element.height,element.fill,false,element.pill,100000,element.name.endsWith('-bubble')?18:undefined);
         else if(element.kind==='text')text(element.name,element.content,element.x,element.y,element.width,element.height,element.max,element.min,element.ink,element.bold,page.emphasis,element.align,element.leading,element.verticalAlign);
       }
       text(`page-${index+1}-footer`,footer,64,footerY,952,footerHeight,20,16,'#555555');

@@ -5,7 +5,7 @@ import {and,desc,eq,inArray,sql} from 'drizzle-orm';
 import type {DB} from '../db';
 import {channels,contentItems,contentRevisions,notionSyncLinks,notionSyncPhotos,studioCards} from '../../shared/schema';
 import {type CardCopy} from '../../shared/cardCopy';
-import {studioKey} from '../../shared/channelKeys';
+import {highScoopTemplateForCategory,highScoopTemplateForKey,isHighScoopChannel} from '../../shared/highscoopTemplates';
 import type {NotionDocument} from '../../shared/notionSync';
 import {notionDesignEditsSchema,type NotionDesignEdits,type NotionStudioDetail,type NotionStudioLink} from '../../shared/notionStudio';
 import {notionDocumentToCopy,notionCopyText,notionCopyToPages,notionSyncChange,notionPlainCardCopy} from '../../shared/notionStudioCopy';
@@ -35,8 +35,8 @@ async function state(db:DB,id:number){
  const [card]=await db.select({id:studioCards.id,trashedAt:studioCards.trashedAt}).from(studioCards).where(eq(studioCards.sourceItemId,link.contentItemId));
  if(!item||!revision)throw new HttpError(409,'연결된 스튜디오 원고를 찾을 수 없습니다.');
  if(card?.trashedAt)throw new HttpError(409,'휴지통의 콘텐츠입니다. 스튜디오에서 복원한 뒤 동기화하세요.');
- const [channel]=await db.select({slug:channels.slug}).from(channels).where(eq(channels.id,link.channelId));
- return {link,item,revision,card,copy:readCopy(revision.payload.cardCopy),canvaAutoSaveSupported:!!channel&&studioKey(channel.slug)==='highscoop'};
+ const [channel]=await db.select({slug:channels.slug,name:channels.name}).from(channels).where(eq(channels.id,link.channelId));
+ return {link,item,revision,card,copy:readCopy(revision.payload.cardCopy),canvaAutoSaveSupported:!!channel&&isHighScoopChannel(channel)};
 }
 function linkDto(s:Awaited<ReturnType<typeof state>>):NotionStudioLink{
  const {link,item,copy,card}=s;
@@ -104,11 +104,14 @@ export async function importNotionStudio(db:DB,input:{pageId:string;channelId:nu
   const [exists]=await tx.select().from(notionSyncLinks).where(eq(notionSyncLinks.notionPageId,doc.pageId));
   if(exists){if(exists.channelId!==input.channelId)throw new HttpError(409,'이 노션 원고는 다른 채널의 작업에 연결되어 있습니다. 기존 연결을 열어 주세요.',{code:'notion_already_linked',linkId:exists.id});return exists.id;}
   const [ch]=await tx.select().from(channels).where(eq(channels.id,input.channelId));if(!ch?.active)throw new HttpError(404,'사용 중인 대상 채널을 선택해 주세요.');
+  // Only a new import adopts the channel's current master. Reopening or pulling
+  // an existing link keeps its explicitly chosen category and manuscript intact.
+  if(isHighScoopChannel(ch))copy={...copy,templateKey:(highScoopTemplateForKey(ch.cardTemplate)??highScoopTemplateForCategory(doc.category)??highScoopTemplateForKey('highscoop:gifted')!).key};
   const [item]=await tx.insert(contentItems).values({channelId:ch.id,kind:ch.contentType,origin:'manual',title:doc.title||copy.cover.title,topicKey:`notion:${doc.pageId}`,relevance:'relevant',evidenceStatus:'needs_review',scheduleStatus:'not_applicable'}).returning();
   const [link]=await tx.insert(notionSyncLinks).values({notionPageId:doc.pageId,notionUrl:doc.url,channelId:ch.id,contentItemId:item.id,sourceHash:doc.sourceHash,baseCopyHash:notionCopyHash(copy),sourceEditedAt:doc.lastEditedAt,sourceSnapshot:snapshot(doc),coverStyle:input.coverStyle}).returning();
   const photoOrder=await storePhotos(tx,link.id,prepared);await tx.update(notionSyncLinks).set({photoOrder}).where(eq(notionSyncLinks.id,link.id));
   const revision=await createRevision(tx,{contentItemId:item.id,author:'operator',payload:{...emptyPayload(ch.contentType,item.title),cardCopy:copy,notion:{pageId:doc.pageId,sourceHash:doc.sourceHash,url:doc.url}},note:'노션 원고 직접 가져오기 · 원문과 사진 보존'});
-  await tx.update(notionSyncLinks).set({canvaAutoSave:studioKey(ch.slug)==='highscoop'?queuedNotionCanvaAutoSave(link.canvaAutoSave,revision.id,item.version):{enabled:false,phase:'idle'}}).where(eq(notionSyncLinks.id,link.id));
+  await tx.update(notionSyncLinks).set({canvaAutoSave:isHighScoopChannel(ch)?queuedNotionCanvaAutoSave(link.canvaAutoSave,revision.id,item.version):{enabled:false,phase:'idle'}}).where(eq(notionSyncLinks.id,link.id));
   await audit(tx,{actor,action:'notion_import',entity:'content_item',entityId:item.id,channelId:ch.id,detail:{pageId:doc.pageId,photos:photoOrder.length}});return link.id;
  });
  // Link writeback is secondary: a missing Notion write capability must never create a second Studio draft on retry.
@@ -133,6 +136,7 @@ export async function pullNotionStudio(db:DB,id:number,input:SyncRequest,actor:s
    emphasisByPage:Object.fromEntries(Object.entries(designEdits.emphasisByPage).filter(([key])=>pageKeys.has(key))),
    ...(designEdits.templateByPage?{templateByPage:Object.fromEntries(Object.entries(designEdits.templateByPage).filter(([key])=>interiorKeys.has(key)))}:{}),
    ...(designEdits.photoByPage?{photoByPage:Object.fromEntries(Object.entries(designEdits.photoByPage).filter(([key])=>interiorKeys.has(key)))}:{}),
+   ...(designEdits.overlayByPage?{overlayByPage:Object.fromEntries(Object.entries(designEdits.overlayByPage).filter(([key])=>interiorKeys.has(key)))}:{}),
   };
   const revision=await createRevision(tx,{contentItemId:current.item.id,author:'operator',payload:{...current.revision.payload,cardCopy:copy,...(current.revision.payload.notionDesignEdits?{notionDesignEdits:survivingEdits}:{}),notion:{pageId:fresh.pageId,sourceHash:fresh.sourceHash,url:fresh.url}},note:'노션 변경 적용 · 이전 원고는 기록에 보존'});
   await tx.update(contentItems).set({title:fresh.title||copy.cover.title,version:current.item.version+1,updatedAt:new Date()}).where(eq(contentItems.id,current.item.id));
@@ -201,20 +205,21 @@ export async function setNotionStudioStyle(db:DB,id:number,input:{version:number
 }
 export function validateNotionStudioDraft(s:Awaited<ReturnType<typeof state>>,copy:CardCopy,designEdits:NotionDesignEdits,options:{templatePage?:number;allowMissingPhotos?:boolean}={}){
  const document=sourceSnapshot(s.link),parsed=notionPlainCardCopy(copy);
- if(parsed.templateKey!==s.copy.templateKey||parsed.pages.length!==s.copy.pages.length||parsed.pages.some((page,i)=>page.id!==s.copy.pages[i].id))throw new HttpError(422,'연결된 카드의 장 수·순서·템플릿은 유지해 주세요.',{code:'notion_structure_conflict'});
+ if((parsed.templateKey!==s.copy.templateKey&&!(s.canvaAutoSaveSupported&&highScoopTemplateForKey(parsed.templateKey)))||parsed.pages.length!==s.copy.pages.length||parsed.pages.some((page,i)=>page.id!==s.copy.pages[i].id))throw new HttpError(422,'연결된 카드의 장 수·순서는 유지하고 하이스쿱 마스터 중에서 선택해 주세요.',{code:'notion_structure_conflict'});
  try{notionCopyToPages(parsed,{baseline:document,current:document});}catch(error){throw new HttpError(422,(error as Error).message,{code:'notion_copy_limits'});}
  const keys=new Set(document.pages.map(notionDesignPageKey));
  if(Object.keys(designEdits.emphasisByPage).some(key=>!keys.has(key)))throw new HttpError(422,'강조문구가 현재 원고의 카드와 맞지 않습니다. 최신 저장본을 확인해 주세요.');
  const interiorKeys=new Set(document.pages.slice(1).map((page,i)=>notionDesignPageKey(page,i+1)));
- if([...Object.keys(designEdits.templateByPage??{}),...Object.keys(designEdits.photoByPage??{})].some(key=>!interiorKeys.has(key)))throw new HttpError(422,'내지 템플릿과 사진은 현재 원고의 본문 카드에서 선택해 주세요.');
- if(Object.values(designEdits.photoByPage??{}).some(id=>!s.link.photoOrder.includes(id)))throw new HttpError(422,'선택한 사진이 현재 원고에 없습니다. 페이지의 사진을 다시 선택해 주세요.');
+ if([...Object.keys(designEdits.templateByPage??{}),...Object.keys(designEdits.photoByPage??{}),...Object.keys(designEdits.overlayByPage??{})].some(key=>!interiorKeys.has(key)))throw new HttpError(422,'내지 템플릿과 사진은 현재 원고의 본문 카드에서 선택해 주세요.');
+ if([...Object.values(designEdits.photoByPage??{}),...Object.values(designEdits.overlayByPage??{})].some(id=>!s.link.photoOrder.includes(id)))throw new HttpError(422,'선택한 원본·표시 이미지가 현재 원고에 없습니다. 페이지의 이미지를 다시 선택해 주세요.');
+ for(const key of Object.keys(designEdits.overlayByPage??{}))if(!['image_text','document_excerpt'].includes(designEdits.templateByPage?.[key]??''))throw new HttpError(422,'표시 PNG는 사진 + 글 또는 문서 캡처 내지에서 사용해 주세요.');
  for(const [index,page]of document.pages.entries()){
   const key=notionDesignPageKey(page,index),template=designEdits.templateByPage?.[key];if(!template)continue;
   // A single-page preview or AI draft can continue while another card is
   // still being arranged. Structure, protected source text and photo ownership
   // above always remain checked for the whole manuscript.
   if(options.templatePage!==undefined&&index!==options.templatePage)continue;
-  if(!options.allowMissingPhotos&&template==='image_text'&&!(designEdits.photoByPage?.[key]??s.link.photoOrder[index]))throw new HttpError(422,`${index+1}장: 사진 + 글 템플릿에 사용할 사진을 선택해 주세요.`);
+  if(!options.allowMissingPhotos&&['image_text','document_excerpt'].includes(template)&&!(designEdits.photoByPage?.[key]??s.link.photoOrder[index]))throw new HttpError(422,`${index+1}장: ${template==='document_excerpt'?'문서 캡처':'사진 + 글'} 템플릿에 사용할 이미지를 선택해 주세요.`);
   const draft=parsed.pages[index-1],combined=[draft.subtitle,draft.body].filter(Boolean).join('\n\n'),subtitle=page.cardFields?.subtitle??'',prefix=subtitle.trim()?`${subtitle}\n\n`:'';
   try{validateInteriorTemplateBody(template,prefix&&combined.startsWith(prefix)?combined.slice(prefix.length):combined);}catch(error){throw new HttpError(422,`${index+1}장: ${(error as Error).message}`,{code:'notion_template_format'});}
  }
@@ -234,7 +239,7 @@ export async function saveNotionStudioDraft(db:DB,id:number,input:{version:numbe
   await tx.update(contentItems).set({edited:payload,version:current.item.version+1,reviewStatus:current.item.reviewStatus==='reviewed'?'pending':current.item.reviewStatus,updatedAt:new Date()}).where(eq(contentItems.id,current.item.id));
   const missingPhotos=sourceSnapshot(current.link).pages.flatMap((page,index)=>{
    const key=notionDesignPageKey(page,index);
-   return input.designEdits.templateByPage?.[key]==='image_text'&&!(input.designEdits.photoByPage?.[key]??current.link.photoOrder[index])?[index+1]:[];
+   return ['image_text','document_excerpt'].includes(input.designEdits.templateByPage?.[key]??'')&&!(input.designEdits.photoByPage?.[key]??current.link.photoOrder[index])?[index+1]:[];
   });
   let automatic=queuedNotionCanvaAutoSave(current.link.canvaAutoSave,revision.id,current.item.version+1);
   // A photo-less draft is useful Studio work, not a failed external import.
