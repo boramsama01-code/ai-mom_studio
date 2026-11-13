@@ -17,7 +17,7 @@ export function studioCurrentDocument(content: StudioContent, brandName: string)
       {title: content.title, ...(content.panels[0].imageId ? {imageId: String(content.panels[0].imageId)} : {}), sourceLabel: content.sourceLabel},
       ...content.panels.map((panel, i) => ({
         title: `핵심 이야기 ${String(i + 1).padStart(2, '0')}`,
-        body: panel.dialogue, interiorTemplate: panel.imageId ? 'image_text' as const : 'text' as const,
+        body: panel.dialogue, interiorTemplate: panel.imageId ? panel.dialogue.trim() ? 'image_text' as const : 'document_excerpt' as const : 'text' as const,
         ...(panel.imageId ? {imageId: String(panel.imageId)} : {}), sourceLabel: content.sourceLabel,
       })),
     ],

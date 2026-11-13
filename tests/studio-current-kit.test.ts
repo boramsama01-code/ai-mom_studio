@@ -37,4 +37,11 @@ describe('common kit in the four-panel workspace',()=>{
   const output=createStudioRenderer(source,1,'Alligodang','#285FAD');
   await expect(output.page(0)).rejects.toThrow('그림을 찾을 수 없습니다');
  });
+ it('keeps valid photo-only panels exportable in the current kit',async()=>{
+  const source=content();source.panels[2]={scene:'사진으로 설명한 장면',dialogue:'',imageId:23};
+  const pixels=await sharp({create:{width:320,height:400,channels:3,background:'#C6DEEE'}}).jpeg().toBuffer();
+  const output=createStudioRenderer(source,1,'Alligodang','#285FAD',new Map([[23,pixels]]));
+  expect(studioCurrentDocument(source,'Alligodang').document.pages[3].interiorTemplate).toBe('document_excerpt');
+  expect(await sharp(await output.page(3)).metadata()).toMatchObject({width:1080,height:1350});
+ });
 });
