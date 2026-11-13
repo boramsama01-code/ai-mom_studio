@@ -5,7 +5,7 @@ import {expectedInstagramUsername} from './channelInstagram';
 import { HIGH_SCOOP_LAYOUT_LABELS, HIGH_SCOOP_TEMPLATE_KITS, HIGH_SCOOP_TEMPLATE_VERSION, isHighScoopChannel } from './highscoopTemplates';
 
 /** One current page system. Historical brand keys remain valid aliases for saved work. */
-export const EDITORIAL_TEMPLATE_VERSION = HIGH_SCOOP_TEMPLATE_VERSION;
+export const EDITORIAL_TEMPLATE_VERSION = `${HIGH_SCOOP_TEMPLATE_VERSION}-news`;
 export const EDITORIAL_LAYOUT_LABELS = HIGH_SCOOP_LAYOUT_LABELS;
 export const EDITORIAL_COLOR_IDS = ['red','mint','purple','blue','yellow','cyan'] as const;
 export type EditorialColorId = typeof EDITORIAL_COLOR_IDS[number];
