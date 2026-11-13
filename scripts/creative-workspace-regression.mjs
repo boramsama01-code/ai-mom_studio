@@ -2,7 +2,7 @@
 // No production credentials, external requests, paid generation or SNS writes.
 import assert from "node:assert/strict";
 import { browserLayout } from "./browser-layout.mjs";
-import {selectChannel,closeChannelMenu} from './channel-picker.mjs';
+import {selectChannel} from './channel-picker.mjs';
 import { writeWorkspaceReview } from "./creative-workspace-review.mjs";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -225,11 +225,11 @@ async function run(root,label,port){
    await page.locator(".video-history > summary").click();await page.locator(".video-history details > summary").click();await noOverflow(page,"expanded video history "+width);
    const navVisible=await page.locator(".mobile-nav").isVisible();assert.equal(navVisible,false,"editing must have one bottom action region");
    // Leave by full navigation; local recovery remains available on return.
-   await page.goto(origin+"/assets");await selectChannel(page,2);await closeChannelMenu(page);await page.locator("[data-testid='current-template-kit'] .highscoop-kit-card").nth(5).waitFor();
+   await page.goto(origin+"/assets");await page.getByRole('heading',{name:'자산·템플릿',exact:true}).waitFor();await selectChannel(page,2);await page.locator("[data-testid='current-template-kit'] .highscoop-kit-card").nth(5).waitFor();
    assert.equal(await page.locator(".highscoop-kit-card").count(),6,"only the six current channel masters are selectable without Canva OAuth");
    assert.equal(await page.locator(".registered-design-card").count(),0,"legacy template gallery is hidden from current selection");
    await noOverflow(page,"template gallery "+width);await shot(page,"after-templates-"+width);
-   await selectChannel(page,'all');await closeChannelMenu(page);
+   await selectChannel(page,'all');
    await page.getByRole("button",{name:"브랜드 가이드",exact:true}).click();await page.locator(".asset-brand").first().waitFor();
    await noOverflow(page,"assets "+width);await shot(page,"after-assets-"+width);
    assert.equal(await page.locator(".asset-brand img").count(),3,"existing registered brand originals are displayed");
