@@ -107,8 +107,8 @@ function fixture() {
       }) };
     }
     else if (pathname === "/api/publication-orphans") data = { items: [], total: 0, page: 1, pageSize: 30 };
-    else if (pathname === "/api/channels/3/templates") data = { current: "editorial:red", items: editorialTemplateCatalogOptions(channels[0]) };
-    else if (pathname === "/api/channels/3/templates/preview") return route.fulfill({ contentType: "image/jpeg", body: await cardImage({ ...initialCopy(), templateKey: url.searchParams.get("key") ?? "editorial:red" }, 0) });
+    else if (pathname === "/api/channels/3/templates") data = { current: "editorial:cyan", items: editorialTemplateCatalogOptions(channels[0]) };
+    else if (pathname === "/api/channels/3/templates/preview") return route.fulfill({ contentType: "image/jpeg", body: await cardImage({ ...initialCopy(), templateKey: url.searchParams.get("key") ?? "editorial:cyan" }, 0) });
     else if (pathname === itemPath && method === "GET") data = detail();
     else if (pathname === `${itemPath}/publication-draft` && method === "PATCH") {
       assert.equal(body.version, state.publicationDraft.version);

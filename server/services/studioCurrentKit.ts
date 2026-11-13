@@ -1,6 +1,6 @@
 import sharp from 'sharp';
 import type { StudioContent } from '../../shared/studio';
-import { editorialBrandForChannel, editorialTemplateForKey, editorialTemplateOptions } from '../../shared/editorialTemplates';
+import { editorialBrandForChannel, editorialTemplateForKey, editorialTemplateForChannel, isEditorialNewsChannel } from '../../shared/editorialTemplates';
 import { buildNotionCanvaPptx, type NotionCanvaDocument, type NotionCanvaPhoto } from './notionCanva';
 import { CanvaRestError } from './canvaRest';
 import { HttpError } from '../routes/util';
@@ -10,9 +10,9 @@ export function studioCurrentDocument(content: StudioContent, brandName: string,
   const current = editorialTemplateForKey(content.exportDesign);
   if (!current) throw new HttpError(400, '현재 공통 템플릿을 선택해 주세요.');
   const channel = {slug: content.channel, name: brandName, categories};
-  const kit = editorialTemplateOptions(channel).find(kit => kit.colorId === current.colorId)!;
+  const kit = editorialTemplateForChannel(channel,content.exportDesign)!;
   const document: NotionCanvaDocument = {
-    title: content.title, coverStyle: 'A', category: content.subcategory || kit.category, categoryColor: kit.color,
+    title: content.title, coverStyle: 'A', category: isEditorialNewsChannel(channel) ? '뉴스' : content.subcategory || kit.category, categoryColor: kit.color,
     pages: [
       {title: content.title, ...(content.panels[0].imageId ? {imageId: String(content.panels[0].imageId)} : {}), sourceLabel: content.sourceLabel},
       ...content.panels.map((panel, i) => ({

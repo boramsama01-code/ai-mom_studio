@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import {editorialBrandForChannel,editorialTemplateForKey,editorialTemplateOptions,type EditorialChannel} from '../../shared/editorialTemplates';
+import {editorialBrandForChannel,editorialTemplateForChannel,type EditorialChannel} from '../../shared/editorialTemplates';
 import {buildNotionCanvaPptx,type NotionCanvaDocument,type NotionCanvaPhoto} from './notionCanva';
 import {loadReadingFont} from './readingCardFonts';
 import {HttpError} from '../routes/util';
@@ -17,7 +17,7 @@ function capture(){return samplePhoto??=Promise.resolve().then(async()=>{
  return sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="900" height="1200"><rect width="900" height="1200" fill="#F8F7F3"/><path d="${title}" fill="#202020"/>${body}<ellipse cx="420" cy="425" rx="270" ry="45" stroke="#E5584A" stroke-width="4" fill="none"/><path d="M90 725h520" stroke="#FFE37F" stroke-width="30" opacity=".6"/></svg>`)).png().toBuffer();
  });}
 export function editorialSampleDocument(channel:EditorialChannel,key:string):NotionCanvaDocument{
- const current=editorialTemplateForKey(key),kit=editorialTemplateOptions(channel).find(item=>item.colorId===current?.colorId);
+ const kit=editorialTemplateForChannel(channel,key);
  if(!kit)throw new Error('현재 공통 템플릿을 찾을 수 없습니다.');
  const note='배치 예시입니다. 실제 원고·사진·출처로 바꿔 주세요.';
  return {title:`${editorialBrandForChannel(channel).name} · ${kit.category}`,category:kit.category,categoryColor:kit.color,coverStyle:'A',pages:[
@@ -38,7 +38,7 @@ export async function renderEditorialTemplateSample(channel:EditorialChannel,key
  const previous=sampleTail;let release!:()=>void;sampleTail=new Promise<void>(resolve=>{release=resolve;});pendingSamples++;
  await previous;
  try{
- const doc=editorialSampleDocument(channel,key),kit=editorialTemplateForKey(key)!;
+ const doc=editorialSampleDocument(channel,key),kit=editorialTemplateForChannel(channel,key)!;
  const photos:NotionCanvaPhoto[]=[{id:'sample',bytes:await capture(),mimeType:'image/png'}];
  const rendered=await buildNotionCanvaPptx(doc,photos,{previewPage:page,previewOnly:true,brand:editorialBrandForChannel(channel),soft:kit.soft});
  if(!rendered.previewSvg)throw new Error('미리보기 페이지를 만들 수 없습니다.');

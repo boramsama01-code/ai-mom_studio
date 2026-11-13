@@ -562,7 +562,7 @@ export function EditPanel({ d, cid, templateKey, onTemplateChange, onDirtyChange
           {workflow && <p className="small muted">현재 원고를 만든 모델: 요약 {workflow.summary.model}{workflow.copy ? ` · 문구 ${workflow.copy.model}` : ""}</p>}
           <GuardedLink href="/settings">채널별 AI 설정 변경 →</GuardedLink>
         </div></details>
-        <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate)?.name ?? "이전 디자인 · 원고 유지"} ▾</button>
+        <button className="btn sm" disabled={gen.isPending} aria-expanded={showTemplates} onClick={() => setShowTemplates(value => !value)}>문구를 작성할 템플릿: {templates.data?.items.find(t => t.key === draftTemplate)?.name ?? (templates.data?.items.length===1&&isCurrentEditorialTemplate(draftTemplate)?templates.data.items[0].name:"이전 디자인 · 원고 유지")} ▾</button>
         {showTemplates && templates.data && <TemplatePicker cid={cid} brandName={aiChannel?.name} value={draftTemplate} items={templates.data.items} disabled={gen.isPending} onChange={key => { setLocalTemplate(key); onTemplateChange?.(key); }} />}
         {readingProfileForTemplateKey(draftTemplate) && <p className="notice small">선택한 풀세트는 표지부터 마지막 장까지 8장으로 만듭니다. 기존 카드 원고가 있으면 아래 편집기에서 새 8장 제안을 비교한 뒤 전환하세요. 선택만으로 생성하거나 기존 내용을 덮어쓰지 않습니다.</p>}
         <p className="hint">요약 AI가 원문을 분석하고, 문구 AI가 선택한 디자인에 맞게 카드를 작성합니다. 아래 카드 편집기에서 세부 문구를 고치거나 다시 제안받을 수 있어요.</p>
@@ -908,7 +908,7 @@ function CardApprovePanel({ d, cid, sourceDirty = false, templateChoice, onTempl
           {!familyCopy.success && !d.imageAiAvailable && !typographyOnly && coverMode === "ai" && <p className="notice warn small">자동 일러스트를 만들려면 <GuardedLink href="/connections?service=openai">이미지 AI 연결</GuardedLink>을 확인해 주세요. 문구 수정과 저장은 계속할 수 있습니다. 연결 문제일 때는 수동 작업이나 표지 설정의 글자 중심 디자인을 이용하세요.</p>}
           <div className="row">
             {!familyCopy.success && <button className="btn" disabled={render.isPending} onClick={() => setShowTpl((v) => !v)} aria-expanded={showTpl}>
-              템플릿: {tpls.data?.items.find((t) => t.key === templateKey)?.name ?? "이전 디자인 · 원고 유지"} ▾
+              템플릿: {tpls.data?.items.find((t) => t.key === templateKey)?.name ?? (tpls.data?.items.length===1&&isCurrentEditorialTemplate(templateKey)?tpls.data.items[0].name:"이전 디자인 · 원고 유지")} ▾
             </button>}
             {currentCard && (
               <a className="btn" aria-disabled={copyDirty || altDirty} tabIndex={copyDirty || altDirty ? -1 : undefined} href={copyDirty || altDirty ? undefined : `/api/channels/${cid}/media/${currentCard.id}?download=1`}>

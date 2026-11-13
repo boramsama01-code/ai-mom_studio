@@ -218,7 +218,7 @@ describe("editable text on collected card-news pages", () => {
     expect(recovered.status, JSON.stringify(recovered.body)).toBe(200);
     expect(recovered.body).toMatchObject({ version: before.item.version, revisionId: before.current.id, hasSavedCopy: false });
     expect(recovered.body.copy.templateKey).not.toBe("custom:999999");
-    expect(recovered.body.copy.templateKey).toBe('editorial:red');
+    expect(recovered.body.copy.templateKey).toBe('editorial:cyan');
     expect(recovered.body.copy).toEqual({ ...missingTemplateCopy, templateKey: recovered.body.copy.templateKey });
     expect(typeof recovered.body.recoveryNotice).toBe("string");
     expect(recovered.body.recoveryNotice.length).toBeGreaterThan(0);

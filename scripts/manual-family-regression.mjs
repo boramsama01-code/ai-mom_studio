@@ -83,8 +83,8 @@ function fixture(expectedTemplate=example.copy.templateKey) {
       try { return await route.fulfill({ contentType: 'image/jpeg', body: await render(body.copy, body.page, body.pageDesigns) }); }
       finally { state.pendingPreviews--; }
     }
-    else if (pathname === '/api/channels/3/templates') data = { current: 'editorial:blue', items: editorialTemplateCatalogOptions(channels[0]) };
-    else if (pathname === '/api/channels/3/templates/preview') return route.fulfill({contentType:'image/jpeg',body:await render({...example.copy,templateKey:url.searchParams.get('key')??'editorial:blue'},0,defaultPageDesigns())});
+    else if (pathname === '/api/channels/3/templates') data = { current: 'editorial:cyan', items: editorialTemplateCatalogOptions(channels[0]) };
+    else if (pathname === '/api/channels/3/templates/preview') return route.fulfill({contentType:'image/jpeg',body:await render({...example.copy,templateKey:url.searchParams.get('key')??'editorial:cyan'},0,defaultPageDesigns())});
     else if (pathname === '/api/canva/status') data = { connected: true };
     else if (pathname === '/api/canva/editorial/status') data = { configured: true, connected: true, autofill: false, capabilities: [], capabilityStatus: 'unavailable', reason: 'capability_missing' };
     else if (pathname === '/api/canva/template-library') data = canvaLibraryStateFixture({ autofill: false });
@@ -231,7 +231,7 @@ try {
   for (const width of widths) {
     const context = await browser.newContext({ viewport: { width, height: 900 }, isMobile: width < 768, hasTouch: width < 768, locale: 'ko-KR', timezoneId: 'Asia/Seoul', serviceWorkers: 'block', reducedMotion: 'reduce' });
     await context.addInitScript(() => localStorage.setItem('spacepenguin.channel', '3')); context.setDefaultTimeout(20_000);
-    const page = await context.newPage(), { state, route } = fixture(width===1280?example.copy.templateKey:'editorial:blue'), errors = [], external = [], diagnostics = [], requestFailures = [];
+    const page = await context.newPage(), { state, route } = fixture(width===1280?example.copy.templateKey:'editorial:cyan'), errors = [], external = [], diagnostics = [], requestFailures = [];
     let stage = 'manual authoring', contextClosed = false, scenarioError = null;
     const lifecycle = { api: createApiLifecycle(diagnostics, () => stage), boundaries: [], get stage() { return stage; }, mark(value) { stage = value; diagnostics.push({ kind: 'stage', stage, at: Date.now() }); } };
     await page.exposeBinding('__manualEditorReadinessChanged', () => lifecycle.api.domChanged());
@@ -270,9 +270,9 @@ try {
       } else {
         await form.getByLabel('8장 작업 제목', { exact: true }).fill(example.title); await form.getByLabel('제공 자료 제목', { exact: true }).fill(example.source.title); await form.getByLabel('제공 자료 주소', { exact: true }).fill(example.source.url); await form.getByLabel('제공 자료 본문', { exact: true }).fill(example.source.text);
         const choices=form.getByLabel('직접 작성 8장 디자인', { exact: true });
-        assert.equal(await choices.locator('option[value^="editorial:"]').count(),6);
+        assert.equal(await choices.locator('option[value^="editorial:"]').count(),1);
         assert.equal(await choices.locator('option[value^="cardnews14-"]').count(),0);
-        await choices.selectOption('editorial:blue');
+        await choices.selectOption('editorial:cyan');
         for (const [index, sourcePage] of example.copy.pages.entries()) {
           await form.getByRole('button', { name: `${index + 1} ${FAMILY_PAGE_LABELS[sourcePage.id]}`, exact: true }).click();
           for (const field of familyFieldDescriptors(sourcePage)) {

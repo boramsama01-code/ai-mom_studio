@@ -30,4 +30,16 @@ describe('current channel defaults migration',()=>{
   const response=await agent.post('/api/channels').set('x-csrf-token',csrf).send({name:'새로운 채널',slug:'new-current-channel',accentColor:'#BAA0FF'});
   expect(response.status).toBe(201);expect(response.body.cardTemplate).toBe('editorial:purple');
  });
+ it('moves only future News presentation defaults to cyan, preserving source topics and copy',async()=>{
+  const db=getDb(),[channel]=await db.select().from(channels).where(eq(channels.slug,'current-dialogue'));
+  const profile={...creativeProfileFor(channel),defaultTemplate:'editorial:blue' as const,tone:'저장한 말투'};
+  await db.update(channels).set({cardTemplate:'editorial:blue',creativeProfile:profile,categories:['과학','사회']}).where(eq(channels.id,channel.id));
+  const copyBefore=await db.select().from(contentItems).where(eq(contentItems.channelId,channel.id));
+  const sql=await fs.readFile('migrations/0030_single_news_master.sql','utf8');await getPool().query(sql);
+  const [changed]=await db.select().from(channels).where(eq(channels.id,channel.id));
+  expect(changed.cardTemplate).toBe('editorial:cyan');expect(changed.creativeProfile).toEqual({...profile,defaultTemplate:'editorial:cyan'});
+  expect(changed.categories).toEqual(['과학','사회']);
+  expect(await db.select().from(contentItems).where(eq(contentItems.channelId,channel.id))).toEqual(copyBefore);
+  await getPool().query(sql);expect((await db.select().from(channels).where(eq(channels.id,channel.id)))[0].version).toBe(changed.version);
+ });
 });
