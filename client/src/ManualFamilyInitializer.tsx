@@ -4,7 +4,9 @@ import { z } from "zod";
 import { familyCardCopySchema, familyFieldDescriptors, familyFieldValue, FAMILY_PAGE_LABELS, type CardCopyV2, type FamilyPage } from "@shared/familyDialogue";
 import { familyManualCreateSchema, familyManualInitializeSchema, familyManualReceiptSchema, familyManualFactBindingSchema, type FamilyManualCreate, type FamilyManualReceipt } from "@shared/familyManual";
 import { familyDisplayDescriptors, resolveFamilyDisplay, type FamilyDisplayKey } from "@shared/familyDisplay";
-import { READING_CARD_PROFILES, readingProfileForTemplateKey, readingDisplayDescriptors } from "@shared/readingCardProfiles";
+import { readingProfileForTemplateKey, readingDisplayDescriptors } from "@shared/readingCardProfiles";
+import { editorialTemplateOptions,isCurrentEditorialTemplate,type EditorialChannel } from "@shared/editorialTemplates";
+import { currentTemplateDefault } from "@shared/currentTemplateDefaults";
 import { api, ApiError } from "./api";
 import { ErrorBox } from "./ui";
 import { useDirtyGuard } from "./state";
@@ -15,12 +17,12 @@ import "./manualFamily.css";
 type FactBinding = FamilyManualCreate["factBindings"][number];
 type ConceptMode = "value_definition" | "scientific_explanation";
 type Draft = Pick<FamilyManualCreate, "title" | "copy" | "source" | "factBindings"> & { conceptAlternatives?: Partial<Record<ConceptMode, { page: FamilyPage; binding?: FactBinding }>> };
-type Props = { channelId: number; channelName: string; initialTitle?: string; templateKey?: string; logoAssetId?: string; existing?: { itemId: number; version: number }; onSaved: (receipt: FamilyManualReceipt) => void; onBack: () => void };
+type Props = { channelId: number; channelName: string; channelSlug?:string; categories?:readonly string[]|null; initialTitle?: string; templateKey?: string; logoAssetId?: string; existing?: { itemId: number; version: number }; onSaved: (receipt: FamilyManualReceipt) => void; onBack: () => void };
 const factPath = (index: number) => `pages.news_summary.fields.facts.${index}` as FamilyManualCreate["factBindings"][number]["fieldPath"];
 const binding = (index: number): FamilyManualCreate["factBindings"][number] => ({ fieldPath: factPath(index), excerpt: "", claimType: "reported_event" });
 function initialDraft(props: Props): Draft {
   const page = (id: FamilyPage["id"], index: number, fields: unknown): FamilyPage => ({ id, type: id, page: index + 1, layout: id, fields, claimRefs: [] }) as FamilyPage;
-  return { title: props.initialTitle ?? "", source: { title: "", text: "" }, factBindings: [binding(0), binding(1)], copy: { version: 2, formatId: "family_dialogue_8", templateKey: readingProfileForTemplateKey(props.templateKey)?.templateKey ?? "cardnews14-cobalt-paper-v1", pages: [
+  return { title: props.initialTitle ?? "", source: { title: "", text: "" }, factBindings: [binding(0), binding(1)], copy: { version: 2, formatId: "family_dialogue_8", templateKey: isCurrentEditorialTemplate(props.templateKey)?props.templateKey!:currentTemplateDefault({slug:props.channelSlug??'news',name:props.channelName,categories:props.categories}), pages: [
     page("cover", 0, { headline: props.initialTitle ?? "", subtitle: "" }), page("news_summary", 1, { title: "자료 요약", facts: ["", ""], caveat: null }),
     page("implication", 2, { title: "자료의 의미", takeaway: "" }), page("discussion", 3, { title: "함께 나눌 질문", scenario: null, question: "" }),
     page("perspectives", 4, { title: "두 가지 시선", viewA: { label: "", body: "" }, viewB: { label: "", body: "" } }),
@@ -53,7 +55,9 @@ export function ManualFamilyInitializer(props: Props) {
   const qc = useQueryClient();
   const subscribe = useCallback((notify: () => void) => qc.getQueryCache().subscribe(event => { if (event.query.queryKey[0] === "me") notify(); }), [qc]);
   const scope = useSyncExternalStore(subscribe, () => { const me = qc.getQueryData<{ user?: string; recoveryScope?: string }>(["me"]); return JSON.stringify([me?.user ?? null, me?.recoveryScope ?? null]); }, () => "[]");
-  return <ManualFamilyForm key={`${scope}:${props.channelId}:${props.existing?.itemId ?? "new"}`} {...props} scope={scope} />;
+  const channel=qc.getQueryData<Array<EditorialChannel & {id:number;cardTemplate?:string}>>(['channels'])?.find(value=>value.id===props.channelId);
+  const templateKey=isCurrentEditorialTemplate(props.templateKey)?props.templateKey:isCurrentEditorialTemplate(channel?.cardTemplate)?channel!.cardTemplate:undefined;
+  return <ManualFamilyForm key={`${scope}:${props.channelId}:${props.existing?.itemId ?? "new"}`} {...props} templateKey={templateKey} channelSlug={props.channelSlug??channel?.slug} categories={props.categories??channel?.categories} scope={scope} />;
 }
 function ManualFamilyForm({ scope, ...props }: Props & { scope: string }) {
   const qc = useQueryClient(), guard = useDirtyGuard(), baseline = useRef(initialDraft(props)).current;
@@ -129,13 +133,14 @@ function ManualFamilyForm({ scope, ...props }: Props & { scope: string }) {
   const page = draft.copy.pages[selected], profile = readingProfileForTemplateKey(draft.copy.templateKey), locked = !!pending || request.isPending || completed;
   const displays = profile ? readingDisplayDescriptors(profile, page) : familyDisplayDescriptors(page), displayValues = resolveFamilyDisplay(page, { sourceCredit: "제공 문서 · 별도 검증 필요" });
   const currentBindings = draft.factBindings.filter(value => value.fieldPath.startsWith(`pages.${page.id}.`));
+  const currentTemplates=editorialTemplateOptions({slug:props.channelSlug??'news',name:props.channelName,categories:props.categories});
   return <section className="manual-family-initializer stack" aria-label="AI 없이 8장 원고 직접 작성">
     <p>직접 쓴 문구와 제공받은 자료로 새 8장 원고를 저장합니다. AI를 호출하지 않습니다. 자료에 적힌 내용과 별도로 검증한 사실은 구분하며, 이전 원고는 버전 기록에 남습니다.</p>
     {!pending && <RecoveryNotice recovery={recovery} formatValue={value => [value.title, value.source.title, value.source.text, ...value.copy.pages.map(page => FAMILY_PAGE_LABELS[page.id] + "\n" + JSON.stringify(page.fields))].join("\n\n")} />}
     <form className="stack" aria-label="직접 작성 8장 원고" onSubmit={event => { event.preventDefault(); submit(); }}>
       <fieldset disabled={locked || !!recovery.pending} className="stack manual-family-fields">
         <label className="field">작업 제목<input aria-label="8장 작업 제목" value={draft.title} maxLength={200} onChange={event => update(current => ({ ...current, title: event.target.value }))} /></label>
-        <label className="field">8장 디자인<select aria-label="직접 작성 8장 디자인" value={draft.copy.templateKey} onChange={event => update(current => ({ ...current, copy: { ...current.copy, templateKey: event.target.value } }))}>{READING_CARD_PROFILES.map(profile => <option key={profile.id} value={profile.templateKey}>{profile.label}</option>)}</select></label>
+        <label className="field">컬러·카테고리 디자인<select aria-label="직접 작성 8장 디자인" value={draft.copy.templateKey} onChange={event => {if(isCurrentEditorialTemplate(event.target.value))update(current => ({ ...current, copy: { ...current.copy, templateKey: event.target.value } }));}}>{!isCurrentEditorialTemplate(draft.copy.templateKey)&&<option value={draft.copy.templateKey} disabled>이전 디자인 · 원고 보관 중</option>}{currentTemplates.map(template => <option key={template.key} value={template.key}>{template.category}</option>)}</select></label>
         <details className="content-options" open><summary>제공 자료와 확인 범위</summary><div className="stack">
           <label className="field">제공 자료 제목<input aria-label="제공 자료 제목" value={draft.source.title} maxLength={1000} onChange={event => update(current => ({ ...current, source: { ...current.source, title: event.target.value } }))} /></label>
           <label className="field">제공 자료 주소 <span className="hint">선택 · 주소 입력만으로 조회하거나 검증하지 않습니다.</span><input aria-label="제공 자료 주소" type="url" inputMode="url" value={draft.source.url ?? ""} maxLength={4000} onChange={event => update(current => ({ ...current, source: { ...current.source, url: event.target.value || undefined } }))} /></label>

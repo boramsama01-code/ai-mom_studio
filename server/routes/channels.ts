@@ -19,6 +19,7 @@ import { channelCategoriesSchema, channelContentTypes, channelCreateSchema } fro
 import { assertAvailableChannelSlug, assertCategoryRemovalSafe, newChannelBudget } from "../services/channelSettings";
 import { channelAiSettingsSchema, defaultChannelRoleSettings } from "../../shared/channelAi";
 import { withChannelAiSettings } from "../services/channelAi";
+import { currentTemplateDefault } from "../../shared/currentTemplateDefaults";
 
 export const channelRoutes = Router();
 
@@ -91,7 +92,7 @@ channelRoutes.post("/channels", ah(async (req, res) => {
     await tx.execute(sql`select pg_advisory_xact_lock(7193203)`);
     const slug = body.slug ?? `channel-${randomUUID()}`;
     await assertAvailableChannelSlug(tx as unknown as DB, slug);
-    const [ch] = await tx.insert(channels).values({ ...body, slug, aiSettings: body.aiSettings ?? defaultChannelRoleSettings(),
+    const [ch] = await tx.insert(channels).values({ ...body, slug, cardTemplate: currentTemplateDefault({ ...body, slug }), aiSettings: body.aiSettings ?? defaultChannelRoleSettings(),
       budget: newChannelBudget(body.contentType),
     }).returning();
     await audit(tx, { actor: actorOf(req), action: "create", entity: "channel", entityId: ch.id, channelId: ch.id });

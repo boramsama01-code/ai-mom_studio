@@ -36,6 +36,16 @@ async function makeItem(agent: import("supertest").Agent, H: Record<string, stri
 }
 
 describe("카드 템플릿", () => {
+  it('모든 채널의 새 선택 목록은 브랜드에 맞는 최신 6종으로 통일한다',async()=>{
+    const {agent}=await login(app);
+    const rows=(await getPool().query('select id,slug from channels order by id')).rows;
+    for(const channel of rows){
+      const response=await agent.get(`/api/channels/${channel.id}/templates`);
+      expect(response.status).toBe(200);expect(response.body.items).toHaveLength(6);
+      expect(response.body.items.every((item:{key:string;pageCount:number})=>/^(editorial:|highscoop:)/.test(item.key)&&item.pageCount===11)).toBe(true);
+      if(channel.slug==='current-dialogue')expect(response.body.items.map((item:{name:string})=>item.name)).toEqual(['과학','사회','정치','예술','여행','최신이슈']);
+    }
+  });
   it("하이스쿱 컬러 마스터 6종과 이전 디자인의 저장 원고 호환", async () => {
     const { agent, csrf } = await login(app);
     const H = { "x-csrf-token": csrf };

@@ -1,6 +1,7 @@
 import { cardDesignOptions } from "./cardDesigns";
 import { READING_CARD_PROFILES } from "./readingCardProfiles";
 import {HIGH_SCOOP_TEMPLATE_KITS,HIGH_SCOOP_TEMPLATE_VERSION} from './highscoopTemplates';
+import {EDITORIAL_TEMPLATE_VERSION,editorialTemplateOptions,editorialTemplateForKey,type EditorialChannel} from './editorialTemplates';
 
 export type TemplateFormat = "standard" | "family_dialogue_8";
 export type TemplateFamily = "recruitment" | "news" | "food";
@@ -33,9 +34,22 @@ export type TemplateCatalogItem = {
   textTone?: string;
   overlay?: number;
   allChannels?: boolean;
+  category?: string;
+  color?: string;
+  soft?: string;
+  accent?: string;
+  canvaEditUrl?: string | null;
 };
 
 export type TemplateListReply = { items: TemplateCatalogItem[]; current: string };
+
+export function editorialTemplateCatalogOptions(channel:EditorialChannel):TemplateCatalogItem[]{
+ return editorialTemplateOptions(channel).map(kit=>({key:kit.key,templateKey:kit.key,name:kit.label,
+  category:kit.category,color:kit.color,soft:kit.soft,accent:kit.accent,canvaEditUrl:kit.canvaEditUrl,
+  description:'현재 공통 템플릿 · 사진 표지와 9종 내지 · 채널별 브랜드 적용',kind:'builtin',
+  format:'standard',cardCopyVersion:1,pageCount:11,previewPageCount:11,pageCountMode:'variable',
+  pageLabels:[...kit.layoutLabels],templateVersion:EDITORIAL_TEMPLATE_VERSION}));
+}
 
 /** Current HighScoop picker has exactly one master per category, never palette duplicates. */
 export function highScoopTemplateCatalogOptions():TemplateCatalogItem[]{
@@ -104,6 +118,8 @@ export function templateSelection(item: TemplateOption, key = item.key): Templat
 }
 
 export function templateCatalogItem(key: string): TemplateCatalogItem | undefined {
+  const current=editorialTemplateForKey(key);
+  if(current){const item=editorialTemplateCatalogOptions(key.startsWith('highscoop:')?{slug:'highscoop'}:{}).find(item=>editorialTemplateForKey(item.key)?.colorId===current.colorId)!;return {...item,key,templateKey:key};}
   const item = [...highScoopTemplateCatalogOptions(),...templateCatalogOptions()].find(item => templateIncludesKey(item, key));
   return item ? templateSelection(item, key) : undefined;
 }

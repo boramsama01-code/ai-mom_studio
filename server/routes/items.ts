@@ -618,7 +618,7 @@ itemRoutes.get("/channels/:cid/items/:id/card-copy", ah(async (req, res) => {
   try {
     const invalidSavedCopy = revision.payload.cardCopy !== undefined && !saved.success;
     const { cardCopy: _oldCopy, ...sourcePayload } = revision.payload;
-    const copy = cardCopyFromPayload({ kind: item.kind, payload: invalidSavedCopy ? sourcePayload : revision.payload, channelName: ch.name, channelSlug: ch.slug, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style, key);
+    const copy = cardCopyFromPayload({ kind: item.kind, payload: invalidSavedCopy ? sourcePayload : revision.payload, channelName: ch.name, channelSlug: ch.slug, channelCategories: ch.categories, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style, key);
     const recoveryNotice = templateRecovery ?? (invalidSavedCopy ? "이전 카드 문구의 형식을 읽을 수 없어 원문 요약에서 편집 문구를 가져왔습니다. 기존 저장본은 유지했으며, 내용을 확인한 뒤 저장하면 새 버전으로 기록됩니다." : undefined);
     res.set("Cache-Control", "no-store").json({ version: item.version, revisionId: revision.id, copy, hasSavedCopy: saved.success && !templateRecovery, recommendedStoryFormat: item.kind === "notice" ? null : "family_dialogue_8", ai: { summary: channelAiSelection(ch, "summary"), copy: channelAiSelection(ch, "copy"), image: channelAiSelection(ch, "image") }, ...(recoveryNotice ? { recoveryNotice } : {}) });
   } catch (error) { cardCopyRenderError(error); }
@@ -757,7 +757,7 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/preview", ah(async (req, res
     await assertFamilyEvidenceForCopy(db, item, body.copy, metadata);
     const style = await resolveCardCopyStyle(body.copy.templateKey, ch.id);
     try {
-      const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, ...metadata, cardCopy: body.copy, pageDesigns: body.pageDesigns }, channelName: ch.name, channelSlug: ch.slug, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, revision.payload), checkedDate: kstToday(new Date()) }, style);
+      const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, ...metadata, cardCopy: body.copy, pageDesigns: body.pageDesigns }, channelName: ch.name, channelSlug: ch.slug, channelCategories: ch.categories, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(db, item, revision.payload), checkedDate: kstToday(new Date()) }, style);
       const images = await loadCardPageArtworkForPage(db, item.id, ch.id, body.copy, body.page, body.pageDesigns);
       const bytes = await renderCarouselPage(plan, body.page, style, null, "우주펭귄상회 스튜디오 · 본문 근거 확인", images);
       res.set("Cache-Control", "no-store").type("image/jpeg").send(bytes);
@@ -772,7 +772,7 @@ itemRoutes.post("/channels/:cid/items/:id/card-copy/preview", ah(async (req, res
   const style = await resolveCardCopyStyle(body.copy.templateKey, ch.id);
   await assertNewsEditorialResources(getDb(), item, body.copy);
   try {
-    const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, cardCopy: body.copy }, channelName: ch.name, channelSlug: ch.slug, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style);
+    const plan = planCarousel({ kind: item.kind, payload: { ...revision.payload, cardCopy: body.copy }, channelName: ch.name, channelSlug: ch.slug, channelCategories: ch.categories, subcategory: item.subcategory, accent: ch.accentColor, sourceOrg: await sourceOrgFor(getDb(), item, revision.payload), checkedDate: kstToday(new Date()) }, style);
     const pageImages = await loadCardPageArtworkForPage(getDb(), item.id, ch.id, body.copy, body.page);
     const savedArt = body.coverMode === "typography" ? null : await findReusableCardCover(getDb(), item.id, revision.payload);
     const credit = savedArt ? "표지: AI 생성 · OpenAI" : style.background ? "이미지: 내 배경 템플릿" : "우주펭귄상회 스튜디오";

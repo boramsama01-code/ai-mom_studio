@@ -7,6 +7,7 @@ import { familyDisplayContext, familyDisplayDescriptors, familyReadingTextValues
 import { resolvedReadingPageDesigns } from "@shared/readingPageImages";
 import { READING_PROFILE_LOGO_ID, readingProfileForTemplateKey, readingProfileDesigns, readingDisplayDescriptors, readingImageSlot, readingArtworkPages } from "@shared/readingCardProfiles";
 import { familyCollectionDesign, familyCollectionPageDesigns } from "@shared/familyCollectionDesigns";
+import { isCurrentEditorialTemplate } from "@shared/editorialTemplates";
 import { FAMILY_PROFILE_ASSET, FAMILY_ENDING_ASSETS, FAMILY_ENDING_FIXED_TEXT, REGISTERED_PROFILE_ASSETS, isRegisteredProfileAssetId, familyEndingAsset, selectedFamilyEnding } from "@shared/characterVariantAssets";
 import type { FamilyEvidenceView } from "@shared/familyEvidence";
 import { api, apiBlob, ApiError } from "./api";
@@ -19,6 +20,9 @@ import { PageBackgroundEditor, type PageArtworkResult } from "./PageBackgroundEd
 import { FamilyDesignPicker, FamilyPageLayout } from "./FamilyDesignControls";
 import type { CardCopyEditorProps, StoredCardCopyResponse } from "./CardCopyEditor";
 import "./familyDialogue.css";
+import { editorialFamilyPageBody } from "@shared/editorialPageContent";
+import { CardInteriorEditor, useCardInteriorDrafts } from "./CardInteriorEditor";
+import { supportsInteriorPhoto } from "./NotionInteriorEditor";
 
 export type FamilyDialogueResponse = FamilyDialogueMetadata & { version: number; revisionId: number; copy: CardCopyV2; hasSavedCopy: boolean; ai?: Record<"summary" | "copy" | "image", AiSelection>; recoveryNotice?: string; evidence?: FamilyEvidenceView; artworkCredits?: Record<string, string> };
 export type FamilyProposal = Partial<FamilyDialogueMetadata> & { copy: CardCopyV2 | null; version: number; revisionId?: number; baseRevision?: number; jobId?: number; fieldPath?: string; targetFieldHash?: string; scope?: string; model?: string; status: "ready" | "needs_source" | "needs_review"; reviewFlags: ReviewFlag[]; lateResult?: boolean; evidence?: FamilyEvidenceView; artworkCredits?: Record<string, string> };
@@ -84,7 +88,8 @@ export const familyCopyText = (copy: CardCopyV2, context: FamilyCopyContext = {}
   const background = context.pageDesigns?.[page.id].background;
   const display = resolveFamilyDisplay(page, { ...familyDisplayContext(copy, context.captionPackage), imageCredit: background?.kind === "image" ? context.artworkCredits?.[String(background.assetId)] ?? "배경 이미지" : "" });
   const labels = familyDisplayDescriptors(page).map(field => display[field.key] ? `${field.label}: ${display[field.key]}` : "").filter(Boolean).join("\n");
-  return `${page.page}. ${FAMILY_PAGE_LABELS[page.id]}\n${textOf(page.fields)}\n${labels}`;
+  const interior = context.pageDesigns?.[page.id];
+  return `${page.page}. ${FAMILY_PAGE_LABELS[page.id]}\n${textOf(page.fields)}\n${labels}${interior?.interiorBody !== undefined ? `\n구성 본문: ${interior.interiorBody}` : ""}${interior?.footnote ? `\n각주: ${interior.footnote}` : ""}`;
   }).join("\n\n");
 };
 const copyText = familyCopyText;
@@ -202,6 +207,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   const modeLockDrafts = useRef<Record<string, Record<string, boolean>>>({});
   const aiPanel = useRef<HTMLDetailsElement>(null);
   const generation = useGenerationRequest(channelId, itemId, "card-copy");
+  const interiors = useCardInteriorDrafts(channelId, itemId, base.version, true);
   const dirty = !same(editable(base), editable(draft)), parsed = familyCardCopySchema.safeParse(draft.copy), invalid = !parsed.success;
   const invalidFields = parsed.success ? [] : parsed.error.issues.map(issue => {
     const index = issue.path[0] === "pages" && typeof issue.path[1] === "number" ? issue.path[1] : null;
@@ -247,6 +253,14 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   function changeReadingStyle(key: string) {
     const current = draftRef.current, profile = readingProfileForTemplateKey(key), collection = familyCollectionDesign(key);
     if (current.copy.templateKey === key) return;
+    // Current masters change presentation, never the saved manuscript format,
+    // page count, evidence bindings or images (including per-page choices).
+    if (isCurrentEditorialTemplate(key)) {
+      put(invalidateDerived({ ...current, copy: { ...current.copy, templateKey: key } }));
+      setProposal(null); setPreviewError(null); onTemplateChange?.(key);
+      setStructureNotice("최신 컬러 마스터를 적용했습니다. 현재 원고의 장수·문구·근거 자료·사진과 페이지별 내지는 유지합니다. 문구·디자인 저장으로 확정하세요.");
+      return;
+    }
     const designs = profile ? readingProfileDesigns(profile, current.pageDesigns) : collection ? familyCollectionPageDesigns(key, current.copy.templateKey, current.pageDesigns) : Object.fromEntries(Object.entries(defaultPageDesigns()).map(([id, fallback]) => {
       const previous = current.pageDesigns[id as FamilyPageId];
       return [id, { ...fallback, ...(previous.outroPresentation ? {outroPresentation:previous.outroPresentation} : {}), previousAssetIds: [...new Set([...(previous.previousAssetIds ?? []), ...(previous.background.assetId ? [previous.background.assetId] : [])])], ...(id !== "outro" && previous.background.kind === "image" ? { background: { ...previous.background, color: fallback.background.color } } : {}) }];
@@ -303,13 +317,14 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
   useEffect(() => { if (itemVersion && itemVersion > baseRef.current.version) void props.refresh(); }, [itemVersion]);
   useEffect(() => {
     if (!templateKey || templateKey === draftRef.current.copy.templateKey) return;
-    if (readingProfileForTemplateKey(templateKey) || familyCollectionDesign(templateKey) || readingProfileForTemplateKey(draftRef.current.copy.templateKey)) changeReadingStyle(templateKey);
+    if (isCurrentEditorialTemplate(templateKey) || readingProfileForTemplateKey(templateKey) || familyCollectionDesign(templateKey) || readingProfileForTemplateKey(draftRef.current.copy.templateKey)) changeReadingStyle(templateKey);
     else { put(invalidateDerived({ ...draftRef.current, copy: { ...draftRef.current.copy, templateKey } })); setProposal(null); }
   }, [templateKey]);
   useEffect(() => { setSelectedField(null); }, [selected]);
   async function loadConflict() { try { setConflict(await api<StoredCardCopyResponse>(path)); } catch (error) { setSaveError(error as Error); } }
   async function saveNow(): Promise<FamilyDialogueResponse> {
     const reject = (message: string): never => { const error = new Error(message); setSaveError(error); throw error; };
+    if (interiors.pending) reject("내지 구성 입력을 적용하거나 취소한 뒤 저장해 주세요. 기존 원고와 근거 연결은 유지했습니다.");
     if (formatConflict) reject("다른 형식으로 저장된 원고를 먼저 확인해 주세요. 현재 입력은 유지했습니다.");
     if (recovery.pending) reject("기기 복구본을 먼저 확인해 주세요.");
     if (serial.current) { await serial.current; return saveNow(); }
@@ -347,7 +362,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     }, () => { recovery.clear(); put(baseRef.current); });
     return () => guard.setDirty(key, false);
   }, [dirty, busy, aiBusy, conflict, channelId, itemId, guard]);
-  useEffect(() => { onDirtyChange?.(dirty || busy || aiBusy || invalid || !!conflict); }, [dirty, busy, aiBusy, invalid, conflict, onDirtyChange]);
+  useEffect(() => { onDirtyChange?.(dirty || interiors.pending || busy || aiBusy || invalid || !!conflict); }, [dirty, interiors.pending, busy, aiBusy, invalid, conflict, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   useEffect(() => {
@@ -502,12 +517,20 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     <nav className="family-page-strip" aria-label="카드 페이지 선택">{draft.copy.pages.map((value, index) => <button key={value.id} type="button" aria-current={selected === index ? "step" : undefined} aria-label={`${index + 1}페이지 · ${FAMILY_PAGE_LABELS[value.id]}`} onClick={() => setSelected(index)}>
       <FamilyPageLayout pageId={value.id} /><strong>{index + 1} · {FAMILY_PAGE_LABELS[value.id]}</strong>
     </button>)}</nav>
-    <FamilyDesignPicker templateKey={draft.copy.templateKey} disabled={busy || aiBusy || !!conflict} onChange={changeReadingStyle} />
+    <FamilyDesignPicker channelId={channelId} templateKey={draft.copy.templateKey} disabled={busy || aiBusy || !!conflict} onChange={changeReadingStyle} />
     <div className="card-copy-workspace">
       <div className="card-copy-fields">
         <h4>{page.page}페이지 · {FAMILY_PAGE_LABELS[page.id]}</h4>
         {page.id === "concept" && <label className="field">개념을 다루는 방식<select value={page.fields.mode} disabled={disabled || !!recovery.pending} onChange={event => changeMode(event.target.value as "value_definition" | "scientific_explanation")}><option value="value_definition">가치 개념 · 나의 정의 만들기</option><option value="scientific_explanation">과학 개념 · 확인된 정의 설명하기</option></select><span className="hint">과학적 정의는 확인된 근거가 필요합니다. 두 방식의 칸은 서로 다르며 자동으로 바꾸지 않습니다.</span></label>}
-        {page.id === "perspectives" && !readingProfile && <label className="field">두 시선 배치<select value={page.layout === "columns" ? "columns" : "stacked"} disabled={disabled || !!recovery.pending} onChange={event => put(invalidateDerived({ ...draftRef.current, copy: { ...draftRef.current.copy, pages: draftRef.current.copy.pages.map(value => value.id === "perspectives" ? { ...value, layout: event.target.value } : value) } }))}><option value="stacked">위아래 · 기본</option><option value="columns">좌우 · 짧은 문구에 적합</option></select></label>}
+        {isCurrentEditorialTemplate(draft.copy.templateKey) && page.id !== "cover" && page.id !== "outro" && <>
+          <CardInteriorEditor value={design.interiorTemplate} body={design.interiorBody ?? editorialFamilyPageBody(page)} emphasis={design.emphasis} footnote={design.footnote} limit={10000} disabled={busy || aiBusy || !!conflict || !!interiors.recovery.pending}
+            draft={interiors.drafts[page.id]} onDraft={value => interiors.set(page.id, value)} independentBody={design.interiorBody !== undefined}
+            onResetBody={() => { interiors.set(page.id, null); updateDesign(page.id, { ...draftRef.current.pageDesigns[page.id], interiorTemplate: undefined, interiorBody: undefined }); }}
+            onChange={({ body, ...patch }) => updateDesign(page.id, { ...draftRef.current.pageDesigns[page.id], ...patch, ...(body === undefined ? {} : { interiorBody: body }) })}
+            rawEditor={design.interiorBody !== undefined ? <label className="field">구성 본문<textarea aria-label="구성 본문" rows={7} value={design.interiorBody} disabled={busy || aiBusy || !!conflict} onChange={event => updateDesign(page.id, { ...draftRef.current.pageDesigns[page.id], interiorBody: event.target.value })}/><span className="hint">구성에 적용한 문구입니다. 원래 원고와 근거 연결은 아래에 별도로 보관합니다.</span></label> : <details><summary>구성에 사용할 현재 원고 확인</summary><pre>{editorialFamilyPageBody(page)}</pre></details>} />
+          {design.interiorBody !== undefined && <p className="notice small">적용한 구성 본문을 미리보기에 표시합니다. 아래 원래 원고와 근거는 유지되며, 원고 수정 후에는 구성 본문도 확인해 주세요.</p>}
+        </>}
+        {page.id === "perspectives" && !readingProfile && !isCurrentEditorialTemplate(draft.copy.templateKey) && <label className="field">두 시선 배치<select value={page.layout === "columns" ? "columns" : "stacked"} disabled={disabled || !!recovery.pending} onChange={event => put(invalidateDerived({ ...draftRef.current, copy: { ...draftRef.current.copy, pages: draftRef.current.copy.pages.map(value => value.id === "perspectives" ? { ...value, layout: event.target.value } : value) } }))}><option value="stacked">위아래 · 기본</option><option value="columns">좌우 · 짧은 문구에 적합</option></select></label>}
         {readingProfile && <p className="hint">이 스타일은 뉴스 본문과 STEP 문구를 고정 영역에 배치합니다. 아래 원고의 보조 제목은 보관되며 일부 페이지에서는 표시되지 않습니다. 줄이 넘치면 해당 칸을 알려 드립니다.</p>}
         {page.id==='outro'&&<fieldset className="stack family-outro-picker" data-testid="family-outro-picker"><legend>마지막 장 이미지</legend>
           <label className="field">마지막 장 방식<select aria-label="마지막 장 방식" value={selectedEnding?.id??'template'} disabled={busy||aiBusy||!!conflict} onChange={event=>chooseOutroPresentation(event.target.value)}>
@@ -556,7 +579,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
         </div> : <>
         <p className="hint" data-testid="family-canva-design-scope">{readingProfile ? `문구·사진·포인트색은 선택한 스타일의 배치를 따릅니다. 사진을 교체하거나 자를 수 있으며, 글이 넘치면 해당 문구를 안내합니다. ${readingProfile.sourceStyleId ? "저장한 뒤 ‘8장 디자인 완성’에서 만든 8장 전체를 확인해 주세요." : "Canva에서 내보낸 결과는 완성본에서 확인해 주세요."}` : "Canva는 등록된 템플릿의 정렬·글자색을 사용합니다. 왼쪽 정렬이나 밝은 배경은 자체 렌더 또는 Canva에서 직접 편집해 주세요."}</p>
         {(!readingProfile || readingSlot?.kind === "artwork") && <>
-        {readingProfile?.sourceStyleId && readingSlot?.kind==='artwork' && page.id!=='cover' && <div className="notice small stack"><label className="check"><input type="checkbox" aria-label="이 장에서 표지 사진 함께 사용" checked={design.background.inheritCover===true&&design.background.kind!=='image'} disabled={busy||aiBusy||!!conflict} onChange={event=>{const {assetId:oldAsset,...background}=design.background;updateDesign(page.id,{...design,background:{...background,kind:'brand',inheritCover:event.target.checked},previousAssetIds:[...new Set([...(design.previousAssetIds??[]),...(oldAsset?[oldAsset]:[])])].slice(-20)});}}/><span>표지 사진 함께 사용</span></label><p>{design.background.inheritCover ? effectiveDesign.background.kind==='image' ? '표지 사진이 바뀌면 이 장에도 반영됩니다. 이 장의 자르기·밝기는 따로 조절합니다.' : '표지 사진을 만들거나 선택하면 이 장에도 표시됩니다.' : '이 장의 사진을 직접 선택할 수 있습니다. 기존 사진은 이전 이미지 목록에 보관합니다.'}</p></div>}
+        {page.id!=='cover' && ((readingProfile?.sourceStyleId && readingSlot?.kind==='artwork') || (isCurrentEditorialTemplate(draft.copy.templateKey) && (!design.interiorTemplate || supportsInteriorPhoto(design.interiorTemplate)))) && <div className="notice small stack"><label className="check"><input type="checkbox" aria-label="이 장에서 표지 사진 함께 사용" checked={design.background.inheritCover===true&&design.background.kind!=='image'} disabled={busy||aiBusy||!!conflict} onChange={event=>{const {assetId:oldAsset,...background}=design.background;updateDesign(page.id,{...design,background:{...background,kind:'brand',inheritCover:event.target.checked},previousAssetIds:[...new Set([...(design.previousAssetIds??[]),...(oldAsset?[oldAsset]:[])])].slice(-20)});}}/><span>표지 사진 함께 사용</span></label><p>{design.background.inheritCover ? effectiveDesign.background.kind==='image' ? '표지 사진이 바뀌면 이 장에도 반영됩니다. 이 장의 자르기·밝기는 따로 조절합니다.' : '표지 사진을 만들거나 선택하면 이 장에도 표시됩니다.' : '이 장의 사진을 직접 선택할 수 있습니다. 기존 사진은 이전 이미지 목록에 보관합니다.'}</p></div>}
         <details className="family-design"><summary>이 페이지 배치·배경 조절</summary><div className="stack">
           {!readingProfile && <>
           <label className="field">문구 정렬<select value={design.alignment} disabled={busy} onChange={event => updateDesign(page.id, { ...design, alignment: event.target.value as "center" | "left" })}><option value="center">중앙 정렬 · 기본</option><option value="left">왼쪽 정렬</option></select></label>
@@ -567,7 +590,7 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
           <button className="btn ghost" disabled={busy || !designHistory[page.id]?.length} onClick={() => { const history = designHistory[page.id] ?? []; if (history.length) { updateDesign(page.id, history.at(-1)!, false); setDesignHistory(value => ({ ...value, [page.id]: history.slice(0, -1) })); } }}>이 페이지 디자인 되돌리기</button>
           {!!sourceAssets.length && <details><summary>이 콘텐츠의 이전 이미지 불러오기</summary><div className="family-asset-grid">{sourceAssets.map(id => <button key={id} className="btn" disabled={busy} onClick={() => selectAsset(page.id, id)} aria-label={`저장 이미지 ${id} 선택`}><img src={`/api${path}/background/${id}`} alt="저장한 배경 이미지" /><span>이 페이지에 사용</span></button>)}</div></details>}
         </div></details>
-        <PageBackgroundEditor channelId={channelId} itemId={itemId} pageIndex={selected} pageId={page.id} background={effectiveDesign.background.kind === "image" && effectiveDesign.background.assetId ? { assetId: effectiveDesign.background.assetId } : undefined} showOpacityControl={false} disabled={busy || aiBusy || !!conflict} showAi={showAi} imageReady={!!aiStatus.data?.image} imageModel={base.ai?.image.model} save={saveNow} onBusyChange={setBackgroundBusy} onApply={applyBackground} onChange={background => selectAsset(page.id, background?.assetId)} />
+        <PageBackgroundEditor channelId={channelId} itemId={itemId} pageIndex={selected} pageId={page.id} background={effectiveDesign.background.kind === "image" && effectiveDesign.background.assetId ? { assetId: effectiveDesign.background.assetId } : undefined} showOpacityControl={false} disabled={busy || interiors.pending || aiBusy || !!conflict} showAi={showAi} imageReady={!!aiStatus.data?.image} imageModel={base.ai?.image.model} save={saveNow} onBusyChange={setBackgroundBusy} onApply={applyBackground} onChange={background => selectAsset(page.id, background?.assetId)} />
         </>}
         {readingProfile && !readingSlot && <p className="notice small">이 장은 글과 색으로 구성합니다. 사진은 {readingArtworkPages(readingProfile)}장에서 만들거나 교체할 수 있습니다.</p>}
         </>}
@@ -582,13 +605,15 @@ export function FamilyDialogueEditor(props: CardCopyEditorProps & { initial: Fam
     <details className="family-caption"><summary>게시물 설명(캡션) 제안 · {captionCurrent ? "저장된 카드와 일치" : caption ? "재검토 필요" : "아직 없음"}</summary><div className="stack"><p className="hint">카드 안의 문구와 별도입니다. 아래 제안을 게시 준비의 캡션 칸에 적용하고 그곳에서 저장하세요.</p>{caption && <><p className="small">카드 원고 #{caption.contentRevision} 기준 · 현재 원고 #{base.revisionId}</p><pre>{caption.fullCaption}</pre>{!captionCurrent && <p className="notice warn">현재 카드 버전 또는 중심 질문이 다릅니다. 최신 저장 원고로 캡션을 다시 제안받거나 직접 고쳐 대조 확인해 주세요.</p>}<button className="btn" disabled={!captionCurrent || !onApplyCaption || busy} onClick={() => onApplyCaption?.(caption.fullCaption)}>게시 준비의 캡션 칸에 적용</button></>}{showAi && <button className="btn" disabled={busy || aiBusy || !!conflict || generation.unresolved} onClick={() => void generate("caption")}>{aiBusy ? "자동 제안 중…" : "저장된 카드로 캡션 자동 제안"}</button>}{onEditCaption && <div className="stack"><p className="hint">AI 한도나 연결 오류로 자동 제안을 받을 수 없다면 게시 준비의 캡션을 직접 고치고 현재 8장과 대조해 확정할 수 있습니다.</p><button className="btn ghost" disabled={busy || aiBusy || !!conflict} onClick={onEditCaption}>게시 준비에서 캡션 직접 수정</button></div>}</div></details>
     <details className="family-evidence"><summary>원문 근거·검수·생성 기록</summary><div className="stack"><p className="small">중심 질문: {draft.editorialPlan.coreQuestion}</p><p className="small">이 기사와 연결되는 이유: {draft.editorialPlan.connectionReason}</p><FamilyEvidenceDetails draft={draft} />{draft.editorialReview?.issues.map((issue, i) => <p key={`${issue.path}-${i}`} className={issue.severity === "blocking" ? "notice err" : "notice"}>{issue.problem}{issue.evidence && ` · ${issue.evidence}`}</p>)}{showAi && <button className="btn" disabled={busy || aiBusy || !!conflict || generation.unresolved} onClick={() => void generate("editorial_review")}>저장 원고 자동 검수 제안</button>}<dl className="family-runs">{runs.map(run => <FamilyRunRecord key={run.id} run={run} />)}</dl></div></details>
     <div className="card-copy-savebar">
+      <RecoveryNotice recovery={interiors.recovery} />
+      {interiors.pending && <p className="notice small" role="status">적용하지 않은 내지 구성 입력이 있습니다. 해당 페이지에서 적용하거나 취소하면 저장할 수 있어요.</p>}
       <p className="hint">{dirty ? "문구·페이지 디자인에 미저장 변경이 있습니다." : "원고 버전 " + base.version + "을 저장했습니다."} {previewError ? "배치 오류를 고친 뒤 완성 이미지를 만들 수 있습니다." : "입력은 페이지를 옮겨도 유지됩니다."}</p>
       {!!invalidFields.length && <div className="notice warn stack" role="alert"><strong>저장 전에 다음 칸을 확인해 주세요. 입력한 내용은 유지했습니다.</strong>{invalidFields.map((issue, index) => issue.index === null ? <p key={index}>{issue.label} · {issue.message}</p> : <button type="button" className="btn sm ghost" key={index} onClick={() => setSelected(issue.index!)}>{issue.label} · {issue.message}</button>)}</div>}
       {recovery.pending && <div className="notice warn small">기기에 보관한 입력의 복구 여부를 먼저 선택해 주세요.</div>}
       {(formatConflict || conflict) && <div className="notice warn small">다른 곳에서 저장한 원고와 현재 입력을 먼저 비교해 주세요. 현재 입력은 유지했습니다.</div>}
       {saveError && <ErrorBox error={saveError} />}
       {saveFeedback && !saveError && <div className={`notice ${dirty ? "warn" : "ok"} small`} role="status">{saveFeedback}{dirty && " 이후 입력한 변경은 아직 저장하지 않았습니다."}</div>}
-      <div className="row"><button type="button" className="btn primary" disabled={busy || invalid || !!conflict} onClick={() => void confirmSave()}>{saving ? "저장 중…" : "문구·디자인 저장"}</button></div>
+      <div className="row"><button type="button" className="btn primary" disabled={busy || interiors.pending || invalid || !!conflict} onClick={() => void confirmSave()}>{saving ? "저장 중…" : "문구·디자인 저장"}</button></div>
     </div>
   </section>;
 }

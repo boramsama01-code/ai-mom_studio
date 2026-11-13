@@ -8,6 +8,7 @@ import path from "node:path";
 import { preview } from "vite";
 import { Resvg } from "@resvg/resvg-js";
 import sharp from "sharp";
+import { editorialTemplateCatalogOptions } from "../shared/templateCatalog.ts";
 
 const require = createRequire(import.meta.url);
 let playwright;
@@ -106,7 +107,8 @@ function fixture() {
       }) };
     }
     else if (pathname === "/api/publication-orphans") data = { items: [], total: 0, page: 1, pageSize: 30 };
-    else if (pathname === "/api/channels/3/templates") data = { current: "set:n04", items: [{ key: "set:n04", name: "뉴스 브리핑", description: "원문에서 시작하는 가족의 뉴스", kind: "builtin", family: "news", pageCount: 5 }] };
+    else if (pathname === "/api/channels/3/templates") data = { current: "editorial:red", items: editorialTemplateCatalogOptions(channels[0]) };
+    else if (pathname === "/api/channels/3/templates/preview") return route.fulfill({ contentType: "image/jpeg", body: await cardImage({ ...initialCopy(), templateKey: url.searchParams.get("key") ?? "editorial:red" }, 0) });
     else if (pathname === itemPath && method === "GET") data = detail();
     else if (pathname === `${itemPath}/publication-draft` && method === "PATCH") {
       assert.equal(body.version, state.publicationDraft.version);

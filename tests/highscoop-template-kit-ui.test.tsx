@@ -6,11 +6,12 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {DesignPage} from '../client/src/pages/Design';
 import {HighScoopTemplateKit} from '../client/src/HighScoopTemplateKit';
 import {HIGH_SCOOP_TEMPLATE_KITS} from '../shared/highscoopTemplates';
+import {editorialTemplateCatalogOptions} from '../shared/templateCatalog';
 
 const mocks=vi.hoisted(()=>({api:vi.fn(),toast:vi.fn(),selected:3 as number|'all'}));
 const channels=[
  {id:3,name:'HighScoop',slug:'highscoop',accentColor:'#FF493B',contentType:'opportunities'},
- {id:5,name:'다른 채널',slug:'other-channel',accentColor:'#663399',contentType:'news'},
+ {id:5,name:'알리고당',slug:'news',accentColor:'#663399',contentType:'news'},
 ];
 vi.mock('../client/src/api',async original=>({...await original<object>(),api:mocks.api}));
 vi.mock('../client/src/state',()=>({useChannel:()=>({selected:mocks.selected,current:channels.find(c=>c.id===mocks.selected)??null}),useDirtyGuard:()=>({confirmLeave:(action:()=>void)=>action()})}));
@@ -24,7 +25,7 @@ beforeEach(()=>{
  vi.clearAllMocks();mocks.selected=3;current='highscoop-a';
  mocks.api.mockImplementation(async(path:string,options?:{method?:string;body?:any})=>{
   if(path==='/channels/3/design'&&options?.method==='PUT'){current=options.body.cardTemplate;return {ok:true};}
-  if(/^\/channels\/(3|5)\/templates$/.test(path))return {current,items:[]};
+  if(/^\/channels\/(3|5)\/templates$/.test(path))return {current,items:editorialTemplateCatalogOptions(channels.find(channel=>path===`/channels/${channel.id}/templates`)!) };
   if(path==='/canva/status')return {configured:false,connected:false,scopes:[],redirectUri:'https://example.test/api/canva/callback'};
   throw new Error(`Unexpected template UI request: ${path}`);
  });
@@ -55,11 +56,13 @@ describe('HighScoop current category masters',()=>{
   expect(mocks.toast).toHaveBeenCalledWith('ok',expect.stringContaining('기본 마스터를 저장'));
  });
 
- it('keeps the other channel library and upload controls',async()=>{
+ it('uses the same current six masters for Alligodang without old galleries or upload choices',async()=>{
   mocks.selected=5;await render();
-  expect(host.textContent).toContain('기존 등록 디자인 목록');expect(host.textContent).toContain('기존 8장 Canva 라이브러리');
-  expect(host.textContent).toContain('내 배경 템플릿');expect(host.querySelector('input[type="file"]')).not.toBeNull();
-  expect(host.querySelector('[aria-label="하이스쿱 마스터 6종"]')).toBeNull();expect(writes()).toHaveLength(0);
+  expect(host.querySelectorAll('[aria-label="알리고당 마스터 6종"] button')).toHaveLength(6);
+  expect(host.textContent).not.toContain('기존 등록 디자인 목록');expect(host.textContent).not.toContain('기존 8장 Canva 라이브러리');
+  expect(host.textContent).not.toContain('내 배경 템플릿');expect(host.querySelector('input[type="file"]')).toBeNull();
+  expect([...host.querySelectorAll('.highscoop-kit-category')].map(node=>node.textContent)).toEqual(['과학','사회','정치','예술','여행','최신이슈']);
+  expect(host.querySelector('img')?.getAttribute('src')).toContain('/api/channels/5/templates/preview?');expect(writes()).toHaveLength(0);
  });
 
  it('keeps read-only master previews selected and links directly to available Canva originals',async()=>{

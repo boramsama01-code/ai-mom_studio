@@ -42,7 +42,7 @@ describe("Alligodang consolidation and idea inbox",()=>{
     const created=await agent.post("/api/studio/cards").set("x-csrf-token",csrf).send(input);expect(created.status).toBe(201);expect(created.body.format).toBe("웹툰");expect(created.body.panels.every((p:{scene:string})=>p.scene.length>10)).toBe(true);expect(created.body.memo).toContain("창작 에피소드");
     const again=await agent.post("/api/studio/cards").set("x-csrf-token",csrf).send(input);expect(again.body.id).toBe(created.body.id);
     const fry=(await db.select().from(channels)).find(c=>c.slug==="fryday")!;const fryList=await agent.get(`/api/items?channelId=${fry.id}&origin=idea`);expect(fryList.body.total).toBe(100);
-    const fryCard=await agent.post("/api/studio/cards").set("x-csrf-token",csrf).send({title:fryList.body.items[0].item.title,channel:"fryday",sourceItemId:fryList.body.items[0].item.id});expect(fryCard.body.exportDesign).toBe("set:f01");expect(fryCard.body.format).toBe("카드뉴스");
+    const fryCard=await agent.post("/api/studio/cards").set("x-csrf-token",csrf).send({title:fryList.body.items[0].item.title,channel:"fryday",sourceItemId:fryList.body.items[0].item.id});expect(fryCard.body.exportDesign).toBe("editorial:red");expect(fryCard.body.format).toBe("카드뉴스");
   });
   it("rejects whitespace keywords and stale deletion while preserving recovery",async()=>{
     const {agent,csrf}=await login(createApp());const H={"x-csrf-token":csrf};const ch=(await getDb().select().from(channels)).find(c=>c.slug==="current-dialogue")!;

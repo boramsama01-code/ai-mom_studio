@@ -12,7 +12,7 @@ import { isCardPageArtworkId } from "../shared/cardPageArtworkId.ts";
 import { planCarousel, renderCarouselPage } from "../server/services/cardCarousel.ts";
 import { discussionCardCopyFixture } from "../tests/fixtures/discussionCardCopy.ts";
 import { familyCardCopySchema } from "../shared/familyDialogue.ts";
-import { READING_CARD_PROFILES } from "../shared/readingCardProfiles.ts";
+import { editorialTemplateCatalogOptions } from "../shared/templateCatalog.ts";
 import { familyDialogueCardFixture, familyDialogueMetadataFixture } from "../tests/fixtures/familyDialogueCard.ts";
 import { familyPageTitle } from "../server/services/familyDialogueCard.ts";
 import { familyEvidenceFixture } from "../tests/fixtures/familyEvidence.ts";
@@ -109,7 +109,8 @@ function fixture() {
     }
     else if (pathname === "/api/studio/cards/2828") data = studio();
     else if (pathname === "/api/studio/cards") data = { cards: [studio().card], ai, notes: "", notesVersion: 1 };
-    else if (pathname === "/api/channels/3/templates") data = { current: "set:n03", items: [{ key: "set:n03", name: "뉴스 대화", description: "하나의 기사, 여러 관점", kind: "builtin", family: "news", pageCount: 5 }] };
+    else if (pathname === "/api/channels/3/templates") data = { current: "editorial:red", items: editorialTemplateCatalogOptions(channels[0]) };
+    else if (pathname === "/api/channels/3/templates/preview") return route.fulfill({contentType:'image/jpeg',body:await cardImage({...familyDialogueCardFixture(),templateKey:url.searchParams.get('key')??'editorial:red'},0,backgrounds,familyDialogueMetadataFixture().pageDesigns)});
     else if (pathname === itemPath && method === "GET") data = detail();
     else if (pathname === copyPath && method === "GET") data = clone(state.saved);
     else if (pathname === copyPath && method === "PATCH") {
@@ -740,27 +741,32 @@ try {
       const stylePicker=family.getByLabel('전체 목록에서 선택',{exact:true});
       const designArea=family.locator('details.family-whole-design');
       if(!await designArea.evaluate(node=>node.open))await designArea.locator(':scope > summary').click();
-      assert.equal(await stylePicker.locator('option[value^="cardnews14-"]').count(),14);
-      const gallery=family.getByRole('group',{name:'전체 8장 디자인 예시',exact:true});
-      assert.equal(await gallery.getByRole('button').count(),14);
-      const designWritesBefore=state.writes.length, cinematic=READING_CARD_PROFILES.find(profile=>profile.templateKey==='cardnews14-cinematic-v1');
-      const cinematicCard=gallery.getByRole('button',{name:`디자인 선택 · ${cinematic.label}`,exact:true});
+      assert.equal(await stylePicker.locator('option[value^="editorial:"]').count(),6);
+      assert.equal(await stylePicker.locator('option[value^="cardnews14-"]').count(),0);
+      const gallery=designArea.getByRole('group',{name:'현재 채널 마스터 6종',exact:true});
+      assert.equal(await gallery.getByRole('button').count(),6);
+      const designWritesBefore=state.writes.length;
+      const cinematicCard=gallery.getByRole('button',{name:'예술 마스터 선택',exact:true});
       await cinematicCard.click();
       assert.equal(await cinematicCard.getAttribute('aria-pressed'),'true');
-      assert.equal(await stylePicker.inputValue(),'cardnews14-cinematic-v1');
+      assert.equal(await stylePicker.inputValue(),'editorial:blue');
       await cinematicCard.locator('img').evaluate(image=>image.decode());
       await settleEditorPreviews(page,lifecycle);
       assert.equal(state.writes.slice(designWritesBefore).filter(write=>!write.path.endsWith('/preview')).length,0,'a visual design choice must not save or call AI');
       assert.deepEqual(state.saved.copy,beforeStyle,'a design choice remains a draft until explicit save');
       await designArea.locator(':scope > summary').scrollIntoViewIfNeeded();
       await page.screenshot({path:`${outputDir}/whole-deck-design-choice-${width}.png`});
+      // A current color change preserves every page setting. Reusing the cover
+      // is a separate, explicit per-page choice rather than an automatic rewrite.
+      await family.getByRole('button',{name:'3페이지 · 뉴스의 의미',exact:true}).click();
+      await family.getByRole('checkbox',{name:'이 장에서 표지 사진 함께 사용'}).check();
       await family.getByRole('button',{name:'1페이지 · 표지',exact:true}).click();
       await family.locator('textarea[id$="-displayOverrides.kicker"]').fill('');
       await openBackground(page);
       await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === `${copyPath}/background` && response.request().method() === 'POST' && response.ok()), family.getByLabel('페이지 배경 이미지 파일',{exact:true}).setInputFiles({name:'shared-cover.png',mimeType:'image/png',buffer:pasteImage})]);
       await family.locator('.page-background-thumb[src$="/9003"]').waitFor();
       await familySave.click();await family.locator('.card-copy-heading .badge',{hasText:'저장됨'}).waitFor();
-      assert.equal(state.saved.copy.templateKey,'cardnews14-cinematic-v1');
+      assert.equal(state.saved.copy.templateKey,'editorial:blue');
       assert.equal(state.saved.copy.pages[0].displayOverrides.kicker,'');
       assert.deepEqual(state.saved.copy.pages[1].fields,beforeStyle.pages[1].fields);
       assert.equal(state.saved.pageDesigns.news_summary.background.assetId,9002);
@@ -777,14 +783,14 @@ try {
       await family.locator('.page-background-thumb[src$="/9004"]').waitFor();await previewReady(page);
       await family.getByRole('checkbox',{name:'이 장에서 표지 사진 함께 사용'}).uncheck();
       await familySave.click();await family.locator('.card-copy-heading .badge',{hasText:'저장됨'}).waitFor();
-      await reloadEditor(page,lifecycle,'family photo reuse reopen');await family.waitFor();assert.equal(await stylePicker.inputValue(),'cardnews14-cinematic-v1');
+      await reloadEditor(page,lifecycle,'family photo reuse reopen');await family.waitFor();assert.equal(await stylePicker.inputValue(),'editorial:blue');
       assert.equal(await family.locator('textarea[id$="-displayOverrides.kicker"]').inputValue(),'');
       await family.getByRole('button',{name:'2페이지 · 뉴스 요약',exact:true}).click();await openBackground(page);
       await family.locator('.page-background-thumb[src$="/9002"]').waitFor();
       await family.getByRole('button',{name:'3페이지 · 뉴스의 의미',exact:true}).click();
       assert.equal(await family.getByRole('checkbox',{name:'이 장에서 표지 사진 함께 사용'}).isChecked(),false);
-      await previewReady(page);await layoutFits(page,`14-style photo reuse ${width}`);
-      await page.screenshot({path:`${outputDir}/cardnews14-${width}.png`});
+      await previewReady(page);await layoutFits(page,`current-six photo reuse ${width}`);
+      await page.screenshot({path:`${outputDir}/current-six-${width}.png`});
       assert.equal(state.familyAttempts,familyAttemptsBeforeManual,'style changes and shared photos never call paid AI');
       assert.equal(state.writes.filter(write => write.path.endsWith('/background')).length,5);
       assert.equal(state.writes.filter(write => /\/(approve|publish|deliveries)(\/|$)/.test(write.path)).length, 0);
@@ -833,7 +839,7 @@ try {
       lifecycle.mark('successful context close'); await settleEditorPreviews(page, lifecycle);
       await context.close();
       assert.deepEqual(errors, []); assert.deepEqual(external, []);
-      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', '14 style identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists', 'Canva folder sync preserves the mounted editor', 'Canva folder inner-page preview and reachable native creation preserve saved copy'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, mockNativeCreates: state.canvaJobs.length, requestFailures, actualPaidCalls: 0, publicationRequests: 0 });
+      results.push({ width, engine, passed: true, checks: ['legacy preservation on AI 503', 'whole eight-page proposal requires explicit apply and save', 'channel summary/copy/image roles', 'comparison columns survive reopen', 'per-page upload and paste survive save and reopen', 'eight real rendered previews', 'final eight-page deck', 'explicit v1-to-v2 revision conversion', 'v2 semantic fields save and reopen', 'manual fact evidence comparison passes actual validator and survives reopen', 'scientific mode has no invented definition', 'semantic background focal point persists', 'parent guide and stale caption are distinct', 'absent optional activity has no fields', 'no horizontal overflow or covered save action', 'six current color identities', 'shared cover replacement updates only inherited pages', 'manual image and empty display value survive style selection/reopen', 'per-page photo reuse opt-out persists', 'Canva folder sync preserves the mounted editor', 'Canva folder inner-page preview and reachable native creation preserve saved copy'], mockRebuildRequests: state.aiAttempts, mockV2Requests: state.familyAttempts, uploadedBackgrounds: 5, mockNativeCreates: state.canvaJobs.length, requestFailures, actualPaidCalls: 0, publicationRequests: 0 });
       Object.assign(results.at(-1), { manualImports, manualImportReview: true, manualConfirmationPaddingHitTests: true });
       Object.assign(results.at(-1), { previewLifecycleSettled: true, diagnostics });
       results.at(-1).checks.push('No-Autofill manual copy safe-ID import, existing review after reload without duplicate POST, 48px review navigation and explicit new-version acceptance');

@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import type { DB } from "./db";
 import { channels, officialSources, searchRules, appSettings } from "../shared/schema";
 import { seedOfficialCatalog } from "./services/officialCatalog";
-import {isHighScoopChannel} from '../shared/highscoopTemplates';
+import { currentTemplateDefault } from '../shared/currentTemplateDefaults';
 import {
   CANDIDATE_RULES,
   CHANNEL_SEEDS,
@@ -29,7 +29,7 @@ export async function seedIfNeeded(db: DB, options: { officialCatalog?: boolean 
           description: c.description,
           contentType: c.contentType,
           accentColor: c.accentColor,
-          ...(isHighScoopChannel(c)?{cardTemplate:'highscoop:gifted'}:{}),
+          cardTemplate: currentTemplateDefault(c),
           budget: DEFAULT_BUDGET,
         })
         .onConflictDoNothing({ target: channels.slug })
@@ -78,7 +78,7 @@ export async function seedIfNeeded(db: DB, options: { officialCatalog?: boolean 
     for (const c of [
       { slug: "penguin", name: "우주펭귄상회", description: "웹툰 · 캐릭터 IP", accentColor: "#51635A" },
       { slug: "fryday", name: "Fryday", description: "감자튀김 · 음식 탐구", accentColor: "#BD742B" },
-    ]) await tx.insert(channels).values({ ...c, contentType: "manual", audience: "일반 독자",
+    ]) await tx.insert(channels).values({ ...c, cardTemplate: currentTemplateDefault(c), contentType: "manual", audience: "일반 독자",
       budget: { naverCallsPerRun: 0, resultsPerRun: 0, fetchTargetsPerRun: 0, fetchCallsPerRun: 0, llmCallsPerRun: 0, dailyPublishLimit: 0, discovery: { enabled: false, autoDraft: false } },
     }).onConflictDoNothing({ target: channels.slug });
     await tx

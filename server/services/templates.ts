@@ -4,7 +4,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import sharp from 'sharp';
 import { and, eq, isNull, or } from "drizzle-orm";
 import type { DB } from "../db";
 import { cardTemplates, channels, type Channel } from "../../shared/schema";
@@ -13,19 +12,20 @@ import { buildCardModel } from "./cardModel";
 import { cardDesign } from "../../shared/cardDesigns";
 import { renderCollectionPreview } from "./cardDesignSamples";
 import { readingProfileForTemplateKey, readingProfileDesigns, type ReadingCardProfile } from "../../shared/readingCardProfiles";
-import { highScoopTemplateCatalogOptions, templateCatalogOptions, type TemplateCatalogItem } from "../../shared/templateCatalog";
-import { highScoopTemplateForKey, isHighScoopChannel } from '../../shared/highscoopTemplates';
+import { editorialTemplateCatalogOptions, type TemplateCatalogItem } from "../../shared/templateCatalog";
 import { defaultPageDesigns } from "../../shared/familyDialogue";
 import cardnews14Layout from "../../shared/cardnews14Layout.json";
 import { layoutReadingProfilePage } from "./readingCard";
 import { prepareReadingArtwork } from "./readingCardImages";
 import { rasterizeReadingSvg } from "./readingCardRaster";
+import {editorialTemplateForKey,EDITORIAL_TEMPLATE_VERSION} from '../../shared/editorialTemplates';
+import {renderEditorialTemplateSample} from './editorialTemplateSamples';
 
 export class TemplateNotFound extends Error {}
 export class TemplatePreviewPageError extends Error {}
 
 export async function resolveStyle(db: DB, key: string, channelId: number): Promise<CardStyle> {
-  const highScoop=highScoopTemplateForKey(key);
+  const highScoop=editorialTemplateForKey(key);
   if(highScoop)return {layout:'magazine',highscoopTemplateKey:highScoop.key};
   // Reading profiles render from their versioned 8-page contract. Their keys
   // are valid for saved V2 copies without pretending to be Canva registrations.
@@ -53,19 +53,9 @@ export async function resolveStyle(db: DB, key: string, channelId: number): Prom
 }
 
 export async function listTemplates(db: DB, channelId: number): Promise<TemplateCatalogItem[]> {
-  const [channel]=await db.select({slug:channels.slug,name:channels.name}).from(channels).where(eq(channels.id,channelId));
-  // Old keys continue to resolve saved work, while new HighScoop choices use only
-  // the six current category masters. Other brands retain their own catalogue.
-  if(channel&&isHighScoopChannel(channel))return highScoopTemplateCatalogOptions();
-  const customs = await db
-    .select({ id: cardTemplates.id, name: cardTemplates.name, layout: cardTemplates.layout, textTone: cardTemplates.textTone, overlay: cardTemplates.overlay, channelId: cardTemplates.channelId, createdAt: cardTemplates.createdAt })
-    .from(cardTemplates)
-    .where(and(isNull(cardTemplates.deletedAt), or(isNull(cardTemplates.channelId), eq(cardTemplates.channelId, channelId))));
-  return [
-    ...templateCatalogOptions(),
-    ...customs.map((c) => ({ key: `custom:${c.id}`, templateKey: `custom:${c.id}`, name: c.name, description: `내 배경 · ${c.textTone === "light" ? "밝은 글자" : "어두운 글자"}${c.overlay ? ` · 막 ${c.overlay}%` : ""}`, kind: "custom" as const, id: c.id, layout: c.layout, textTone: c.textTone, overlay: c.overlay, allChannels: c.channelId === null,
-      format: "standard" as const, cardCopyVersion: 1 as const, pageCount: 1, previewPageCount: 1, pageCountMode: "variable" as const })),
-  ];
+  const [channel]=await db.select({slug:channels.slug,name:channels.name,categories:channels.categories}).from(channels).where(eq(channels.id,channelId));
+  // Historical keys remain readable by resolveStyle, never new selectable choices.
+  return editorialTemplateCatalogOptions(channel??{});
 }
 
 const SAMPLE: Record<string, Record<string, unknown>> = {
@@ -156,19 +146,15 @@ async function renderReadingPreview(profile: ReadingCardProfile, page: number): 
 const cache = new Map<string, Buffer>();
 const pending = new Map<string, Promise<Buffer>>();
 export async function renderPreview(db: DB, key: string, channel: Channel, page = 0): Promise<Buffer> {
-  const kit=highScoopTemplateForKey(key);
-  if(kit){
-    if(!Number.isInteger(page)||page<0||page>=kit.pageCount)throw new TemplatePreviewPageError(`이 템플릿의 미리보기는 ${kit.pageCount}장입니다.`);
-    const slug=kit.key.slice('highscoop:'.length),file=path.resolve(process.cwd(),`client/public/highscoop/current/${slug}-page-${page+1}.webp`);
-    if(!fs.existsSync(file))throw new TemplateNotFound('최신 카테고리 마스터의 미리보기를 준비 중입니다.');
-    return sharp(fs.readFileSync(file)).jpeg({quality:88}).toBuffer();
-  }
-  const ck = `${key}|${page}|${channel.id}|${channel.accentColor}|${channel.name}|${channel.contentType}`;
+  const kit=editorialTemplateForKey(key);
+  if(kit&&(!Number.isInteger(page)||page<0||page>=kit.pageCount))throw new TemplatePreviewPageError(`이 템플릿의 미리보기는 ${kit.pageCount}장입니다.`);
+  const ck = JSON.stringify([EDITORIAL_TEMPLATE_VERSION,key,page,channel.id,channel.slug,channel.accentColor,channel.name,channel.contentType,channel.categories]);
   const hit = cache.get(ck);
   if (hit) return hit;
   const inflight = pending.get(ck);
   if (inflight) return inflight;
   const work = (async () => {
+    if(kit){const jpeg=await renderEditorialTemplateSample(channel,key,page);if(cache.size>=60)cache.delete(cache.keys().next().value!);cache.set(ck,jpeg);return jpeg;}
     const style = await resolveStyle(db, key, channel.id);
     const profile = readingProfileForTemplateKey(key);
     const pageCount = profile ? profile.pages.length : style.collection ? 5 : 1;

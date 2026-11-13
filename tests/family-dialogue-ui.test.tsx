@@ -15,6 +15,7 @@ import type { FamilyEvidenceView } from "../shared/familyEvidence";
 import { familyEvidenceFixture } from "./fixtures/familyEvidence";
 import { familyEvidenceView, validateFamilyEvidenceReferences } from "../server/services/familyEvidence";
 import { FAMILY_PROFILE_ASSET_ID, FAMILY_ENDING_ASSET_IDS } from "../shared/characterVariantAssets";
+import { editorialTemplateCatalogOptions } from "../shared/templateCatalog";
 
 const mocks = vi.hoisted(() => ({ api: vi.fn(), blob: vi.fn(), guard: { setDirty: vi.fn() } }));
 vi.mock("../client/src/api", async original => ({ ...await original<object>(), api: mocks.api, apiBlob: mocks.blob }));
@@ -36,6 +37,7 @@ beforeEach(() => {
   let sequence = 0; Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => `blob:family-preview-${++sequence}`) }); Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
   Element.prototype.scrollIntoView = vi.fn(); mocks.blob.mockResolvedValue(new Blob(["local-jpeg"], { type: "image/jpeg" }));
   mocks.api.mockImplementation(async (request: string, options?: { method?: string; body?: any }) => {
+    if (request === '/channels/3/templates') return {current:'editorial:red',items:editorialTemplateCatalogOptions({slug:'news'})};
     if (request === "/studio/ai-status") return { text: { gemini: true, openai: true, anthropic: false }, image: true };
     if (request === path && options?.method === "PATCH") {
       if (patch) return patch(options.body);
@@ -119,19 +121,22 @@ describe("family dialogue v2 editor", () => {
     saved = initial;
     await render(); await input('displayOverrides.kicker', '');
     const originalHeadline = field('fields.headline').value;
-    const example = [...host.querySelectorAll<HTMLButtonElement>('.family-design-example')].find(node => node.getAttribute('aria-label') === `디자인 선택 · ${READING_CARD_PROFILES.find(profile => profile.templateKey === 'cardnews14-cinematic-v1')!.label}`)!;
+    const example = host.querySelector<HTMLButtonElement>('[aria-label="예술 마스터 선택"]')!;
     await act(async () => example.click()); await settle();
     expect(field('fields.headline').value).toBe(originalHeadline);
     expect(field('displayOverrides.kicker').value).toBe('');
     expect(lockFor('fields.headline').checked).toBe(true);
-    expect(host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')?.value).toBe('cardnews14-cinematic-v1');
-    expect(host.querySelector('.family-whole-design summary')?.textContent).toContain(READING_CARD_PROFILES.find(profile => profile.templateKey === 'cardnews14-cinematic-v1')!.label);
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')?.value).toBe('editorial:blue');
+    expect(host.querySelector('.family-whole-design summary')?.textContent).toContain('예술');
     expect(example.getAttribute('aria-pressed')).toBe('true');
     expect(mocks.api.mock.calls.filter(([, options]) => options?.method && options.method !== 'GET')).toHaveLength(0);
     await click('문구·디자인 저장');
-    expect(saved.copy.templateKey).toBe('cardnews14-cinematic-v1');
+    expect(saved.copy.templateKey).toBe('editorial:blue');
+    expect(saved.copy.version).toBe(2);expect(saved.copy.pages).toHaveLength(8);
     expect((saved as FamilyDialogueResponse).fieldLocks).toEqual(initial.fieldLocks);
     expect((saved as FamilyDialogueResponse).pageDesigns.cover.background.assetId).toBe(991);
+    expect((saved as FamilyDialogueResponse).pageDesigns).toEqual(initial.pageDesigns);
+    expect((saved as FamilyDialogueResponse).evidenceBinding).toEqual(initial.evidenceBinding);
     expect(saved.copy.pages[0]).toMatchObject({ fields: { headline: originalHeadline }, displayOverrides: { kicker: '' } });
   });
 
@@ -251,20 +256,22 @@ describe("family dialogue v2 editor", () => {
     await input('fields.cta','돌아온 뒤 직접 수정');await click('문구·디자인 저장');
     expect((saved as FamilyDialogueResponse).pageDesigns.outro.outroPresentation).toEqual({mode:'template'});expect(saved.copy.pages[7]).toMatchObject({fields:{cta:'돌아온 뒤 직접 수정'}});
   });
-  it("saves and reopens the 14-style photo layouts without losing an edited field or an intentionally empty display label",async()=>{
+  it.each(['cardnews14-cinematic-v1','cardnews14-swiss-modernism-v1'])("reopens a saved historical photo layout %s without exposing it as a new choice",async(templateKey)=>{
+    saved.copy.templateKey=templateKey;
     await render(); await input('fields.headline','내가 고친 제목');await input('displayOverrides.kicker','');
-    const choose=async(key:string)=>{const picker=host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(picker,key);picker.dispatchEvent(new Event('change',{bubbles:true}));});await settle();};
-    await choose('cardnews14-cinematic-v1');await selectPage('2페이지 · 뉴스 요약');expect(host.querySelector('.page-background-editor')).not.toBeNull();
-    await choose('cardnews14-swiss-modernism-v1');expect(host.querySelector('.page-background-editor')).toBeNull();expect(host.textContent).toContain('사진은 1·3·4·7장');
+    expect(host.querySelector(`select[aria-label="전체 목록에서 선택"] option[value="${templateKey}"]`)).toBeNull();
+    await selectPage('2페이지 · 뉴스 요약');
+    if(templateKey==='cardnews14-cinematic-v1')expect(host.querySelector('.page-background-editor')).not.toBeNull();
+    else{expect(host.querySelector('.page-background-editor')).toBeNull();expect(host.textContent).toContain('사진은 1·3·4·7장');}
     await selectPage('3페이지 · 뉴스의 의미');expect(host.querySelector('.page-background-editor')).not.toBeNull();
-    await click('문구·디자인 저장');expect(saved.copy.templateKey).toBe('cardnews14-swiss-modernism-v1');
+    await click('문구·디자인 저장');expect(saved.copy.templateKey).toBe(templateKey);
     await render(null);client.clear();await render();expect(field('fields.headline').value).toBe('내가 고친 제목');expect(field('displayOverrides.kicker').value).toBe('');
   });
-  it("selects a reading profile, preserves manual text, exposes its photo slots, and reopens the saved style", async () => {
+  it("preserves a previously saved reading profile and its photo slots without offering old profiles for selection", async () => {
+    saved.copy.templateKey=READING_CARD_PROFILES[0].templateKey;
     await render();
     await input("fields.headline", "서로의 판단 기준");
-    const picker = host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')!;
-    await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(picker, READING_CARD_PROFILES[0].templateKey); picker.dispatchEvent(new Event("change", { bubbles: true })); }); await settle();
+    expect(host.querySelector(`select[aria-label="전체 목록에서 선택"] option[value="${READING_CARD_PROFILES[0].templateKey}"]`)).toBeNull();
     expect(field("fields.headline").value).toBe("서로의 판단 기준");
     expect(host.querySelector('.page-background-editor')).not.toBeNull();
     await selectPage("2페이지 · 뉴스 요약");
@@ -277,7 +284,7 @@ describe("family dialogue v2 editor", () => {
     expect(saved.copy.templateKey).toBe(READING_CARD_PROFILES[0].templateKey);
     expect(saved.copy.pages[7]).toMatchObject({fields:{logoAssetId:"brand:space-penguin-company:20261101",brandLine:"오늘 서로의 생각은?"}});
     await render(null);client.clear();await render();
-    expect(host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')!.value).toBe(READING_CARD_PROFILES[0].templateKey);
+    expect(host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')!.value).toBe('');
     expect(field("fields.headline").value).toBe("서로의 판단 기준");
   });
 

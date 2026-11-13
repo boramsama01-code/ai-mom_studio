@@ -77,7 +77,9 @@ describe("general template picker to the actual eight-page editor", () => {
     expect(saved.pageDesigns?.cover.background.assetId).toBe(811);
     expect(host.querySelectorAll(".family-page-strip>button")).toHaveLength(8); expect(renderImages).not.toHaveBeenCalled();
     await act(async () => root.unmount()); root = createRoot(host); await render({ templateKey: target });
-    expect(host.querySelector<HTMLSelectElement>('[aria-label="전체 목록에서 선택"]')?.value).toBe(target);
+    // Historical saved work reopens, but its old style is no longer offered as
+    // a new selection. The manuscript and eight pages still remain intact.
+    expect(host.querySelector<HTMLSelectElement>(`[aria-label="전체 목록에서 선택"] option[value="${target}"]`)).toBeNull();
     expect(host.querySelectorAll(".family-page-strip>button")).toHaveLength(8);
   });
 

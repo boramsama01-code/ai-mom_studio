@@ -137,7 +137,7 @@ jobs:
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         env:
           CREATIVE_BASELINE_DIR: /tmp/creative-baseline
-        run: node scripts/creative-workspace-regression.mjs
+        run: node --import tsx scripts/creative-workspace-regression.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -151,7 +151,7 @@ jobs:
         run: node scripts/mobile-regression.mjs
       - name: Verify one-page editing, save/reopen and publication controls
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
-        run: node scripts/content-workspace-regression.mjs
+        run: node --import tsx scripts/content-workspace-regression.mjs
       - name: Verify eight-page news editing, comparison text and page backgrounds
         if: ${{ !cancelled() && steps.browser_tools.outcome == 'success' }}
         run: node --import tsx scripts/news-editorial-regression.mjs

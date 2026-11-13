@@ -207,7 +207,7 @@ function ChannelForm({ ch, onArchived }: { ch: Channel; onArchived: () => void }
         편집 기준
         <textarea rows={4} value={f.editorialGuide} onChange={(e) => setF({ ...f, editorialGuide: e.target.value })} />
       </label>
-      <CreativeProfileFields value={f.creativeProfile} onChange={creativeProfile => setF({ ...f, creativeProfile })} />
+      <CreativeProfileFields value={f.creativeProfile} channel={{slug:ch.slug,name:f.name,categories:f.categoriesDefault?null:f.categoryText.split('\n').map(value=>value.trim()).filter(Boolean)}} onChange={creativeProfile => setF({ ...f, creativeProfile })} />
       <ChannelAiFields value={f.aiSettings} onChange={aiSettings => setF({ ...f, aiSettings })} runtime={base as Channel & Partial<ChannelAiRuntime>} />
       <details className="settings-details">
         <summary>AI 비용 추정</summary><div className="stack">

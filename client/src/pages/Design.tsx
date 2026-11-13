@@ -1,466 +1,66 @@
-import { CanvaMasterSettings } from "../CanvaEditorial";
-import { CanvaTemplateLibrary } from "../CanvaTemplateLibrary";
-import { RegisteredCardDesigns } from "../RegisteredCardDesigns";
 /**
  * 카드 디자인 — 템플릿 고르기, 내 배경 템플릿 올리기, Canva 자동 채우기, 대량 제작·망고보드용 글자 내보내기
  */
-import { BRAND_REVISION } from "@shared/branding";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, apiUpload } from "../api";
+import { api } from "../api";
 import { useChannel } from "../state";
 import { useToast } from "../toast";
-import { Badge, Empty, ErrorBox, GuardedLink, Loading } from "../ui";
-import { CARD_FIELD_KEYS } from "@shared/cardFields";
-import { templateIncludesKey, templateSelection, type TemplateCatalogItem, type TemplateListReply, type TemplateOption } from "@shared/templateCatalog";
-import {highScoopTemplateForKey,isHighScoopChannel} from '@shared/highscoopTemplates';
+import { Empty, ErrorBox, GuardedLink, Loading } from "../ui";
+import { templateSelection, type TemplateCatalogItem, type TemplateListReply, type TemplateOption } from "@shared/templateCatalog";
+import {isCurrentEditorialTemplate,editorialTemplateForKey} from '@shared/editorialTemplates';
 import {HighScoopTemplateKit} from '../HighScoopTemplateKit';
 import "../templateCatalog.css";
 
 export type Tpl = TemplateOption;
 export type { TemplateListReply } from "@shared/templateCatalog";
-const includesKey = templateIncludesKey;
 
 export function useTemplates(cid: number | "all") {
   return useQuery({ queryKey: ["ch", cid, "templates"], queryFn: () => api<TemplateListReply>(`/channels/${cid}/templates`), enabled: cid !== "all" });
 }
 
-export function TemplatePicker({ cid, value, onChange, items, version, studioChannel, disabled = false }: { cid: number | "studio"; value: string; onChange: (k: string, item?: TemplateCatalogItem) => void; items: Tpl[]; version?: string; studioChannel?: string; disabled?: boolean }) {
-  const [family, setFamily] = useState("all");
-  const [pageFilter, setPageFilter] = useState("all");
-  const [search, setSearch] = useState("");
-  const [preview, setPreview] = useState<string>(value);
-  const [page, setPage] = useState(0);
-  const [overview, setOverview] = useState(false);
-  const previousValue = useRef(value);
-  useEffect(() => {
-    // Switching only the palette should update the page being inspected,
-    // instead of jumping back to the cover and hiding the changed body colour.
-    const sameSet = items.some(item => includesKey(item, value) && includesKey(item, previousValue.current));
-    setPreview(value);
-    if (!sameSet) { setPage(0); setOverview(false); }
-    previousValue.current = value;
-  }, [value]);
-  const normalize = (text: string) => text.normalize("NFKC").toLocaleLowerCase().replace(/\s+/g, "");
-  const searchTerm = normalize(search);
-  const countOf = (item: Tpl) => item.previewPageCount ?? item.pageCount ?? 1;
-  const visible = items.filter(t => (family === "all" || (t.family ?? "other") === family)
-    && (pageFilter === "all" || String(countOf(t)) === pageFilter)
-    && (!searchTerm || normalize(`${t.name} ${t.description} ${t.key} ${t.setId ?? ""}`).includes(searchTerm)));
-  const active = visible.find(t => includesKey(t, preview)) ?? visible[0];
-  const activeKey = active && includesKey(active, preview) ? preview : active?.key ?? "";
-  const activeColor = active?.colors?.find(color => color.key === activeKey);
-  const activeIsApplied = !!active && includesKey(active, value);
-  const pages = active ? countOf(active) : 1;
-  const shownPage = Math.min(page, pages - 1);
-  const pageLabel = active?.pageLabels?.[shownPage] ?? (shownPage === 0 ? "표지" : `본문 ${shownPage}`);
-  const versionedAsset = (url: string, item: Tpl) => `${url}${url.includes("?") ? "&" : "?"}v=${encodeURIComponent(item.templateVersion ?? BRAND_REVISION)}`;
-  const src = (key: string, p = 0, small = true) => {
-    const item = items.find(t => includesKey(t, key));
-    return `${cid === "studio" ? "/api/studio/design-preview" : `/api/channels/${cid}/templates/preview`}?${small ? "size=sm&" : ""}key=${encodeURIComponent(key)}&page=${p}&v=${encodeURIComponent(`${BRAND_REVISION}-${item?.templateVersion ?? ""}-${version ?? ""}`)}${studioChannel ? `&channel=${encodeURIComponent(studioChannel)}` : ""}`;
-  };
-  const showOverview = !!active?.overviewUrl && overview;
-  const detailSrc = active && showOverview ? versionedAsset(active.overviewUrl!, active) : src(activeKey, shownPage);
-  return (
-    <div className="collection-picker">
-      {!items.some(t => includesKey(t, value)) && <p className="small muted collection-legacy">현재 작업에는 이전 디자인이 적용되어 있습니다. 아래에서 새 디자인을 적용할 수 있습니다.</p>}
-      <div className="collection-toolbar">
-        <label className="field collection-search">디자인 검색<input type="search" value={search} placeholder="이름으로 찾기 · 시네마틱, BANG BANG…" onChange={event => { setSearch(event.target.value); setPage(0); }} /></label>
-        <label className="field collection-length">세트 구성<select value={pageFilter} onChange={event => { setPageFilter(event.target.value); setPage(0); setOverview(false); }}>
-          <option value="all">모든 구성</option>
-          {items.some(item => countOf(item) === 8) && <option value="8">8장 풀세트</option>}
-          {items.some(item => countOf(item) === 5) && <option value="5">기본 세트 · 예시 5장</option>}
-          {items.some(item => countOf(item) === 1) && <option value="1">내 배경 · 예시 1장</option>}
-        </select></label>
-      </div>
-      <div className="collection-filters" role="group" aria-label="디자인 종류">
-        {[{ id: "all", label: "전체" }, { id: "recruitment", label: "모집정보" }, { id: "news", label: "뉴스·속보" }, { id: "food", label: "Fryday" }, { id: "other", label: "내 배경" }].filter(f => f.id === "all" || items.some(t => (t.family ?? "other") === f.id)).map(f => <button key={f.id} type="button" className="collection-filter" aria-pressed={family === f.id} onClick={() => { setFamily(f.id); setPage(0); setOverview(false); }}>{f.label}<span>{f.id === "all" ? items.length : items.filter(t => (t.family ?? "other") === f.id).length}</span></button>)}
-      </div>
-      <p className="small muted collection-results" role="status">{visible.length}개 디자인 · 컬러는 각 디자인 안에서 고릅니다.</p>
-      {!visible.length && <Empty>조건에 맞는 디자인이 없습니다. 검색어나 세트 구성을 바꿔 주세요.</Empty>}
-      <div className="collection-workspace">
-        <div className="tpl-grid collection-grid" role="group" aria-label="카드 템플릿">
-          {visible.map((t) => (
-            <button key={t.key} type="button" className="tpl" aria-pressed={active?.key === t.key} aria-label={`${t.setId?.toUpperCase() ?? ""} ${t.name} 미리보기`.trim()} onClick={() => { setPreview(includesKey(t, value) ? value : t.key); setPage(0); setOverview(false); }}>
-              <div className="collection-cover"><img src={t.thumbnailUrl ? versionedAsset(t.thumbnailUrl, t) : src(active?.key === t.key ? activeKey : includesKey(t, value) ? value : t.key)} alt="" loading="lazy" />{includesKey(t, value) && <span className="collection-applied">사용 중</span>}<span className="collection-set-badge">{countOf(t) === 8 ? "8장 풀세트" : `예시 ${countOf(t)}장`}</span></div>
-              <span className="tpl-name"><small>{t.setId?.toUpperCase()}</small>{t.name}</span>
-              <span className="tpl-desc">{t.description}</span>
-            </button>
-          ))}
-        </div>
-        {active && <aside className="collection-detail" aria-label="선택한 디자인 상세">
-          <div className="row between"><span className="small muted">디자인 예시 · {showOverview ? "전체 구성" : pageLabel}</span><span className="small muted">{showOverview ? `${pages}장` : `${shownPage + 1} / ${pages}`}</span></div>
-          {!!active.overviewUrl && <div className="collection-view-mode" role="group" aria-label="미리보기 방식">
-            <button type="button" aria-pressed={!showOverview} onClick={() => setOverview(false)}>한 장씩</button>
-            <button type="button" aria-pressed={showOverview} onClick={() => setOverview(true)}>8장 전체보기</button>
-          </div>}
-          <a href={showOverview ? detailSrc : src(activeKey, shownPage, false)} target="_blank" rel="noopener noreferrer" aria-label={`${active.name} ${activeColor?.name ?? ""} ${showOverview ? "전체 구성" : pageLabel} 크게 보기`}><img className={showOverview ? "collection-overview" : "collection-large"} src={detailSrc} alt={`${active.name} ${activeColor?.name ?? ""} ${showOverview ? "8장 전체 구성" : pageLabel} 디자인 예시`} /></a>
-          {pages > 1 && !showOverview && <div className="collection-pages" role="group" aria-label="세트 페이지">
-            {Array.from({ length: pages }, (_, i) => <button key={i} type="button" aria-pressed={shownPage === i} onClick={() => setPage(i)}>{active.pageLabels?.[i] ?? (i ? `본문 ${i}` : "표지")}</button>)}
-          </div>}
-          <h3>{active.name}</h3><p>{active.description}</p>
-          {!!active.colors && active.colors.length > 1 && <div className="collection-color-section">
-            <div className="row between"><strong className="small">컬러</strong><span className="small muted" aria-live="polite">{activeColor?.name}</span></div>
-            <div className="collection-colors" role="group" aria-label="디자인 컬러">
-              {active.colors.map(color => <button key={color.key} type="button" className="collection-color" disabled={disabled} aria-pressed={activeKey === color.key} onClick={() => {
-                setPreview(color.key); setOverview(false);
-                // Browsing another set remains a preview. A colour choice for
-                // the already-applied set is an actual editable selection.
-                if (activeIsApplied && value !== color.key) onChange(color.key, templateSelection(active, color.key));
-              }}>
-                <span className="collection-color-chip" style={{ background: color.bg, color: color.ink }} aria-hidden="true"><span>Aa</span><i style={{ background: color.secondary ? `linear-gradient(90deg, ${color.accent} 50%, ${color.secondary} 50%)` : color.accent }} /></span><span>{color.name}</span>
-              </button>)}
-            </div>
-            <p className="small muted">{activeIsApplied ? "컬러를 고르면 현재 디자인의 표지와 본문 전체에 바로 적용됩니다." : "컬러를 고르면 예시가 바뀝니다. 아래 ‘이 디자인 사용’을 누르면 원고에 적용됩니다."}</p>
-          </div>}
-          {pages > 1 && <p className="small muted">{active.cardCopyVersion === 2 ? "표지 · 뉴스 읽기 2장 · STEP 1–4 · 닫는 표지, 총 8장입니다. 실제 문구와 사진은 편집 화면에서 바꿀 수 있어요." : `디자인 예시 ${pages}장입니다. 실제 장수는 편집 중인 원고를 따릅니다.`}</p>}
-          <button type="button" className="btn primary" disabled={disabled || value === activeKey} onClick={() => onChange(activeKey, templateSelection(active, activeKey))}>{value === activeKey ? "현재 사용 중인 디자인" : "이 디자인 사용"}</button>
-        </aside>}
-      </div>
-    </div>
-  );
+/** The same current catalogue is used from channel settings, Inbox and Studio. */
+export function TemplatePicker({ cid, value, onChange, items, version, studioChannel, brandName="현재 채널", disabled = false }: { cid: number | "studio"; value: string; onChange: (k: string, item?: TemplateCatalogItem) => void; items: Tpl[]; version?: string; studioChannel?: string; brandName?:string; disabled?: boolean }) {
+  const current = items.filter(item => isCurrentEditorialTemplate(item.key));
+  const previewUrlFor = (key: string) => `${cid === "studio" ? "/api/studio/design-preview" : `/api/channels/${cid}/templates/preview`}?size=sm&key=${encodeURIComponent(key)}&page=0&v=${encodeURIComponent(version ?? "current")}${studioChannel ? `&channel=${encodeURIComponent(studioChannel)}` : ""}`;
+  return <div className="collection-picker" data-testid="current-template-picker">
+    {!current.some(item => item.key === value) && <p className="small muted collection-legacy">현재 작업에는 이전 디자인이 적용되어 있습니다. 원고와 이미지는 유지하며 아래 최신 마스터를 적용할 수 있습니다.</p>}
+    {current.length ? <HighScoopTemplateKit items={current} value={value} disabled={disabled} brandName={brandName} previewUrlFor={previewUrlFor} onSelect={key => {
+      const item = current.find(option => option.key === key);
+      if (item) onChange(key, templateSelection(item, key));
+    }} selectionHint="선택은 현재 원고에만 반영됩니다. 문구·디자인 저장으로 확정하세요. 페이지별 내지는 편집기에서 고릅니다."/> : <Empty>현재 마스터를 불러오지 못했습니다. 화면을 새로고침해 주세요.</Empty>}
+  </div>;
 }
 
 export function DesignPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { current, selected } = useChannel();
-  if (selected === "all" || !current)
-    return (
-      <>
-        {!embedded && <h1>수집 카드 디자인</h1>}
-        <RegisteredCardDesigns />
-        <CanvaTemplateLibrary />
-        {embedded ? <p className="small muted">표지와 세트 원본을 비교해 보세요. 수집 자료에 사용할 기본 카드는 ‘보기 채널’을 선택해 설정할 수 있습니다. 작업별 디자인은 콘텐츠 편집기에서 고릅니다.</p> : <Empty>수집함에서 만드는 카드의 디자인입니다. 오른쪽 위 ‘보기 채널’에서 설정할 채널을 선택해 주세요. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.</Empty>}
-      </>
-    );
-  if(isHighScoopChannel(current))return <>
-    {!embedded&&<div className="page-head"><div><h1>하이스쿱 디자인 템플릿</h1><p className="small muted">카테고리별 마스터 하나를 고르고, 콘텐츠 안에서 페이지별 내지를 선택하세요.</p></div></div>}
-    <HighScoopDefaultTemplate key={current.id} cid={current.id}/>
+  if (selected === "all" || !current) return <>
+    {!embedded && <h1>디자인 템플릿</h1>}
+    <Empty>보기 채널을 고르면 현재 사용하는 컬러 마스터 6종을 확인할 수 있습니다.</Empty>
   </>;
-  return (
-    <>
-      {!embedded && <div className="page-head">
-        <div>
-          <h1>수집 카드 디자인</h1>
-          <p className="small muted" style={{ margin: 0 }}>
-            수집함 → 콘텐츠 초안 → 발행함의 카드에 적용됩니다. Studio 제작물은 각 작업의 내보내기에서 디자인을 고릅니다.
-          </p>
-        </div>
-      </div>}
-      <RegisteredCardDesigns />
-      <CanvaTemplateLibrary />
-      <DefaultTemplate cid={current.id} accent={current.accentColor} />
-      <UploadTemplate cid={current.id} />
-      <CanvaSection cid={current.id} brandTemplateId={current.canvaBrandTemplateId ?? null} />
-      <details className="content-options"><summary>기본 8장 샘플·기존 Canva 마스터 설정</summary><CanvaMasterSettings key={current.id} channelId={current.id} showPreparedMasters={/al+igodang|알리고당/i.test(`${current.slug} ${current.name}`)} /></details>
-      <BulkSection cid={current.id} kind={current.contentType} />
-    </>
-  );
+  return <>
+    {!embedded && <div className="page-head"><div><h1>{current.name} 디자인 템플릿</h1><p className="small muted">컬러 마스터 하나를 고르고, 콘텐츠 편집기에서 페이지별 내지를 선택하세요.</p></div></div>}
+    <CurrentDefaultTemplate key={current.id} cid={current.id} brandName={current.name}/>
+  </>;
 }
 
-function HighScoopDefaultTemplate({cid}:{cid:number}){
+function CurrentDefaultTemplate({cid,brandName}:{cid:number;brandName:string}){
  const qc=useQueryClient(),toast=useToast(),q=useTemplates(cid),[selection,setSelection]=useState('');
- const chosen=selection||q.data?.current,current=highScoopTemplateForKey(q.data?.current);
+ const chosen=selection||q.data?.current,current=editorialTemplateForKey(q.data?.current);
  const save=useMutation({
   mutationFn:(key:string)=>api(`/channels/${cid}/design`,{method:'PUT',body:{cardTemplate:key}}),
   onSuccess:(_result,key)=>{
    qc.setQueryData<TemplateListReply>(['ch',cid,'templates'],old=>old?{...old,current:key}:old);
    void qc.invalidateQueries({queryKey:['ch',cid,'templates']});void qc.invalidateQueries({queryKey:['channels']});
-   toast('ok','하이스쿱 기본 마스터를 저장했습니다. 새로 만드는 콘텐츠부터 적용됩니다.');
+   toast('ok','기본 마스터를 저장했습니다. 새로 만드는 콘텐츠부터 적용됩니다.');
   },onError:error=>toast('err',(error as Error).message),
  });
- return <section className="panel stack" aria-label="하이스쿱 현재 템플릿">
-  {q.isPending?<Loading label="하이스쿱 마스터 불러오는 중"/>:q.error?<ErrorBox error={q.error} retry={()=>void q.refetch()}/>:<>
-   {!current&&<p className="notice small">현재 기본값은 이전 디자인입니다. 아래에서 새 카테고리 마스터를 선택해 주세요.</p>}
-   <HighScoopTemplateKit value={chosen} disabled={save.isPending} onSelect={setSelection} selectionHint="카테고리를 고른 뒤 ‘이 마스터를 기본으로 사용’을 눌러 저장하세요. 콘텐츠 원고에서는 페이지별 내지를 선택할 수 있습니다."/>
-   <div className="row"><button type="button" className="btn primary" disabled={save.isPending||!highScoopTemplateForKey(chosen)||chosen===q.data?.current} onClick={()=>chosen&&save.mutate(chosen)}>{save.isPending?'저장 중…':chosen===q.data?.current?'현재 기본 마스터':'이 마스터를 기본으로 사용'}</button><GuardedLink className="btn" href="/notion">원고에서 페이지별 내지 선택</GuardedLink><GuardedLink className="btn ghost" href="/connections?service=canva">Canva 연결 설정</GuardedLink></div>
-   <p className="small muted">Canva 원본은 각 카드에서 열 수 있습니다. Studio에서 고른 배치와 원고는 Canva 작업본으로 만들고, Canva에서 직접 고친 배치는 해당 디자인에 저장됩니다.</p>
+ return <section className="panel stack" aria-label={`${brandName} 현재 템플릿`}>
+  {q.isPending?<Loading label="현재 마스터 불러오는 중"/>:q.error?<ErrorBox error={q.error} retry={()=>void q.refetch()}/>:<>
+   {!current&&<p className="notice small">현재 기본값은 이전 디자인입니다. 아래에서 새 컬러 마스터를 선택해 주세요.</p>}
+   <HighScoopTemplateKit items={q.data?.items??[]} brandName={brandName} value={chosen} disabled={save.isPending} onSelect={setSelection} previewUrlFor={key=>`/api/channels/${cid}/templates/preview?size=sm&key=${encodeURIComponent(key)}&page=0`} selectionHint="컬러를 고른 뒤 ‘이 마스터를 기본으로 사용’을 눌러 저장하세요. 콘텐츠 원고에서는 페이지별 내지를 선택할 수 있습니다."/>
+   <div className="row"><button type="button" className="btn primary" disabled={save.isPending||!isCurrentEditorialTemplate(chosen)||chosen===q.data?.current} onClick={()=>chosen&&save.mutate(chosen)}>{save.isPending?'저장 중…':chosen===q.data?.current?'현재 기본 마스터':'이 마스터를 기본으로 사용'}</button><GuardedLink className="btn" href="/inbox">수집함에서 콘텐츠 만들기</GuardedLink><GuardedLink className="btn ghost" href="/connections?service=canva">Canva 연결 설정</GuardedLink></div>
+   <p className="small muted">공통 내지는 텍스트·형광펜, 2단 비교, 사진과 글, 표, 단계도, 기간표, 그래프, 문서 캡처, 메신저 대화로 구성됩니다. 이전 작업의 원고와 이미지는 계속 보관합니다.</p>
   </>}
  </section>;
-}
-
-function DefaultTemplate({ cid, accent }: { cid: number; accent: string }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const q = useTemplates(cid);
-  const set = useMutation({
-    mutationFn: (key: string) => api(`/channels/${cid}/design`, { method: "PUT", body: { cardTemplate: key } }),
-    onSuccess: () => {
-      toast("ok", "이 채널의 기본 카드 템플릿을 바꿨습니다. 새로 만드는 카드부터 적용됩니다.");
-      qc.invalidateQueries({ queryKey: ["ch", cid, "templates"] });
-      qc.invalidateQueries({ queryKey: ["channels"] });
-    },
-    onError: (e) => toast("err", (e as Error).message),
-  });
-  return (
-    <section className="panel stack">
-      <div className="row between">
-        <h2 style={{ margin: 0 }}>Studio 기본 디자인 컬렉션</h2>
-        <span className="small muted">{q.data ? `디자인 ${q.data.items.length}종 · 8장 풀세트 ${q.data.items.filter(item => item.cardCopyVersion === 2).length}종` : "표지부터 본문까지 한 세트로"}</span>
-      </div>
-      {q.isLoading ? <Loading lines={1} /> : q.error ? <ErrorBox error={q.error} /> : <TemplatePicker cid={cid} value={q.data!.current} disabled={set.isPending} onChange={(k) => set.mutate(k)} items={q.data!.items} version={accent} />}
-      <p className="small muted" style={{ margin: 0 }}>콘텐츠마다 카드를 만들 때 다른 템플릿을 고를 수도 있습니다.</p>
-    </section>
-  );
-}
-
-function UploadTemplate({ cid }: { cid: number }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const q = useTemplates(cid);
-  const [file, setFile] = useState<File | null>(null);
-  const [name, setName] = useState("");
-  const [layout, setLayout] = useState("classic");
-  const [tone, setTone] = useState("dark");
-  const [overlay, setOverlay] = useState(0);
-  const [all, setAll] = useState(false);
-  const up = useMutation({
-    mutationFn: () => apiUpload<{ key: string }>(`/channels/${cid}/templates?name=${encodeURIComponent(name)}&layout=${layout}&tone=${tone}&overlay=${overlay}&allChannels=${all ? 1 : 0}`, file!),
-    onSuccess: () => {
-      toast("ok", "배경 템플릿을 추가했습니다. 위 목록에서 기본으로 고를 수 있습니다.");
-      setFile(null);
-      setName("");
-      qc.invalidateQueries({ queryKey: ["ch", cid, "templates"] });
-    },
-    onError: (e) => toast("err", (e as Error).message),
-  });
-  const customs = (q.data?.items ?? []).filter((t) => t.kind === "custom");
-  return (
-    <section className="panel stack" style={{ marginTop: 16 }}>
-      <h2 style={{ margin: 0 }}>내 배경 템플릿</h2>
-      <p className="small muted" style={{ margin: 0 }}>
-        Canva·망고보드·포토샵 등에서 <b>글자 없이 배경만</b> 1080×1350(4:5) 크기로 디자인해 PNG/JPG로 내려받은 뒤 올리세요. 제목·일정 같은 글자는 이 앱이 자동으로 얹습니다. 글자가 들어갈 가운데·왼쪽 영역은 비워 두면 잘 읽힙니다.
-      </p>
-      <form className="stack" onSubmit={(e) => { e.preventDefault(); if (file && name.trim()) up.mutate(); }}>
-        <div className="grid grid-2">
-          <label className="field">
-            배경 이미지 (PNG·JPG·WEBP, 12MB 이하)
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => setFile(e.target.files?.[0] ?? null)} required />
-          </label>
-          <label className="field">
-            템플릿 이름
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder="예: 가을 파스텔" required />
-          </label>
-          <label className="field">
-            글자 배치
-            <select value={layout} onChange={(e) => setLayout(e.target.value)}>
-              <option value="classic">기본</option>
-              <option value="magazine">매거진(강조 상자)</option>
-              <option value="minimal">미니멀</option>
-            </select>
-          </label>
-          <fieldset className="row">
-            <legend>글자색</legend>
-            <label className="check"><input type="radio" name="tone" checked={tone === "dark"} onChange={() => setTone("dark")} /> 어두운 글자(밝은 배경용)</label>
-            <label className="check"><input type="radio" name="tone" checked={tone === "light"} onChange={() => setTone("light")} /> 흰 글자(어두운 배경용)</label>
-          </fieldset>
-        </div>
-        <label className="field">
-          가독성 막 {overlay}%
-          <span className="hint">배경이 복잡해 글자가 잘 안 보이면 올리세요(흰 글자면 어둡게, 어두운 글자면 밝게 덮음).</span>
-          <input type="range" min={0} max={80} step={5} value={overlay} onChange={(e) => setOverlay(Number(e.target.value))} />
-        </label>
-        <label className="check">
-          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> 모든 채널에서 사용
-        </label>
-        <div>
-          <button className="btn primary" disabled={!file || !name.trim() || up.isPending}>
-            {up.isPending ? "올리는 중…" : "템플릿 추가"}
-          </button>
-        </div>
-      </form>
-      {customs.length > 0 && (
-        <div className="stack">
-          <h3 style={{ margin: 0 }}>올린 템플릿</h3>
-          {customs.map((t) => (
-            <CustomRow key={t.key} cid={cid} t={t} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function CustomRow({ cid, t }: { cid: number; t: Tpl }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const [tone, setTone] = useState(t.textTone ?? "dark");
-  const [overlay, setOverlay] = useState(t.overlay ?? 0);
-  const [v, setV] = useState(0);
-  const save = useMutation({
-    mutationFn: () => api(`/channels/${cid}/templates/${t.id}`, { method: "PATCH", body: { textTone: tone, overlay } }),
-    onSuccess: () => {
-      setV((x) => x + 1);
-      toast("ok", "템플릿을 수정했습니다.");
-      qc.invalidateQueries({ queryKey: ["ch", cid, "templates"] });
-    },
-  });
-  const del = useMutation({
-    mutationFn: () => api(`/channels/${cid}/templates/${t.id}/delete`, { method: "POST", body: {} }),
-    onSuccess: () => {
-      toast("ok", "템플릿을 삭제했습니다. 이미 만든 카드는 그대로 남습니다.");
-      qc.invalidateQueries({ queryKey: ["ch", cid, "templates"] });
-    },
-  });
-  return (
-    <div className="list-item" style={{ flexDirection: "row", gap: 16, flexWrap: "wrap" }}>
-      <img src={`/api/channels/${cid}/templates/preview?size=sm&key=${t.key}&v=${v}`} alt={`${t.name} 미리보기`} style={{ width: 120, aspectRatio: "4/5", borderRadius: 8, objectFit: "cover" }} />
-      <div className="stack" style={{ flex: 1, minWidth: 220 }}>
-        <strong>
-          {t.name} {t.allChannels && <Badge kind="">모든 채널</Badge>}
-        </strong>
-        <div className="row">
-          <label className="check"><input type="radio" name={`tone-${t.id}`} checked={tone === "dark"} onChange={() => setTone("dark")} /> 어두운 글자</label>
-          <label className="check"><input type="radio" name={`tone-${t.id}`} checked={tone === "light"} onChange={() => setTone("light")} /> 흰 글자</label>
-        </div>
-        <label className="field">
-          가독성 막 {overlay}%
-          <input type="range" min={0} max={80} step={5} value={overlay} onChange={(e) => setOverlay(Number(e.target.value))} />
-        </label>
-        <div className="row">
-          <button className="btn sm primary" onClick={() => save.mutate()} disabled={save.isPending}>적용</button>
-          <button className="btn sm danger" onClick={() => confirm(`'${t.name}' 템플릿을 삭제할까요?`) && del.mutate()}>삭제</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-type CanvaStatus = { configured: boolean; connected: boolean; message?: string | null; redirectUri: string; scopes: string[] };
-
-function CanvaSection({ cid, brandTemplateId }: { cid: number; brandTemplateId: string | null }) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  const st = useQuery({ queryKey: ["canva-status"], queryFn: () => api<CanvaStatus>("/canva/status") });
-  const list = useQuery({ queryKey: ["canva-templates"], queryFn: () => api<{ items: Array<{ id: string; title: string; thumbnail?: { url: string } }> }>("/canva/brand-templates"), enabled: !!st.data?.connected, retry: false });
-  const [manual, setManual] = useState(brandTemplateId ?? "");
-  const tplId = brandTemplateId;
-  const dataset = useQuery({ queryKey: ["canva-dataset", tplId], queryFn: () => api<{ dataset: Record<string, { type: string }> }>(`/canva/brand-templates/${encodeURIComponent(tplId!)}/dataset`), enabled: !!tplId && !!st.data?.connected, retry: false });
-  const save = useMutation({
-    mutationFn: (id: string | null) => api(`/channels/${cid}/design`, { method: "PUT", body: { canvaBrandTemplateId: id } }),
-    onSuccess: () => {
-      toast("ok", "Canva 브랜드 템플릿을 지정했습니다.");
-      qc.invalidateQueries({ queryKey: ["channels"] });
-    },
-    onError: (e) => toast("err", (e as Error).message),
-  });
-  const disconnect = useMutation({ mutationFn: () => api("/canva/disconnect", { method: "POST", body: {} }), onSuccess: () => qc.invalidateQueries({ queryKey: ["canva-status"] }) });
-  const ours = new Set(Object.values(CARD_FIELD_KEYS).flat().map((f) => f.key));
-  const s = st.data;
-  return (
-    <section className="panel stack" style={{ marginTop: 16 }}>
-      <div className="row between">
-        <h2 style={{ margin: 0 }}>Canva 계정 연결</h2>
-        {s && <Badge kind={s.connected ? "ok" : "warn"}>{s.connected ? "Canva 연결됨" : s.configured ? "연결 전" : "앱 정보 필요"}</Badge>}
-      </div>
-      <p className="small muted" style={{ margin: 0 }}>
-        노션 원고와 사진은 <GuardedLink href="/notion">노션 원고 연결</GuardedLink>에서 새 Canva 디자인으로 가져옵니다. 기존 8장 템플릿 자동 채우기는 아래 마스터를 사용합니다. ChatGPT의 Canva 연결과 이 스튜디오의 연결은 별개입니다.
-      </p>
-      {!s ? (
-        <Loading lines={1} />
-      ) : !s.configured ? (
-        <div className="stack">
-        {s.message && <p className="notice" role="status">{s.message}</p>}
-        <ol className="small" style={{ margin: 0, paddingLeft: 18 }}>
-          <li>
-            <a href="https://www.canva.com/developers/apps" target="_blank" rel="noopener noreferrer">Canva 개발자 페이지(Your apps)</a>에서 앱을 만들고 <b>Outside Canva</b>(Connect API)를 켭니다.
-          </li>
-          <li>
-            권한(Scopes)에서 <code>{s.scopes.join(", ")}</code>를 허용합니다.
-          </li>
-          <li>
-            리디렉트 주소(Redirect URL)에 <code>{s.redirectUri}</code> 를 넣습니다.
-          </li>
-          <li>Client ID와 Client secret을 <GuardedLink href="/connections?service=canva">API 키 관리 → Canva</GuardedLink>에 저장한 뒤 이 화면으로 돌아옵니다.</li>
-        </ol>
-        </div>
-      ) : !s.connected ? (
-        <div className="stack">
-          <p className="small" style={{ margin: 0 }}>
-            Canva 앱의 리디렉트 주소가 <code>{s.redirectUri}</code> 인지 확인한 뒤 연결하세요.
-          </p>
-          <div>
-            <a className="btn primary" href="/api/canva/connect">
-              Canva 연결
-            </a>
-          </div>
-        </div>
-      ) : (
-        <div className="stack">
-          <div className="row">
-            <a className="btn sm" href="/api/canva/connect">Canva 다시 연결</a>
-            <button className="btn sm ghost" onClick={() => disconnect.mutate()}>연결 해제</button>
-          </div>
-          <details className="content-options"><summary>기존 카드용 브랜드 템플릿 (선택)</summary>
-          {list.isLoading ? (
-            <Loading lines={1} />
-          ) : list.error ? (
-            <ErrorBox error={list.error} />
-          ) : list.data!.items.length ? (
-            <div className="tpl-grid">
-              {list.data!.items.map((t) => (
-                <button key={t.id} type="button" className="tpl" aria-pressed={tplId === t.id} onClick={() => save.mutate(t.id)}>
-                  {t.thumbnail?.url ? <img src={t.thumbnail.url} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="tpl-desc">미리보기 없음</span>}
-                  <span className="tpl-name">{t.title}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="small muted">등록된 브랜드 템플릿이 없습니다. 8장 마스터는 일반 디자인 ID로도 등록할 수 있습니다.</p>
-          )}
-          <form className="row" onSubmit={(e) => { e.preventDefault(); save.mutate(manual.trim() || null); }}>
-            <input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="또는 브랜드 템플릿 ID 직접 입력" style={{ flex: "1 1 240px", width: "auto" }} aria-label="브랜드 템플릿 ID" />
-            <button className="btn sm">지정</button>
-          </form>
-          {tplId && dataset.data && (
-            <div className="stack">
-              <span className="small">템플릿의 글자 칸과 콘텐츠 항목 연결</span>
-              <div className="row">
-                {Object.entries(dataset.data.dataset).map(([k, v]) => (
-                  <Badge key={k} kind={v.type === "text" && ours.has(k) ? "ok" : "warn"}>
-                    {k} {v.type !== "text" ? `(${v.type} — 자동 채우기 안 함)` : ours.has(k) ? "✓" : "— 이름이 달라 비워 둠"}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-          {dataset.error && <ErrorBox error={dataset.error} />}
-          </details>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function BulkSection({ cid, kind }: { cid: number; kind: string }) {
-  const keys = CARD_FIELD_KEYS[kind] ?? CARD_FIELD_KEYS.notice;
-  return (
-    <section className="panel stack" style={{ marginTop: 16 }}>
-      <h2 style={{ margin: 0 }}>Canva 대량 제작 · 망고보드용 글자 내보내기</h2>
-      <p className="small muted" style={{ margin: 0 }}>
-        API 연결 없이도 쓸 수 있는 방법입니다. <b>Canva 대량 제작(Bulk Create, Pro 이상·데스크톱)</b>은 CSV 파일을 올리면 템플릿의 글자 칸을 행마다 채워 여러 장을 한 번에 만듭니다. 망고보드는 공개 API·대량 제작 기능을 확인하지 못해, 콘텐츠 상세 화면의 <b>글자 복사</b>로 붙여 넣는 방식을 권합니다.
-      </p>
-      <table className="simple">
-        <thead>
-          <tr>
-            <th>CSV 열 이름</th>
-            <th>들어가는 내용</th>
-          </tr>
-        </thead>
-        <tbody>
-          {keys.map((k) => (
-            <tr key={k.key}>
-              <td><code>{k.key}</code></td>
-              <td>{k.label}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="row">
-        <a className="btn" href={`/api/channels/${cid}/export/fields.csv`}>
-          검토 완료 항목 CSV 내려받기
-        </a>
-        <span className="small muted">Canva 템플릿의 글자 칸 이름을 위 열 이름과 같게 연결하세요.</span>
-      </div>
-    </section>
-  );
 }
